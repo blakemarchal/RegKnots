@@ -63,7 +63,7 @@ interface VesselForm {
   imo_mmsi: string
   vessel_type: string
   gross_tonnage: string
-  route_type: string
+  route_types: string[]
   cargo_types: string[]
 }
 
@@ -72,7 +72,7 @@ interface VesselResponse {
   name: string
   vessel_type: string
   gross_tonnage: number | null
-  route_type: string
+  route_types: string[]
   cargo_types: string[]
 }
 
@@ -81,7 +81,7 @@ const EMPTY_FORM: VesselForm = {
   imo_mmsi: '',
   vessel_type: '',
   gross_tonnage: '',
-  route_type: '',
+  route_types: [],
   cargo_types: [],
 }
 
@@ -202,6 +202,16 @@ export default function OnboardingPage() {
     if (errors[key]) setErrors((e) => ({ ...e, [key]: undefined }))
   }
 
+  function toggleRoute(r: string) {
+    setForm((f) => ({
+      ...f,
+      route_types: f.route_types.includes(r)
+        ? f.route_types.filter((x) => x !== r)
+        : [...f.route_types, r],
+    }))
+    if (errors.route_types) setErrors((e) => ({ ...e, route_types: undefined }))
+  }
+
   function toggleCargo(c: string) {
     setForm((f) => ({
       ...f,
@@ -215,7 +225,7 @@ export default function OnboardingPage() {
     const e: Partial<Record<keyof VesselForm, string>> = {}
     if (s === 1 && !form.name.trim()) e.name = 'Vessel name is required'
     if (s === 2 && !form.vessel_type) e.vessel_type = 'Please select a vessel type'
-    if (s === 3 && !form.route_type) e.route_type = 'Please select a route type'
+    if (s === 3 && form.route_types.length === 0) e.route_types = 'Please select at least one route type'
     return e
   }
 
@@ -266,7 +276,7 @@ export default function OnboardingPage() {
             imo_mmsi: v.imo_mmsi.trim() || null,
             vessel_type: v.vessel_type,
             gross_tonnage: v.gross_tonnage ? parseFloat(v.gross_tonnage) : null,
-            route_type: v.route_type,
+            route_types: v.route_types,
             cargo_types: v.cargo_types,
           }),
         })
@@ -299,8 +309,8 @@ export default function OnboardingPage() {
 
   // ── Route label helper ─────────────────────────────────────────────────────
 
-  function routeLabel(v: string) {
-    return ROUTE_OPTIONS.find((r) => r.value === v)?.label ?? v
+  function routeLabels(values: string[]) {
+    return values.map((v) => ROUTE_OPTIONS.find((r) => r.value === v)?.label ?? v).join(', ') || 'Not specified'
   }
 
   // ── Step renderers ────────────────────────────────────────────────────────────
@@ -388,37 +398,41 @@ export default function OnboardingPage() {
   function renderStep3() {
     return (
       <div className="flex flex-col gap-3">
-        {ROUTE_OPTIONS.map((r) => (
-          <button
-            key={r.value}
-            type="button"
-            onClick={() => patch('route_type', r.value)}
-            className={`w-full p-4 rounded-xl border text-left transition-all duration-150 ${
-              form.route_type === r.value
-                ? 'border-[--color-teal] bg-[--color-teal]/8'
-                : 'border-white/10 bg-[--color-surface-dim] hover:border-white/20'
-            }`}
-          >
-            <div className="flex items-center gap-3">
-              <span className="text-2xl leading-none" aria-hidden="true">
-                {r.emoji}
-              </span>
-              <div>
-                <p className="font-mono text-sm font-medium text-[--color-off-white]">{r.label}</p>
-                <p className="font-mono text-xs text-[--color-muted] mt-0.5">{r.desc}</p>
-              </div>
-              {form.route_type === r.value && (
-                <div className="ml-auto w-4 h-4 rounded-full bg-[--color-teal] flex items-center justify-center">
-                  <svg viewBox="0 0 12 12" className="w-2.5 h-2.5" fill="none" stroke="#0a0e1a" strokeWidth="2">
-                    <path d="M2 6l3 3 5-5" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
+        <HelperText>Select all that apply — many vessels operate on multiple route types.</HelperText>
+        {ROUTE_OPTIONS.map((r) => {
+          const selected = form.route_types.includes(r.value)
+          return (
+            <button
+              key={r.value}
+              type="button"
+              onClick={() => toggleRoute(r.value)}
+              className={`w-full p-4 rounded-xl border text-left transition-all duration-150 ${
+                selected
+                  ? 'border-[--color-teal] bg-[--color-teal]/8'
+                  : 'border-white/10 bg-[--color-surface-dim] hover:border-white/20'
+              }`}
+            >
+              <div className="flex items-center gap-3">
+                <span className="text-2xl leading-none" aria-hidden="true">
+                  {r.emoji}
+                </span>
+                <div>
+                  <p className="font-mono text-sm font-medium text-[--color-off-white]">{r.label}</p>
+                  <p className="font-mono text-xs text-[--color-muted] mt-0.5">{r.desc}</p>
                 </div>
-              )}
-            </div>
-          </button>
-        ))}
-        {errors.route_type && (
-          <HelperText variant="error">{errors.route_type}</HelperText>
+                {selected && (
+                  <div className="ml-auto w-4 h-4 rounded-full bg-[--color-teal] flex items-center justify-center">
+                    <svg viewBox="0 0 12 12" className="w-2.5 h-2.5" fill="none" stroke="#0a0e1a" strokeWidth="2">
+                      <path d="M2 6l3 3 5-5" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  </div>
+                )}
+              </div>
+            </button>
+          )
+        })}
+        {errors.route_types && (
+          <HelperText variant="error">{errors.route_types}</HelperText>
         )}
       </div>
     )
@@ -491,7 +505,7 @@ export default function OnboardingPage() {
             />
           )}
           <div className="border-t border-white/8" />
-          <ReviewRow label="Route" value={routeLabel(form.route_type)} onEdit={() => jumpToStep(3)} />
+          <ReviewRow label="Route" value={routeLabels(form.route_types)} onEdit={() => jumpToStep(3)} />
           <div className="border-t border-white/8" />
           <ReviewRow
             label="Cargo"

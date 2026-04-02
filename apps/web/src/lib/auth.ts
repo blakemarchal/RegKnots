@@ -42,7 +42,9 @@ interface AuthState {
   logout: () => Promise<void>
   refreshAuth: () => Promise<boolean>
   setToken: (token: string, user: AuthUser) => void
+  updateUserFromToken: (token: string) => void
   addVessel: (vessel: VesselSummary) => void
+  removeVessel: (id: string) => void
   setVessels: (vessels: VesselSummary[]) => void
   setActiveVessel: (id: string | null) => void
 }
@@ -58,6 +60,12 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   addVessel: (vessel: VesselSummary) =>
     set((s) => ({ vessels: [...s.vessels, vessel] })),
 
+  removeVessel: (id: string) =>
+    set((s) => ({
+      vessels: s.vessels.filter((v) => v.id !== id),
+      activeVesselId: s.activeVesselId === id ? null : s.activeVesselId,
+    })),
+
   setVessels: (vessels: VesselSummary[]) =>
     set({ vessels }),
 
@@ -66,6 +74,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   setToken: (token: string, user: AuthUser) => {
     set({ accessToken: token, user, isAuthenticated: true })
+  },
+
+  updateUserFromToken: (token: string) => {
+    const user = decodeJwtUser(token)
+    if (user) set({ accessToken: token, user })
   },
 
   login: async (email: string, password: string) => {

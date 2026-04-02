@@ -19,13 +19,16 @@ def verify_password(plain: str, hashed: str) -> bool:
     return _pw_hash.verify(plain, hashed)
 
 
-def create_access_token(user_id: str, email: str, role: str, tier: str) -> str:
+def create_access_token(
+    user_id: str, email: str, role: str, tier: str, full_name: str | None = None,
+) -> str:
     now = datetime.now(timezone.utc)
     payload = {
         "sub": user_id,
         "email": email,
         "role": role,
         "tier": tier,
+        "full_name": full_name,
         "type": "access",
         "iat": now,
         "exp": now + timedelta(minutes=settings.access_token_expire_minutes),

@@ -9,13 +9,17 @@ interface VesselDetail {
   id: string
   name: string
   vessel_type: string
-  route_type: string
+  route_types: string[]
   cargo_types: string[]
   gross_tonnage: number | null
 }
 
-function routeLabel(r: string) {
-  return { inland: 'Inland', coastal: 'Coastal', international: 'Intl' }[r] ?? r
+const ROUTE_LABEL: Record<string, string> = { inland: 'Inland', coastal: 'Coastal', international: 'Intl' }
+
+function routeSummary(routes: string[]) {
+  if (routes.length === 0) return 'No route'
+  if (routes.length === 1) return ROUTE_LABEL[routes[0]] ?? routes[0]
+  return 'Multiple routes'
 }
 
 interface Props {
@@ -157,7 +161,7 @@ export function VesselSheet({ onClose }: Props) {
                 <div className="min-w-0">
                   <p className="font-mono text-sm text-[#f0ece4] truncate">{v.name}</p>
                   <p className="font-mono text-xs text-[#2dd4bf]/70 mt-0.5">
-                    {v.vessel_type} · {routeLabel(v.route_type)}
+                    {v.vessel_type} · {routeSummary(v.route_types)}
                   </p>
                 </div>
                 {isActive && (
