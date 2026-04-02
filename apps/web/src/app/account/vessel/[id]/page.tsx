@@ -127,18 +127,26 @@ function VesselEditContent() {
       <header className="flex-shrink-0 flex items-center gap-3 px-4 py-3
         bg-[#111827]/95 backdrop-blur-md border-b border-white/8">
         <button
-          onClick={() => router.back()}
+          onClick={() => router.push('/account')}
           className="w-9 h-9 flex items-center justify-center rounded-lg
             text-[#6b7594] hover:text-[#f0ece4] transition-colors duration-150"
-          aria-label="Back"
+          aria-label="Back to Account"
         >
           <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <path d="M19 12H5M12 5l-7 7 7 7" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         </button>
-        <h1 className="font-display text-xl font-bold text-[#f0ece4] tracking-wide leading-none">
-          Edit Vessel
-        </h1>
+        <div className="flex flex-col">
+          <h1 className="font-display text-xl font-bold text-[#f0ece4] tracking-wide leading-none">
+            Edit Vessel
+          </h1>
+          <button
+            onClick={() => router.push('/account')}
+            className="font-mono text-xs text-[#6b7594] hover:text-[#2dd4bf] transition-colors duration-150 text-left mt-0.5"
+          >
+            ← Back to Account
+          </button>
+        </div>
       </header>
 
       <main className="flex-1 overflow-y-auto px-4 py-6">
