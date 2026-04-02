@@ -16,7 +16,8 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 # Override URL from pydantic settings so CLI and programmatic use both work
-config.set_main_option("sqlalchemy.url", settings.database_url)
+sync_url = settings.database_url.replace("postgresql+asyncpg://", "postgresql+psycopg2://")
+config.set_main_option("sqlalchemy.url", sync_url)
 
 # No SQLAlchemy ORM models — we write raw SQL in migrations
 target_metadata = None

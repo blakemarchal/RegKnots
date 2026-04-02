@@ -123,7 +123,8 @@ async def _run(sources: list[str], mode: str) -> None:
     console.print(f"  Database: {db_host}")
     console.print()
 
-    pool = await asyncpg.create_pool(settings.database_url, min_size=2, max_size=5)
+    dsn = settings.database_url.replace("postgresql+asyncpg://", "postgresql://")
+    pool = await asyncpg.create_pool(dsn, min_size=2, max_size=5)
     all_results: list[IngestResult] = []
 
     try:
