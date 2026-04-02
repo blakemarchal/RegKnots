@@ -1,4 +1,4 @@
-import asyncpg
+= import asyncpg
 from app.config import settings
 
 pool: asyncpg.Pool | None = None
@@ -6,7 +6,8 @@ pool: asyncpg.Pool | None = None
 
 async def init_pool() -> asyncpg.Pool:
     global pool
-    pool = await asyncpg.create_pool(settings.database_url, min_size=2, max_size=10)
+    dsn = settings.database_url.replace("postgresql+asyncpg://", "postgresql://")
+    pool = await asyncpg.create_pool(dsn, min_size=2, max_size=10)
     return pool
 
 

@@ -42,3 +42,5 @@ public/swe-worker-*.js
 
 # Build
 *.tsbuildinfo
+".env.txt" 
+".env.txt" 
