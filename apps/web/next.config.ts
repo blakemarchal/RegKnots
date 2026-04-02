@@ -7,4 +7,9 @@ export default withPWA({
   dest: "public",
   disable: process.env.NODE_ENV === "development",
   register: true,
+  cacheOnFrontEndNav: false,
+  aggressiveFrontEndNavCaching: false,
+  workboxOptions: {
+    disableDevLogs: true,
+  },
 })(nextConfig);
