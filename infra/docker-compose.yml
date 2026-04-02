@@ -1,0 +1,40 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: regknots-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-regknots}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-regknots_dev}
+      POSTGRES_DB: ${POSTGRES_DB:-regknots}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U regknots"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - regknots-net
+
+  redis:
+    image: redis:7-alpine
+    container_name: regknots-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - regknots-net
+
+volumes:
+  pgdata:
+
+networks:
+  regknots-net:
+    driver: bridge

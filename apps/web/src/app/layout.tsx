@@ -1,0 +1,45 @@
+import type { Metadata, Viewport } from 'next'
+import { Barlow_Condensed, IBM_Plex_Mono } from 'next/font/google'
+import './globals.css'
+
+const barlow = Barlow_Condensed({
+  subsets: ['latin'],
+  weight: ['600', '700'],
+  variable: '--font-barlow',
+  display: 'swap',
+})
+
+const ibm = IBM_Plex_Mono({
+  subsets: ['latin'],
+  weight: ['400', '500'],
+  variable: '--font-ibm',
+  display: 'swap',
+})
+
+export const metadata: Metadata = {
+  title: 'RegKnots',
+  description: 'Maritime regulatory compliance platform',
+  manifest: '/manifest.json',
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'black-translucent',
+    title: 'RegKnots',
+  },
+}
+
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 1,
+  themeColor: '#0a0e1a',
+}
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <html lang="en" className={`${barlow.variable} ${ibm.variable}`}>
+      <body className="antialiased">
+        {children}
+      </body>
+    </html>
+  )
+}

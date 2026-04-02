@@ -1,0 +1,201 @@
+"""
+Pipeline orchestrator: fetch → parse → chunk → embed → store → change detection.
+
+Each stage is wrapped in try/except so a single bad section never kills the run.
+Failed sections are written to data/failed/{source}_{timestamp}.jsonl.
+"""
+
+import json
+import logging
+from datetime import date, datetime, timezone
+from pathlib import Path
+
+import asyncpg
+from rich.console import Console
+from rich.progress import (
+    BarColumn,
+    MofNCompleteColumn,
+    Progress,
+    SpinnerColumn,
+    TextColumn,
+    TimeElapsedColumn,
+    TimeRemainingColumn,
+)
+
+from ingest import store
+from ingest.chunker import chunk_section
+from ingest.config import IngestSettings, settings as _default_settings
+from ingest.ecfr_client import ECFRClient
+from ingest.embedder import EmbedderClient
+from ingest.models import IngestResult, SOURCE_TO_TITLE
+from ingest.parser import parse_title_xml
+
+logger = logging.getLogger(__name__)
+
+_FAILED_DIR = Path(__file__).resolve().parents[3] / "data" / "failed"
+
+
+async def run_pipeline(
+    source: str,
+    mode: str,          # "fresh" | "update"
+    pool: asyncpg.Pool,
+    cfg: IngestSettings | None = None,
+    console: Console | None = None,
+) -> IngestResult:
+    """Run the full ingest pipeline for one CFR source.
+
+    Args:
+        source:  One of "cfr_33", "cfr_46", "cfr_49".
+        mode:    "fresh" re-embeds everything; "update" skips unchanged chunks.
+        pool:    asyncpg connection pool (caller owns lifecycle).
+        cfg:     IngestSettings; defaults to module-level singleton.
+        console: Rich console; defaults to a new Console().
+    """
+    cfg = cfg or _default_settings
+    console = console or Console()
+    result = IngestResult(source=source)
+    title_number = SOURCE_TO_TITLE[source]
+
+    ecfr = ECFRClient()
+    embedder = EmbedderClient(api_key=cfg.openai_api_key)
+
+    progress = Progress(
+        SpinnerColumn(),
+        TextColumn("[bold cyan]{task.description:<40}"),
+        BarColumn(bar_width=30),
+        MofNCompleteColumn(),
+        TimeElapsedColumn(),
+        TimeRemainingColumn(),
+        console=console,
+        transient=False,
+    )
+
+    try:
+        with progress:
+            # ── 1. Resolve as_of date ────────────────────────────────────────
+            meta_task = progress.add_task("Resolving title metadata…", total=1)
+            titles = await ecfr.list_titles()
+            title_info = next((t for t in titles if t.number == title_number), None)
+            if not title_info or not title_info.up_to_date_as_of:
+                raise ValueError(f"No metadata available for title {title_number}")
+
+            as_of: date = date.fromisoformat(title_info.up_to_date_as_of)
+            progress.update(
+                meta_task,
+                completed=1,
+                description=f"Title {title_number} as of {as_of}",
+            )
+
+            # ── 2. Short-circuit if up-to-date (update mode only) ────────────
+            if mode == "update":
+                prev_as_of = await store.get_previous_as_of(pool, source)
+                if prev_as_of and prev_as_of >= as_of:
+                    console.print(
+                        f"  [green]OK {source} is current (as of {as_of}), nothing to do.[/green]"
+                    )
+                    return result
+
+            # ── 3. Fetch XML ─────────────────────────────────────────────────
+            fetch_task = progress.add_task(
+                f"Fetching Title {title_number} XML…", total=1
+            )
+            xml_bytes = await ecfr.fetch_full_xml(title_number, as_of=as_of)
+            mb = len(xml_bytes) / 1_048_576
+            progress.update(
+                fetch_task,
+                completed=1,
+                description=f"Fetched {mb:.1f} MB",
+            )
+
+            # ── 4. Parse sections ────────────────────────────────────────────
+            parse_task = progress.add_task("Parsing sections…", total=1)
+            sections = parse_title_xml(xml_bytes, title_number, as_of)
+            result.sections_found = len(sections)
+            progress.update(
+                parse_task,
+                completed=1,
+                description=f"Parsed {len(sections):,} sections",
+            )
+
+            # ── 5. Chunk ─────────────────────────────────────────────────────
+            chunk_task = progress.add_task(
+                "Chunking…", total=len(sections)
+            )
+            all_chunks = []
+            failed_entries: list[dict] = []
+
+            for section in sections:
+                try:
+                    chunks = chunk_section(section)
+                    all_chunks.extend(chunks)
+                except Exception as exc:
+                    result.errors += 1
+                    msg = f"{section.section_number}: {exc}"
+                    result.error_details.append(msg)
+                    failed_entries.append(
+                        {"section_number": section.section_number, "error": str(exc)}
+                    )
+                    logger.warning(f"Chunk error: {msg}")
+                progress.advance(chunk_task)
+
+            result.chunks_created = len(all_chunks)
+            progress.update(
+                chunk_task,
+                description=f"Chunked: {len(all_chunks):,} chunks",
+            )
+
+            # ── 6. Dedup (update mode skips unchanged hashes) ────────────────
+            if mode == "update":
+                existing_hashes = await store.get_existing_hashes(pool, source)
+                to_embed = [
+                    c for c in all_chunks if c.content_hash not in existing_hashes
+                ]
+                result.chunks_skipped = len(all_chunks) - len(to_embed)
+            else:
+                to_embed = all_chunks
+
+            # ── 7. Embed ─────────────────────────────────────────────────────
+            embed_task = progress.add_task("Embedding…", total=len(to_embed))
+            embedded = []
+
+            if to_embed:
+                def _on_batch(done: int, _total: int) -> None:
+                    progress.update(embed_task, completed=done)
+
+                embedded = await embedder.embed_chunks(to_embed, on_batch=_on_batch)
+                result.embeddings_generated = len(embedded)
+
+            progress.update(embed_task, completed=len(to_embed))
+
+            # ── 8. Store ─────────────────────────────────────────────────────
+            store_task = progress.add_task("Storing…", total=len(embedded))
+            if embedded:
+                result.upserts = await store.upsert_chunks(pool, embedded)
+            progress.update(store_task, completed=len(embedded))
+
+            # ── 9. Change detection ──────────────────────────────────────────
+            if mode == "update" and embedded:
+                prev_as_of = await store.get_previous_as_of(pool, source)
+                if prev_as_of and prev_as_of < as_of:
+                    changed = [c.section_number for c in to_embed]
+                    await store.record_version_change(
+                        pool, source, prev_as_of, as_of, changed
+                    )
+                    result.version_changes = 1
+
+    finally:
+        await embedder.close()
+
+    # ── Write error log ──────────────────────────────────────────────────────
+    if failed_entries:
+        _FAILED_DIR.mkdir(parents=True, exist_ok=True)
+        ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        fail_path = _FAILED_DIR / f"{source}_{ts}.jsonl"
+        with open(fail_path, "w", encoding="utf-8") as fh:
+            for entry in failed_entries:
+                fh.write(json.dumps(entry) + "\n")
+        console.print(
+            f"  [yellow]WARN: {result.errors} error(s) logged to {fail_path}[/yellow]"
+        )
+
+    return result
