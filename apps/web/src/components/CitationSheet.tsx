@@ -10,6 +10,7 @@ interface RegulationDetail {
   full_text: string
   effective_date: string | null
   up_to_date_as_of: string | null
+  copyrighted: boolean
 }
 
 interface Props {
@@ -150,7 +151,18 @@ export function CitationSheet({ source, sectionNumber, sectionTitle, onClose }: 
             </p>
           )}
 
-          {detail && !loading && (
+          {detail && !loading && detail.copyrighted && (
+            <div className="rounded-lg border border-[--color-teal]/20 bg-[--color-teal]/5 px-4 py-4 mt-1">
+              <p className="font-display text-sm font-semibold text-[--color-teal] mb-2">
+                IMO Copyrighted Content
+              </p>
+              <p className="font-mono text-xs text-[--color-off-white]/80 leading-relaxed">
+                {detail.full_text}
+              </p>
+            </div>
+          )}
+
+          {detail && !loading && !detail.copyrighted && (
             <p className="font-mono text-xs text-[--color-off-white]/80 leading-relaxed whitespace-pre-wrap">
               {detail.full_text}
             </p>
@@ -170,14 +182,25 @@ export function CitationSheet({ source, sectionNumber, sectionTitle, onClose }: 
             </p>
           </div>
 
-          <a
-            href={ecfrUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="font-mono text-xs text-[--color-teal] hover:underline whitespace-nowrap"
-          >
-            View on eCFR ↗
-          </a>
+          {detail?.copyrighted ? (
+            <a
+              href="https://www.imo.org/en/publications"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-mono text-xs text-[--color-teal] hover:underline whitespace-nowrap"
+            >
+              View official source ↗
+            </a>
+          ) : (
+            <a
+              href={ecfrUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-mono text-xs text-[--color-teal] hover:underline whitespace-nowrap"
+            >
+              View on eCFR ↗
+            </a>
+          )}
         </div>
       </div>
     </div>
