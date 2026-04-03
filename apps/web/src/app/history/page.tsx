@@ -13,19 +13,26 @@ interface ConversationSummary {
   vessel_name: string | null
 }
 
-// ── Relative time ──────────────────────────────────────────────────────────────
+// ── Date formatting ────────────────────────────────────────────────────────────
 
-function formatRelative(iso: string): string {
-  const now = Date.now()
-  const then = new Date(iso).getTime()
-  const diff = Math.floor((now - then) / 1000)
+function formatDate(iso: string): string {
+  const now = new Date()
+  const then = new Date(iso)
 
-  if (diff < 60) return 'Just now'
-  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`
-  if (diff < 172800) return 'Yesterday'
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const weekStart = new Date(todayStart)
+  weekStart.setDate(todayStart.getDate() - 6)
 
-  return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+  if (then >= todayStart) {
+    // Same day — show time: "2:34 PM"
+    return then.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+  }
+  if (then >= weekStart) {
+    // Within last 7 days — show weekday: "Tuesday"
+    return then.toLocaleDateString('en-US', { weekday: 'long' })
+  }
+  // Older — show short date: "Mar 28"
+  return then.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 }
 
 // ── Skeleton card ──────────────────────────────────────────────────────────────
@@ -60,21 +67,30 @@ function HistoryContent() {
   return (
     <div className="flex flex-col h-dvh bg-[#0a0e1a]">
       {/* Header */}
-      <header className="flex-shrink-0 flex items-center gap-3 px-4 py-3
+      <header className="flex-shrink-0 flex items-center justify-between gap-3 px-4 py-3
         bg-[#111827]/95 backdrop-blur-md border-b border-white/8">
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => router.back()}
+            className="w-9 h-9 flex items-center justify-center rounded-lg
+              text-[#6b7594] hover:text-[#f0ece4] transition-colors duration-150"
+            aria-label="Back to chat"
+          >
+            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M19 12H5M12 5l-7 7 7 7" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+          <h1 className="font-display text-xl font-bold text-[#f0ece4] tracking-wide leading-none">
+            Chat History
+          </h1>
+        </div>
         <button
-          onClick={() => router.back()}
-          className="w-9 h-9 flex items-center justify-center rounded-lg
-            text-[#6b7594] hover:text-[#f0ece4] transition-colors duration-150"
-          aria-label="Back to chat"
+          onClick={() => router.push('/')}
+          className="font-mono text-xs font-bold text-[#0a0e1a] bg-[#2dd4bf]
+            hover:brightness-110 rounded-lg px-3 py-1.5 transition-[filter] duration-150"
         >
-          <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M19 12H5M12 5l-7 7 7 7" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
+          + New Chat
         </button>
-        <h1 className="font-display text-xl font-bold text-[#f0ece4] tracking-wide leading-none">
-          Chat History
-        </h1>
       </header>
 
       {/* Content */}
@@ -103,7 +119,7 @@ function HistoryContent() {
               <CompassRose className="w-16 h-16 text-[#f0ece4]/20" />
               <p className="font-mono text-sm text-[#6b7594]">No conversations yet</p>
               <button
-                onClick={() => router.back()}
+                onClick={() => router.push('/')}
                 className="font-mono text-xs text-[#2dd4bf] hover:underline"
               >
                 Ask your first question
@@ -117,8 +133,8 @@ function HistoryContent() {
               key={c.id}
               onClick={() => openConversation(c.id)}
               className="w-full text-left bg-[#111827] border-l-2 border-[#2dd4bf]/30
-                hover:border-[#2dd4bf]/70 hover:bg-[#111827]/80
-                rounded-r-xl px-4 py-3.5 transition-colors duration-150
+                hover:border-[#2dd4bf] hover:bg-[#111827]/80
+                rounded-r-xl px-4 py-3.5 transition-all duration-150
                 animate-[fadeSlideIn_0.2s_ease-out]"
             >
               <p className="font-mono text-sm text-[#f0ece4] truncate leading-snug">
@@ -126,8 +142,8 @@ function HistoryContent() {
               </p>
               <p className="font-mono text-xs text-[#6b7594] mt-1">
                 {c.vessel_name
-                  ? <span><span className="text-[#2dd4bf]/70">{c.vessel_name}</span> · {formatRelative(c.updated_at)}</span>
-                  : <span>No vessel · {formatRelative(c.updated_at)}</span>
+                  ? <><span className="text-[#2dd4bf]">{c.vessel_name}</span> · {formatDate(c.updated_at)}</>
+                  : <>No vessel · {formatDate(c.updated_at)}</>
                 }
               </p>
             </button>

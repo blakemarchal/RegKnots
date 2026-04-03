@@ -11,9 +11,10 @@ interface Props {
   loading: boolean
   onPrompt: (text: string) => void
   onCitationTap: (source: string, sectionNumber: string, sectionTitle: string) => void
+  isNewConversation: boolean
 }
 
-export function ChatThread({ messages, loading, onPrompt, onCitationTap }: Props) {
+export function ChatThread({ messages, loading, onPrompt, onCitationTap, isNewConversation }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -23,7 +24,7 @@ export function ChatThread({ messages, loading, onPrompt, onCitationTap }: Props
   return (
     <div className="flex flex-col min-h-full">
       {messages.length === 0 && !loading ? (
-        <EmptyState onPrompt={onPrompt} />
+        <EmptyState onPrompt={onPrompt} isNewConversation={isNewConversation} />
       ) : (
         <div className="flex flex-col py-3 gap-0.5">
           {messages.map(msg => (

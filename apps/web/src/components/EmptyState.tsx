@@ -8,9 +8,10 @@ const SUGGESTED = [
 
 interface Props {
   onPrompt: (text: string) => void
+  isNewConversation: boolean
 }
 
-export function EmptyState({ onPrompt }: Props) {
+export function EmptyState({ onPrompt, isNewConversation }: Props) {
   return (
     <div className="flex flex-col items-center justify-center min-h-full px-6 py-12 text-center select-none">
       {/* Compass rose */}
@@ -32,22 +33,24 @@ export function EmptyState({ onPrompt }: Props) {
         Ask anything about federal maritime regulations. Cite-referenced answers from Titles 33, 46 &amp; 49.
       </p>
 
-      {/* Suggested prompts */}
-      <div className="flex flex-col gap-2 w-full max-w-xs">
-        <p className="text-[10px] text-[#6b7594] uppercase tracking-widest mb-1">Try asking</p>
-        {SUGGESTED.map(prompt => (
-          <button
-            key={prompt}
-            onClick={() => onPrompt(prompt)}
-            className="px-4 py-2.5 rounded-xl text-sm text-left
-              bg-white/5 border border-white/8 text-[#f0ece4]/80
-              hover:bg-white/10 hover:border-teal/30 hover:text-[#f0ece4]
-              transition-all duration-150"
-          >
-            {prompt}
-          </button>
-        ))}
-      </div>
+      {/* Suggested prompts — only on a fresh new conversation */}
+      {isNewConversation && (
+        <div className="flex flex-col gap-2 w-full max-w-xs">
+          <p className="text-[10px] text-[#6b7594] uppercase tracking-widest mb-1">Try asking</p>
+          {SUGGESTED.map(prompt => (
+            <button
+              key={prompt}
+              onClick={() => onPrompt(prompt)}
+              className="px-4 py-2.5 rounded-xl text-sm text-left
+                bg-white/5 border border-white/8 text-[#f0ece4]/80
+                hover:bg-white/10 hover:border-teal/30 hover:text-[#f0ece4]
+                transition-all duration-150"
+            >
+              {prompt}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

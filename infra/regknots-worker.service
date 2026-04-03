@@ -1,0 +1,21 @@
+[Unit]
+Description=RegKnots Celery Worker + Beat
+After=network.target redis.service postgresql.service
+Requires=redis.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/RegKnots/apps/api
+ExecStart=/root/.local/bin/uv run celery -A celery_beat worker --beat --loglevel=info --concurrency=2
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=regknots-worker
+
+# Environment — secrets loaded from .env by pydantic-settings at import time
+EnvironmentFile=/root/RegKnots/.env
+
+[Install]
+WantedBy=multi-user.target
