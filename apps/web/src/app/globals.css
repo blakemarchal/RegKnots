@@ -146,3 +146,37 @@ body {
   scrollbar-width: thin;
   scrollbar-color: rgba(45, 212, 191, 0.4) transparent;
 }
+
+/* ── Print stylesheet for certificate forms ──────────────────────────────── */
+@media print {
+  /* Hide all app chrome */
+  header.print\:hidden,
+  nav,
+  .print\:hidden {
+    display: none !important;
+  }
+
+  html::before {
+    display: none !important;
+  }
+
+  body, html {
+    background: white !important;
+    color: black !important;
+  }
+
+  .cert-print-area {
+    max-width: none !important;
+    margin: 0 !important;
+  }
+
+  /* Page breaks between certificates */
+  .page-break-before {
+    page-break-before: always;
+  }
+
+  @page {
+    size: A4;
+    margin: 15mm 20mm;
+  }
+}
