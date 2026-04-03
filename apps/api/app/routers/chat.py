@@ -11,6 +11,7 @@ Flow:
   7. Return ChatResponse
 """
 
+import asyncio
 import logging
 import uuid
 from typing import Annotated
@@ -53,7 +54,7 @@ async def chat_endpoint(
     if body.vessel_id:
         row = await pool.fetchrow(
             """
-            SELECT vessel_type, route_type, cargo_types
+            SELECT vessel_type, route_types, cargo_types
             FROM vessels
             WHERE id = $1 AND user_id = $2
             """,
@@ -63,12 +64,13 @@ async def chat_endpoint(
         if row:
             vessel_profile = {
                 "vessel_type": row["vessel_type"],
-                "route_type": row["route_type"],
+                "route_types": list(row["route_types"] or []),
                 "cargo_types": list(row["cargo_types"] or []),
             }
 
     # 2. Resolve conversation — load history or create new record
     conversation_id = body.conversation_id
+    is_new_conversation = conversation_id is None
     history: list[ChatMessage] = []
 
     if conversation_id is not None:
@@ -152,7 +154,51 @@ async def chat_endpoint(
         cited_ids,
     )
 
+    # 6. Fire background title generation for brand-new conversations
+    if is_new_conversation:
+        asyncio.create_task(
+            _generate_title(
+                conversation_id=conversation_id,
+                query=body.query,
+                anthropic_client=anthropic_client,
+                pool=pool,
+            )
+        )
+
     return response
+
+
+async def _generate_title(
+    conversation_id: uuid.UUID,
+    query: str,
+    anthropic_client: AsyncAnthropic,
+    pool: asyncpg.Pool,
+) -> None:
+    """Generate a 4-6 word title for a new conversation using Haiku. Non-blocking."""
+    try:
+        msg = await anthropic_client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=24,
+            messages=[
+                {
+                    "role": "user",
+                    "content": (
+                        f"Generate a 4-6 word title for a maritime compliance conversation "
+                        f"that starts with this question: {query!r}\n"
+                        "Respond with only the title, no punctuation, no quotes."
+                    ),
+                }
+            ],
+        )
+        title = msg.content[0].text.strip()[:120] if msg.content else None
+        if title:
+            await pool.execute(
+                "UPDATE conversations SET title = $1 WHERE id = $2 AND title IS NULL",
+                title,
+                conversation_id,
+            )
+    except Exception:
+        pass  # Never affect the chat response
 
 
 # ── Request body defined here to avoid circular import with rag.models ───────

@@ -40,6 +40,8 @@ packages/ingest/data/
 public/sw.js
 public/workbox-*.js
 public/swe-worker-*.js
+apps/web/public/sw.js
+apps/web/public/workbox-*.js
 
 # Build
 *.tsbuildinfo

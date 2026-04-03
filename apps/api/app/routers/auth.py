@@ -1,3 +1,5 @@
+import hashlib
+import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Annotated, Optional
@@ -16,6 +18,7 @@ from app.auth.service import (
 )
 from app.config import settings
 from app.db import get_pool
+from app.email import send_password_reset_email, send_welcome_email
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -78,6 +81,13 @@ async def register(data: RegisterRequest, response: Response) -> TokenResponse:
     )
 
     _set_refresh_cookie(response, raw_refresh)
+
+    # Fire welcome email — non-blocking, failures don't affect registration
+    try:
+        await send_welcome_email(user["email"], user["full_name"])
+    except Exception:
+        pass
+
     return TokenResponse(access_token=access_token)
 
 
@@ -286,3 +296,95 @@ async def change_password(
         new_hash,
         uuid.UUID(user.user_id),
     )
+
+
+# ── Password reset (unauthenticated) ──────────────────────────────────────────
+
+_RESET_TOKEN_EXPIRE_HOURS = 1
+
+
+def _hash_reset_token(raw: str) -> str:
+    return hashlib.sha256(raw.encode()).hexdigest()
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: str
+
+
+@router.post("/forgot-password", status_code=status.HTTP_200_OK)
+async def forgot_password(body: ForgotPasswordRequest) -> dict:
+    pool = await get_pool()
+    user = await pool.fetchrow(
+        "SELECT id, email, full_name FROM users WHERE email = $1",
+        body.email.strip().lower(),
+    )
+
+    if user:
+        raw_token = secrets.token_urlsafe(32)
+        token_hash = _hash_reset_token(raw_token)
+        expires_at = datetime.now(timezone.utc) + timedelta(hours=_RESET_TOKEN_EXPIRE_HOURS)
+
+        await pool.execute(
+            """
+            INSERT INTO password_reset_tokens (user_id, token_hash, expires_at)
+            VALUES ($1, $2, $3)
+            """,
+            user["id"],
+            token_hash,
+            expires_at,
+        )
+
+        try:
+            await send_password_reset_email(user["email"], raw_token)
+        except Exception:
+            pass
+
+    # Always return the same response — don't reveal whether email exists
+    return {"detail": "If that email is registered, you'll receive a reset link shortly"}
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str
+
+
+@router.post("/reset-password", status_code=status.HTTP_200_OK)
+async def reset_password(body: ResetPasswordRequest) -> dict:
+    if len(body.new_password) < 8:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Password must be at least 8 characters",
+        )
+
+    token_hash = _hash_reset_token(body.token)
+    pool = await get_pool()
+
+    row = await pool.fetchrow(
+        """
+        SELECT id, user_id, expires_at, used
+        FROM password_reset_tokens
+        WHERE token_hash = $1
+        """,
+        token_hash,
+    )
+
+    if not row or row["used"] or row["expires_at"] < datetime.now(timezone.utc):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired reset link",
+        )
+
+    new_hash = hash_password(body.new_password)
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute(
+                "UPDATE users SET hashed_password = $1 WHERE id = $2",
+                new_hash,
+                row["user_id"],
+            )
+            await conn.execute(
+                "UPDATE password_reset_tokens SET used = TRUE WHERE id = $1",
+                row["id"],
+            )
+
+    return {"detail": "Password updated successfully"}

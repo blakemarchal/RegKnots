@@ -1,19 +1,22 @@
 'use client'
 
-import { useState, FormEvent } from 'react'
-import { useRouter } from 'next/navigation'
+import { useState, FormEvent, Suspense } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { useAuthStore } from '@/lib/auth'
 import { CompassRose } from '@/components/CompassRose'
 
-export default function LoginPage() {
+function LoginForm() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const login = useAuthStore((s) => s.login)
 
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+
+  const resetSuccess = searchParams.get('reset') === '1'
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -32,6 +35,12 @@ export default function LoginPage() {
   return (
     <main className="min-h-screen flex items-center justify-center bg-[--color-navy] px-4">
       <div className="w-full max-w-sm">
+        {resetSuccess && (
+          <p className="font-mono text-xs text-[--color-teal] bg-[--color-teal]/10 border border-[--color-teal]/20 rounded-lg px-3 py-2 mb-4 text-center">
+            Password updated — sign in with your new password.
+          </p>
+        )}
+
         {/* Logo / wordmark */}
         <div className="mb-8 text-center flex flex-col items-center gap-3">
           <CompassRose className="w-12 h-12 text-[--color-teal]" />
@@ -85,13 +94,21 @@ export default function LoginPage() {
             </p>
           )}
 
-          <button
-            type="submit"
-            disabled={loading}
-            className="mt-1 bg-[--color-teal] hover:bg-[--color-teal-dark] disabled:opacity-50 disabled:cursor-not-allowed text-[--color-navy] font-bold text-sm uppercase tracking-wider rounded-lg py-2.5 transition-colors font-mono"
-          >
-            {loading ? 'Signing in…' : 'Sign In'}
-          </button>
+          <div className="flex items-center justify-between mt-1">
+            <button
+              type="submit"
+              disabled={loading}
+              className="bg-[--color-teal] hover:bg-[--color-teal-dark] disabled:opacity-50 disabled:cursor-not-allowed text-[--color-navy] font-bold text-sm uppercase tracking-wider rounded-lg px-6 py-2.5 transition-colors font-mono"
+            >
+              {loading ? 'Signing in…' : 'Sign In'}
+            </button>
+            <Link
+              href="/forgot-password"
+              className="font-mono text-xs text-[--color-muted] hover:text-[--color-teal] transition-colors"
+            >
+              Forgot password?
+            </Link>
+          </div>
         </form>
 
         <p className="mt-4 text-center text-xs text-[--color-muted] font-mono">
@@ -102,5 +119,13 @@ export default function LoginPage() {
         </p>
       </div>
     </main>
+  )
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={null}>
+      <LoginForm />
+    </Suspense>
   )
 }

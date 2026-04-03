@@ -11,6 +11,7 @@ import { VesselPill } from './VesselPill'
 import { HamburgerMenu } from './HamburgerMenu'
 import { CitationSheet } from './CitationSheet'
 import { VesselSheet } from './VesselSheet'
+import { InstallPrompt } from './InstallPrompt'
 
 interface ConversationMessage {
   role: string
@@ -211,12 +212,14 @@ export function ChatInterface({ initialConversationId }: Props) {
             loading={loading}
             onPrompt={handlePrompt}
             onCitationTap={handleCitationTap}
+            isNewConversation={initialConversationId === null}
           />
         )}
       </main>
 
       {/* ── Bottom bar ───────────────────────────────────────────── */}
       <div className="flex-shrink-0 bg-[#111827] border-t border-white/8">
+        <InstallPrompt />
         <VesselPill vesselName={activeVessel?.name ?? null} onClick={openVesselSheet} />
         <InputBar
           value={input}

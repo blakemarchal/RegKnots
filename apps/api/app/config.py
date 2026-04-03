@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     openai_api_key: str = Field(default="", validation_alias="OPENAI_API_KEY")
     anthropic_api_key: str = Field(default="", validation_alias="ANTHROPIC_API_KEY")
 
+    # Email — no REGKNOTS_ prefix in .env
+    resend_api_key: str = Field(default="", validation_alias="RESEND_API_KEY")
+
     @property
     def is_dev(self) -> bool:
         return self.environment == "development"
