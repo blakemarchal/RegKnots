@@ -1,0 +1,17 @@
+[Unit]
+Description=RegKnots Celery Worker + Beat
+After=network.target docker.service regknots-api.service
+Requires=docker.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/RegKnots/apps/api
+Environment=PATH=/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+EnvironmentFile=/opt/RegKnots/.env
+ExecStart=/root/.local/bin/uv run celery -A celery_beat worker --beat --loglevel=info
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
