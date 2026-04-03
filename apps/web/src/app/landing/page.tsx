@@ -28,7 +28,7 @@ function StepCard({ n, title, desc }: { n: string; title: string; desc: string }
 
 // ── Pricing card ──────────────────────────────────────────────────────────────
 function PricingCard({
-  name, price, priceSub, badge, features, smallPrint, cta, featured,
+  name, price, priceSub, badge, features, smallPrint, subNote, cta, featured,
 }: {
   name: string
   price: string
@@ -36,6 +36,7 @@ function PricingCard({
   badge?: string
   features: string[]
   smallPrint?: string
+  subNote?: string
   cta: string
   featured?: boolean
 }) {
@@ -50,6 +51,9 @@ function PricingCard({
           <p className="font-display text-2xl font-bold text-[#f0ece4] tracking-wide">{name}</p>
           <p className="font-mono text-3xl font-bold text-[#f0ece4] mt-1">{price}</p>
           <p className="font-mono text-xs text-[#6b7594]">{priceSub}</p>
+          {subNote && (
+            <p className="font-mono text-xs text-[#2dd4bf]/80 mt-1 leading-snug">{subNote}</p>
+          )}
         </div>
         {badge && (
           <span className="font-mono text-[10px] font-bold text-[#2dd4bf] bg-[#2dd4bf]/10
@@ -395,22 +399,23 @@ export default function LandingPage() {
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
             <PricingCard
-              name="7-Day Free Trial"
+              name="Founding Pilot"
               price="$0"
-              priceSub="for 7 days"
+              priceSub="for 14 days"
               features={[
+                '14-day pilot access',
                 'No credit card required to start',
                 'Full Pro access during trial',
-                'After 7 days: $49/month or cancel',
               ]}
-              smallPrint="One trial per account. Payment method required to continue after 7 days."
-              cta="Start Free Trial"
+              smallPrint="One trial per account. Founding members lock in $49/month forever."
+              cta="Join the Founding Pilot"
             />
             <PricingCard
               name="Pro"
               price="$49"
               priceSub="per month"
-              badge="EARLY ACCESS RATE"
+              badge="FOUNDING MEMBER RATE"
+              subNote="Founding members lock in $49/month forever."
               features={[
                 'Unlimited questions',
                 'CFR Titles 33, 46 & 49 + COLREGs, NVICs & SOLAS 2024',

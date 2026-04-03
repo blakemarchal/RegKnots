@@ -15,6 +15,8 @@ import { CitationSheet } from './CitationSheet'
 import { VesselSheet } from './VesselSheet'
 import { InstallPrompt } from './InstallPrompt'
 import { PwaProvider, usePwa } from '@/lib/pwa'
+import { PilotEndedModal } from './PilotEndedModal'
+import { PilotSurveyModal } from './PilotSurveyModal'
 
 interface ConversationMessage {
   role: string
@@ -42,6 +44,8 @@ function ChatInterfaceInner({ initialConversationId }: Props) {
   const [conversationId, setConversationId] = useState<string | null>(initialConversationId)
   const [menuOpen, setMenuOpen] = useState(false)
   const [restoring, setRestoring] = useState(!!initialConversationId)
+  const [rateLimitMsg, setRateLimitMsg] = useState<string | null>(null)
+  const [pilotEndedMsg, setPilotEndedMsg] = useState<string | null>(null)
 
   const router = useRouter()
   const { canInstall, install } = usePwa()
@@ -122,9 +126,25 @@ function ChatInterfaceInner({ initialConversationId }: Props) {
         citations: response.cited_regulations,
       }
       setMessages(prev => [...prev, assistantMsg])
+      // Refresh billing status in background after each message
+      apiRequest<BillingStatus>('/billing/status').then(setBilling).catch(() => {})
     } catch (err) {
       if (err instanceof Error && err.message.includes('402')) {
         router.push('/pricing')
+        return
+      }
+      if (err instanceof Error && err.message.includes('429')) {
+        setRateLimitMsg('Too many messages — please wait a moment before sending another.')
+        setTimeout(() => setRateLimitMsg(null), 5000)
+        // Remove the user message we optimistically added
+        setMessages(prev => prev.slice(0, -1))
+        return
+      }
+      if (err instanceof Error && err.message.includes('403') && err.message.includes('pilot')) {
+        setPilotEndedMsg(
+          'The RegKnots pilot program has ended. Thank you for your feedback! Stay tuned for our official launch at regknots.com.'
+        )
+        setMessages(prev => prev.slice(0, -1))
         return
       }
       setMessages(prev => [
@@ -164,6 +184,8 @@ function ChatInterfaceInner({ initialConversationId }: Props) {
             citations: response.cited_regulations,
           },
         ])
+        // Refresh billing status in background
+        apiRequest<BillingStatus>('/billing/status').then(setBilling).catch(() => {})
       }).catch(() => {
         setMessages(prev => [
           ...prev,
@@ -285,6 +307,11 @@ function ChatInterfaceInner({ initialConversationId }: Props) {
           onSend={handleSend}
           loading={loading || restoring}
         />
+        {rateLimitMsg && (
+          <p className="px-4 py-2 font-mono text-xs text-amber-400 bg-amber-950/30 border-t border-amber-800/20">
+            {rateLimitMsg}
+          </p>
+        )}
       </div>
 
       {/* ── Hamburger drawer ─────────────────────────────────────── */}
@@ -309,6 +336,17 @@ function ChatInterfaceInner({ initialConversationId }: Props) {
           onClose={() => setCitation(null)}
         />
       )}
+
+      {/* ── Pilot ended modal ────────────────────────────────────── */}
+      {pilotEndedMsg && (
+        <PilotEndedModal
+          message={pilotEndedMsg}
+          onClose={() => setPilotEndedMsg(null)}
+        />
+      )}
+
+      {/* ── Pilot survey modal ───────────────────────────────────── */}
+      <PilotSurveyModal billing={billing} />
     </div>
   )
 }

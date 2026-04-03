@@ -26,6 +26,9 @@ class Settings(BaseSettings):
     # Email — no REGKNOTS_ prefix in .env
     resend_api_key: str = Field(default="", validation_alias="RESEND_API_KEY")
 
+    # Pilot mode — extended trial for founding members
+    pilot_mode: bool = True
+
     # Stripe — no REGKNOTS_ prefix in .env
     stripe_secret_key: str = Field(default="", validation_alias="STRIPE_SECRET_KEY")
     stripe_webhook_secret: str = Field(default="", validation_alias="STRIPE_WEBHOOK_SECRET")

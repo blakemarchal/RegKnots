@@ -52,6 +52,10 @@ _PDF_SOURCE_CONFIG: dict[str, dict] = {
         "text_dir": _DATA_RAW / "solas",
         "adapter":  "ingest.sources.solas",
     },
+    "solas_supplement": {
+        "pdf":     _DATA_RAW / "solas_supplements" / "1QH110E_supplement_January2026_EBK.pdf",
+        "adapter": "ingest.sources.solas_supplement",
+    },
 }
 
 _DATA_FAILED = Path(__file__).resolve().parents[3] / "data" / "failed"
@@ -134,14 +138,22 @@ async def _run(sources: list[str], mode: str, dry_run: bool = False) -> None:
     if dry_run:
         for source in sources:
             cfg = _PDF_SOURCE_CONFIG.get(source)
-            if cfg is None or "text_dir" not in cfg:
+            if cfg is None:
                 console.print(
-                    f"[yellow]--dry-run is only supported for text-dir sources "
-                    f"(e.g. solas). '{source}' does not support it.[/yellow]"
+                    f"[yellow]--dry-run is only supported for PDF/text sources. "
+                    f"'{source}' does not support it.[/yellow]"
                 )
                 sys.exit(1)
             adapter = importlib.import_module(cfg["adapter"])
-            adapter.dry_run(cfg["text_dir"])
+            if "text_dir" in cfg:
+                adapter.dry_run(cfg["text_dir"])
+            elif "pdf" in cfg and hasattr(adapter, "dry_run"):
+                adapter.dry_run(cfg["pdf"])
+            else:
+                console.print(
+                    f"[yellow]--dry-run is not supported for '{source}'.[/yellow]"
+                )
+                sys.exit(1)
         return
 
     if not settings.openai_api_key:

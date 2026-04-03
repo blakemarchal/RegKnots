@@ -45,6 +45,7 @@ interface AuthState {
   accessToken: string | null
   isAuthenticated: boolean
   isLoading: boolean
+  hydrated: boolean
   vessels: VesselSummary[]
   activeVesselId: string | null
   billing: BillingStatus | null
@@ -52,6 +53,7 @@ interface AuthState {
   register: (email: string, password: string, fullName: string, role: string) => Promise<void>
   logout: () => Promise<void>
   refreshAuth: () => Promise<boolean>
+  hydrateAuth: () => Promise<void>
   setToken: (token: string, user: AuthUser) => void
   updateUserFromToken: (token: string) => void
   addVessel: (vessel: VesselSummary) => void
@@ -66,6 +68,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   accessToken: null,
   isAuthenticated: false,
   isLoading: false,
+  hydrated: false,
   vessels: [],
   activeVesselId: null,
   billing: null,
@@ -151,6 +154,12 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       // Ignore network errors on logout
     }
     set({ accessToken: null, user: null, isAuthenticated: false, vessels: [], activeVesselId: null, billing: null })
+  },
+
+  hydrateAuth: async () => {
+    const { refreshAuth } = get()
+    await refreshAuth()
+    set({ hydrated: true })
   },
 
   refreshAuth: async () => {

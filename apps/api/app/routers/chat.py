@@ -23,7 +23,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from app.auth.deps import get_current_user
 from app.auth.schemas import CurrentUser
-from app.db import get_pool
+from app.db import get_pool, get_redis
 
 logger = logging.getLogger(__name__)
 
@@ -47,11 +47,38 @@ async def chat_endpoint(
     from rag.engine import chat
     from rag.models import ChatMessage, ChatResponse
 
-    # ── Subscription gate ────────────────────────────────────────────────────
+    # ── Rate limit: 10 messages per minute per user ──────────────────────────
+    try:
+        redis = await get_redis()
+        rate_key = f"ratelimit:chat:{current_user.user_id}"
+        count = await redis.incr(rate_key)
+        if count == 1:
+            await redis.expire(rate_key, 60)
+        if count > 10:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Too many messages — please wait a moment before sending another.",
+            )
+    except HTTPException:
+        raise
+    except Exception:
+        pass  # If Redis is down, don't block chat
+
+    # ── Pilot mode gate ────────────────────────────────────────────────────
+    from app.config import settings as _cfg
     sub_row = await pool.fetchrow(
-        "SELECT subscription_tier, trial_ends_at, message_count FROM users WHERE id = $1",
+        "SELECT subscription_tier, trial_ends_at, message_count, created_at FROM users WHERE id = $1",
         uuid.UUID(current_user.user_id),
     )
+    if sub_row and _cfg.pilot_mode and sub_row["subscription_tier"] == "free":
+        account_age_days = (datetime.now(timezone.utc) - sub_row["created_at"]).days
+        if account_age_days > 14:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="The RegKnots pilot program has ended. Thank you for your feedback! Stay tuned for our official launch at regknots.com.",
+            )
+
+    # ── Subscription gate ────────────────────────────────────────────────────
     if sub_row and sub_row["subscription_tier"] == "free":
         trial_expired = sub_row["trial_ends_at"] < datetime.now(timezone.utc)
         over_limit = sub_row["message_count"] >= 50

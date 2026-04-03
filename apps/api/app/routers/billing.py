@@ -23,6 +23,12 @@ class CheckoutResponse(BaseModel):
 async def create_checkout(
     user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> CheckoutResponse:
+    from app.config import settings as _settings
+    if not _settings.stripe_secret_key:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Payment system not configured",
+        )
     pool = await get_pool()
     url = await create_checkout_session(user.user_id, user.email, pool)
     return CheckoutResponse(checkout_url=url)

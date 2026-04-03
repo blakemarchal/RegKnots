@@ -8,8 +8,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
-from app.db import init_pool, close_pool
-from app.routers import auth, billing, health, chat, vessels, regulations, conversations
+from app.db import init_pool, close_pool, close_redis
+from app.routers import auth, billing, health, chat, vessels, regulations, conversations, waitlist
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +40,7 @@ async def lifespan(app: FastAPI):
     app.state.openai_api_key = settings.openai_api_key
     yield
     await app.state.anthropic.close()
+    await close_redis()
     await close_pool()
 
 
@@ -60,3 +61,4 @@ app.include_router(vessels.router)
 app.include_router(regulations.router)
 app.include_router(conversations.router)
 app.include_router(billing.router)
+app.include_router(waitlist.router)

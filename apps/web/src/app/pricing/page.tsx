@@ -1,23 +1,40 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { CompassRose } from '@/components/CompassRose'
 import { apiRequest } from '@/lib/api'
 import { useAuthStore } from '@/lib/auth'
+import type { BillingStatus } from '@/lib/auth'
 
 export default function PricingPage() {
   const [loading, setLoading] = useState(false)
-  const billing = useAuthStore(s => s.billing)
+  const [error, setError] = useState<string | null>(null)
+  const { billing, setBilling } = useAuthStore()
+
+  useEffect(() => {
+    if (!billing) {
+      apiRequest<BillingStatus>('/billing/status')
+        .then(setBilling)
+        .catch(() => {})
+    }
+  }, [billing, setBilling])
 
   async function handleSubscribe() {
     setLoading(true)
+    setError(null)
     try {
-      const { checkout_url } = await apiRequest<{ checkout_url: string }>('/billing/checkout', {
+      const data = await apiRequest<{ checkout_url: string }>('/billing/checkout', {
         method: 'POST',
       })
-      window.location.href = checkout_url
-    } catch {
+      window.location.href = data.checkout_url
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Something went wrong'
+      if (msg.includes('503')) {
+        setError('Payment system is not yet configured. Please try again later.')
+      } else {
+        setError('Unable to start checkout. Please try again.')
+      }
       setLoading(false)
     }
   }
@@ -47,7 +64,7 @@ export default function PricingPage() {
           <p className="font-mono text-sm text-amber-400 mb-8 text-center max-w-md">
             {billing.trial_active
               ? `You've used ${billing.message_count} of 50 free messages.`
-              : 'Your 7-day free trial has ended.'}
+              : 'Your pilot trial has ended.'}
             {' '}Subscribe to continue using RegKnots.
           </p>
         )}
@@ -58,6 +75,9 @@ export default function PricingPage() {
             <p className="font-display text-2xl font-bold text-[#f0ece4] tracking-wide">Pro</p>
             <p className="font-mono text-4xl font-bold text-[#f0ece4] mt-2">$49</p>
             <p className="font-mono text-xs text-[#6b7594]">per month</p>
+            <p className="font-mono text-xs text-[#2dd4bf]/80 mt-1.5 leading-snug">
+              Pilot members lock in this price forever — even when we raise it.
+            </p>
 
             <ul className="flex flex-col gap-2 mt-6 mb-6">
               {[
@@ -75,6 +95,10 @@ export default function PricingPage() {
                 </li>
               ))}
             </ul>
+
+            {error && (
+              <p className="font-mono text-xs text-red-400 mb-3 text-center">{error}</p>
+            )}
 
             <button
               onClick={handleSubscribe}

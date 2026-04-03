@@ -54,16 +54,18 @@ async def register(data: RegisterRequest, response: Response) -> TokenResponse:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid role")
 
     hashed_pw = hash_password(data.password)
+    trial_days = 14 if settings.pilot_mode else 7
     user = await pool.fetchrow(
         """
-        INSERT INTO users (email, hashed_password, full_name, role)
-        VALUES ($1, $2, $3, $4)
+        INSERT INTO users (email, hashed_password, full_name, role, trial_ends_at)
+        VALUES ($1, $2, $3, $4, NOW() + ($5 || ' days')::INTERVAL)
         RETURNING id, email, full_name, role, subscription_tier
         """,
         data.email,
         hashed_pw,
         data.full_name,
         data.role,
+        str(trial_days),
     )
 
     access_token = create_access_token(
