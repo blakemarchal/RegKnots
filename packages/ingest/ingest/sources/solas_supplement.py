@@ -28,6 +28,7 @@ _RESOLUTION_RE = re.compile(
 
 # Known resolutions and their chapter mappings from the supplement
 _RESOLUTION_CHAPTERS: dict[str, str] = {
+    "MSC.338(91)":  "Chapter II-2 Fire Protection",
     "MSC.520(106)": "Chapter II-2 Fire Protection",
     "MSC.522(106)": "Chapter II-1 Construction",
     "MSC.532(107)": "Chapter V Navigation Safety",
@@ -35,6 +36,49 @@ _RESOLUTION_CHAPTERS: dict[str, str] = {
     "MSC.534(107)": "Chapter II-1 Construction",
     "MSC.550(108)": "Appendix Certificates",
 }
+
+
+# ── Text cleaning ─────────────────────────────────────────────────────────────
+
+# Placeholders left by PDF-to-text converters
+_IMAGE_PLACEHOLDER = re.compile(
+    r"\[(?:IMAGE|FIGURE|TABLE|DIAGRAM|PHOTO|CHART|ILLUSTRATION)[^\]]*\]",
+    re.IGNORECASE,
+)
+
+# Repeated dashes used as visual separators
+_DASH_LINE = re.compile(r"^[\-\u2013\u2014]{4,}\s*$", re.MULTILINE)
+
+# IMO eBook delivery watermark lines
+_WATERMARK_LINE = re.compile(
+    r"^.*(?:Delivered by|Base to:).*$", re.MULTILINE,
+)
+
+# Order/license number lines (short alphanumeric strings like "1QH110E", "IP:J A")
+_ORDER_NUMBER_LINE = re.compile(
+    r"^\s*(?:[A-Z0-9]{5,10}|[A-Z]{1,3}:[A-Z]\s*[A-Z]?)\s*$", re.MULTILINE,
+)
+
+
+def _clean_text(text: str) -> str:
+    """Remove PDF and IMO eBook artefacts from supplement text.
+
+    Operations (in order):
+      1. Strip null bytes (PostgreSQL rejects U+0000).
+      2. Remove lines containing IMO eBook delivery watermarks.
+      3. Remove lines that look like order/license numbers.
+      4. Remove [IMAGE ...] / [FIGURE ...] placeholders.
+      5. Remove pure separator lines (-----).
+      6. Collapse runs of 3+ blank lines to 2.
+      7. Strip leading/trailing whitespace.
+    """
+    text = text.replace("\x00", "")
+    text = _WATERMARK_LINE.sub("", text)
+    text = _ORDER_NUMBER_LINE.sub("", text)
+    text = _IMAGE_PLACEHOLDER.sub("", text)
+    text = _DASH_LINE.sub("", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
 
 
 def parse_source(pdf_path: Path) -> list[Section]:
@@ -63,14 +107,14 @@ def parse_source(pdf_path: Path) -> list[Section]:
     sections: list[Section] = []
 
     # ── Preamble: first page summary table ──────────────────────────────────
-    preamble_text = pages_text[0] if pages_text else ""
-    if preamble_text.strip():
+    preamble_text = _clean_text(pages_text[0]) if pages_text else ""
+    if preamble_text:
         sections.append(Section(
             source=SOURCE,
             title_number=TITLE_NUMBER,
             section_number="SOLAS Supplement Jan2026 Preamble",
             section_title="January 2026 Supplement: Resolution Summary Table",
-            full_text=preamble_text.strip(),
+            full_text=preamble_text,
             up_to_date_as_of=SOURCE_DATE,
             parent_section_number="SOLAS 2024 Supplements",
         ))
@@ -87,7 +131,7 @@ def parse_source(pdf_path: Path) -> list[Section]:
         start = match.start()
         end = matches[i + 1].start() if i + 1 < len(matches) else len(full_text)
 
-        resolution_text = full_text[start:end].strip()
+        resolution_text = _clean_text(full_text[start:end])
 
         # Extract the MSC number from the heading
         msc_match = re.search(r"MSC\.\d+\(\d+\)", heading, re.IGNORECASE)
