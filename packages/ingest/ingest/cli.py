@@ -5,6 +5,7 @@ Usage:
     uv run python -m ingest.cli --source cfr_33 --fresh
     uv run python -m ingest.cli --source cfr_46 --update
     uv run python -m ingest.cli --source colregs --fresh
+    uv run python -m ingest.cli --source solas --dry-run
     uv run python -m ingest.cli --all --update
 """
 
@@ -29,12 +30,15 @@ _SOURCES = _CFR_SOURCES + PDF_SOURCES
 # Data directory for source PDFs
 _DATA_RAW = Path(__file__).resolve().parents[3] / "data" / "raw"
 
-# Maps PDF source tag → config dict.
+# Maps PDF/text source tag → config dict.
 #
 # Single-PDF sources (e.g. colregs) use the key "pdf" pointing at one file.
 # Multi-PDF sources (e.g. nvic) use the key "raw_dir" pointing at a directory;
-# they must also expose discover_and_download() and get_source_date() in their
-# adapter module.
+#   they must also expose discover_and_download() and get_source_date() in
+#   their adapter module.
+# Text-dir sources (e.g. solas) use the key "text_dir" pointing at a directory
+#   of pre-extracted .txt files plus a headers.txt index.  The adapter must
+#   expose parse_source(raw_dir) and SOURCE_DATE.
 _PDF_SOURCE_CONFIG: dict[str, dict] = {
     "colregs": {
         "pdf":     _DATA_RAW / "colregs_2024.pdf",
@@ -43,6 +47,10 @@ _PDF_SOURCE_CONFIG: dict[str, dict] = {
     "nvic": {
         "raw_dir": _DATA_RAW / "nvic",
         "adapter": "ingest.sources.nvic",
+    },
+    "solas": {
+        "text_dir": _DATA_RAW / "solas",
+        "adapter":  "ingest.sources.solas",
     },
 }
 
@@ -92,6 +100,15 @@ Examples:
     )
 
     parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help=(
+            "For text-dir sources (e.g. solas): print the page-range → section "
+            "mapping and exit without embedding or writing to the database."
+        ),
+    )
+
+    parser.add_argument(
         "--verbose",
         action="store_true",
         help="Enable DEBUG logging",
@@ -105,11 +122,27 @@ Examples:
     sources = _SOURCES if args.all else [args.source]
     mode = "update" if args.update else "fresh"
 
-    asyncio.run(_run(sources, mode))
+    asyncio.run(_run(sources, mode, dry_run=args.dry_run))
 
 
-async def _run(sources: list[str], mode: str) -> None:
+async def _run(sources: list[str], mode: str, dry_run: bool = False) -> None:
+    import importlib
+
     console = Console()
+
+    # ── Dry-run: no DB or API calls needed ────────────────────────────────────
+    if dry_run:
+        for source in sources:
+            cfg = _PDF_SOURCE_CONFIG.get(source)
+            if cfg is None or "text_dir" not in cfg:
+                console.print(
+                    f"[yellow]--dry-run is only supported for text-dir sources "
+                    f"(e.g. solas). '{source}' does not support it.[/yellow]"
+                )
+                sys.exit(1)
+            adapter = importlib.import_module(cfg["adapter"])
+            adapter.dry_run(cfg["text_dir"])
+        return
 
     if not settings.openai_api_key:
         console.print("[bold red]Error:[/bold red] OPENAI_API_KEY not set in .env")
@@ -152,12 +185,14 @@ async def _run_pdf_source(
     pool: asyncpg.Pool,
     console: Console,
 ) -> IngestResult:
-    """Dispatch a PDF-sourced ingest run.
+    """Dispatch a PDF/text-sourced ingest run.
 
-    Supports two adapter patterns:
-      - Single-PDF  (cfg["pdf"])    — COLREGs style; one PDF file, static SOURCE_DATE.
-      - Multi-PDF   (cfg["raw_dir"]) — NVIC style; adapter handles discovery + download,
-                                       exposes get_source_date(raw_dir) dynamically.
+    Supports three adapter patterns:
+      - Single-PDF  (cfg["pdf"])      — COLREGs style; one PDF file, static SOURCE_DATE.
+      - Multi-PDF   (cfg["raw_dir"])  — NVIC style; adapter handles discovery + download,
+                                        exposes get_source_date(raw_dir) dynamically.
+      - Text-dir    (cfg["text_dir"]) — SOLAS style; pre-extracted .txt files + headers.txt.
+                                        Adapter exposes parse_source(raw_dir) and SOURCE_DATE.
     """
     import importlib
 
@@ -167,6 +202,10 @@ async def _run_pdf_source(
         return IngestResult(source=source, errors=1)
 
     adapter = importlib.import_module(cfg["adapter"])
+
+    # ── Text-dir path (e.g. solas) ────────────────────────────────────────────
+    if "text_dir" in cfg:
+        return await _run_text_source(source, mode, cfg, adapter, pool, console)
 
     # ── Multi-PDF path (e.g. nvic) ────────────────────────────────────────────
     if "raw_dir" in cfg:
@@ -208,6 +247,62 @@ async def _run_pdf_source(
         return IngestResult(source=source, errors=1)
 
     section_loader = lambda: adapter.parse_source(pdf_path)  # noqa: E731
+
+    return await run_pdf_pipeline(
+        source=source,
+        mode=mode,
+        section_loader=section_loader,
+        source_date=adapter.SOURCE_DATE,
+        pool=pool,
+        cfg=settings,
+        console=console,
+    )
+
+
+async def _run_text_source(
+    source: str,
+    mode: str,
+    cfg: dict,
+    adapter,
+    pool: asyncpg.Pool,
+    console: Console,
+) -> IngestResult:
+    """Ingest a pre-extracted text-dir source (e.g. SOLAS).
+
+    The adapter must expose:
+      - parse_source(raw_dir: Path) -> list[Section]
+      - SOURCE_DATE: date
+
+    The raw_dir must contain:
+      - headers.txt  — page-range metadata index
+      - <start>-<end>.txt files — pre-extracted text per page range
+    """
+    raw_dir: Path = cfg["text_dir"]
+    raw_dir.mkdir(parents=True, exist_ok=True)
+
+    headers_path = raw_dir / "headers.txt"
+    if not headers_path.exists():
+        console.print(
+            f"[red]headers.txt not found: {headers_path}\n"
+            f"Create it with lines like: '5-12: Chapter I Part A — General'[/red]"
+        )
+        return IngestResult(source=source, errors=1)
+
+    # Check at least one range txt file exists
+    txt_files = list(raw_dir.glob("[0-9]*-[0-9]*.txt"))
+    if not txt_files:
+        console.print(
+            f"[red]No <start>-<end>.txt files found in {raw_dir}\n"
+            f"Expected files named like '5-12.txt'.[/red]"
+        )
+        return IngestResult(source=source, errors=1)
+
+    console.print(
+        f"  [cyan]Text dir:[/cyan] {raw_dir} "
+        f"([bold]{len(txt_files)}[/bold] range files)"
+    )
+
+    section_loader = lambda: adapter.parse_source(raw_dir)  # noqa: E731
 
     return await run_pdf_pipeline(
         source=source,

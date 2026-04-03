@@ -27,5 +27,5 @@ export function middleware(request: NextRequest) {
 
 export const config = {
   // Only run on these routes — never on /_next/*, /api/*, or static assets
-  matcher: ['/', '/landing', '/login', '/register'],
+  matcher: ['/', '/landing', '/login', '/register', '/pricing', '/subscribe/success'],
 }

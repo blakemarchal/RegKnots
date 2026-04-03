@@ -26,6 +26,12 @@ class Settings(BaseSettings):
     # Email — no REGKNOTS_ prefix in .env
     resend_api_key: str = Field(default="", validation_alias="RESEND_API_KEY")
 
+    # Stripe — no REGKNOTS_ prefix in .env
+    stripe_secret_key: str = Field(default="", validation_alias="STRIPE_SECRET_KEY")
+    stripe_webhook_secret: str = Field(default="", validation_alias="STRIPE_WEBHOOK_SECRET")
+    stripe_price_id: str = Field(default="", validation_alias="STRIPE_PRICE_ID")
+    app_url: str = "https://regknots.com"
+
     @property
     def is_dev(self) -> bool:
         return self.environment == "development"

@@ -14,6 +14,7 @@ Flow:
 import asyncio
 import logging
 import uuid
+from datetime import datetime, timezone
 from typing import Annotated
 
 import asyncpg
@@ -45,6 +46,20 @@ async def chat_endpoint(
 ):
     from rag.engine import chat
     from rag.models import ChatMessage, ChatResponse
+
+    # ── Subscription gate ────────────────────────────────────────────────────
+    sub_row = await pool.fetchrow(
+        "SELECT subscription_tier, trial_ends_at, message_count FROM users WHERE id = $1",
+        uuid.UUID(current_user.user_id),
+    )
+    if sub_row and sub_row["subscription_tier"] == "free":
+        trial_expired = sub_row["trial_ends_at"] < datetime.now(timezone.utc)
+        over_limit = sub_row["message_count"] >= 50
+        if trial_expired or over_limit:
+            raise HTTPException(
+                status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                detail="Trial expired or message limit reached. Subscribe to continue.",
+            )
 
     anthropic_client: AsyncAnthropic = request.app.state.anthropic
     openai_api_key: str = request.app.state.openai_api_key
@@ -154,7 +169,13 @@ async def chat_endpoint(
         cited_ids,
     )
 
-    # 6. Fire background title generation for brand-new conversations
+    # 6. Increment message count for billing
+    await pool.execute(
+        "UPDATE users SET message_count = message_count + 1 WHERE id = $1",
+        uuid.UUID(current_user.user_id),
+    )
+
+    # 7. Fire background title generation for brand-new conversations
     if is_new_conversation:
         asyncio.create_task(
             _generate_title(

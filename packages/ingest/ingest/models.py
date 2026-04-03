@@ -20,8 +20,8 @@ TITLE_NAMES: dict[int, str] = {
     0: "COLREGs — International/Inland Navigation Rules",
 }
 
-# Sources ingested from PDF (not eCFR API). title_number=0 for all.
-PDF_SOURCES: list[str] = ["colregs", "nvic"]
+# Sources ingested from text/PDF files (not eCFR API). title_number=0 for all.
+PDF_SOURCES: list[str] = ["colregs", "nvic", "solas"]
 
 
 # ── Data models ─────────────────────────────────────────────────────────────
