@@ -156,7 +156,9 @@ async def _run(sources: list[str], mode: str, dry_run: bool = False) -> None:
     console.print(f"  Database: {db_host}")
     console.print()
 
-    pool = await asyncpg.create_pool(settings.database_url, min_size=2, max_size=5)
+    # asyncpg requires plain "postgresql://" — strip the SQLAlchemy dialect suffix
+    dsn = settings.database_url.replace("postgresql+asyncpg://", "postgresql://")
+    pool = await asyncpg.create_pool(dsn, min_size=2, max_size=5)
     all_results: list[IngestResult] = []
 
     try:
