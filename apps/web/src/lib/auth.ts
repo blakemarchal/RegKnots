@@ -25,6 +25,16 @@ function decodeJwtUser(token: string): AuthUser | null {
   }
 }
 
+export interface BillingStatus {
+  tier: string
+  subscription_status: string
+  trial_ends_at: string | null
+  trial_active: boolean
+  message_count: number
+  messages_remaining: number | null
+  needs_subscription: boolean
+}
+
 export interface VesselSummary {
   id: string
   name: string
@@ -37,6 +47,7 @@ interface AuthState {
   isLoading: boolean
   vessels: VesselSummary[]
   activeVesselId: string | null
+  billing: BillingStatus | null
   login: (email: string, password: string) => Promise<void>
   register: (email: string, password: string, fullName: string, role: string) => Promise<void>
   logout: () => Promise<void>
@@ -47,6 +58,7 @@ interface AuthState {
   removeVessel: (id: string) => void
   setVessels: (vessels: VesselSummary[]) => void
   setActiveVessel: (id: string | null) => void
+  setBilling: (billing: BillingStatus) => void
 }
 
 export const useAuthStore = create<AuthState>((set, get) => ({
@@ -56,6 +68,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   isLoading: false,
   vessels: [],
   activeVesselId: null,
+  billing: null,
 
   addVessel: (vessel: VesselSummary) =>
     set((s) => ({ vessels: [...s.vessels, vessel] })),
@@ -71,6 +84,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   setActiveVessel: (id: string | null) =>
     set({ activeVesselId: id }),
+
+  setBilling: (billing: BillingStatus) =>
+    set({ billing }),
 
   setToken: (token: string, user: AuthUser) => {
     set({ accessToken: token, user, isAuthenticated: true })
@@ -134,7 +150,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     } catch {
       // Ignore network errors on logout
     }
-    set({ accessToken: null, user: null, isAuthenticated: false, vessels: [], activeVesselId: null })
+    set({ accessToken: null, user: null, isAuthenticated: false, vessels: [], activeVesselId: null, billing: null })
   },
 
   refreshAuth: async () => {

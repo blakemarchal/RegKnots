@@ -1,10 +1,12 @@
 'use client'
 
 import { useState, useCallback, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import type { Message } from '@/types/chat'
 import { sendMessage } from '@/lib/mockApi'
 import { apiRequest } from '@/lib/api'
 import { useAuthStore } from '@/lib/auth'
+import type { BillingStatus } from '@/lib/auth'
 import { ChatThread } from './ChatThread'
 import { InputBar } from './InputBar'
 import { VesselPill } from './VesselPill'
@@ -12,6 +14,7 @@ import { HamburgerMenu } from './HamburgerMenu'
 import { CitationSheet } from './CitationSheet'
 import { VesselSheet } from './VesselSheet'
 import { InstallPrompt } from './InstallPrompt'
+import { PwaProvider, usePwa } from '@/lib/pwa'
 
 interface ConversationMessage {
   role: string
@@ -25,6 +28,14 @@ interface Props {
 }
 
 export function ChatInterface({ initialConversationId }: Props) {
+  return (
+    <PwaProvider>
+      <ChatInterfaceInner initialConversationId={initialConversationId} />
+    </PwaProvider>
+  )
+}
+
+function ChatInterfaceInner({ initialConversationId }: Props) {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
@@ -32,7 +43,16 @@ export function ChatInterface({ initialConversationId }: Props) {
   const [menuOpen, setMenuOpen] = useState(false)
   const [restoring, setRestoring] = useState(!!initialConversationId)
 
-  const { vessels, activeVesselId } = useAuthStore()
+  const router = useRouter()
+  const { canInstall, install } = usePwa()
+  const { vessels, activeVesselId, billing, setBilling } = useAuthStore()
+
+  // Fetch billing status on mount
+  useEffect(() => {
+    apiRequest<BillingStatus>('/billing/status')
+      .then(setBilling)
+      .catch(() => {})
+  }, [setBilling])
   const activeVessel = vessels.find(v => v.id === activeVesselId) ?? null
 
   const [vesselSheetOpen, setVesselSheetOpen] = useState(false)
@@ -102,7 +122,11 @@ export function ChatInterface({ initialConversationId }: Props) {
         citations: response.cited_regulations,
       }
       setMessages(prev => [...prev, assistantMsg])
-    } catch {
+    } catch (err) {
+      if (err instanceof Error && err.message.includes('402')) {
+        router.push('/pricing')
+        return
+      }
       setMessages(prev => [
         ...prev,
         {
@@ -181,6 +205,23 @@ export function ChatInterface({ initialConversationId }: Props) {
           </div>
         </div>
 
+        <div className="flex items-center gap-2">
+          {canInstall && (
+            <button
+              onClick={install}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg
+                border border-[#2dd4bf]/40 text-[#2dd4bf] hover:bg-[#2dd4bf]/10
+                transition-colors duration-150"
+              aria-label="Install app"
+            >
+              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="7 10 12 15 17 10" />
+                <line x1="12" y1="15" x2="12" y2="3" />
+              </svg>
+              <span className="hidden md:inline font-mono text-xs font-bold">Install</span>
+            </button>
+          )}
         <button
           onClick={() => setMenuOpen(true)}
           className="w-9 h-9 flex flex-col items-center justify-center gap-1
@@ -192,7 +233,24 @@ export function ChatInterface({ initialConversationId }: Props) {
           <span className="w-5 h-0.5 bg-[#f0ece4]/70 rounded-full" />
           <span className="w-3.5 h-0.5 bg-[#f0ece4]/70 rounded-full self-start ml-[5px]" />
         </button>
+        </div>
       </header>
+
+      {/* ── Trial banner ─────────────────────────────────────────── */}
+      {billing && billing.tier === 'free' && billing.trial_active && (
+        <div className="flex-shrink-0 flex items-center justify-between gap-3 px-4 py-2
+          bg-amber-950/40 border-b border-amber-800/30">
+          <p className="font-mono text-xs text-amber-400">
+            Free trial: {billing.messages_remaining ?? 0} messages remaining
+          </p>
+          <button
+            onClick={() => router.push('/pricing')}
+            className="font-mono text-xs font-bold text-[#2dd4bf] hover:underline"
+          >
+            Upgrade
+          </button>
+        </div>
+      )}
 
       {/* ── Chat thread ──────────────────────────────────────────── */}
       <main className="chat-thread flex-1 overflow-y-auto overscroll-contain

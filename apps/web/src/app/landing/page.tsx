@@ -163,7 +163,7 @@ export default function LandingPage() {
           style={{ animationFillMode: 'both' }}
         >
           Instant answers to U.S. maritime compliance questions.
-          Titles 33, 46 &amp; 49 + COLREGs &amp; NVICs — cited, current, and plain English.
+          Titles 33, 46 &amp; 49 + COLREGs, NVICs &amp; SOLAS 2024 — cited, current, and plain English.
         </p>
 
         {/* CTAs */}
@@ -180,21 +180,21 @@ export default function LandingPage() {
           >
             Get Early Access
           </Link>
-          <a
-            href="#sample-answer"
+          <button
+            onClick={() => document.getElementById('in-action')?.scrollIntoView({ behavior: 'smooth' })}
             className="font-mono font-bold text-sm uppercase tracking-wider
               border border-[#2dd4bf]/50 text-[#2dd4bf] rounded-xl px-6 py-3
               hover:border-[#2dd4bf] hover:bg-[#2dd4bf]/5 transition-colors duration-150"
           >
             See It In Action
-          </a>
+          </button>
         </div>
 
         {/* Scroll indicator */}
         <button
           className="absolute bottom-8 flex flex-col items-center gap-1 cursor-pointer"
           aria-label="Scroll to demo"
-          onClick={() => document.getElementById('in-action')?.scrollIntoView({ behavior: 'smooth' })}
+          onClick={() => document.getElementById('why-regknots')?.scrollIntoView({ behavior: 'smooth' })}
         >
           <svg
             className="w-5 h-5 text-[#6b7594] animate-[chevronBounce_2s_ease-in-out_infinite]"
@@ -208,7 +208,7 @@ export default function LandingPage() {
       {/* ══════════════════════════════════════════════════════════════════════
           SECTION 2 — BUILT BY MARINERS
       ══════════════════════════════════════════════════════════════════════ */}
-      <section className="bg-[#111827] px-5 md:px-10 py-20 md:py-28">
+      <section id="why-regknots" className="bg-[#111827] px-5 md:px-10 py-20 md:py-28">
         <div className="max-w-3xl mx-auto">
           {/* Compass accent */}
           <CompassRose className="w-6 h-6 text-[#2dd4bf] mb-5" />
@@ -227,7 +227,7 @@ export default function LandingPage() {
           {/* Body */}
           <div className="flex flex-col gap-5">
             <p className="font-mono text-[#6b7594] leading-relaxed text-sm md:text-base">
-              U.S. commercial mariners navigate an overlapping web of Titles 33, 46, and 49 — plus COLREGs and NVICs —
+              U.S. commercial mariners navigate an overlapping web of Titles 33, 46, and 49 — plus COLREGs, NVICs, and SOLAS —
               thousands of sections that cross-reference each other, change without warning,
               and vary by vessel type, tonnage, route, and cargo. One missed detail during a
               Coast Guard inspection means deficiency citations, vessel detention, or costly
@@ -372,7 +372,7 @@ export default function LandingPage() {
             <StepCard
               n="03"
               title="Ask anything"
-              desc="Get instant cited answers, 24/7. Every response references exact CFR sections and NVICs you can verify on eCFR."
+              desc="Get instant cited answers, 24/7. Every response references exact CFR sections, NVICs, and SOLAS regulations you can verify."
             />
           </div>
         </div>
@@ -413,7 +413,7 @@ export default function LandingPage() {
               badge="EARLY ACCESS RATE"
               features={[
                 'Unlimited questions',
-                'CFR Titles 33, 46 & 49 + COLREGs & NVICs',
+                'CFR Titles 33, 46 & 49 + COLREGs, NVICs & SOLAS 2024',
                 'Vessel profile + history',
                 'Priority regulation updates',
                 'Audit-ready chat logs',
