@@ -84,24 +84,29 @@ async def handle_webhook_event(payload: bytes, sig_header: str, pool) -> None:
     etype = event["type"]
     data = event["data"]["object"]
     logger.info("Stripe webhook received: type=%s", etype)
+    print(f"[STRIPE WEBHOOK] type={etype}", flush=True)
 
     if etype == "checkout.session.completed":
         await _on_checkout_completed(data, pool)
     elif etype in (
+        "customer.subscription.created",
         "customer.subscription.updated",
         "customer.subscription.deleted",
     ):
         await _on_subscription_change(data, pool)
     else:
-        logger.debug("Ignoring Stripe event: %s", etype)
+        logger.info("Ignoring Stripe event: %s", etype)
+        print(f"[STRIPE WEBHOOK] ignoring event type={etype}", flush=True)
 
 
 async def _on_checkout_completed(session: dict, pool) -> None:
     customer_id = session.get("customer")
     subscription_id = session.get("subscription")
     logger.info("Checkout completed: customer_id=%s subscription_id=%s", customer_id, subscription_id)
+    print(f"[STRIPE CHECKOUT] customer_id={customer_id} subscription_id={subscription_id}", flush=True)
     if not customer_id or not subscription_id:
         logger.warning("Checkout missing customer_id or subscription_id, skipping")
+        print("[STRIPE CHECKOUT] missing customer_id or subscription_id, skipping", flush=True)
         return
 
     # Idempotency: skip if already processed
@@ -111,6 +116,7 @@ async def _on_checkout_completed(session: dict, pool) -> None:
     )
     if existing and existing["stripe_subscription_id"] == subscription_id:
         logger.info("Skipping duplicate checkout.session.completed for customer %s", customer_id)
+        print(f"[STRIPE CHECKOUT] duplicate, skipping customer={customer_id}", flush=True)
         return
 
     row = await pool.fetchrow(
@@ -127,8 +133,10 @@ async def _on_checkout_completed(session: dict, pool) -> None:
     )
     if row:
         logger.info("Activated pro subscription for customer %s (email=%s)", customer_id, row["email"])
+        print(f"[STRIPE CHECKOUT] activated pro for customer={customer_id} email={row['email']}", flush=True)
     else:
         logger.warning("Checkout UPDATE matched no user for customer %s", customer_id)
+        print(f"[STRIPE CHECKOUT] UPDATE matched NO user for customer={customer_id}", flush=True)
 
     # Send subscription confirmed email (non-blocking)
     if row:
@@ -143,6 +151,7 @@ async def _on_subscription_change(subscription: dict, pool) -> None:
     sub_id = subscription.get("id")
     status = subscription.get("status")  # active, past_due, canceled, unpaid
     logger.info("Subscription change: sub_id=%s status=%s", sub_id, status)
+    print(f"[STRIPE SUB] sub_id={sub_id} status={status}", flush=True)
 
     status_map = {
         "active": ("pro", "active"),
@@ -159,7 +168,10 @@ async def _on_subscription_change(subscription: dict, pool) -> None:
     )
     if existing and existing["subscription_tier"] == tier and existing["subscription_status"] == sub_status:
         logger.info("Skipping duplicate subscription change for %s (already %s/%s)", sub_id, tier, sub_status)
+        print(f"[STRIPE SUB] duplicate, skipping sub={sub_id}", flush=True)
         return
+    if not existing:
+        print(f"[STRIPE SUB] no user found with stripe_subscription_id={sub_id}", flush=True)
 
     result = await pool.execute(
         """
@@ -173,3 +185,4 @@ async def _on_subscription_change(subscription: dict, pool) -> None:
         sub_id,
     )
     logger.info("Subscription %s → tier=%s status=%s (result=%s)", sub_id, tier, sub_status, result)
+    print(f"[STRIPE SUB] {sub_id} → tier={tier} status={sub_status} result={result}", flush=True)

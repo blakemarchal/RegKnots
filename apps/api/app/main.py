@@ -3,6 +3,8 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
+
 import sentry_sdk
 from anthropic import AsyncAnthropic
 from fastapi import FastAPI
