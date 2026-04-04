@@ -149,9 +149,10 @@ async def _on_checkout_completed(session: dict, pool) -> None:
 
 async def _on_subscription_change(subscription: dict, pool) -> None:
     sub_id = subscription.get("id")
+    customer_id = subscription.get("customer")
     status = subscription.get("status")  # active, past_due, canceled, unpaid
-    logger.info("Subscription change: sub_id=%s status=%s", sub_id, status)
-    print(f"[STRIPE SUB] sub_id={sub_id} status={status}", flush=True)
+    logger.info("Subscription change: sub_id=%s customer_id=%s status=%s", sub_id, customer_id, status)
+    print(f"[STRIPE SUB] sub_id={sub_id} customer_id={customer_id} status={status}", flush=True)
 
     status_map = {
         "active": ("pro", "active"),
@@ -161,28 +162,49 @@ async def _on_subscription_change(subscription: dict, pool) -> None:
     }
     tier, sub_status = status_map.get(status, ("free", "inactive"))
 
-    # Idempotency: skip if DB already matches
-    existing = await pool.fetchrow(
-        "SELECT subscription_tier, subscription_status FROM users WHERE stripe_subscription_id = $1",
-        sub_id,
-    )
-    if existing and existing["subscription_tier"] == tier and existing["subscription_status"] == sub_status:
-        logger.info("Skipping duplicate subscription change for %s (already %s/%s)", sub_id, tier, sub_status)
-        print(f"[STRIPE SUB] duplicate, skipping sub={sub_id}", flush=True)
-        return
-    if not existing:
-        print(f"[STRIPE SUB] no user found with stripe_subscription_id={sub_id}", flush=True)
-
+    # Try lookup by subscription_id first
     result = await pool.execute(
         """
         UPDATE users
         SET subscription_tier = $1,
-            subscription_status = $2
+            subscription_status = $2,
+            stripe_subscription_id = $3
         WHERE stripe_subscription_id = $3
         """,
         tier,
         sub_status,
         sub_id,
     )
-    logger.info("Subscription %s → tier=%s status=%s (result=%s)", sub_id, tier, sub_status, result)
-    print(f"[STRIPE SUB] {sub_id} → tier={tier} status={sub_status} result={result}", flush=True)
+    logger.info("Sub change UPDATE by subscription_id: %s", result)
+    print(f"[STRIPE SUB] UPDATE by sub_id result: {result}", flush=True)
+
+    if result == "UPDATE 0" and customer_id:
+        # Fallback: lookup by customer_id (handles subscription.created where sub_id not yet stored)
+        result = await pool.execute(
+            """
+            UPDATE users
+            SET subscription_tier = $1,
+                subscription_status = $2,
+                stripe_subscription_id = $3
+            WHERE stripe_customer_id = $4
+            """,
+            tier,
+            sub_status,
+            sub_id,
+            customer_id,
+        )
+        logger.info("Sub change UPDATE by customer_id fallback: %s", result)
+        print(f"[STRIPE SUB] UPDATE by customer_id fallback result: {result}", flush=True)
+
+    # Send subscription confirmed email on activation
+    if tier == "pro" and sub_status == "active":
+        row = await pool.fetchrow(
+            "SELECT email, full_name FROM users WHERE stripe_subscription_id = $1",
+            sub_id,
+        )
+        if row:
+            try:
+                from app.email import send_subscription_confirmed_email
+                await send_subscription_confirmed_email(row["email"], row["full_name"] or "")
+            except Exception as exc:
+                logger.error("Failed to send subscription confirmed email: %s", exc)
