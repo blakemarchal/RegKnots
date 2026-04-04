@@ -29,6 +29,7 @@ dependencies = [
     "stripe>=8.0.0",
     # HTTP client
     "requests>=2.31.0",
+    "httpx>=0.27.0",
     # Monitoring
     "sentry-sdk[fastapi]>=2.0.0",
     "regknots-rag",

@@ -38,6 +38,16 @@ interface AdminUser {
   is_admin: boolean
 }
 
+interface SentryIssue {
+  id: string
+  title: string
+  level: string
+  count: number
+  last_seen: string
+  link: string
+  project: string
+}
+
 // Read-only admin emails — mirrors backend READONLY_ADMIN_EMAILS
 const READONLY_ADMIN_EMAILS = new Set(['kdmarchal@gmail.com'])
 
@@ -77,6 +87,8 @@ function AdminContent() {
   const [actionLoading, setActionLoading] = useState<string | null>(null)
   const [emailSending, setEmailSending] = useState<string | null>(null)
   const [emailToast, setEmailToast] = useState<{ msg: string; ok: boolean } | null>(null)
+  const [sentryIssues, setSentryIssues] = useState<SentryIssue[]>([])
+  const [sentryLoading, setSentryLoading] = useState(true)
 
   const fetchStats = useCallback(() => {
     apiRequest<AdminStats>('/admin/stats').then(setStats).catch(() => {})
@@ -91,6 +103,13 @@ function AdminContent() {
       .catch(() => {})
   }, [])
 
+  const fetchSentry = useCallback(() => {
+    apiRequest<SentryIssue[]>('/admin/sentry-issues')
+      .then(setSentryIssues)
+      .catch(() => {})
+      .finally(() => setSentryLoading(false))
+  }, [])
+
   useEffect(() => {
     if (hydrated && !isAdmin) {
       router.replace('/')
@@ -100,11 +119,12 @@ function AdminContent() {
 
     fetchStats()
     fetchUsers(0, false)
+    fetchSentry()
     setLoading(false)
 
-    const interval = setInterval(fetchStats, 60_000)
+    const interval = setInterval(() => { fetchStats(); fetchSentry() }, 60_000)
     return () => clearInterval(interval)
-  }, [hydrated, isAdmin, router, fetchStats, fetchUsers])
+  }, [hydrated, isAdmin, router, fetchStats, fetchUsers, fetchSentry])
 
   function loadMore() {
     const next = usersOffset + 50
@@ -238,6 +258,61 @@ function AdminContent() {
               </div>
             </div>
           )}
+
+          {/* ── System Errors (Sentry) ─────────────────────────────────── */}
+          <div className="mb-8">
+            <h2 className="font-display text-lg font-bold text-[#f0ece4] tracking-wide mb-3">System Errors</h2>
+            {sentryLoading ? (
+              <div className="bg-[#111827] rounded-xl border border-white/8 px-4 py-6 h-[72px] animate-pulse" />
+            ) : sentryIssues.length === 0 ? (
+              <div className="bg-[#111827] rounded-xl border border-white/8 px-4 py-4 text-center">
+                <p className="font-mono text-sm text-[#2dd4bf]">No recent issues</p>
+              </div>
+            ) : (
+              <div className="rounded-xl border border-white/8">
+                <table className="w-full table-fixed text-left font-mono text-xs">
+                  <thead>
+                    <tr className="bg-red-500/10 text-red-400">
+                      <th className="px-3 py-2.5 font-medium w-[8%]">Sev</th>
+                      <th className="px-3 py-2.5 font-medium w-[14%]">Project</th>
+                      <th className="px-3 py-2.5 font-medium w-[48%]">Issue</th>
+                      <th className="px-3 py-2.5 font-medium text-right w-[10%]">Count</th>
+                      <th className="px-3 py-2.5 font-medium w-[20%]">Last Seen</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sentryIssues.map((issue, i) => {
+                      const isFatal = issue.level === 'fatal' || issue.level === 'error'
+                      return (
+                        <tr key={issue.id}
+                          className={`border-t border-white/5 ${i % 2 === 0 ? 'bg-[#111827]' : 'bg-[#0f1629]'}`}>
+                          <td className="px-3 py-2">
+                            <span className={`inline-block text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                              isFatal
+                                ? 'bg-red-500/20 text-red-400 border border-red-500/30'
+                                : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                            }`}>
+                              {issue.level}
+                            </span>
+                          </td>
+                          <td className="px-3 py-2 text-[#6b7594] truncate overflow-hidden">{issue.project}</td>
+                          <td className="px-3 py-2 truncate overflow-hidden">
+                            <a href={issue.link} target="_blank" rel="noopener noreferrer"
+                              className="text-[#f0ece4]/90 hover:text-[#2dd4bf] transition-colors"
+                              title={issue.title}>
+                              {issue.title}
+                            </a>
+                          </td>
+                          <td className="px-3 py-2 text-right text-[#f0ece4]/80">{issue.count.toLocaleString()}</td>
+                          <td className="px-3 py-2 text-[#6b7594]">{fmtDate(issue.last_seen)}</td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
 
           {/* ── Email Testing ─────────────────────────────────────────── */}
           {!isReadOnly && (

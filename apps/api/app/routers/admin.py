@@ -1,13 +1,15 @@
-"""Admin dashboard endpoints — stats, user list, model usage, pilot reset, email testing."""
+"""Admin dashboard endpoints — stats, user list, model usage, pilot reset, email testing, Sentry."""
 
 import logging
 from typing import Annotated, Literal
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 
 from app.auth.deps import get_current_user
 from app.auth.schemas import CurrentUser
+from app.config import settings
 from app.db import get_pool
 
 logger = logging.getLogger(__name__)
@@ -433,3 +435,57 @@ async def send_test_email(
 
     logger.info("Admin %s sent test email type=%s to=%s", admin.email, body.type, recipient)
     return TestEmailResult(success=True, type=body.type, recipient=recipient)
+
+
+# ── Sentry issues ────────────────────────────────────────────────────────────
+
+SENTRY_PROJECTS = ["regknots-api", "regknots-web"]
+
+
+class SentryIssue(BaseModel):
+    id: str
+    title: str
+    level: str
+    count: int
+    last_seen: str
+    link: str
+    project: str
+
+
+@router.get("/sentry-issues", response_model=list[SentryIssue])
+async def sentry_issues(
+    _admin: Annotated[CurrentUser, Depends(require_admin)],
+) -> list[SentryIssue]:
+    """Fetch the 10 most recent unresolved issues from Sentry."""
+    if not settings.sentry_auth_token or not settings.sentry_org:
+        return []
+
+    org = settings.sentry_org
+    headers = {"Authorization": f"Bearer {settings.sentry_auth_token}"}
+    all_issues: list[SentryIssue] = []
+
+    async with httpx.AsyncClient(timeout=10) as client:
+        for project in SENTRY_PROJECTS:
+            url = f"https://sentry.io/api/0/projects/{org}/{project}/issues/"
+            try:
+                resp = await client.get(
+                    url,
+                    headers=headers,
+                    params={"query": "is:unresolved", "sort": "date", "limit": 10},
+                )
+                resp.raise_for_status()
+                for issue in resp.json():
+                    all_issues.append(SentryIssue(
+                        id=issue["id"],
+                        title=issue["title"],
+                        level=issue["level"],
+                        count=int(issue["count"]),
+                        last_seen=issue["lastSeen"],
+                        link=issue["permalink"],
+                        project=project,
+                    ))
+            except Exception as exc:
+                logger.warning("Sentry fetch failed for %s: %s", project, exc)
+
+    all_issues.sort(key=lambda i: i.last_seen, reverse=True)
+    return all_issues[:10]

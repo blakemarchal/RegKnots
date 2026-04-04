@@ -38,6 +38,8 @@ class Settings(BaseSettings):
 
     # Monitoring
     sentry_dsn: str = Field(default="", validation_alias="SENTRY_DSN")
+    sentry_auth_token: str = Field(default="", validation_alias="SENTRY_AUTH_TOKEN")
+    sentry_org: str = Field(default="", validation_alias="SENTRY_ORG")
 
     @property
     def is_dev(self) -> bool:
