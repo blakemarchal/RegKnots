@@ -81,10 +81,11 @@ async def handle_webhook_event(payload: bytes, sig_header: str, pool) -> None:
         payload, sig_header, settings.stripe_webhook_secret,
     )
 
-    etype = event["type"]
-    data = event["data"]["object"]
+    # stripe-python v15+: event objects are StripeObject, not dict.
+    # Use attribute access (not .get()) throughout.
+    etype = event.type
+    data = event.data.object
     logger.info("Stripe webhook received: type=%s", etype)
-    print(f"[STRIPE WEBHOOK] type={etype}", flush=True)
 
     if etype == "checkout.session.completed":
         await _on_checkout_completed(data, pool)
@@ -96,17 +97,14 @@ async def handle_webhook_event(payload: bytes, sig_header: str, pool) -> None:
         await _on_subscription_change(data, pool)
     else:
         logger.info("Ignoring Stripe event: %s", etype)
-        print(f"[STRIPE WEBHOOK] ignoring event type={etype}", flush=True)
 
 
-async def _on_checkout_completed(session: dict, pool) -> None:
-    customer_id = session.get("customer")
-    subscription_id = session.get("subscription")
+async def _on_checkout_completed(session, pool) -> None:
+    customer_id = session.customer
+    subscription_id = session.subscription
     logger.info("Checkout completed: customer_id=%s subscription_id=%s", customer_id, subscription_id)
-    print(f"[STRIPE CHECKOUT] customer_id={customer_id} subscription_id={subscription_id}", flush=True)
     if not customer_id or not subscription_id:
         logger.warning("Checkout missing customer_id or subscription_id, skipping")
-        print("[STRIPE CHECKOUT] missing customer_id or subscription_id, skipping", flush=True)
         return
 
     # Idempotency: skip if already processed
@@ -116,7 +114,6 @@ async def _on_checkout_completed(session: dict, pool) -> None:
     )
     if existing and existing["stripe_subscription_id"] == subscription_id:
         logger.info("Skipping duplicate checkout.session.completed for customer %s", customer_id)
-        print(f"[STRIPE CHECKOUT] duplicate, skipping customer={customer_id}", flush=True)
         return
 
     row = await pool.fetchrow(
@@ -133,10 +130,8 @@ async def _on_checkout_completed(session: dict, pool) -> None:
     )
     if row:
         logger.info("Activated pro subscription for customer %s (email=%s)", customer_id, row["email"])
-        print(f"[STRIPE CHECKOUT] activated pro for customer={customer_id} email={row['email']}", flush=True)
     else:
         logger.warning("Checkout UPDATE matched no user for customer %s", customer_id)
-        print(f"[STRIPE CHECKOUT] UPDATE matched NO user for customer={customer_id}", flush=True)
 
     # Send subscription confirmed email (non-blocking)
     if row:
@@ -147,12 +142,11 @@ async def _on_checkout_completed(session: dict, pool) -> None:
             logger.error("Failed to send subscription confirmed email: %s", exc)
 
 
-async def _on_subscription_change(subscription: dict, pool) -> None:
-    sub_id = subscription.get("id")
-    customer_id = subscription.get("customer")
-    status = subscription.get("status")  # active, past_due, canceled, unpaid
+async def _on_subscription_change(subscription, pool) -> None:
+    sub_id = subscription.id
+    customer_id = subscription.customer
+    status = subscription.status  # active, past_due, canceled, unpaid
     logger.info("Subscription change: sub_id=%s customer_id=%s status=%s", sub_id, customer_id, status)
-    print(f"[STRIPE SUB] sub_id={sub_id} customer_id={customer_id} status={status}", flush=True)
 
     status_map = {
         "active": ("pro", "active"),
@@ -176,7 +170,6 @@ async def _on_subscription_change(subscription: dict, pool) -> None:
         sub_id,
     )
     logger.info("Sub change UPDATE by subscription_id: %s", result)
-    print(f"[STRIPE SUB] UPDATE by sub_id result: {result}", flush=True)
 
     if result == "UPDATE 0" and customer_id:
         # Fallback: lookup by customer_id (handles subscription.created where sub_id not yet stored)
@@ -194,7 +187,6 @@ async def _on_subscription_change(subscription: dict, pool) -> None:
             customer_id,
         )
         logger.info("Sub change UPDATE by customer_id fallback: %s", result)
-        print(f"[STRIPE SUB] UPDATE by customer_id fallback result: {result}", flush=True)
 
     # Send subscription confirmed email on activation
     if tier == "pro" and sub_status == "active":
