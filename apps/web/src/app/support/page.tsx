@@ -2,8 +2,31 @@
 
 import { useState, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
+import ReactMarkdown from 'react-markdown'
+import type { Components } from 'react-markdown'
 import AuthGuard from '@/components/AuthGuard'
 import { apiRequest } from '@/lib/api'
+
+const mdComponents: Components = {
+  h1: ({ children }) => <h1 className="font-display text-base font-bold text-[#f0ece4] mt-3 mb-1 first:mt-0">{children}</h1>,
+  h2: ({ children }) => <h2 className="font-display text-sm font-bold text-[#f0ece4] mt-2.5 mb-1 first:mt-0">{children}</h2>,
+  h3: ({ children }) => <h3 className="font-display text-xs font-bold text-[#f0ece4] mt-2 mb-0.5 first:mt-0">{children}</h3>,
+  p: ({ children }) => <p className="mb-1.5 last:mb-0 leading-relaxed">{children}</p>,
+  strong: ({ children }) => <strong className="font-semibold text-[#2dd4bf]">{children}</strong>,
+  em: ({ children }) => <em className="italic text-[#f0ece4]/80">{children}</em>,
+  ul: ({ children }) => <ul className="list-disc list-outside pl-3.5 mb-1.5 space-y-0.5">{children}</ul>,
+  ol: ({ children }) => <ol className="list-decimal list-outside pl-3.5 mb-1.5 space-y-0.5">{children}</ol>,
+  li: ({ children }) => <li className="leading-relaxed text-[#f0ece4]/90">{children}</li>,
+  a: ({ href, children }) => <a href={href} target="_blank" rel="noopener noreferrer" className="text-[#2dd4bf] hover:underline">{children}</a>,
+  code: ({ children, className }) => {
+    if (className?.startsWith('language-')) {
+      return <code className="block bg-[#0a0e1a] border border-white/8 rounded-lg px-2 py-1.5 text-[10px] font-mono text-[#f0ece4]/80 overflow-x-auto my-1.5">{children}</code>
+    }
+    return <code className="bg-[#0a0e1a] border border-white/8 rounded px-1 py-0.5 text-[10px] font-mono text-[#2dd4bf]">{children}</code>
+  },
+  blockquote: ({ children }) => <blockquote className="border-l-2 border-[#2dd4bf]/40 pl-2 my-1.5 text-[#f0ece4]/70 italic">{children}</blockquote>,
+  hr: () => <hr className="border-white/10 my-2" />,
+}
 
 // ── FAQ Data ────────────────────────────────────────────────────────────────────
 
@@ -177,7 +200,11 @@ function SupportChat() {
                 ? 'bg-[#1a3254] text-[#f0ece4]'
                 : 'bg-[#0d1225] text-[#f0ece4]/80 border border-white/5'
               }`}>
-              {m.content}
+              {m.role === 'assistant' ? (
+                <ReactMarkdown components={mdComponents}>{m.content}</ReactMarkdown>
+              ) : (
+                m.content
+              )}
             </div>
           </div>
         ))}
