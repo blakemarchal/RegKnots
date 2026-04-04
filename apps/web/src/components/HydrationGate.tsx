@@ -6,7 +6,7 @@ import { useAuthStore } from '@/lib/auth'
 import { CompassRose } from './CompassRose'
 
 // Pages that don't require auth — never block them with a loading screen
-const GUEST_PAGES = ['/landing', '/login', '/register', '/forgot-password', '/reset-password']
+const GUEST_PAGES = ['/landing', '/login', '/register', '/forgot-password', '/reset-password', '/terms', '/privacy']
 
 export function HydrationGate({ children }: { children: React.ReactNode }) {
   const { hydrated, hydrateAuth } = useAuthStore()

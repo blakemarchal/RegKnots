@@ -452,9 +452,17 @@ export default function LandingPage() {
           <p className="font-mono text-xs text-[#6b7594]">
             Navigation aid only — not legal advice
           </p>
-          <p className="font-mono text-xs text-[#6b7594]">
-            © 2026 RegKnots
-          </p>
+          <div className="flex items-center gap-4">
+            <a href="/terms" className="font-mono text-xs text-[#6b7594] hover:text-[#f0ece4]/80 transition-colors">
+              Terms
+            </a>
+            <a href="/privacy" className="font-mono text-xs text-[#6b7594] hover:text-[#f0ece4]/80 transition-colors">
+              Privacy
+            </a>
+            <p className="font-mono text-xs text-[#6b7594]">
+              © 2026 RegKnots
+            </p>
+          </div>
         </div>
       </footer>
 

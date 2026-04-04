@@ -68,6 +68,7 @@ function AdminContent() {
   const [usersOffset, setUsersOffset] = useState(0)
   const [hasMore, setHasMore] = useState(true)
   const [loading, setLoading] = useState(true)
+  const [resetting, setResetting] = useState<string | null>(null)
 
   const fetchStats = useCallback(() => {
     apiRequest<AdminStats>('/admin/stats').then(setStats).catch(() => {})
@@ -101,6 +102,31 @@ function AdminContent() {
     const next = usersOffset + 50
     setUsersOffset(next)
     fetchUsers(next, true)
+  }
+
+  async function resetUser(userId: string, email: string) {
+    if (!confirm(`Reset pilot account for ${email}? This deletes all their conversations and restarts their trial.`)) return
+    setResetting(userId)
+    try {
+      await apiRequest(`/admin/reset-user/${userId}`, { method: 'POST' })
+      fetchUsers(0, false)
+      setUsersOffset(0)
+      fetchStats()
+    } catch { /* ignore */ }
+    setResetting(null)
+  }
+
+  async function resetAllPilots() {
+    if (!confirm('Reset ALL non-admin pilot accounts? This deletes all their conversations and restarts their trials.')) return
+    setResetting('all')
+    try {
+      const res = await apiRequest<{ reset_count: number }>('/admin/reset-all-pilots', { method: 'POST' })
+      alert(`Reset ${res.reset_count} pilot accounts.`)
+      fetchUsers(0, false)
+      setUsersOffset(0)
+      fetchStats()
+    } catch { /* ignore */ }
+    setResetting(null)
   }
 
   if (!hydrated || !isAdmin) return null
@@ -172,7 +198,17 @@ function AdminContent() {
           )}
 
           {/* ── Users table ──────────────────────────────────────────── */}
-          <h2 className="font-display text-lg font-bold text-[#f0ece4] tracking-wide mb-3">Users</h2>
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="font-display text-lg font-bold text-[#f0ece4] tracking-wide">Users</h2>
+            <button
+              onClick={resetAllPilots}
+              disabled={resetting === 'all'}
+              className="font-mono text-xs px-3 py-1.5 rounded-lg border border-red-500/40
+                text-red-400 hover:bg-red-500/10 disabled:opacity-50 transition-colors"
+            >
+              {resetting === 'all' ? 'Resetting...' : 'Reset All Pilots'}
+            </button>
+          </div>
 
           <div className="overflow-x-auto rounded-xl border border-white/8">
             <table className="w-full text-left font-mono text-xs">
@@ -186,6 +222,7 @@ function AdminContent() {
                   <th className="px-3 py-2.5 font-medium text-right">Msgs</th>
                   <th className="px-3 py-2.5 font-medium">Trial Ends</th>
                   <th className="px-3 py-2.5 font-medium">Joined</th>
+                  <th className="px-3 py-2.5 font-medium"></th>
                 </tr>
               </thead>
               <tbody>
@@ -207,6 +244,19 @@ function AdminContent() {
                     <td className="px-3 py-2 text-right text-[#f0ece4]/80">{u.message_count}</td>
                     <td className="px-3 py-2 text-[#6b7594] whitespace-nowrap">{fmtDate(u.trial_ends_at)}</td>
                     <td className="px-3 py-2 text-[#6b7594] whitespace-nowrap">{fmtDate(u.created_at)}</td>
+                    <td className="px-3 py-2">
+                      {!u.is_admin && (
+                        <button
+                          onClick={() => resetUser(u.id, u.email)}
+                          disabled={resetting === u.id}
+                          className="font-mono text-[10px] px-2 py-0.5 rounded border border-red-500/30
+                            text-red-400/70 hover:text-red-400 hover:bg-red-500/10
+                            disabled:opacity-50 transition-colors"
+                        >
+                          {resetting === u.id ? '...' : 'Reset'}
+                        </button>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>

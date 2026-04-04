@@ -117,7 +117,8 @@ function ChatInterfaceInner({ initialConversationId }: Props) {
     setLoading(true)
 
     try {
-      const response = await sendMessage(query, conversationId, activeVesselId)
+      const currentVesselId = useAuthStore.getState().activeVesselId
+      const response = await sendMessage(query, conversationId, currentVesselId)
       setConversationId(response.conversation_id)
       const assistantMsg: Message = {
         id: crypto.randomUUID(),
@@ -159,7 +160,7 @@ function ChatInterfaceInner({ initialConversationId }: Props) {
     } finally {
       setLoading(false)
     }
-  }, [input, loading, conversationId, activeVesselId])
+  }, [input, loading, conversationId])
 
   function handlePrompt(text: string) {
     setInput(text)
@@ -173,7 +174,7 @@ function ChatInterfaceInner({ initialConversationId }: Props) {
       }
       setMessages([userMsg])
       setLoading(true)
-      sendMessage(text, null, activeVesselId).then(response => {
+      sendMessage(text, null, useAuthStore.getState().activeVesselId).then(response => {
         setConversationId(response.conversation_id)
         setMessages(prev => [
           ...prev,

@@ -1,5 +1,6 @@
-"""Admin dashboard endpoints — stats, user list, model usage."""
+"""Admin dashboard endpoints — stats, user list, model usage, pilot reset."""
 
+import logging
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -8,6 +9,8 @@ from pydantic import BaseModel
 from app.auth.deps import get_current_user
 from app.auth.schemas import CurrentUser
 from app.db import get_pool
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -206,3 +209,88 @@ async def model_usage(
         )
         for r in rows
     ]
+
+
+# ── Pilot reset ────────────────────────────────────────────────────────────────
+
+class ResetResult(BaseModel):
+    reset_count: int
+
+
+@router.post("/reset-user/{user_id}", response_model=ResetResult)
+async def reset_user(
+    user_id: str,
+    admin: Annotated[CurrentUser, Depends(require_admin)],
+) -> ResetResult:
+    """Reset a single user's pilot state: zero message_count, restart trial, delete conversations."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            row = await conn.fetchrow("SELECT id, email FROM users WHERE id = $1", user_id)
+            if not row:
+                raise HTTPException(status_code=404, detail="User not found")
+
+            await conn.execute(
+                """
+                UPDATE users
+                SET message_count = 0,
+                    trial_ends_at = NOW() + INTERVAL '14 days',
+                    subscription_status = 'active'
+                WHERE id = $1
+                """,
+                user_id,
+            )
+
+            await conn.execute(
+                """
+                DELETE FROM messages WHERE conversation_id IN (
+                    SELECT id FROM conversations WHERE user_id = $1
+                )
+                """,
+                user_id,
+            )
+            await conn.execute("DELETE FROM conversations WHERE user_id = $1", user_id)
+
+    logger.info("Admin %s reset user %s (%s)", admin.email, user_id, row["email"])
+    return ResetResult(reset_count=1)
+
+
+@router.post("/reset-all-pilots", response_model=ResetResult)
+async def reset_all_pilots(
+    admin: Annotated[CurrentUser, Depends(require_admin)],
+) -> ResetResult:
+    """Reset ALL non-admin users: zero message_count, restart trial, delete conversations."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            rows = await conn.fetch("SELECT id FROM users WHERE is_admin = false")
+            user_ids = [r["id"] for r in rows]
+
+            if not user_ids:
+                return ResetResult(reset_count=0)
+
+            await conn.execute(
+                """
+                UPDATE users
+                SET message_count = 0,
+                    trial_ends_at = NOW() + INTERVAL '14 days',
+                    subscription_status = 'active'
+                WHERE is_admin = false
+                """
+            )
+
+            await conn.execute(
+                """
+                DELETE FROM messages WHERE conversation_id IN (
+                    SELECT id FROM conversations WHERE user_id = ANY($1::uuid[])
+                )
+                """,
+                user_ids,
+            )
+            await conn.execute(
+                "DELETE FROM conversations WHERE user_id = ANY($1::uuid[])",
+                user_ids,
+            )
+
+    logger.info("Admin %s reset %d pilot accounts", admin.email, len(user_ids))
+    return ResetResult(reset_count=len(user_ids))
