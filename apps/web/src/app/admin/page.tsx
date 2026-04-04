@@ -70,6 +70,8 @@ function AdminContent() {
   const [loading, setLoading] = useState(true)
   const [resetting, setResetting] = useState<string | null>(null)
   const [actionLoading, setActionLoading] = useState<string | null>(null)
+  const [emailSending, setEmailSending] = useState<string | null>(null)
+  const [emailToast, setEmailToast] = useState<{ msg: string; ok: boolean } | null>(null)
 
   const fetchStats = useCallback(() => {
     apiRequest<AdminStats>('/admin/stats').then(setStats).catch(() => {})
@@ -142,6 +144,22 @@ function AdminContent() {
     setActionLoading(null)
   }
 
+  async function sendTestEmail(type: string) {
+    setEmailSending(type)
+    setEmailToast(null)
+    try {
+      const res = await apiRequest<{ success: boolean; type: string; recipient: string }>(
+        '/admin/test-email',
+        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type }) },
+      )
+      setEmailToast({ msg: `Sent ${res.type} email to ${res.recipient}`, ok: true })
+    } catch {
+      setEmailToast({ msg: `Failed to send ${type} email`, ok: false })
+    }
+    setEmailSending(null)
+    setTimeout(() => setEmailToast(null), 4000)
+  }
+
   if (!hydrated || !isAdmin) return null
 
   return (
@@ -209,6 +227,41 @@ function AdminContent() {
               </div>
             </div>
           )}
+
+          {/* ── Email Testing ─────────────────────────────────────────── */}
+          <div className="mb-8">
+            <h2 className="font-display text-lg font-bold text-[#f0ece4] tracking-wide mb-3">Email Testing</h2>
+            <p className="font-mono text-xs text-[#6b7594] mb-3">Send test emails to your admin address.</p>
+            <div className="flex flex-wrap gap-2">
+              {([
+                ['welcome', 'Welcome Email'],
+                ['password_reset', 'Password Reset'],
+                ['trial_expiry', 'Trial Expiry'],
+                ['pilot_ended', 'Pilot Ended'],
+                ['waitlist_confirmed', 'Waitlist Confirmed'],
+              ] as const).map(([type, label]) => (
+                <button
+                  key={type}
+                  onClick={() => sendTestEmail(type)}
+                  disabled={emailSending === type}
+                  className="font-mono text-xs font-bold px-4 py-2 rounded-lg border border-[#2dd4bf]/30
+                    text-[#2dd4bf] hover:bg-[#2dd4bf]/10 disabled:opacity-50
+                    disabled:cursor-not-allowed transition-colors"
+                >
+                  {emailSending === type ? 'Sending...' : label}
+                </button>
+              ))}
+            </div>
+            {emailToast && (
+              <div className={`mt-3 font-mono text-xs px-3 py-2 rounded-lg border ${
+                emailToast.ok
+                  ? 'bg-[#2dd4bf]/10 border-[#2dd4bf]/30 text-[#2dd4bf]'
+                  : 'bg-red-500/10 border-red-500/30 text-red-400'
+              }`}>
+                {emailToast.msg}
+              </div>
+            )}
+          </div>
 
           {/* ── Users table ──────────────────────────────────────────── */}
           <div className="flex items-center justify-between mb-3">

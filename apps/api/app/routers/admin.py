@@ -1,7 +1,7 @@
-"""Admin dashboard endpoints — stats, user list, model usage, pilot reset."""
+"""Admin dashboard endpoints — stats, user list, model usage, pilot reset, email testing."""
 
 import logging
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
@@ -371,3 +371,50 @@ async def revoke_pro(
         raise HTTPException(status_code=404, detail="User not found")
     logger.info("Admin %s revoked pro from %s", admin.email, user_id)
     return AdminActionResult(ok=True)
+
+
+# ── Email testing ─────────────────────────────────────────────────────────────
+
+EmailType = Literal["welcome", "password_reset", "trial_expiry", "pilot_ended", "waitlist_confirmed"]
+
+
+class TestEmailRequest(BaseModel):
+    type: EmailType
+    recipient: str | None = None
+
+
+class TestEmailResult(BaseModel):
+    success: bool
+    type: str
+    recipient: str
+
+
+@router.post("/test-email", response_model=TestEmailResult)
+async def send_test_email(
+    body: TestEmailRequest,
+    admin: Annotated[CurrentUser, Depends(require_admin)],
+) -> TestEmailResult:
+    """Send a test email of any type to the admin's own address (or a specified recipient)."""
+    from app.email import (
+        send_welcome_email,
+        send_password_reset_email,
+        send_trial_expiring_email,
+        send_pilot_ended_email,
+        send_waitlist_confirmed_email,
+    )
+
+    recipient = body.recipient or admin.email
+
+    if body.type == "welcome":
+        await send_welcome_email(recipient, "Test Mariner")
+    elif body.type == "password_reset":
+        await send_password_reset_email(recipient, "test-reset-token-abc123")
+    elif body.type == "trial_expiry":
+        await send_trial_expiring_email(recipient, "Test Mariner", 37)
+    elif body.type == "pilot_ended":
+        await send_pilot_ended_email(recipient, "Test Mariner")
+    elif body.type == "waitlist_confirmed":
+        await send_waitlist_confirmed_email(recipient, "Test Mariner")
+
+    logger.info("Admin %s sent test email type=%s to=%s", admin.email, body.type, recipient)
+    return TestEmailResult(success=True, type=body.type, recipient=recipient)

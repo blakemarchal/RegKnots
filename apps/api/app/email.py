@@ -126,6 +126,60 @@ async def send_trial_expiring_email(to_email: str, full_name: str, messages_used
     })
 
 
+async def send_pilot_ended_email(to_email: str, full_name: str) -> None:
+    first_name = full_name.split()[0] if full_name.strip() else "Mariner"
+    html = _html(f"""
+      <h1>Your pilot trial has ended</h1>
+      <p>
+        Hey {first_name} — your 14-day RegKnots pilot has expired. You've reached the end of your
+        complimentary access period.
+      </p>
+      <p>
+        To continue getting instant cited answers to CFR, COLREGs, NVIC, and SOLAS questions —
+        subscribe to RegKnots Pro for <strong style="color:#f0ece4;">$49/month</strong>.
+      </p>
+      <p style="font-size:13px; color:#2dd4bf;">
+        As a founding pilot member, this price is locked in forever — even when we raise it.
+      </p>
+      <a href="{APP_URL}/pricing" class="cta">Subscribe to Pro</a>
+      <p style="font-size:12px; color:rgba(107,117,148,0.7); margin-top:8px;">
+        Questions? Reply to this email — we read every message.
+      </p>
+    """)
+    resend.Emails.send({
+        "from": CAPTAIN_EMAIL,
+        "to": [to_email],
+        "subject": f"Your RegKnots trial has ended, {first_name}",
+        "html": html,
+    })
+
+
+async def send_waitlist_confirmed_email(to_email: str, full_name: str) -> None:
+    first_name = full_name.split()[0] if full_name.strip() else "Mariner"
+    html = _html(f"""
+      <h1>You're on the list, {first_name}</h1>
+      <p>
+        Thanks for your interest in RegKnots. You've been added to our waitlist and we'll notify you
+        as soon as a spot opens up.
+      </p>
+      <p>
+        In the meantime, here's what you can look forward to: instant cited answers across
+        CFR Titles 33, 46 &amp; 49, COLREGs, NVICs, and SOLAS 2024 — all tailored to your
+        vessel profile.
+      </p>
+      <p style="font-size:13px; color:#2dd4bf;">
+        Waitlist members get priority access and founding member pricing when we open up.
+      </p>
+      <a href="{APP_URL}" class="cta">Learn More</a>
+    """)
+    resend.Emails.send({
+        "from": FROM_EMAIL,
+        "to": [to_email],
+        "subject": f"You're on the RegKnots waitlist, {first_name}",
+        "html": html,
+    })
+
+
 async def send_subscription_confirmed_email(to_email: str, full_name: str) -> None:
     first_name = full_name.split()[0] if full_name.strip() else "Mariner"
     html = _html(f"""
