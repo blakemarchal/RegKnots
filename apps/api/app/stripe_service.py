@@ -56,7 +56,12 @@ async def create_checkout_session(
 
 
 async def create_billing_portal_session(user_id: str, pool) -> str:
-    """Create a Stripe Billing Portal session and return the URL."""
+    """Create a Stripe Billing Portal session and return the URL.
+
+    TODO: Configure plan switching in the Stripe dashboard under
+    Settings → Billing → Customer portal. Enable subscription updates
+    with monthly ↔ annual price switching, cancellation, and invoice history.
+    """
     _configure()
     row = await pool.fetchrow(
         "SELECT stripe_customer_id FROM users WHERE id = $1",
@@ -107,14 +112,16 @@ async def _on_checkout_completed(session, pool) -> None:
         logger.warning("Checkout missing customer_id or subscription_id, skipping")
         return
 
-    # Idempotency: skip if already processed
-    existing = await pool.fetchrow(
-        "SELECT stripe_subscription_id FROM users WHERE stripe_customer_id = $1",
+    # Check previous state before updating
+    prev = await pool.fetchrow(
+        "SELECT subscription_tier, stripe_subscription_id FROM users WHERE stripe_customer_id = $1",
         customer_id,
     )
-    if existing and existing["stripe_subscription_id"] == subscription_id:
+    if prev and prev["stripe_subscription_id"] == subscription_id:
         logger.info("Skipping duplicate checkout.session.completed for customer %s", customer_id)
         return
+
+    was_already_pro = prev and prev["subscription_tier"] == "pro"
 
     row = await pool.fetchrow(
         """
@@ -133,8 +140,8 @@ async def _on_checkout_completed(session, pool) -> None:
     else:
         logger.warning("Checkout UPDATE matched no user for customer %s", customer_id)
 
-    # Send subscription confirmed email (non-blocking)
-    if row:
+    # Send subscription confirmed email only if they weren't already pro
+    if row and not was_already_pro:
         try:
             from app.email import send_subscription_confirmed_email
             await send_subscription_confirmed_email(row["email"], row["full_name"] or "")
@@ -146,15 +153,36 @@ async def _on_subscription_change(subscription, pool) -> None:
     sub_id = subscription.id
     customer_id = subscription.customer
     status = subscription.status  # active, past_due, canceled, unpaid
-    logger.info("Subscription change: sub_id=%s customer_id=%s status=%s", sub_id, customer_id, status)
+    cancel_at_period_end = getattr(subscription, "cancel_at_period_end", False)
+    logger.info(
+        "Subscription change: sub_id=%s customer_id=%s status=%s cancel_at_period_end=%s",
+        sub_id, customer_id, status, cancel_at_period_end,
+    )
 
-    status_map = {
-        "active": ("pro", "active"),
-        "past_due": ("pro", "past_due"),
-        "canceled": ("free", "canceled"),
-        "unpaid": ("free", "inactive"),
-    }
-    tier, sub_status = status_map.get(status, ("free", "inactive"))
+    # Detect cancellation pending (user cancelled but still has access until period end)
+    if status == "active" and cancel_at_period_end:
+        tier, sub_status = "pro", "canceling"
+    else:
+        status_map = {
+            "active": ("pro", "active"),
+            "past_due": ("pro", "past_due"),
+            "canceled": ("free", "canceled"),
+            "unpaid": ("free", "inactive"),
+        }
+        tier, sub_status = status_map.get(status, ("free", "inactive"))
+
+    # Check previous state before updating
+    prev = await pool.fetchrow(
+        "SELECT subscription_tier, subscription_status FROM users WHERE stripe_subscription_id = $1",
+        sub_id,
+    )
+    if not prev and customer_id:
+        prev = await pool.fetchrow(
+            "SELECT subscription_tier, subscription_status FROM users WHERE stripe_customer_id = $1",
+            customer_id,
+        )
+    was_already_pro = prev and prev["subscription_tier"] == "pro"
+    prev_status = prev["subscription_status"] if prev else None
 
     # Try lookup by subscription_id first
     result = await pool.execute(
@@ -188,15 +216,26 @@ async def _on_subscription_change(subscription, pool) -> None:
         )
         logger.info("Sub change UPDATE by customer_id fallback: %s", result)
 
-    # Send subscription confirmed email on activation
-    if tier == "pro" and sub_status == "active":
-        row = await pool.fetchrow(
-            "SELECT email, full_name FROM users WHERE stripe_subscription_id = $1",
-            sub_id,
-        )
-        if row:
-            try:
-                from app.email import send_subscription_confirmed_email
-                await send_subscription_confirmed_email(row["email"], row["full_name"] or "")
-            except Exception as exc:
-                logger.error("Failed to send subscription confirmed email: %s", exc)
+    # Fetch user for email notifications
+    row = await pool.fetchrow(
+        "SELECT email, full_name FROM users WHERE stripe_subscription_id = $1",
+        sub_id,
+    )
+
+    # Send cancellation email when transitioning to canceling
+    if sub_status == "canceling" and prev_status != "canceling" and row:
+        try:
+            from app.email import send_subscription_cancelled_email
+            await send_subscription_cancelled_email(row["email"], row["full_name"] or "")
+            logger.info("Sent cancellation email to %s", row["email"])
+        except Exception as exc:
+            logger.error("Failed to send cancellation email: %s", exc)
+
+    # Send Pro welcome email only on first activation (not already pro)
+    if tier == "pro" and sub_status == "active" and not was_already_pro and row:
+        try:
+            from app.email import send_subscription_confirmed_email
+            await send_subscription_confirmed_email(row["email"], row["full_name"] or "")
+            logger.info("Sent Pro welcome email to %s", row["email"])
+        except Exception as exc:
+            logger.error("Failed to send subscription confirmed email: %s", exc)

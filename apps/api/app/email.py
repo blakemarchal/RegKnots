@@ -180,6 +180,31 @@ async def send_waitlist_confirmed_email(to_email: str, full_name: str) -> None:
     })
 
 
+async def send_subscription_cancelled_email(to_email: str, full_name: str) -> None:
+    first_name = full_name.split()[0] if full_name.strip() else "Mariner"
+    html = _html(f"""
+      <h1>Your subscription has been cancelled</h1>
+      <p>
+        Hi {first_name} — your RegKnots Pro subscription has been cancelled.
+        You'll continue to have Pro access until the end of your current billing period.
+      </p>
+      <p>
+        If you change your mind, you can re-subscribe anytime:
+      </p>
+      <a href="{APP_URL}/pricing" class="cta">Re-subscribe</a>
+      <p style="font-size:12px; color:rgba(107,117,148,0.7); margin-top:8px;">
+        We'd love to hear what we could do better — reply to this email or use the
+        support chat in the app. Fair winds.
+      </p>
+    """)
+    resend.Emails.send({
+        "from": CAPTAIN_EMAIL,
+        "to": [to_email],
+        "subject": "Your RegKnots subscription has been cancelled",
+        "html": html,
+    })
+
+
 async def send_subscription_confirmed_email(to_email: str, full_name: str) -> None:
     first_name = full_name.split()[0] if full_name.strip() else "Mariner"
     html = _html(f"""

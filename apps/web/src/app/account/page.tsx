@@ -132,8 +132,10 @@ function AccountContent() {
     setPortalLoading(true)
     try {
       const data = await apiRequest<{ portal_url: string }>('/billing/portal', { method: 'POST' })
-      window.location.href = data.portal_url
+      window.open(data.portal_url, '_blank')
     } catch {
+      // ignore
+    } finally {
       setPortalLoading(false)
     }
   }
