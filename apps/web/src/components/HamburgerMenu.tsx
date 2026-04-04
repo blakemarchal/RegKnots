@@ -16,6 +16,7 @@ const BASE_MENU_ITEMS = [
   { icon: '\u2261', label: 'Chat History', action: 'history' },
   { icon: '\u2693', label: 'My Vessels', action: 'vessels' },
   { icon: '\u25A1', label: 'Certificates', action: 'certificates' },
+  { icon: '?', label: 'Help', action: 'help' },
   { icon: '\u25CE', label: 'Account', action: 'account' },
 ]
 
@@ -40,6 +41,7 @@ export function HamburgerMenu({ open, onClose, onNewChat, onOpenVessels }: Props
     if (action === 'history') router.push('/history')
     if (action === 'vessels') onOpenVessels()
     if (action === 'certificates') { onClose(); router.push('/certificates') }
+    if (action === 'help') { onClose(); router.push('/support') }
     if (action === 'admin') { onClose(); router.push('/admin') }
     if (action === 'account') { onClose(); router.push('/account') }
     if (action === 'signout') {

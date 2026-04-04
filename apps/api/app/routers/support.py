@@ -1,0 +1,144 @@
+"""Support endpoints: AI chat and email escalation."""
+
+import logging
+from typing import Annotated
+
+from anthropic import AsyncAnthropic
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from pydantic import BaseModel
+
+from app.auth.deps import get_current_user
+from app.auth.schemas import CurrentUser
+from app.db import get_redis
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/support", tags=["support"])
+
+_SUPPORT_SYSTEM_PROMPT = """\
+You are RegKnots Support, a helpful assistant for the RegKnots maritime compliance platform.
+
+You help users with:
+- Account issues (login, password reset, profile updates)
+- Billing questions (subscription, pricing, trial)
+- How to use RegKnots features (vessel profiles, citations, certificates, chat)
+- Technical issues (browser support, PWA installation, display problems)
+
+You do NOT answer maritime regulation questions — redirect those to the main RegKnots chat.
+
+If you cannot resolve an issue, suggest the user send an email to support@regknots.com.
+
+Be concise, friendly, and practical. The user is likely a working mariner, not a tech expert.\
+"""
+
+
+# ── AI Support Chat ──────────────────────────────────────────────────────────────
+
+class SupportMessage(BaseModel):
+    role: str
+    content: str
+
+
+class SupportChatRequest(BaseModel):
+    message: str
+    history: list[SupportMessage] = []
+
+
+class SupportChatResponse(BaseModel):
+    response: str
+
+
+@router.post("/chat", response_model=SupportChatResponse)
+async def support_chat(
+    body: SupportChatRequest,
+    request: Request,
+    user: Annotated[CurrentUser, Depends(get_current_user)],
+) -> SupportChatResponse:
+    # Rate limit: 5 messages/minute
+    try:
+        redis = await get_redis()
+        rate_key = f"ratelimit:support:{user.user_id}"
+        count = await redis.incr(rate_key)
+        if count == 1:
+            await redis.expire(rate_key, 60)
+        if count > 5:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Too many support messages — please wait a moment.",
+            )
+    except HTTPException:
+        raise
+    except Exception:
+        pass  # Redis down — allow request
+
+    client: AsyncAnthropic = request.app.state.anthropic
+
+    messages = [{"role": m.role, "content": m.content} for m in body.history]
+    messages.append({"role": "user", "content": body.message})
+
+    try:
+        resp = await client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=1024,
+            system=_SUPPORT_SYSTEM_PROMPT,
+            messages=messages,
+        )
+        text = resp.content[0].text if resp.content else "I'm sorry, I couldn't generate a response."
+    except Exception as exc:
+        logger.error("Support chat error: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Support chat is temporarily unavailable.",
+        )
+
+    return SupportChatResponse(response=text)
+
+
+# ── Email Escalation ─────────────────────────────────────────────────────────────
+
+class SupportEmailRequest(BaseModel):
+    subject: str
+    message: str
+
+
+class SupportEmailResponse(BaseModel):
+    sent: bool
+
+
+@router.post("/email", response_model=SupportEmailResponse)
+async def support_email(
+    body: SupportEmailRequest,
+    user: Annotated[CurrentUser, Depends(get_current_user)],
+) -> SupportEmailResponse:
+    if not body.subject.strip() or not body.message.strip():
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Subject and message are required.",
+        )
+
+    import resend
+    from app.email import FROM_EMAIL
+
+    try:
+        resend.Emails.send({
+            "from": FROM_EMAIL,
+            "to": ["support@regknots.com"],
+            "reply_to": user.email,
+            "subject": f"[Support] {body.subject.strip()}",
+            "html": (
+                f"<p><strong>From:</strong> {user.email}</p>"
+                f"<p><strong>Name:</strong> {user.email}</p>"
+                f"<p><strong>Role:</strong> {user.role}</p>"
+                f"<p><strong>Tier:</strong> {user.tier}</p>"
+                f"<hr>"
+                f"<p>{body.message.strip()}</p>"
+            ),
+        })
+    except Exception as exc:
+        logger.error("Support email error: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Failed to send email. Please try again or email support@regknots.com directly.",
+        )
+
+    return SupportEmailResponse(sent=True)
