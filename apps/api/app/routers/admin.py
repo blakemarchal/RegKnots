@@ -405,16 +405,20 @@ async def send_test_email(
 
     recipient = body.recipient or admin.email
 
-    if body.type == "welcome":
-        await send_welcome_email(recipient, "Test Mariner")
-    elif body.type == "password_reset":
-        await send_password_reset_email(recipient, "test-reset-token-abc123")
-    elif body.type == "trial_expiry":
-        await send_trial_expiring_email(recipient, "Test Mariner", 37)
-    elif body.type == "pilot_ended":
-        await send_pilot_ended_email(recipient, "Test Mariner")
-    elif body.type == "waitlist_confirmed":
-        await send_waitlist_confirmed_email(recipient, "Test Mariner")
+    try:
+        if body.type == "welcome":
+            await send_welcome_email(recipient, "Test Mariner")
+        elif body.type == "password_reset":
+            await send_password_reset_email(recipient, "test-reset-token-abc123")
+        elif body.type == "trial_expiry":
+            await send_trial_expiring_email(recipient, "Test Mariner", 37)
+        elif body.type == "pilot_ended":
+            await send_pilot_ended_email(recipient, "Test Mariner")
+        elif body.type == "waitlist_confirmed":
+            await send_waitlist_confirmed_email(recipient, "Test Mariner")
+    except Exception as exc:
+        logger.error("Test email failed type=%s: %s", body.type, exc)
+        raise HTTPException(status_code=502, detail=str(exc))
 
     logger.info("Admin %s sent test email type=%s to=%s", admin.email, body.type, recipient)
     return TestEmailResult(success=True, type=body.type, recipient=recipient)

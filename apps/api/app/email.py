@@ -4,7 +4,7 @@ from app.config import settings
 resend.api_key = settings.resend_api_key
 
 FROM_EMAIL = "RegKnots <hello@mail.regknots.com>"
-CAPTAIN_EMAIL = "RegKnots <captain@regknots.com>"
+CAPTAIN_EMAIL = "RegKnots <captain@mail.regknots.com>"
 APP_URL = "https://regknots.com"
 
 _BASE_STYLES = """
