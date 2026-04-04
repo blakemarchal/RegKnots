@@ -137,7 +137,7 @@ async def refresh(
 
     row = await pool.fetchrow(
         """
-        SELECT rt.id, rt.user_id, rt.expires_at, rt.revoked,
+        SELECT rt.id, rt.user_id, rt.expires_at, rt.revoked, rt.revoked_at,
                u.email, u.full_name, u.role, u.subscription_tier, u.is_admin
         FROM   refresh_tokens rt
         JOIN   users u ON u.id = rt.user_id
@@ -150,9 +150,17 @@ async def refresh(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
 
     if row["revoked"]:
-        # Token reuse detected — revoke the entire user's session family
+        # Check for race condition: if token was revoked very recently,
+        # this is likely a concurrent request, not a replay attack
+        revoked_at = row.get("revoked_at")
+        if revoked_at and (datetime.now(timezone.utc) - revoked_at).total_seconds() < 10:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token already rotated",
+            )
+        # Genuine replay attack — revoke the entire user's session family
         await pool.execute(
-            "UPDATE refresh_tokens SET revoked = TRUE WHERE user_id = $1 AND NOT revoked",
+            "UPDATE refresh_tokens SET revoked = TRUE, revoked_at = NOW() WHERE user_id = $1 AND NOT revoked",
             row["user_id"],
         )
         _clear_refresh_cookie(response)
@@ -166,7 +174,7 @@ async def refresh(
 
     # Rotate: invalidate old token, issue new pair
     await pool.execute(
-        "UPDATE refresh_tokens SET revoked = TRUE WHERE id = $1",
+        "UPDATE refresh_tokens SET revoked = TRUE, revoked_at = NOW() WHERE id = $1",
         row["id"],
     )
 

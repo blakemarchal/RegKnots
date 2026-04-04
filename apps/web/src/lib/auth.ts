@@ -65,6 +65,9 @@ interface AuthState {
   setBilling: (billing: BillingStatus) => void
 }
 
+// Mutex: only one refresh call in flight at a time
+let refreshPromise: Promise<boolean> | null = null
+
 export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
   accessToken: null,
@@ -165,36 +168,38 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   refreshAuth: async () => {
-    try {
-      const res = await fetch(`${API_URL}/auth/refresh`, {
-        method: 'POST',
-        credentials: 'include',
-      })
+    // If a refresh is already in flight, wait for it instead of firing another
+    if (refreshPromise) {
+      return refreshPromise
+    }
 
-      if (!res.ok) {
-        // Clear potentially stale SW caches that may be causing auth loops
-        if ('serviceWorker' in navigator) {
-          const registrations = await navigator.serviceWorker.getRegistrations()
-          for (const reg of registrations) {
-            await reg.unregister()
-          }
-          const cacheNames = await caches.keys()
-          await Promise.all(cacheNames.map(name => caches.delete(name)))
+    refreshPromise = (async () => {
+      try {
+        const res = await fetch(`${API_URL}/auth/refresh`, {
+          method: 'POST',
+          credentials: 'include',
+        })
+
+        if (!res.ok) {
+          set({ accessToken: null, user: null, isAuthenticated: false })
+          return false
         }
+
+        const data = await res.json()
+        set({
+          accessToken: data.access_token,
+          user: decodeJwtUser(data.access_token),
+          isAuthenticated: true,
+        })
+        return true
+      } catch {
         set({ accessToken: null, user: null, isAuthenticated: false })
         return false
+      } finally {
+        refreshPromise = null
       }
+    })()
 
-      const data = await res.json()
-      set({
-        accessToken: data.access_token,
-        user: decodeJwtUser(data.access_token),
-        isAuthenticated: true,
-      })
-      return true
-    } catch {
-      set({ accessToken: null, user: null, isAuthenticated: false })
-      return false
-    }
+    return refreshPromise
   },
 }))
