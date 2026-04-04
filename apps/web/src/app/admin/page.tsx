@@ -89,6 +89,7 @@ function AdminContent() {
   const [emailToast, setEmailToast] = useState<{ msg: string; ok: boolean } | null>(null)
   const [sentryIssues, setSentryIssues] = useState<SentryIssue[]>([])
   const [sentryLoading, setSentryLoading] = useState(true)
+  const [exporting, setExporting] = useState<string | null>(null)
 
   const fetchStats = useCallback(() => {
     apiRequest<AdminStats>('/admin/stats').then(setStats).catch(() => {})
@@ -183,6 +184,21 @@ function AdminContent() {
     }
     setEmailSending(null)
     setTimeout(() => setEmailToast(null), 4000)
+  }
+
+  async function exportChats(userId: string, email: string) {
+    setExporting(userId)
+    try {
+      const data = await apiRequest<Record<string, unknown>>(`/admin/export-chats/${userId}`)
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `regknots_export_${email}_${new Date().toISOString().slice(0, 10)}.json`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch { /* ignore */ }
+    setExporting(null)
   }
 
   if (!hydrated || !isAdmin) return null
@@ -378,7 +394,7 @@ function AdminContent() {
                   <th className="px-3 py-2.5 font-medium text-right w-[6%]">Msgs</th>
                   <th className="px-3 py-2.5 font-medium w-[10%]">Trial Ends</th>
                   <th className="px-3 py-2.5 font-medium w-[10%]">Joined</th>
-                  {!isReadOnly && <th className="px-3 py-2.5 font-medium w-[16%]"></th>}
+                  <th className="px-3 py-2.5 font-medium w-[16%]"></th>
                 </tr>
               </thead>
               <tbody>
@@ -400,53 +416,62 @@ function AdminContent() {
                     <td className="px-3 py-2 text-right text-[#f0ece4]/80">{u.message_count}</td>
                     <td className="px-3 py-2 text-[#6b7594]">{fmtDate(u.trial_ends_at)}</td>
                     <td className="px-3 py-2 text-[#6b7594]">{fmtDate(u.created_at)}</td>
-                    {!isReadOnly && (
                     <td className="px-3 py-2">
-                      {!u.is_admin && (
-                        <div className="flex items-center gap-1.5">
-                          <button
-                            onClick={() => adminAction(u.id, 'extend-trial', 'Extend trial 14 days')}
-                            disabled={actionLoading === `${u.id}-extend-trial`}
-                            className="font-mono text-[10px] px-1.5 py-0.5 rounded border border-[#2dd4bf]/30
-                              text-[#2dd4bf]/70 hover:text-[#2dd4bf] hover:bg-[#2dd4bf]/10
-                              disabled:opacity-50 transition-colors whitespace-nowrap"
-                          >
-                            +Trial
-                          </button>
-                          {u.subscription_tier !== 'pro' ? (
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          onClick={() => exportChats(u.id, u.email)}
+                          disabled={exporting === u.id}
+                          className="font-mono text-[10px] px-1.5 py-0.5 rounded border border-[#2dd4bf]/30
+                            text-[#2dd4bf]/70 hover:text-[#2dd4bf] hover:bg-[#2dd4bf]/10
+                            disabled:opacity-50 transition-colors whitespace-nowrap"
+                        >
+                          {exporting === u.id ? '...' : 'Export'}
+                        </button>
+                        {!isReadOnly && !u.is_admin && (
+                          <>
                             <button
-                              onClick={() => adminAction(u.id, 'grant-pro', 'Grant Pro')}
-                              disabled={actionLoading === `${u.id}-grant-pro`}
+                              onClick={() => adminAction(u.id, 'extend-trial', 'Extend trial 14 days')}
+                              disabled={actionLoading === `${u.id}-extend-trial`}
                               className="font-mono text-[10px] px-1.5 py-0.5 rounded border border-[#2dd4bf]/30
                                 text-[#2dd4bf]/70 hover:text-[#2dd4bf] hover:bg-[#2dd4bf]/10
                                 disabled:opacity-50 transition-colors whitespace-nowrap"
                             >
-                              +Pro
+                              +Trial
                             </button>
-                          ) : (
+                            {u.subscription_tier !== 'pro' ? (
+                              <button
+                                onClick={() => adminAction(u.id, 'grant-pro', 'Grant Pro')}
+                                disabled={actionLoading === `${u.id}-grant-pro`}
+                                className="font-mono text-[10px] px-1.5 py-0.5 rounded border border-[#2dd4bf]/30
+                                  text-[#2dd4bf]/70 hover:text-[#2dd4bf] hover:bg-[#2dd4bf]/10
+                                  disabled:opacity-50 transition-colors whitespace-nowrap"
+                              >
+                                +Pro
+                              </button>
+                            ) : (
+                              <button
+                                onClick={() => adminAction(u.id, 'revoke-pro', 'Revoke Pro')}
+                                disabled={actionLoading === `${u.id}-revoke-pro`}
+                                className="font-mono text-[10px] px-1.5 py-0.5 rounded border border-amber-500/30
+                                  text-amber-400/70 hover:text-amber-400 hover:bg-amber-500/10
+                                  disabled:opacity-50 transition-colors whitespace-nowrap"
+                              >
+                                -Pro
+                              </button>
+                            )}
                             <button
-                              onClick={() => adminAction(u.id, 'revoke-pro', 'Revoke Pro')}
-                              disabled={actionLoading === `${u.id}-revoke-pro`}
-                              className="font-mono text-[10px] px-1.5 py-0.5 rounded border border-amber-500/30
-                                text-amber-400/70 hover:text-amber-400 hover:bg-amber-500/10
-                                disabled:opacity-50 transition-colors whitespace-nowrap"
+                              onClick={() => resetUser(u.id, u.email)}
+                              disabled={resetting === u.id}
+                              className="font-mono text-[10px] px-1.5 py-0.5 rounded border border-red-500/30
+                                text-red-400/70 hover:text-red-400 hover:bg-red-500/10
+                                disabled:opacity-50 transition-colors"
                             >
-                              -Pro
+                              {resetting === u.id ? '...' : 'Reset'}
                             </button>
-                          )}
-                          <button
-                            onClick={() => resetUser(u.id, u.email)}
-                            disabled={resetting === u.id}
-                            className="font-mono text-[10px] px-1.5 py-0.5 rounded border border-red-500/30
-                              text-red-400/70 hover:text-red-400 hover:bg-red-500/10
-                              disabled:opacity-50 transition-colors"
-                          >
-                            {resetting === u.id ? '...' : 'Reset'}
-                          </button>
-                        </div>
-                      )}
+                          </>
+                        )}
+                      </div>
                     </td>
-                    )}
                   </tr>
                 ))}
               </tbody>

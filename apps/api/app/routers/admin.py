@@ -1,10 +1,13 @@
-"""Admin dashboard endpoints — stats, user list, model usage, pilot reset, email testing, Sentry."""
+"""Admin dashboard endpoints — stats, user list, model usage, pilot reset, email testing, Sentry, export."""
 
 import logging
-from typing import Annotated, Literal
+import uuid
+from datetime import datetime, timezone
+from typing import Annotated, Any, Literal
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from app.auth.deps import get_current_user
@@ -489,3 +492,83 @@ async def sentry_issues(
 
     all_issues.sort(key=lambda i: i.last_seen, reverse=True)
     return all_issues[:10]
+
+
+# ── Chat export ──────────────────────────────────────────────────────────────
+
+
+@router.get("/export-chats/{user_id}")
+async def export_chats(
+    user_id: str,
+    _admin: Annotated[CurrentUser, Depends(require_admin)],
+) -> JSONResponse:
+    """Export all conversations and messages for a user as JSON."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        user_row = await conn.fetchrow(
+            "SELECT email, full_name, role FROM users WHERE id = $1", user_id,
+        )
+        if not user_row:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        conv_rows = await conn.fetch(
+            """
+            SELECT c.id, c.title, c.created_at, v.name AS vessel_name
+            FROM conversations c
+            LEFT JOIN vessels v ON v.id = c.vessel_id
+            WHERE c.user_id = $1
+            ORDER BY c.created_at DESC
+            """,
+            user_id,
+        )
+
+        conversations: list[dict[str, Any]] = []
+        for conv in conv_rows:
+            msg_rows = await conn.fetch(
+                """
+                SELECT role, content, model_used, tokens_used,
+                       cited_regulation_ids, created_at
+                FROM messages
+                WHERE conversation_id = $1
+                ORDER BY created_at ASC
+                """,
+                conv["id"],
+            )
+
+            messages: list[dict[str, Any]] = []
+            for msg in msg_rows:
+                cited: list[str] = []
+                reg_ids = list(msg["cited_regulation_ids"] or [])
+                if reg_ids:
+                    reg_rows = await conn.fetch(
+                        "SELECT section_number FROM regulations WHERE id = ANY($1::uuid[])",
+                        reg_ids,
+                    )
+                    cited = [r["section_number"] for r in reg_rows]
+
+                messages.append({
+                    "role": msg["role"],
+                    "content": msg["content"],
+                    "created_at": msg["created_at"].isoformat() if msg["created_at"] else None,
+                    "model_used": msg["model_used"],
+                    "tokens_used": msg["tokens_used"],
+                    "cited_regulations": cited,
+                })
+
+            conversations.append({
+                "id": str(conv["id"]),
+                "title": conv["title"],
+                "vessel_name": conv["vessel_name"],
+                "created_at": conv["created_at"].isoformat() if conv["created_at"] else None,
+                "messages": messages,
+            })
+
+    return JSONResponse({
+        "user": {
+            "email": user_row["email"],
+            "full_name": user_row["full_name"],
+            "role": user_row["role"],
+        },
+        "exported_at": datetime.now(timezone.utc).isoformat(),
+        "conversations": conversations,
+    })

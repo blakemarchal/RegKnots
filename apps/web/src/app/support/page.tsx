@@ -67,7 +67,7 @@ const FAQ_ITEMS: FaqItem[] = [
   {
     category: 'Account & Billing',
     q: 'How much does RegKnots Pro cost?',
-    a: 'RegKnots Pro is $49/month with unlimited questions. Pilot members who subscribe lock in this price permanently \u2014 even when we raise prices later.',
+    a: 'RegKnots Pro is $39/month with unlimited questions. Founding members who subscribe lock in this price permanently \u2014 even when we raise prices later.',
   },
   {
     category: 'Account & Billing',

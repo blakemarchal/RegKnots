@@ -111,7 +111,7 @@ async def send_trial_expiring_email(to_email: str, full_name: str, messages_used
       </p>
       <p>
         To keep your access to unlimited CFR queries, vessel-specific answers, and all regulation
-        sources, subscribe to RegKnots Pro for <strong style="color:#f0ece4;">$49/month</strong>.
+        sources, subscribe to RegKnots Pro for <strong style="color:#f0ece4;">$39/month</strong>.
       </p>
       <p style="font-size:13px; color:#2dd4bf;">
         As a pilot member, this price is locked in forever — even when we raise it.
@@ -136,7 +136,7 @@ async def send_pilot_ended_email(to_email: str, full_name: str) -> None:
       </p>
       <p>
         To continue getting instant cited answers to CFR, COLREGs, NVIC, and SOLAS questions —
-        subscribe to RegKnots Pro for <strong style="color:#f0ece4;">$49/month</strong>.
+        subscribe to RegKnots Pro for <strong style="color:#f0ece4;">$39/month</strong>.
       </p>
       <p style="font-size:13px; color:#2dd4bf;">
         As a founding pilot member, this price is locked in forever — even when we raise it.
@@ -197,7 +197,7 @@ async def send_subscription_confirmed_email(to_email: str, full_name: str) -> No
         <li style="color:#6b7594; font-size:14px; line-height:1.7;">Audit-ready chat logs</li>
       </ul>
       <p style="font-size:13px; color:#2dd4bf;">
-        Your $49/month pilot price is locked in forever — even when we raise it.
+        Your $39/month founding member price is locked in forever — even when we raise it.
       </p>
       <a href="{APP_URL}" class="cta">Start Asking Questions</a>
     """)

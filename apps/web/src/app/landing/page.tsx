@@ -423,7 +423,7 @@ export default function LandingPage() {
                   Annual
                   <span className="ml-1.5 text-[10px] font-bold uppercase tracking-wider
                     bg-[#2dd4bf]/15 text-[#2dd4bf] px-1.5 py-0.5 rounded">
-                    Save 20%
+                    Save 26%
                   </span>
                 </button>
               </div>
@@ -440,13 +440,13 @@ export default function LandingPage() {
                 'No credit card required to start',
                 'Full Pro access during trial',
               ]}
-              smallPrint={`One trial per account. Founding members lock in ${plan === 'monthly' ? '$49/month' : '$39/month ($468/year)'} forever.`}
+              smallPrint={`One trial per account. Founding members lock in ${plan === 'monthly' ? '$39/month' : '$29/month ($348/year)'} forever.`}
               cta="Join the Founding Pilot"
             />
             <PricingCard
               name="Pro"
-              price={plan === 'monthly' ? '$49' : '$39'}
-              priceSub={plan === 'monthly' ? 'per month' : 'per month, billed $468/year'}
+              price={plan === 'monthly' ? '$39' : '$29'}
+              priceSub={plan === 'monthly' ? 'per month' : 'per month, billed $348/year'}
               badge="FOUNDING MEMBER RATE"
               subNote="Founding members lock in this price forever."
               features={[

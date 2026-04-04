@@ -95,7 +95,7 @@ export default function PricingPage() {
             Annual
             <span className="ml-1.5 text-[10px] font-bold uppercase tracking-wider
               bg-[#2dd4bf]/15 text-[#2dd4bf] px-1.5 py-0.5 rounded">
-              Save 20%
+              Save 26%
             </span>
           </button>
         </div>
@@ -105,13 +105,13 @@ export default function PricingPage() {
             bg-[#111827] shadow-[0_0_40px_rgba(45,212,191,0.08)]">
             <p className="font-display text-2xl font-bold text-[#f0ece4] tracking-wide">Pro</p>
             <p className="font-mono text-4xl font-bold text-[#f0ece4] mt-2">
-              {plan === 'monthly' ? '$49' : '$39'}
+              {plan === 'monthly' ? '$39' : '$29'}
             </p>
             <p className="font-mono text-xs text-[#6b7594]">
-              {plan === 'monthly' ? 'per month' : 'per month, billed $468/year'}
+              {plan === 'monthly' ? 'per month' : 'per month, billed $348/year'}
             </p>
             <p className="font-mono text-xs text-[#2dd4bf]/80 mt-1.5 leading-snug">
-              Pilot members lock in this price forever — even when we raise it.
+              Founding members lock in this price forever — even when we raise it.
             </p>
 
             <ul className="flex flex-col gap-2 mt-6 mb-6">
