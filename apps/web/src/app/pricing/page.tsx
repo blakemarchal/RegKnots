@@ -10,6 +10,7 @@ import type { BillingStatus } from '@/lib/auth'
 export default function PricingPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [plan, setPlan] = useState<'monthly' | 'annual'>('monthly')
   const { billing, setBilling } = useAuthStore()
 
   useEffect(() => {
@@ -26,6 +27,8 @@ export default function PricingPage() {
     try {
       const data = await apiRequest<{ checkout_url: string }>('/billing/checkout', {
         method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ plan }),
       })
       window.location.href = data.checkout_url
     } catch (err) {
@@ -61,7 +64,7 @@ export default function PricingPage() {
         </h1>
 
         {billing?.needs_subscription && (
-          <p className="font-mono text-sm text-amber-400 mb-8 text-center max-w-md">
+          <p className="font-mono text-sm text-amber-400 mb-6 text-center max-w-md">
             {billing.trial_active
               ? `You've used ${billing.message_count} of 50 free messages.`
               : 'Your pilot trial has ended.'}
@@ -69,12 +72,44 @@ export default function PricingPage() {
           </p>
         )}
 
+        {/* Monthly / Annual toggle */}
+        <div className="flex items-center gap-1 bg-[#111827] rounded-full p-1 border border-white/8 mb-8">
+          <button
+            onClick={() => setPlan('monthly')}
+            className={`font-mono text-sm font-bold px-5 py-2 rounded-full transition-colors duration-150
+              ${plan === 'monthly'
+                ? 'bg-[#2dd4bf] text-[#0a0e1a]'
+                : 'text-[#6b7594] hover:text-[#f0ece4]'
+              }`}
+          >
+            Monthly
+          </button>
+          <button
+            onClick={() => setPlan('annual')}
+            className={`font-mono text-sm font-bold px-5 py-2 rounded-full transition-colors duration-150
+              ${plan === 'annual'
+                ? 'bg-[#2dd4bf] text-[#0a0e1a]'
+                : 'text-[#6b7594] hover:text-[#f0ece4]'
+              }`}
+          >
+            Annual
+            <span className="ml-1.5 text-[10px] font-bold uppercase tracking-wider
+              bg-[#2dd4bf]/15 text-[#2dd4bf] px-1.5 py-0.5 rounded">
+              Save 20%
+            </span>
+          </button>
+        </div>
+
         <div className="w-full max-w-sm">
           <div className="rounded-2xl p-6 border border-[#2dd4bf]/50
             bg-[#111827] shadow-[0_0_40px_rgba(45,212,191,0.08)]">
             <p className="font-display text-2xl font-bold text-[#f0ece4] tracking-wide">Pro</p>
-            <p className="font-mono text-4xl font-bold text-[#f0ece4] mt-2">$49</p>
-            <p className="font-mono text-xs text-[#6b7594]">per month</p>
+            <p className="font-mono text-4xl font-bold text-[#f0ece4] mt-2">
+              {plan === 'monthly' ? '$49' : '$39'}
+            </p>
+            <p className="font-mono text-xs text-[#6b7594]">
+              {plan === 'monthly' ? 'per month' : 'per month, billed $468/year'}
+            </p>
             <p className="font-mono text-xs text-[#2dd4bf]/80 mt-1.5 leading-snug">
               Pilot members lock in this price forever — even when we raise it.
             </p>

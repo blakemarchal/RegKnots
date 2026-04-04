@@ -15,6 +15,10 @@ from app.stripe_service import create_billing_portal_session, create_checkout_se
 router = APIRouter(prefix="/billing", tags=["billing"])
 
 
+class CheckoutRequest(BaseModel):
+    plan: str = "monthly"
+
+
 class CheckoutResponse(BaseModel):
     checkout_url: str
 
@@ -22,6 +26,7 @@ class CheckoutResponse(BaseModel):
 @router.post("/checkout", response_model=CheckoutResponse)
 async def create_checkout(
     user: Annotated[CurrentUser, Depends(get_current_user)],
+    body: CheckoutRequest | None = None,
 ) -> CheckoutResponse:
     from app.config import settings as _settings
     if not _settings.stripe_secret_key:
@@ -29,9 +34,10 @@ async def create_checkout(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Payment system not configured",
         )
+    plan = body.plan if body else "monthly"
     pool = await get_pool()
     try:
-        url = await create_checkout_session(user.user_id, user.email, pool)
+        url = await create_checkout_session(user.user_id, user.email, pool, plan=plan)
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,

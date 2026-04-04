@@ -14,7 +14,7 @@ def _configure() -> None:
 
 
 async def create_checkout_session(
-    user_id: str, email: str, pool,
+    user_id: str, email: str, pool, *, plan: str = "monthly",
 ) -> str:
     """Create a Stripe Checkout Session and return the URL.
 
@@ -40,10 +40,14 @@ async def create_checkout_session(
             __import__("uuid").UUID(user_id),
         )
 
+    price_id = settings.stripe_price_id
+    if plan == "annual" and settings.stripe_annual_price_id:
+        price_id = settings.stripe_annual_price_id
+
     session = stripe.checkout.Session.create(
         customer=customer_id,
         mode="subscription",
-        line_items=[{"price": settings.stripe_price_id, "quantity": 1}],
+        line_items=[{"price": price_id, "quantity": 1}],
         success_url=f"{settings.app_url}/subscribe/success?session_id={{CHECKOUT_SESSION_ID}}",
         cancel_url=f"{settings.app_url}/pricing",
         metadata={"user_id": user_id},

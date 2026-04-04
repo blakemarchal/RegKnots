@@ -1,5 +1,6 @@
 'use client'
 
+import { useState } from 'react'
 import Link from 'next/link'
 import { CompassRose } from '@/components/CompassRose'
 
@@ -95,6 +96,8 @@ function PricingCard({
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 export default function LandingPage() {
+  const [plan, setPlan] = useState<'monthly' | 'annual'>('monthly')
+
   return (
     <div className="min-h-screen bg-[#0a0e1a] overflow-x-hidden">
 
@@ -395,6 +398,36 @@ export default function LandingPage() {
             <p className="font-mono text-[#6b7594] mt-3 text-sm md:text-base">
               Built for working mariners, not corporate procurement.
             </p>
+
+            {/* Monthly / Annual toggle */}
+            <div className="flex items-center justify-center mt-6">
+              <div className="flex items-center gap-1 bg-[#111827] rounded-full p-1 border border-white/8">
+                <button
+                  onClick={() => setPlan('monthly')}
+                  className={`font-mono text-sm font-bold px-5 py-2 rounded-full transition-colors duration-150
+                    ${plan === 'monthly'
+                      ? 'bg-[#2dd4bf] text-[#0a0e1a]'
+                      : 'text-[#6b7594] hover:text-[#f0ece4]'
+                    }`}
+                >
+                  Monthly
+                </button>
+                <button
+                  onClick={() => setPlan('annual')}
+                  className={`font-mono text-sm font-bold px-5 py-2 rounded-full transition-colors duration-150
+                    ${plan === 'annual'
+                      ? 'bg-[#2dd4bf] text-[#0a0e1a]'
+                      : 'text-[#6b7594] hover:text-[#f0ece4]'
+                    }`}
+                >
+                  Annual
+                  <span className="ml-1.5 text-[10px] font-bold uppercase tracking-wider
+                    bg-[#2dd4bf]/15 text-[#2dd4bf] px-1.5 py-0.5 rounded">
+                    Save 20%
+                  </span>
+                </button>
+              </div>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
@@ -407,15 +440,15 @@ export default function LandingPage() {
                 'No credit card required to start',
                 'Full Pro access during trial',
               ]}
-              smallPrint="One trial per account. Founding members lock in $49/month forever."
+              smallPrint={`One trial per account. Founding members lock in ${plan === 'monthly' ? '$49/month' : '$39/month ($468/year)'} forever.`}
               cta="Join the Founding Pilot"
             />
             <PricingCard
               name="Pro"
-              price="$49"
-              priceSub="per month"
+              price={plan === 'monthly' ? '$49' : '$39'}
+              priceSub={plan === 'monthly' ? 'per month' : 'per month, billed $468/year'}
               badge="FOUNDING MEMBER RATE"
-              subNote="Founding members lock in $49/month forever."
+              subNote="Founding members lock in this price forever."
               features={[
                 'Unlimited questions',
                 'CFR Titles 33, 46 & 49 + COLREGs, NVICs & SOLAS 2024',

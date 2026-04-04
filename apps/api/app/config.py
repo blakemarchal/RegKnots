@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     stripe_secret_key: str = Field(default="", validation_alias="STRIPE_SECRET_KEY")
     stripe_webhook_secret: str = Field(default="", validation_alias="STRIPE_WEBHOOK_SECRET")
     stripe_price_id: str = Field(default="", validation_alias="STRIPE_PRICE_ID")
+    stripe_annual_price_id: str = Field(default="", validation_alias="STRIPE_ANNUAL_PRICE_ID")
     app_url: str = "https://regknots.com"
 
     # Monitoring
