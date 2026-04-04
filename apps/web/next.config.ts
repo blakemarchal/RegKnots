@@ -12,9 +12,24 @@ const pwaConfig = withPWA({
   aggressiveFrontEndNavCaching: false,
   cacheStartUrl: false,
   dynamicStartUrl: false,
+  extendDefaultRuntimeCaching: true,
   workboxOptions: {
-    cacheId: "regknots-v2",
+    cacheId: "regknots-v3",
     disableDevLogs: true,
+    runtimeCaching: [
+      {
+        urlPattern: /\/api\/auth\/.*/,
+        handler: "NetworkOnly",
+      },
+      {
+        urlPattern: /\/api\/billing\/.*/,
+        handler: "NetworkOnly",
+      },
+      {
+        urlPattern: /\/api\/admin\/.*/,
+        handler: "NetworkOnly",
+      },
+    ],
   },
 })(nextConfig);
 

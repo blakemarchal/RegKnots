@@ -172,6 +172,15 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       })
 
       if (!res.ok) {
+        // Clear potentially stale SW caches that may be causing auth loops
+        if ('serviceWorker' in navigator) {
+          const registrations = await navigator.serviceWorker.getRegistrations()
+          for (const reg of registrations) {
+            await reg.unregister()
+          }
+          const cacheNames = await caches.keys()
+          await Promise.all(cacheNames.map(name => caches.delete(name)))
+        }
         set({ accessToken: null, user: null, isAuthenticated: false })
         return false
       }
