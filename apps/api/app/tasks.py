@@ -1,7 +1,10 @@
 import asyncio
 import logging
+import re
 import subprocess
 from pathlib import Path
+
+import requests
 
 from app.worker import celery
 
@@ -79,3 +82,107 @@ async def _send_trial_reminders_async():
                 logger.error("Failed to send trial reminder to %s: %s", row["email"], exc)
     finally:
         await conn.close()
+
+
+@celery.task(name="app.tasks.check_solas_supplements")
+def check_solas_supplements():
+    """Check for new SOLAS supplements from public marine notice sources."""
+    _run_async(_check_solas_async())
+
+
+_SOLAS_SOURCES = [
+    {
+        "name": "Marshall Islands Marine Notices",
+        "url": "https://www.register-iri.com/maritime/marine-notices/",
+    },
+    {
+        "name": "IMO Meeting Summaries",
+        "url": "https://www.imo.org/en/MediaCentre/MeetingSummaries",
+    },
+]
+
+# Matches MSC resolution references like MSC.520(106), MSC.550(108)
+_MSC_RE = re.compile(r"MSC\.\d+\(\d+\)")
+
+
+async def _check_solas_async():
+    import asyncpg
+    from app.config import settings
+
+    dsn = settings.database_url.replace("postgresql+asyncpg://", "postgresql://")
+    conn = await asyncpg.connect(dsn)
+    try:
+        # Get existing supplement references from DB
+        rows = await conn.fetch(
+            "SELECT DISTINCT section_number FROM regulations WHERE source = 'solas_supplement'"
+        )
+        existing_refs = {r["section_number"] for r in rows}
+
+        new_findings = []
+
+        for source in _SOLAS_SOURCES:
+            try:
+                resp = requests.get(source["url"], timeout=30, headers={
+                    "User-Agent": "RegKnots SOLAS Monitor/1.0"
+                })
+                resp.raise_for_status()
+                text = resp.text
+
+                # Find MSC resolution references in SOLAS-related content
+                solas_chunks = [
+                    chunk for chunk in text.split("\n")
+                    if "SOLAS" in chunk.upper() or "solas" in chunk.lower()
+                ]
+                solas_text = " ".join(solas_chunks)
+                solas_refs = set(_MSC_RE.findall(solas_text))
+
+                for ref in solas_refs:
+                    if ref not in existing_refs:
+                        new_findings.append({
+                            "ref": ref,
+                            "source_name": source["name"],
+                            "source_url": source["url"],
+                        })
+
+            except Exception as exc:
+                logger.warning("Failed to scrape %s: %s", source["name"], exc)
+
+        if new_findings:
+            _send_solas_alert(new_findings)
+        else:
+            logger.info("SOLAS supplement check: no new references found")
+
+    finally:
+        await conn.close()
+
+
+def _send_solas_alert(findings: list[dict]):
+    """Send alert email about new SOLAS supplement references."""
+    try:
+        import resend
+        from app.config import settings
+        resend.api_key = settings.resend_api_key
+
+        items_html = ""
+        for f in findings:
+            items_html += (
+                f"<li><strong>{f['ref']}</strong> — found on "
+                f"<a href=\"{f['source_url']}\">{f['source_name']}</a></li>"
+            )
+
+        resend.Emails.send({
+            "from": "RegKnots <hello@mail.regknots.com>",
+            "to": ["hello@regknots.com"],
+            "subject": "New SOLAS supplement detected",
+            "html": (
+                f"<h2>New SOLAS Supplement References Detected</h2>"
+                f"<p>The following MSC resolution references were found that are not yet in the RegKnots database:</p>"
+                f"<ul>{items_html}</ul>"
+                f"<p><strong>Action required:</strong> Download and review the source PDFs, then ingest manually "
+                f"if they contain new SOLAS amendments.</p>"
+                f"<p>Do NOT auto-ingest — manual review is required to verify copyright compliance.</p>"
+            ),
+        })
+        logger.info("Sent SOLAS supplement alert for %d new references", len(findings))
+    except Exception as exc:
+        logger.error("Failed to send SOLAS alert email: %s", exc)

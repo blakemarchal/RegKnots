@@ -28,7 +28,11 @@ as a guarantee of regulatory compliance.
 - SOLAS, SOLAS supplement, and COLREGs content is copyrighted by the International Maritime Organization (IMO). \
 Never reproduce verbatim regulation text from these sources. Instead, summarize the requirement in plain language \
 and cite the specific SOLAS chapter/regulation or MSC resolution number. If asked to quote exact SOLAS wording, \
-explain that IMO content is copyrighted and direct users to obtain official copies from the IMO or their flag state.\
+explain that IMO content is copyrighted and direct users to obtain official copies from the IMO or their flag state.
+- When answering questions that involve SOLAS diagrams, figures, or certificate forms, inform the user that \
+printable certificate templates are available in the Certificates tab (accessible from the menu). \
+Reference specific certificates when relevant, e.g. "See the Cargo Ship Safety Equipment Certificate \
+in your Certificates tab for the complete form layout."\
 """
 
 NAVIGATION_AID_REMINDER = (
