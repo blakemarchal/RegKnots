@@ -9,6 +9,7 @@ export interface AuthUser {
   email: string
   full_name: string | null
   role: string
+  is_admin: boolean
 }
 
 function decodeJwtUser(token: string): AuthUser | null {
@@ -19,6 +20,7 @@ function decodeJwtUser(token: string): AuthUser | null {
       email: payload.email as string,
       full_name: (payload.full_name as string) ?? null,
       role: payload.role as string,
+      is_admin: (payload.is_admin as boolean) ?? false,
     }
   } catch {
     return null

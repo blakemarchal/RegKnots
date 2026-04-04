@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.db import init_pool, close_pool, close_redis
-from app.routers import auth, billing, health, chat, vessels, regulations, conversations, waitlist
+from app.routers import admin, auth, billing, health, chat, vessels, regulations, conversations, waitlist
 
 logger = logging.getLogger(__name__)
 
@@ -62,3 +62,4 @@ app.include_router(regulations.router)
 app.include_router(conversations.router)
 app.include_router(billing.router)
 app.include_router(waitlist.router)
+app.include_router(admin.router)

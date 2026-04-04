@@ -23,6 +23,7 @@ async def get_current_user(
             email=payload["email"],
             role=payload["role"],
             tier=payload["tier"],
+            is_admin=payload.get("is_admin", False),
         )
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token expired")

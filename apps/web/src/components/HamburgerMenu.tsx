@@ -11,7 +11,7 @@ interface Props {
   onOpenVessels: () => void
 }
 
-const MENU_ITEMS = [
+const BASE_MENU_ITEMS = [
   { icon: '\uFF0B', label: 'New Chat', action: 'new' },
   { icon: '\u2261', label: 'Chat History', action: 'history' },
   { icon: '\u2693', label: 'My Vessels', action: 'vessels' },
@@ -19,9 +19,12 @@ const MENU_ITEMS = [
   { icon: '\u25CE', label: 'Account', action: 'account' },
 ]
 
+const ADMIN_ITEM = { icon: '\u2318', label: 'Admin', action: 'admin' }
+
 export function HamburgerMenu({ open, onClose, onNewChat, onOpenVessels }: Props) {
   const router = useRouter()
   const logout = useAuthStore((s) => s.logout)
+  const isAdmin = useAuthStore((s) => s.user?.is_admin ?? false)
 
   // Lock body scroll when open
   useEffect(() => {
@@ -37,6 +40,7 @@ export function HamburgerMenu({ open, onClose, onNewChat, onOpenVessels }: Props
     if (action === 'history') router.push('/history')
     if (action === 'vessels') onOpenVessels()
     if (action === 'certificates') { onClose(); router.push('/certificates') }
+    if (action === 'admin') { onClose(); router.push('/admin') }
     if (action === 'account') { onClose(); router.push('/account') }
     if (action === 'signout') {
       logout().then(() => router.replace('/login'))
@@ -77,7 +81,7 @@ export function HamburgerMenu({ open, onClose, onNewChat, onOpenVessels }: Props
 
         {/* Menu items */}
         <nav className="flex-1 py-2">
-          {MENU_ITEMS.map(item => (
+          {[...BASE_MENU_ITEMS, ...(isAdmin ? [ADMIN_ITEM] : [])].map(item => (
             <button
               key={item.action}
               onClick={() => handleItem(item.action)}

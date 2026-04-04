@@ -59,7 +59,7 @@ async def register(data: RegisterRequest, response: Response) -> TokenResponse:
         """
         INSERT INTO users (email, hashed_password, full_name, role, trial_ends_at)
         VALUES ($1, $2, $3, $4, NOW() + ($5 || ' days')::INTERVAL)
-        RETURNING id, email, full_name, role, subscription_tier
+        RETURNING id, email, full_name, role, subscription_tier, is_admin
         """,
         data.email,
         hashed_pw,
@@ -70,7 +70,7 @@ async def register(data: RegisterRequest, response: Response) -> TokenResponse:
 
     access_token = create_access_token(
         str(user["id"]), user["email"], user["role"], user["subscription_tier"],
-        full_name=user["full_name"],
+        full_name=user["full_name"], is_admin=user["is_admin"],
     )
     raw_refresh, token_hash = create_refresh_token()
     expires_at = datetime.now(timezone.utc) + timedelta(days=settings.refresh_token_expire_days)
@@ -98,7 +98,7 @@ async def login(data: LoginRequest, response: Response) -> TokenResponse:
     pool = await get_pool()
 
     user = await pool.fetchrow(
-        "SELECT id, email, full_name, hashed_password, role, subscription_tier FROM users WHERE email = $1",
+        "SELECT id, email, full_name, hashed_password, role, subscription_tier, is_admin FROM users WHERE email = $1",
         data.email,
     )
     if not user or not verify_password(data.password, user["hashed_password"]):
@@ -108,7 +108,7 @@ async def login(data: LoginRequest, response: Response) -> TokenResponse:
 
     access_token = create_access_token(
         str(user["id"]), user["email"], user["role"], user["subscription_tier"],
-        full_name=user["full_name"],
+        full_name=user["full_name"], is_admin=user["is_admin"],
     )
     raw_refresh, token_hash = create_refresh_token()
     expires_at = datetime.now(timezone.utc) + timedelta(days=settings.refresh_token_expire_days)
@@ -138,7 +138,7 @@ async def refresh(
     row = await pool.fetchrow(
         """
         SELECT rt.id, rt.user_id, rt.expires_at, rt.revoked,
-               u.email, u.full_name, u.role, u.subscription_tier
+               u.email, u.full_name, u.role, u.subscription_tier, u.is_admin
         FROM   refresh_tokens rt
         JOIN   users u ON u.id = rt.user_id
         WHERE  rt.token_hash = $1
@@ -181,7 +181,7 @@ async def refresh(
 
     access_token = create_access_token(
         str(row["user_id"]), row["email"], row["role"], row["subscription_tier"],
-        full_name=row["full_name"],
+        full_name=row["full_name"], is_admin=row["is_admin"],
     )
 
     _set_refresh_cookie(response, raw_refresh)
@@ -253,14 +253,14 @@ async def update_profile(
         f"""
         UPDATE users SET {', '.join(sets)}
         WHERE id = ${idx}
-        RETURNING id, email, full_name, role, subscription_tier
+        RETURNING id, email, full_name, role, subscription_tier, is_admin
         """,
         *params,
     )
 
     access_token = create_access_token(
         str(row["id"]), row["email"], row["role"], row["subscription_tier"],
-        full_name=row["full_name"],
+        full_name=row["full_name"], is_admin=row["is_admin"],
     )
     return ProfileResponse(access_token=access_token)
 
