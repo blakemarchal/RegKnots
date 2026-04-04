@@ -10,6 +10,9 @@ from app.config import settings
 
 _pw_hash = PasswordHash([Argon2Hasher()])
 
+# Emails granted admin access at the application level (no DB migration needed)
+_APP_LEVEL_ADMINS: set[str] = {"kdmarchal@gmail.com"}
+
 
 def hash_password(password: str) -> str:
     return _pw_hash.hash(password)
@@ -30,7 +33,7 @@ def create_access_token(
         "role": role,
         "tier": tier,
         "full_name": full_name,
-        "is_admin": is_admin,
+        "is_admin": is_admin or email in _APP_LEVEL_ADMINS,
         "type": "access",
         "iat": now,
         "exp": now + timedelta(minutes=settings.access_token_expire_minutes),

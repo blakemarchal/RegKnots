@@ -38,6 +38,9 @@ interface AdminUser {
   is_admin: boolean
 }
 
+// Read-only admin emails — mirrors backend READONLY_ADMIN_EMAILS
+const READONLY_ADMIN_EMAILS = new Set(['kdmarchal@gmail.com'])
+
 // ── Stat card ───────────────────────────────────────────────────────────────────
 
 function StatCard({ label, value, wide }: { label: string; value: string | number; wide?: boolean }) {
@@ -60,7 +63,9 @@ function fmtDate(iso: string | null): string {
 
 function AdminContent() {
   const router = useRouter()
-  const isAdmin = useAuthStore((s) => s.user?.is_admin ?? false)
+  const user = useAuthStore((s) => s.user)
+  const isAdmin = user?.is_admin ?? false
+  const isReadOnly = READONLY_ADMIN_EMAILS.has(user?.email ?? '')
   const hydrated = useAuthStore((s) => s.hydrated)
 
   const [stats, setStats] = useState<AdminStats | null>(null)
@@ -178,6 +183,12 @@ function AdminContent() {
         <h1 className="font-display text-xl font-bold text-[#f0ece4] tracking-wide leading-none">
           Admin Dashboard
         </h1>
+        {isReadOnly && (
+          <span className="font-mono text-[10px] font-bold px-2 py-0.5 rounded-full
+            bg-amber-500/20 text-amber-400 border border-amber-500/30">
+            Read Only
+          </span>
+        )}
       </header>
 
       <main className="flex-1 overflow-y-auto">
@@ -229,6 +240,7 @@ function AdminContent() {
           )}
 
           {/* ── Email Testing ─────────────────────────────────────────── */}
+          {!isReadOnly && (
           <div className="mb-8">
             <h2 className="font-display text-lg font-bold text-[#f0ece4] tracking-wide mb-3">Email Testing</h2>
             <p className="font-mono text-xs text-[#6b7594] mb-3">Send test emails to your admin address.</p>
@@ -262,10 +274,12 @@ function AdminContent() {
               </div>
             )}
           </div>
+          )}
 
           {/* ── Users table ──────────────────────────────────────────── */}
           <div className="flex items-center justify-between mb-3">
             <h2 className="font-display text-lg font-bold text-[#f0ece4] tracking-wide">Users</h2>
+            {!isReadOnly && (
             <button
               onClick={resetAllPilots}
               disabled={resetting === 'all'}
@@ -274,32 +288,33 @@ function AdminContent() {
             >
               {resetting === 'all' ? 'Resetting...' : 'Reset All Pilots'}
             </button>
+            )}
           </div>
 
-          <div className="overflow-x-auto rounded-xl border border-white/8">
-            <table className="w-full text-left font-mono text-xs">
+          <div className="rounded-xl border border-white/8">
+            <table className="w-full table-fixed text-left font-mono text-xs">
               <thead>
                 <tr className="bg-[#2dd4bf]/10 text-[#2dd4bf]">
-                  <th className="px-3 py-2.5 font-medium">Email</th>
-                  <th className="px-3 py-2.5 font-medium">Name</th>
-                  <th className="px-3 py-2.5 font-medium">Role</th>
-                  <th className="px-3 py-2.5 font-medium">Tier</th>
-                  <th className="px-3 py-2.5 font-medium">Status</th>
-                  <th className="px-3 py-2.5 font-medium text-right">Msgs</th>
-                  <th className="px-3 py-2.5 font-medium">Trial Ends</th>
-                  <th className="px-3 py-2.5 font-medium">Joined</th>
-                  <th className="px-3 py-2.5 font-medium"></th>
+                  <th className="px-3 py-2.5 font-medium w-[22%]">Email</th>
+                  <th className="px-3 py-2.5 font-medium w-[14%]">Name</th>
+                  <th className="px-3 py-2.5 font-medium w-[8%]">Role</th>
+                  <th className="px-3 py-2.5 font-medium w-[6%]">Tier</th>
+                  <th className="px-3 py-2.5 font-medium w-[8%]">Status</th>
+                  <th className="px-3 py-2.5 font-medium text-right w-[6%]">Msgs</th>
+                  <th className="px-3 py-2.5 font-medium w-[10%]">Trial Ends</th>
+                  <th className="px-3 py-2.5 font-medium w-[10%]">Joined</th>
+                  {!isReadOnly && <th className="px-3 py-2.5 font-medium w-[16%]"></th>}
                 </tr>
               </thead>
               <tbody>
                 {users.map((u, i) => (
                   <tr key={u.id}
                     className={`border-t border-white/5 ${i % 2 === 0 ? 'bg-[#111827]' : 'bg-[#0f1629]'}`}>
-                    <td className="px-3 py-2 text-[#f0ece4]/90 whitespace-nowrap">
+                    <td className="px-3 py-2 text-[#f0ece4]/90 truncate overflow-hidden" title={u.email}>
                       {u.email}
                       {u.is_admin && <span className="ml-1.5 text-[#2dd4bf] text-[10px]">ADMIN</span>}
                     </td>
-                    <td className="px-3 py-2 text-[#f0ece4]/60 whitespace-nowrap">{u.full_name ?? '-'}</td>
+                    <td className="px-3 py-2 text-[#f0ece4]/60 truncate overflow-hidden" title={u.full_name ?? ''}>{u.full_name ?? '-'}</td>
                     <td className="px-3 py-2 text-[#f0ece4]/60">{u.role}</td>
                     <td className="px-3 py-2">
                       <span className={u.subscription_tier === 'pro' ? 'text-[#2dd4bf]' : 'text-[#6b7594]'}>
@@ -308,8 +323,9 @@ function AdminContent() {
                     </td>
                     <td className="px-3 py-2 text-[#f0ece4]/60">{u.subscription_status}</td>
                     <td className="px-3 py-2 text-right text-[#f0ece4]/80">{u.message_count}</td>
-                    <td className="px-3 py-2 text-[#6b7594] whitespace-nowrap">{fmtDate(u.trial_ends_at)}</td>
-                    <td className="px-3 py-2 text-[#6b7594] whitespace-nowrap">{fmtDate(u.created_at)}</td>
+                    <td className="px-3 py-2 text-[#6b7594]">{fmtDate(u.trial_ends_at)}</td>
+                    <td className="px-3 py-2 text-[#6b7594]">{fmtDate(u.created_at)}</td>
+                    {!isReadOnly && (
                     <td className="px-3 py-2">
                       {!u.is_admin && (
                         <div className="flex items-center gap-1.5">
@@ -355,6 +371,7 @@ function AdminContent() {
                         </div>
                       )}
                     </td>
+                    )}
                   </tr>
                 ))}
               </tbody>

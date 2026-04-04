@@ -14,12 +14,23 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
+# Read-only admins: can view dashboard but cannot perform mutations
+READONLY_ADMIN_EMAILS: set[str] = {"kdmarchal@gmail.com"}
+
 
 async def require_admin(
     user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> CurrentUser:
-    if not user.is_admin:
+    if not user.is_admin and user.email not in READONLY_ADMIN_EMAILS:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
+    return user
+
+
+async def require_write_admin(
+    user: Annotated[CurrentUser, Depends(require_admin)],
+) -> CurrentUser:
+    if user.email in READONLY_ADMIN_EMAILS:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Read-only admin access")
     return user
 
 
@@ -220,7 +231,7 @@ class ResetResult(BaseModel):
 @router.post("/reset-user/{user_id}", response_model=ResetResult)
 async def reset_user(
     user_id: str,
-    admin: Annotated[CurrentUser, Depends(require_admin)],
+    admin: Annotated[CurrentUser, Depends(require_write_admin)],
 ) -> ResetResult:
     """Reset a single user's pilot state: zero message_count, restart trial, delete conversations."""
     pool = await get_pool()
@@ -257,7 +268,7 @@ async def reset_user(
 
 @router.post("/reset-all-pilots", response_model=ResetResult)
 async def reset_all_pilots(
-    admin: Annotated[CurrentUser, Depends(require_admin)],
+    admin: Annotated[CurrentUser, Depends(require_write_admin)],
 ) -> ResetResult:
     """Reset ALL non-admin users: zero message_count, restart trial, delete conversations."""
     pool = await get_pool()
@@ -305,7 +316,7 @@ class ExtendTrialResult(BaseModel):
 @router.post("/extend-trial/{user_id}", response_model=ExtendTrialResult)
 async def extend_trial(
     user_id: str,
-    admin: Annotated[CurrentUser, Depends(require_admin)],
+    admin: Annotated[CurrentUser, Depends(require_write_admin)],
 ) -> ExtendTrialResult:
     """Extend a user's trial by 14 days from now."""
     pool = await get_pool()
@@ -332,7 +343,7 @@ class AdminActionResult(BaseModel):
 @router.post("/grant-pro/{user_id}", response_model=AdminActionResult)
 async def grant_pro(
     user_id: str,
-    admin: Annotated[CurrentUser, Depends(require_admin)],
+    admin: Annotated[CurrentUser, Depends(require_write_admin)],
 ) -> AdminActionResult:
     """Manually grant pro tier to a user."""
     pool = await get_pool()
@@ -354,7 +365,7 @@ async def grant_pro(
 @router.post("/revoke-pro/{user_id}", response_model=AdminActionResult)
 async def revoke_pro(
     user_id: str,
-    admin: Annotated[CurrentUser, Depends(require_admin)],
+    admin: Annotated[CurrentUser, Depends(require_write_admin)],
 ) -> AdminActionResult:
     """Revoke pro tier and revert to free."""
     pool = await get_pool()
@@ -392,7 +403,7 @@ class TestEmailResult(BaseModel):
 @router.post("/test-email", response_model=TestEmailResult)
 async def send_test_email(
     body: TestEmailRequest,
-    admin: Annotated[CurrentUser, Depends(require_admin)],
+    admin: Annotated[CurrentUser, Depends(require_write_admin)],
 ) -> TestEmailResult:
     """Send a test email of any type to the admin's own address (or a specified recipient)."""
     from app.email import (
