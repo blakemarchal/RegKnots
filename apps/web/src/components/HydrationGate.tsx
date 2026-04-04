@@ -18,7 +18,7 @@ export function HydrationGate({ children }: { children: React.ReactNode }) {
     if (!hydrated) {
       hydrateAuth()
     }
-  }, [hydrated, hydrateAuth])
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Guest pages render immediately — no auth gate
   if (isGuestPage) {

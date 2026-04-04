@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Annotated, Optional
 
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Response, status
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from app.auth.deps import get_current_user
@@ -124,13 +125,20 @@ async def login(data: LoginRequest, response: Response) -> TokenResponse:
     return TokenResponse(access_token=access_token)
 
 
+def _reject_refresh(detail: str) -> JSONResponse:
+    """Return 401 with Set-Cookie that clears the refresh token cookie."""
+    resp = JSONResponse(status_code=401, content={"detail": detail})
+    resp.delete_cookie(key=_COOKIE_NAME, path=_COOKIE_PATH)
+    return resp
+
+
 @router.post("/refresh", response_model=TokenResponse)
 async def refresh(
     response: Response,
     refresh_token: Optional[str] = Cookie(default=None, alias=_COOKIE_NAME),
-) -> TokenResponse:
+):
     if not refresh_token:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="No refresh token")
+        return _reject_refresh("No refresh token")
 
     pool = await get_pool()
     token_hash = hash_refresh_token(refresh_token)
@@ -147,30 +155,23 @@ async def refresh(
     )
 
     if not row:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
+        return _reject_refresh("Invalid refresh token")
 
     if row["revoked"]:
         # Check for race condition: if token was revoked very recently,
         # this is likely a concurrent request, not a replay attack
         revoked_at = row.get("revoked_at")
         if revoked_at and (datetime.now(timezone.utc) - revoked_at).total_seconds() < 10:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Token already rotated",
-            )
+            return _reject_refresh("Token already rotated")
         # Genuine replay attack — revoke the entire user's session family
         await pool.execute(
             "UPDATE refresh_tokens SET revoked = TRUE, revoked_at = NOW() WHERE user_id = $1 AND NOT revoked",
             row["user_id"],
         )
-        _clear_refresh_cookie(response)
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Refresh token already used — all sessions revoked",
-        )
+        return _reject_refresh("Refresh token already used — all sessions revoked")
 
     if row["expires_at"] < datetime.now(timezone.utc):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Refresh token expired")
+        return _reject_refresh("Refresh token expired")
 
     # Rotate: invalidate old token, issue new pair
     await pool.execute(

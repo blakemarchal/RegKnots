@@ -162,8 +162,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   hydrateAuth: async () => {
-    const { refreshAuth } = get()
-    await refreshAuth()
+    if (get().hydrated) return // Already hydrated, never re-run
+    await get().refreshAuth()
     set({ hydrated: true })
   },
 
@@ -181,6 +181,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         })
 
         if (!res.ok) {
+          // Clear the revoked cookie so we don't loop on next page load
+          try {
+            await fetch(`${API_URL}/auth/logout`, {
+              method: 'POST',
+              credentials: 'include',
+            })
+          } catch {}
           set({ accessToken: null, user: null, isAuthenticated: false })
           return false
         }
