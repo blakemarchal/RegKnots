@@ -100,16 +100,28 @@ export default function PricingPage() {
               <p className="font-mono text-xs text-red-400 mb-3 text-center">{error}</p>
             )}
 
-            <button
-              onClick={handleSubscribe}
-              disabled={loading}
-              className="w-full text-center font-mono font-bold text-sm uppercase tracking-wider
-                bg-[#2dd4bf] text-[#0a0e1a] rounded-lg py-3
-                hover:brightness-110 transition-[filter] duration-150
-                disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {loading ? 'Redirecting...' : 'Subscribe Now'}
-            </button>
+            {billing && billing.tier === 'pro' && billing.subscription_status === 'active' ? (
+              <div className="text-center">
+                <p className="font-mono text-sm text-[#2dd4bf] font-bold mb-2">
+                  You&apos;re subscribed!
+                </p>
+                <p className="font-mono text-xs text-[#6b7594]">
+                  Manage your subscription in{' '}
+                  <a href="/account" className="text-[#2dd4bf] hover:underline">Account settings</a>.
+                </p>
+              </div>
+            ) : (
+              <button
+                onClick={handleSubscribe}
+                disabled={loading}
+                className="w-full text-center font-mono font-bold text-sm uppercase tracking-wider
+                  bg-[#2dd4bf] text-[#0a0e1a] rounded-lg py-3
+                  hover:brightness-110 transition-[filter] duration-150
+                  disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {loading ? 'Redirecting...' : 'Subscribe Now'}
+              </button>
+            )}
           </div>
 
           <p className="font-mono text-xs text-[#6b7594] text-center mt-6">

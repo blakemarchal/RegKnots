@@ -35,6 +35,9 @@ class Settings(BaseSettings):
     stripe_price_id: str = Field(default="", validation_alias="STRIPE_PRICE_ID")
     app_url: str = "https://regknots.com"
 
+    # Monitoring
+    sentry_dsn: str = Field(default="", validation_alias="SENTRY_DSN")
+
     @property
     def is_dev(self) -> bool:
         return self.environment == "development"

@@ -69,6 +69,7 @@ function AdminContent() {
   const [hasMore, setHasMore] = useState(true)
   const [loading, setLoading] = useState(true)
   const [resetting, setResetting] = useState<string | null>(null)
+  const [actionLoading, setActionLoading] = useState<string | null>(null)
 
   const fetchStats = useCallback(() => {
     apiRequest<AdminStats>('/admin/stats').then(setStats).catch(() => {})
@@ -127,6 +128,18 @@ function AdminContent() {
       fetchStats()
     } catch { /* ignore */ }
     setResetting(null)
+  }
+
+  async function adminAction(userId: string, action: string, label: string) {
+    if (!confirm(`${label} for this user?`)) return
+    setActionLoading(`${userId}-${action}`)
+    try {
+      await apiRequest(`/admin/${action}/${userId}`, { method: 'POST' })
+      fetchUsers(0, false)
+      setUsersOffset(0)
+      fetchStats()
+    } catch { /* ignore */ }
+    setActionLoading(null)
   }
 
   if (!hydrated || !isAdmin) return null
@@ -246,15 +259,47 @@ function AdminContent() {
                     <td className="px-3 py-2 text-[#6b7594] whitespace-nowrap">{fmtDate(u.created_at)}</td>
                     <td className="px-3 py-2">
                       {!u.is_admin && (
-                        <button
-                          onClick={() => resetUser(u.id, u.email)}
-                          disabled={resetting === u.id}
-                          className="font-mono text-[10px] px-2 py-0.5 rounded border border-red-500/30
-                            text-red-400/70 hover:text-red-400 hover:bg-red-500/10
-                            disabled:opacity-50 transition-colors"
-                        >
-                          {resetting === u.id ? '...' : 'Reset'}
-                        </button>
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            onClick={() => adminAction(u.id, 'extend-trial', 'Extend trial 14 days')}
+                            disabled={actionLoading === `${u.id}-extend-trial`}
+                            className="font-mono text-[10px] px-1.5 py-0.5 rounded border border-[#2dd4bf]/30
+                              text-[#2dd4bf]/70 hover:text-[#2dd4bf] hover:bg-[#2dd4bf]/10
+                              disabled:opacity-50 transition-colors whitespace-nowrap"
+                          >
+                            +Trial
+                          </button>
+                          {u.subscription_tier !== 'pro' ? (
+                            <button
+                              onClick={() => adminAction(u.id, 'grant-pro', 'Grant Pro')}
+                              disabled={actionLoading === `${u.id}-grant-pro`}
+                              className="font-mono text-[10px] px-1.5 py-0.5 rounded border border-[#2dd4bf]/30
+                                text-[#2dd4bf]/70 hover:text-[#2dd4bf] hover:bg-[#2dd4bf]/10
+                                disabled:opacity-50 transition-colors whitespace-nowrap"
+                            >
+                              +Pro
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => adminAction(u.id, 'revoke-pro', 'Revoke Pro')}
+                              disabled={actionLoading === `${u.id}-revoke-pro`}
+                              className="font-mono text-[10px] px-1.5 py-0.5 rounded border border-amber-500/30
+                                text-amber-400/70 hover:text-amber-400 hover:bg-amber-500/10
+                                disabled:opacity-50 transition-colors whitespace-nowrap"
+                            >
+                              -Pro
+                            </button>
+                          )}
+                          <button
+                            onClick={() => resetUser(u.id, u.email)}
+                            disabled={resetting === u.id}
+                            className="font-mono text-[10px] px-1.5 py-0.5 rounded border border-red-500/30
+                              text-red-400/70 hover:text-red-400 hover:bg-red-500/10
+                              disabled:opacity-50 transition-colors"
+                          >
+                            {resetting === u.id ? '...' : 'Reset'}
+                          </button>
+                        </div>
                       )}
                     </td>
                   </tr>

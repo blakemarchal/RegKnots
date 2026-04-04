@@ -4,6 +4,7 @@ from app.config import settings
 resend.api_key = settings.resend_api_key
 
 FROM_EMAIL = "RegKnots <hello@mail.regknots.com>"
+CAPTAIN_EMAIL = "RegKnots <captain@regknots.com>"
 APP_URL = "https://regknots.com"
 
 _BASE_STYLES = """
@@ -96,5 +97,59 @@ async def send_password_reset_email(to_email: str, reset_token: str) -> None:
         "from": FROM_EMAIL,
         "to": [to_email],
         "subject": "Reset your RegKnots password",
+        "html": html,
+    })
+
+
+async def send_trial_expiring_email(to_email: str, full_name: str, messages_used: int) -> None:
+    first_name = full_name.split()[0] if full_name.strip() else "Mariner"
+    html = _html(f"""
+      <h1>Your trial ends in 3 days</h1>
+      <p>
+        Hey {first_name} — just a heads up that your RegKnots trial expires in 3 days.
+        You've sent <strong style="color:#f0ece4;">{messages_used}</strong> messages so far.
+      </p>
+      <p>
+        To keep your access to unlimited CFR queries, vessel-specific answers, and all regulation
+        sources, subscribe to RegKnots Pro for <strong style="color:#f0ece4;">$49/month</strong>.
+      </p>
+      <p style="font-size:13px; color:#2dd4bf;">
+        As a pilot member, this price is locked in forever — even when we raise it.
+      </p>
+      <a href="{APP_URL}/pricing" class="cta">Subscribe Now</a>
+    """)
+    resend.Emails.send({
+        "from": CAPTAIN_EMAIL,
+        "to": [to_email],
+        "subject": "Your RegKnots trial ends in 3 days",
+        "html": html,
+    })
+
+
+async def send_subscription_confirmed_email(to_email: str, full_name: str) -> None:
+    first_name = full_name.split()[0] if full_name.strip() else "Mariner"
+    html = _html(f"""
+      <h1>Welcome to RegKnots Pro</h1>
+      <p>
+        Thanks for subscribing, {first_name}! Your Pro plan is now active.
+      </p>
+      <p>
+        Here's what you get:
+      </p>
+      <ul style="padding-left:20px; margin:0 0 16px;">
+        <li style="color:#6b7594; font-size:14px; line-height:1.7;">Unlimited questions — no message caps</li>
+        <li style="color:#6b7594; font-size:14px; line-height:1.7;">CFR Titles 33, 46 &amp; 49 + COLREGs, NVICs &amp; SOLAS 2024</li>
+        <li style="color:#6b7594; font-size:14px; line-height:1.7;">Vessel-specific compliance answers</li>
+        <li style="color:#6b7594; font-size:14px; line-height:1.7;">Audit-ready chat logs</li>
+      </ul>
+      <p style="font-size:13px; color:#2dd4bf;">
+        Your $49/month pilot price is locked in forever — even when we raise it.
+      </p>
+      <a href="{APP_URL}" class="cta">Start Asking Questions</a>
+    """)
+    resend.Emails.send({
+        "from": CAPTAIN_EMAIL,
+        "to": [to_email],
+        "subject": f"Welcome to RegKnots Pro, {first_name}",
         "html": html,
     })

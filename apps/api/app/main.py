@@ -3,11 +3,19 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+import sentry_sdk
 from anthropic import AsyncAnthropic
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
+
+if settings.sentry_dsn:
+    sentry_sdk.init(
+        dsn=settings.sentry_dsn,
+        traces_sample_rate=0.1,
+        environment=settings.environment,
+    )
 from app.db import init_pool, close_pool, close_redis
 from app.routers import admin, auth, billing, health, chat, vessels, regulations, conversations, support, waitlist
 

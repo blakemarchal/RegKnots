@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from app.auth.deps import get_current_user
 from app.auth.schemas import CurrentUser
 from app.db import get_pool
-from app.stripe_service import create_checkout_session, handle_webhook_event
+from app.stripe_service import create_billing_portal_session, create_checkout_session, handle_webhook_event
 
 router = APIRouter(prefix="/billing", tags=["billing"])
 
@@ -30,7 +30,13 @@ async def create_checkout(
             detail="Payment system not configured",
         )
     pool = await get_pool()
-    url = await create_checkout_session(user.user_id, user.email, pool)
+    try:
+        url = await create_checkout_session(user.user_id, user.email, pool)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        )
     return CheckoutResponse(checkout_url=url)
 
 
@@ -100,3 +106,22 @@ async def billing_status(
         messages_remaining=messages_remaining,
         needs_subscription=needs_subscription,
     )
+
+
+class PortalResponse(BaseModel):
+    portal_url: str
+
+
+@router.post("/portal", response_model=PortalResponse)
+async def billing_portal(
+    user: Annotated[CurrentUser, Depends(get_current_user)],
+) -> PortalResponse:
+    pool = await get_pool()
+    try:
+        url = await create_billing_portal_session(user.user_id, pool)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No subscription found. Subscribe first to manage billing.",
+        )
+    return PortalResponse(portal_url=url)

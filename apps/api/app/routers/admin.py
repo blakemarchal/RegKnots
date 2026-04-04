@@ -294,3 +294,80 @@ async def reset_all_pilots(
 
     logger.info("Admin %s reset %d pilot accounts", admin.email, len(user_ids))
     return ResetResult(reset_count=len(user_ids))
+
+
+# ── Admin write actions ────────────────────────────────────────────────────────
+
+class ExtendTrialResult(BaseModel):
+    trial_ends_at: str
+
+
+@router.post("/extend-trial/{user_id}", response_model=ExtendTrialResult)
+async def extend_trial(
+    user_id: str,
+    admin: Annotated[CurrentUser, Depends(require_admin)],
+) -> ExtendTrialResult:
+    """Extend a user's trial by 14 days from now."""
+    pool = await get_pool()
+    row = await pool.fetchrow(
+        """
+        UPDATE users
+        SET trial_ends_at = NOW() + INTERVAL '14 days',
+            trial_reminder_sent = FALSE
+        WHERE id = $1
+        RETURNING trial_ends_at
+        """,
+        user_id,
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="User not found")
+    logger.info("Admin %s extended trial for %s", admin.email, user_id)
+    return ExtendTrialResult(trial_ends_at=row["trial_ends_at"].isoformat())
+
+
+class AdminActionResult(BaseModel):
+    ok: bool
+
+
+@router.post("/grant-pro/{user_id}", response_model=AdminActionResult)
+async def grant_pro(
+    user_id: str,
+    admin: Annotated[CurrentUser, Depends(require_admin)],
+) -> AdminActionResult:
+    """Manually grant pro tier to a user."""
+    pool = await get_pool()
+    result = await pool.execute(
+        """
+        UPDATE users
+        SET subscription_tier = 'pro',
+            subscription_status = 'active'
+        WHERE id = $1
+        """,
+        user_id,
+    )
+    if result == "UPDATE 0":
+        raise HTTPException(status_code=404, detail="User not found")
+    logger.info("Admin %s granted pro to %s", admin.email, user_id)
+    return AdminActionResult(ok=True)
+
+
+@router.post("/revoke-pro/{user_id}", response_model=AdminActionResult)
+async def revoke_pro(
+    user_id: str,
+    admin: Annotated[CurrentUser, Depends(require_admin)],
+) -> AdminActionResult:
+    """Revoke pro tier and revert to free."""
+    pool = await get_pool()
+    result = await pool.execute(
+        """
+        UPDATE users
+        SET subscription_tier = 'free',
+            subscription_status = 'inactive'
+        WHERE id = $1
+        """,
+        user_id,
+    )
+    if result == "UPDATE 0":
+        raise HTTPException(status_code=404, detail="User not found")
+    logger.info("Admin %s revoked pro from %s", admin.email, user_id)
+    return AdminActionResult(ok=True)

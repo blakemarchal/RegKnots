@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import AuthGuard from '@/components/AuthGuard'
 import { useAuthStore } from '@/lib/auth'
+import type { BillingStatus } from '@/lib/auth'
 import { apiRequest } from '@/lib/api'
 
 const ROLE_OPTIONS = [
@@ -34,7 +35,7 @@ interface VesselItem {
 
 function AccountContent() {
   const router = useRouter()
-  const { user, logout, updateUserFromToken, removeVessel } = useAuthStore()
+  const { user, logout, updateUserFromToken, removeVessel, billing, setBilling } = useAuthStore()
 
   // ── Profile editing ────────────────────────────────────────────
   const [fullName, setFullName] = useState(user?.full_name ?? '')
@@ -49,6 +50,9 @@ function AccountContent() {
   const [pwSaving, setPwSaving] = useState(false)
   const [pwMsg, setPwMsg] = useState<{ text: string; ok: boolean } | null>(null)
 
+  // ── Subscription ────────────────────────────────────────────────
+  const [portalLoading, setPortalLoading] = useState(false)
+
   // ── Vessels ────────────────────────────────────────────────────
   const [vessels, setVessels] = useState<VesselItem[]>([])
   const [vesselsLoading, setVesselsLoading] = useState(true)
@@ -60,7 +64,10 @@ function AccountContent() {
       .then(setVessels)
       .catch(() => {})
       .finally(() => setVesselsLoading(false))
-  }, [])
+    if (!billing) {
+      apiRequest<BillingStatus>('/billing/status').then(setBilling).catch(() => {})
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function saveProfile() {
     setProfileSaving(true)
@@ -118,6 +125,16 @@ function AccountContent() {
     } finally {
       setDeletingId(null)
       setConfirmDeleteId(null)
+    }
+  }
+
+  async function openBillingPortal() {
+    setPortalLoading(true)
+    try {
+      const data = await apiRequest<{ portal_url: string }>('/billing/portal', { method: 'POST' })
+      window.location.href = data.portal_url
+    } catch {
+      setPortalLoading(false)
     }
   }
 
@@ -204,6 +221,26 @@ function AccountContent() {
               )}
             </div>
           </section>
+
+          {/* ── Subscription ──────────────────────────────────────── */}
+          {billing && billing.tier === 'pro' && (
+            <section className="bg-[#111827] border border-white/8 rounded-xl p-5 flex flex-col gap-3">
+              <p className="font-mono text-xs text-[#6b7594] uppercase tracking-wider">Subscription</p>
+              <p className="font-mono text-sm text-[#f0ece4]/80">
+                <span className="text-[#2dd4bf] font-bold">Pro</span> — $49/month
+              </p>
+              <button
+                onClick={openBillingPortal}
+                disabled={portalLoading}
+                className="w-full font-mono text-sm font-bold text-[#2dd4bf]
+                  border border-[#2dd4bf]/40 hover:bg-[#2dd4bf]/10
+                  disabled:opacity-50 rounded-lg py-2.5 transition-colors duration-150"
+              >
+                {portalLoading ? 'Loading...' : 'Manage Subscription'}
+              </button>
+              <p className="font-mono text-[10px] text-[#6b7594] text-center">Powered by Stripe</p>
+            </section>
+          )}
 
           {/* ── Change password ──────────────────────────────────── */}
           <section className="bg-[#111827] border border-white/8 rounded-xl p-5 flex flex-col gap-4">
