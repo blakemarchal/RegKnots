@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import AuthGuard from '@/components/AuthGuard'
+import { AppHeader } from '@/components/AppHeader'
 import { useAuthStore } from '@/lib/auth'
 import { apiRequest } from '@/lib/api'
 
@@ -205,27 +206,12 @@ function AdminContent() {
 
   return (
     <div className="flex flex-col min-h-dvh bg-[#0a0e1a]">
-      {/* Header */}
-      <header className="flex-shrink-0 flex items-center gap-3 px-4 py-3
-        bg-[#111827]/95 backdrop-blur-md border-b border-white/8">
-        <button onClick={() => router.back()}
-          className="w-9 h-9 flex items-center justify-center rounded-lg
-            text-[#6b7594] hover:text-[#f0ece4] transition-colors"
-          aria-label="Back">
-          <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M19 12H5M12 5l-7 7 7 7" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </button>
-        <h1 className="font-display text-xl font-bold text-[#f0ece4] tracking-wide leading-none">
-          Admin Dashboard
-        </h1>
-        {isReadOnly && (
-          <span className="font-mono text-[10px] font-bold px-2 py-0.5 rounded-full
-            bg-amber-500/20 text-amber-400 border border-amber-500/30">
-            Read Only
-          </span>
-        )}
-      </header>
+      <AppHeader title="Admin" trailing={isReadOnly ? (
+        <span className="font-mono text-[10px] font-bold px-2 py-0.5 rounded-full
+          bg-amber-500/20 text-amber-400 border border-amber-500/30">
+          Read Only
+        </span>
+      ) : undefined} />
 
       <main className="flex-1 overflow-y-auto">
         <div className="max-w-5xl mx-auto px-4 py-6">

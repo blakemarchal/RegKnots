@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import AuthGuard from '@/components/AuthGuard'
+import { AppHeader } from '@/components/AppHeader'
 import { apiRequest } from '@/lib/api'
 import { CompassRose } from '@/components/CompassRose'
 
@@ -66,32 +67,7 @@ function HistoryContent() {
 
   return (
     <div className="flex flex-col h-dvh bg-[#0a0e1a]">
-      {/* Header */}
-      <header className="flex-shrink-0 flex items-center justify-between gap-3 px-4 py-3
-        bg-[#111827]/95 backdrop-blur-md border-b border-white/8">
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => router.back()}
-            className="w-9 h-9 flex items-center justify-center rounded-lg
-              text-[#6b7594] hover:text-[#f0ece4] transition-colors duration-150"
-            aria-label="Back to chat"
-          >
-            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M19 12H5M12 5l-7 7 7 7" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </button>
-          <h1 className="font-display text-xl font-bold text-[#f0ece4] tracking-wide leading-none">
-            Chat History
-          </h1>
-        </div>
-        <button
-          onClick={() => router.push('/')}
-          className="font-mono text-xs font-bold text-[#0a0e1a] bg-[#2dd4bf]
-            hover:brightness-110 rounded-lg px-3 py-1.5 transition-[filter] duration-150"
-        >
-          + New Chat
-        </button>
-      </header>
+      <AppHeader title="Chat History" />
 
       {/* Content */}
       <main className="chat-thread flex-1 overflow-y-auto">

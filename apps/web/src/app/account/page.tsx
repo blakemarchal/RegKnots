@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import AuthGuard from '@/components/AuthGuard'
+import { AppHeader } from '@/components/AppHeader'
 import { useAuthStore } from '@/lib/auth'
 import type { BillingStatus } from '@/lib/auth'
 import { apiRequest } from '@/lib/api'
@@ -132,10 +133,8 @@ function AccountContent() {
     setPortalLoading(true)
     try {
       const data = await apiRequest<{ portal_url: string }>('/billing/portal', { method: 'POST' })
-      window.open(data.portal_url, '_blank')
+      window.location.href = data.portal_url
     } catch {
-      // ignore
-    } finally {
       setPortalLoading(false)
     }
   }
@@ -147,23 +146,7 @@ function AccountContent() {
 
   return (
     <div className="flex flex-col h-dvh bg-[#0a0e1a]">
-      {/* Header */}
-      <header className="flex-shrink-0 flex items-center gap-3 px-4 py-3
-        bg-[#111827]/95 backdrop-blur-md border-b border-white/8">
-        <button
-          onClick={() => router.back()}
-          className="w-9 h-9 flex items-center justify-center rounded-lg
-            text-[#6b7594] hover:text-[#f0ece4] transition-colors duration-150"
-          aria-label="Back"
-        >
-          <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M19 12H5M12 5l-7 7 7 7" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </button>
-        <h1 className="font-display text-xl font-bold text-[#f0ece4] tracking-wide leading-none">
-          Account
-        </h1>
-      </header>
+      <AppHeader title="Account" />
 
       {/* Content */}
       <main className="flex-1 overflow-y-auto px-4 py-6">
