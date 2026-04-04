@@ -382,91 +382,96 @@ function AdminContent() {
             )}
           </div>
 
-          <div className="rounded-xl border border-white/8">
-            <table className="w-full table-fixed text-left font-mono text-xs">
+          <div className="rounded-xl border border-white/8 overflow-x-auto">
+            <table className="w-full text-left font-mono text-xs" style={{ minWidth: '820px' }}>
               <thead>
                 <tr className="bg-[#2dd4bf]/10 text-[#2dd4bf]">
-                  <th className="px-3 py-2.5 font-medium w-[22%]">Email</th>
-                  <th className="px-3 py-2.5 font-medium w-[14%]">Name</th>
-                  <th className="px-3 py-2.5 font-medium w-[8%]">Role</th>
-                  <th className="px-3 py-2.5 font-medium w-[6%]">Tier</th>
-                  <th className="px-3 py-2.5 font-medium w-[8%]">Status</th>
-                  <th className="px-3 py-2.5 font-medium text-right w-[6%]">Msgs</th>
-                  <th className="px-3 py-2.5 font-medium w-[10%]">Trial Ends</th>
-                  <th className="px-3 py-2.5 font-medium w-[10%]">Joined</th>
-                  <th className="px-3 py-2.5 font-medium w-[16%]"></th>
+                  <th className="px-2 py-2 font-medium">Email</th>
+                  <th className="px-2 py-2 font-medium">Name</th>
+                  <th className="px-2 py-2 font-medium">Tier</th>
+                  <th className="px-2 py-2 font-medium">Status</th>
+                  <th className="px-2 py-2 font-medium text-right">Msgs</th>
+                  <th className="px-2 py-2 font-medium">Trial Ends</th>
+                  <th className="px-2 py-2 font-medium">Joined</th>
+                  <th className="px-2 py-2 font-medium"></th>
                 </tr>
               </thead>
               <tbody>
                 {users.map((u, i) => (
                   <tr key={u.id}
                     className={`border-t border-white/5 ${i % 2 === 0 ? 'bg-[#111827]' : 'bg-[#0f1629]'}`}>
-                    <td className="px-3 py-2 text-[#f0ece4]/90 truncate overflow-hidden" title={u.email}>
-                      {u.email}
-                      {u.is_admin && <span className="ml-1.5 text-[#2dd4bf] text-[10px]">ADMIN</span>}
+                    <td className="px-2 py-1.5 text-[#f0ece4]/90" title={u.email}>
+                      <span className="block max-w-[180px] truncate">{u.email}</span>
+                      {u.is_admin && <span className="text-[#2dd4bf] text-[9px]">ADMIN</span>}
                     </td>
-                    <td className="px-3 py-2 text-[#f0ece4]/60 truncate overflow-hidden" title={u.full_name ?? ''}>{u.full_name ?? '-'}</td>
-                    <td className="px-3 py-2 text-[#f0ece4]/60">{u.role}</td>
-                    <td className="px-3 py-2">
+                    <td className="px-2 py-1.5 text-[#f0ece4]/60" title={u.full_name ?? ''}>
+                      <span className="block max-w-[110px] truncate">{u.full_name ?? '-'}</span>
+                    </td>
+                    <td className="px-2 py-1.5">
                       <span className={u.subscription_tier === 'pro' ? 'text-[#2dd4bf]' : 'text-[#6b7594]'}>
                         {u.subscription_tier}
                       </span>
                     </td>
-                    <td className="px-3 py-2 text-[#f0ece4]/60">{u.subscription_status}</td>
-                    <td className="px-3 py-2 text-right text-[#f0ece4]/80">{u.message_count}</td>
-                    <td className="px-3 py-2 text-[#6b7594]">{fmtDate(u.trial_ends_at)}</td>
-                    <td className="px-3 py-2 text-[#6b7594]">{fmtDate(u.created_at)}</td>
-                    <td className="px-3 py-2">
-                      <div className="flex items-center gap-1.5">
+                    <td className="px-2 py-1.5 text-[#f0ece4]/60">{u.subscription_status}</td>
+                    <td className="px-2 py-1.5 text-right text-[#f0ece4]/80">{u.message_count}</td>
+                    <td className="px-2 py-1.5 text-[#6b7594] whitespace-nowrap">{fmtDate(u.trial_ends_at)}</td>
+                    <td className="px-2 py-1.5 text-[#6b7594] whitespace-nowrap">{fmtDate(u.created_at)}</td>
+                    <td className="px-2 py-1.5">
+                      <div className="flex items-center gap-1">
                         <button
                           onClick={() => exportChats(u.id, u.email)}
                           disabled={exporting === u.id}
-                          className="font-mono text-[10px] px-1.5 py-0.5 rounded border border-[#2dd4bf]/30
+                          title="Export chat logs"
+                          className="font-mono text-[9px] px-1 py-px rounded border border-[#2dd4bf]/30
                             text-[#2dd4bf]/70 hover:text-[#2dd4bf] hover:bg-[#2dd4bf]/10
-                            disabled:opacity-50 transition-colors whitespace-nowrap"
+                            disabled:opacity-50 transition-colors"
                         >
-                          {exporting === u.id ? '...' : 'Export'}
+                          {exporting === u.id ? '..' : 'Exp'}
                         </button>
                         {!isReadOnly && !u.is_admin && (
                           <>
                             <button
                               onClick={() => adminAction(u.id, 'extend-trial', 'Extend trial 14 days')}
                               disabled={actionLoading === `${u.id}-extend-trial`}
-                              className="font-mono text-[10px] px-1.5 py-0.5 rounded border border-[#2dd4bf]/30
+                              title="Extend trial 14 days"
+                              className="font-mono text-[9px] px-1 py-px rounded border border-[#2dd4bf]/30
                                 text-[#2dd4bf]/70 hover:text-[#2dd4bf] hover:bg-[#2dd4bf]/10
-                                disabled:opacity-50 transition-colors whitespace-nowrap"
+                                disabled:opacity-50 transition-colors"
                             >
-                              +Trial
+                              +T
                             </button>
                             {u.subscription_tier !== 'pro' ? (
                               <button
                                 onClick={() => adminAction(u.id, 'grant-pro', 'Grant Pro')}
                                 disabled={actionLoading === `${u.id}-grant-pro`}
-                                className="font-mono text-[10px] px-1.5 py-0.5 rounded border border-[#2dd4bf]/30
+                                title="Grant Pro"
+                                className="font-mono text-[9px] px-1 py-px rounded border border-[#2dd4bf]/30
                                   text-[#2dd4bf]/70 hover:text-[#2dd4bf] hover:bg-[#2dd4bf]/10
-                                  disabled:opacity-50 transition-colors whitespace-nowrap"
+                                  disabled:opacity-50 transition-colors"
                               >
-                                +Pro
+                                +P
                               </button>
                             ) : (
                               <button
                                 onClick={() => adminAction(u.id, 'revoke-pro', 'Revoke Pro')}
                                 disabled={actionLoading === `${u.id}-revoke-pro`}
-                                className="font-mono text-[10px] px-1.5 py-0.5 rounded border border-amber-500/30
+                                title="Revoke Pro"
+                                className="font-mono text-[9px] px-1 py-px rounded border border-amber-500/30
                                   text-amber-400/70 hover:text-amber-400 hover:bg-amber-500/10
-                                  disabled:opacity-50 transition-colors whitespace-nowrap"
+                                  disabled:opacity-50 transition-colors"
                               >
-                                -Pro
+                                -P
                               </button>
                             )}
                             <button
                               onClick={() => resetUser(u.id, u.email)}
                               disabled={resetting === u.id}
-                              className="font-mono text-[10px] px-1.5 py-0.5 rounded border border-red-500/30
+                              title="Reset pilot account"
+                              className="font-mono text-[9px] px-1 py-px rounded border border-red-500/30
                                 text-red-400/70 hover:text-red-400 hover:bg-red-500/10
                                 disabled:opacity-50 transition-colors"
                             >
-                              {resetting === u.id ? '...' : 'Reset'}
+                              {resetting === u.id ? '..' : 'Rst'}
                             </button>
                           </>
                         )}

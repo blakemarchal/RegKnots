@@ -83,6 +83,7 @@ async def handle_webhook_event(payload: bytes, sig_header: str, pool) -> None:
 
     etype = event["type"]
     data = event["data"]["object"]
+    logger.info("Stripe webhook received: type=%s", etype)
 
     if etype == "checkout.session.completed":
         await _on_checkout_completed(data, pool)
@@ -98,7 +99,9 @@ async def handle_webhook_event(payload: bytes, sig_header: str, pool) -> None:
 async def _on_checkout_completed(session: dict, pool) -> None:
     customer_id = session.get("customer")
     subscription_id = session.get("subscription")
+    logger.info("Checkout completed: customer_id=%s subscription_id=%s", customer_id, subscription_id)
     if not customer_id or not subscription_id:
+        logger.warning("Checkout missing customer_id or subscription_id, skipping")
         return
 
     # Idempotency: skip if already processed
@@ -122,7 +125,10 @@ async def _on_checkout_completed(session: dict, pool) -> None:
         subscription_id,
         customer_id,
     )
-    logger.info("Activated pro subscription for customer %s", customer_id)
+    if row:
+        logger.info("Activated pro subscription for customer %s (email=%s)", customer_id, row["email"])
+    else:
+        logger.warning("Checkout UPDATE matched no user for customer %s", customer_id)
 
     # Send subscription confirmed email (non-blocking)
     if row:
@@ -136,6 +142,7 @@ async def _on_checkout_completed(session: dict, pool) -> None:
 async def _on_subscription_change(subscription: dict, pool) -> None:
     sub_id = subscription.get("id")
     status = subscription.get("status")  # active, past_due, canceled, unpaid
+    logger.info("Subscription change: sub_id=%s status=%s", sub_id, status)
 
     status_map = {
         "active": ("pro", "active"),
@@ -154,7 +161,7 @@ async def _on_subscription_change(subscription: dict, pool) -> None:
         logger.info("Skipping duplicate subscription change for %s (already %s/%s)", sub_id, tier, sub_status)
         return
 
-    await pool.execute(
+    result = await pool.execute(
         """
         UPDATE users
         SET subscription_tier = $1,
@@ -165,4 +172,4 @@ async def _on_subscription_change(subscription: dict, pool) -> None:
         sub_status,
         sub_id,
     )
-    logger.info("Subscription %s → tier=%s status=%s", sub_id, tier, sub_status)
+    logger.info("Subscription %s → tier=%s status=%s (result=%s)", sub_id, tier, sub_status, result)
