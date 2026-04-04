@@ -10,7 +10,10 @@ const pwaConfig = withPWA({
   register: true,
   cacheOnFrontEndNav: false,
   aggressiveFrontEndNavCaching: false,
+  cacheStartUrl: false,
+  dynamicStartUrl: false,
   workboxOptions: {
+    cacheId: "regknots-v2",
     disableDevLogs: true,
   },
 })(nextConfig);
