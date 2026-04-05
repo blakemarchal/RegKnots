@@ -32,16 +32,16 @@ function getSourceLink(source: string, sectionNumber: string): { url: string; la
     }
   }
   if (source === 'nvic') {
-    return { url: 'https://www.dco.uscg.mil/Our-Organization/NVIC/', label: 'View on USCG.mil' }
+    return { url: 'https://www.dco.uscg.mil/Our-Organization/Assistant-Commandant-for-Prevention-Policy-CG-5P/Commercial-Regulations-standards-CG-5PS/NVIC/', label: 'View on USCG.mil' }
   }
   if (source === 'colregs') {
     return { url: 'https://www.imo.org/en/About/Conventions/Pages/COLREG.aspx', label: 'View on IMO.org' }
   }
   if (source === 'solas') {
-    return { url: 'https://www.imo.org/en/publications', label: 'View official source' }
+    return { url: 'https://www.imo.org/en/publications/Pages/default.aspx', label: 'View official source' }
   }
   if (source === 'solas_supplement') {
-    return { url: 'https://www.imo.org/en/publications', label: 'View on IMO.org' }
+    return { url: 'https://www.imo.org/en/publications/Pages/default.aspx', label: 'View on IMO.org' }
   }
   return null
 }
