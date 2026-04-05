@@ -49,6 +49,15 @@ interface SentryIssue {
   project: string
 }
 
+interface CitationError {
+  id: string
+  conversation_id: string
+  unverified_citation: string
+  model_used: string | null
+  message_preview: string
+  created_at: string
+}
+
 // Read-only admin emails — mirrors backend READONLY_ADMIN_EMAILS
 const READONLY_ADMIN_EMAILS = new Set(['kdmarchal@gmail.com'])
 
@@ -91,6 +100,8 @@ function AdminContent() {
   const [sentryIssues, setSentryIssues] = useState<SentryIssue[]>([])
   const [sentryLoading, setSentryLoading] = useState(true)
   const [exporting, setExporting] = useState<string | null>(null)
+  const [citationErrors, setCitationErrors] = useState<CitationError[]>([])
+  const [citationLoading, setCitationLoading] = useState(true)
 
   const fetchStats = useCallback(() => {
     apiRequest<AdminStats>('/admin/stats').then(setStats).catch(() => {})
@@ -112,6 +123,13 @@ function AdminContent() {
       .finally(() => setSentryLoading(false))
   }, [])
 
+  const fetchCitations = useCallback(() => {
+    apiRequest<CitationError[]>('/admin/citation-errors?limit=50')
+      .then(setCitationErrors)
+      .catch(() => {})
+      .finally(() => setCitationLoading(false))
+  }, [])
+
   useEffect(() => {
     if (hydrated && !isAdmin) {
       router.replace('/')
@@ -122,11 +140,12 @@ function AdminContent() {
     fetchStats()
     fetchUsers(0, false)
     fetchSentry()
+    fetchCitations()
     setLoading(false)
 
-    const interval = setInterval(() => { fetchStats(); fetchSentry() }, 60_000)
+    const interval = setInterval(() => { fetchStats(); fetchSentry(); fetchCitations() }, 60_000)
     return () => clearInterval(interval)
-  }, [hydrated, isAdmin, router, fetchStats, fetchUsers, fetchSentry])
+  }, [hydrated, isAdmin, router, fetchStats, fetchUsers, fetchSentry, fetchCitations])
 
   function loadMore() {
     const next = usersOffset + 50
@@ -185,6 +204,18 @@ function AdminContent() {
     }
     setEmailSending(null)
     setTimeout(() => setEmailToast(null), 4000)
+  }
+
+  async function simulateExpiry(userId: string, email: string) {
+    if (!confirm(`Simulate trial expiry for ${email}? This sets their trial to yesterday.`)) return
+    setActionLoading(`${userId}-simulate-expiry`)
+    try {
+      await apiRequest(`/admin/simulate-expiry/${userId}`, { method: 'POST' })
+      fetchUsers(0, false)
+      setUsersOffset(0)
+      fetchStats()
+    } catch { /* ignore */ }
+    setActionLoading(null)
   }
 
   async function exportChats(userId: string, email: string) {
@@ -316,6 +347,50 @@ function AdminContent() {
             )}
           </div>
 
+          {/* ── Citation Errors ──────────────────────────────────────────── */}
+          <div className="mb-8">
+            <h2 className="font-display text-lg font-bold text-[#f0ece4] tracking-wide mb-3">Citation Errors</h2>
+            {citationLoading ? (
+              <div className="bg-[#111827] rounded-xl border border-white/8 px-4 py-6 h-[72px] animate-pulse" />
+            ) : citationErrors.length === 0 ? (
+              <div className="bg-[#111827] rounded-xl border border-white/8 px-4 py-4 text-center">
+                <p className="font-mono text-sm text-[#2dd4bf]">No citation errors</p>
+              </div>
+            ) : (
+              <div className="rounded-xl border border-white/8 overflow-x-auto">
+                <table className="w-full text-left font-mono text-xs" style={{ minWidth: '600px' }}>
+                  <thead>
+                    <tr className="bg-amber-500/10 text-amber-400">
+                      <th className="px-3 py-2.5 font-medium">Citation</th>
+                      <th className="px-3 py-2.5 font-medium">Model</th>
+                      <th className="px-3 py-2.5 font-medium">Preview</th>
+                      <th className="px-3 py-2.5 font-medium">Date</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {citationErrors.map((ce, i) => (
+                      <tr key={ce.id}
+                        className={`border-t border-white/5 ${i % 2 === 0 ? 'bg-[#111827]' : 'bg-[#0f1629]'}`}>
+                        <td className="px-3 py-2 text-[#f0ece4]/90 whitespace-nowrap font-bold">
+                          {ce.unverified_citation}
+                        </td>
+                        <td className="px-3 py-2 text-[#6b7594] whitespace-nowrap">
+                          {ce.model_used ?? 'unknown'}
+                        </td>
+                        <td className="px-3 py-2 text-[#f0ece4]/60 max-w-[300px] truncate" title={ce.message_preview}>
+                          {ce.message_preview.slice(0, 120)}{ce.message_preview.length > 120 ? '...' : ''}
+                        </td>
+                        <td className="px-3 py-2 text-[#6b7594] whitespace-nowrap">
+                          {fmtDate(ce.created_at)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
           {/* ── Email Testing ─────────────────────────────────────────── */}
           {!isReadOnly && (
           <div className="mb-8">
@@ -369,7 +444,7 @@ function AdminContent() {
           </div>
 
           <div className="rounded-xl border border-white/8 overflow-x-auto">
-            <table className="w-full text-left font-mono text-xs" style={{ minWidth: '820px' }}>
+            <table className="w-full text-left font-mono text-xs" style={{ minWidth: '860px' }}>
               <thead>
                 <tr className="bg-[#2dd4bf]/10 text-[#2dd4bf]">
                   <th className="px-2 py-2 font-medium">Email</th>
@@ -425,6 +500,16 @@ function AdminContent() {
                                 disabled:opacity-50 transition-colors"
                             >
                               +T
+                            </button>
+                            <button
+                              onClick={() => simulateExpiry(u.id, u.email)}
+                              disabled={actionLoading === `${u.id}-simulate-expiry`}
+                              title="Simulate trial expiry"
+                              className="font-mono text-[9px] px-1 py-px rounded border border-amber-500/30
+                                text-amber-400/70 hover:text-amber-400 hover:bg-amber-500/10
+                                disabled:opacity-50 transition-colors"
+                            >
+                              Sim
                             </button>
                             {u.subscription_tier !== 'pro' ? (
                               <button

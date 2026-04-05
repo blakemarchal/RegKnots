@@ -6,6 +6,7 @@ import AuthGuard from '@/components/AuthGuard'
 import { AppHeader } from '@/components/AppHeader'
 import { apiRequest } from '@/lib/api'
 import { CompassRose } from '@/components/CompassRose'
+import { signalNavigation } from '@/components/NavigationProgress'
 
 interface ConversationSummary {
   id: string
@@ -62,6 +63,7 @@ function HistoryContent() {
   }, [])
 
   function openConversation(id: string) {
+    signalNavigation()
     router.push(`/?conversation_id=${id}`)
   }
 

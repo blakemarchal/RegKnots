@@ -3,6 +3,7 @@
 import { useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuthStore } from '@/lib/auth'
+import { signalNavigation } from './NavigationProgress'
 
 interface Props {
   open: boolean
@@ -38,12 +39,12 @@ export function HamburgerMenu({ open, onClose, onNewChat, onOpenVessels }: Props
 
   function handleItem(action: string) {
     if (action === 'new') onNewChat()
-    if (action === 'history') router.push('/history')
+    if (action === 'history') { signalNavigation(); router.push('/history') }
     if (action === 'vessels') onOpenVessels()
-    if (action === 'certificates') { onClose(); router.push('/certificates') }
-    if (action === 'help') { onClose(); router.push('/support') }
-    if (action === 'admin') { onClose(); router.push('/admin') }
-    if (action === 'account') { onClose(); router.push('/account') }
+    if (action === 'certificates') { signalNavigation(); onClose(); router.push('/certificates') }
+    if (action === 'help') { signalNavigation(); onClose(); router.push('/support') }
+    if (action === 'admin') { signalNavigation(); onClose(); router.push('/admin') }
+    if (action === 'account') { signalNavigation(); onClose(); router.push('/account') }
     if (action === 'signout') {
       logout().then(() => router.replace('/login'))
     }

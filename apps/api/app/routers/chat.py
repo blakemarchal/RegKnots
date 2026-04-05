@@ -96,7 +96,7 @@ async def chat_endpoint(
     if body.vessel_id:
         row = await pool.fetchrow(
             """
-            SELECT vessel_type, route_types, cargo_types
+            SELECT name, vessel_type, route_types, cargo_types, gross_tonnage
             FROM vessels
             WHERE id = $1 AND user_id = $2
             """,
@@ -105,10 +105,27 @@ async def chat_endpoint(
         )
         if row:
             vessel_profile = {
+                "vessel_name": row["name"],
                 "vessel_type": row["vessel_type"],
                 "route_types": list(row["route_types"] or []),
                 "cargo_types": list(row["cargo_types"] or []),
+                "gross_tonnage": row["gross_tonnage"],
             }
+            logger.info(
+                "Vessel profile loaded user=%s vessel=%s type=%s routes=%s cargo=%s gt=%s",
+                current_user.user_id,
+                row["name"],
+                row["vessel_type"],
+                vessel_profile["route_types"],
+                vessel_profile["cargo_types"],
+                row["gross_tonnage"],
+            )
+        else:
+            logger.warning(
+                "Vessel not found vessel_id=%s user=%s",
+                body.vessel_id,
+                current_user.user_id,
+            )
 
     # 2. Resolve conversation — load history or create new record
     conversation_id = body.conversation_id

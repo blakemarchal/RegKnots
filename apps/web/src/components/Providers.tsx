@@ -1,7 +1,13 @@
 'use client'
 
 import { HydrationGate } from './HydrationGate'
+import { NavigationProgress } from './NavigationProgress'
 
 export function Providers({ children }: { children: React.ReactNode }) {
-  return <HydrationGate>{children}</HydrationGate>
+  return (
+    <HydrationGate>
+      <NavigationProgress />
+      {children}
+    </HydrationGate>
+  )
 }

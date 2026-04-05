@@ -389,6 +389,72 @@ async def revoke_pro(
     return AdminActionResult(ok=True)
 
 
+# ── Trial expiry simulator ────────────────────────────────────────────────────
+
+
+@router.post("/simulate-expiry/{user_id}", response_model=AdminActionResult)
+async def simulate_expiry(
+    user_id: str,
+    admin: Annotated[CurrentUser, Depends(require_write_admin)],
+) -> AdminActionResult:
+    """Set a user's trial_ends_at to yesterday to simulate trial expiration."""
+    pool = await get_pool()
+    result = await pool.execute(
+        """
+        UPDATE users
+        SET trial_ends_at = NOW() - INTERVAL '1 day'
+        WHERE id = $1
+        """,
+        user_id,
+    )
+    if result == "UPDATE 0":
+        raise HTTPException(status_code=404, detail="User not found")
+    logger.info("Admin %s simulated expiry for %s", admin.email, user_id)
+    return AdminActionResult(ok=True)
+
+
+# ── Citation errors ──────────────────────────────────────────────────────────
+
+
+class CitationError(BaseModel):
+    id: str
+    conversation_id: str
+    unverified_citation: str
+    model_used: str | None
+    message_preview: str
+    created_at: str
+
+
+@router.get("/citation-errors", response_model=list[CitationError])
+async def list_citation_errors(
+    _admin: Annotated[CurrentUser, Depends(require_admin)],
+    limit: int = Query(default=50, ge=1, le=200),
+) -> list[CitationError]:
+    """Return recent citation errors for the admin dashboard."""
+    pool = await get_pool()
+    rows = await pool.fetch(
+        """
+        SELECT id, conversation_id, unverified_citation, model_used,
+               LEFT(message_content, 200) AS message_preview, created_at
+        FROM citation_errors
+        ORDER BY created_at DESC
+        LIMIT $1
+        """,
+        limit,
+    )
+    return [
+        CitationError(
+            id=str(r["id"]),
+            conversation_id=str(r["conversation_id"]),
+            unverified_citation=r["unverified_citation"],
+            model_used=r["model_used"],
+            message_preview=r["message_preview"] or "",
+            created_at=r["created_at"].isoformat() if r["created_at"] else "",
+        )
+        for r in rows
+    ]
+
+
 # ── Email testing ─────────────────────────────────────────────────────────────
 
 EmailType = Literal["welcome", "password_reset", "trial_expiry", "pilot_ended", "waitlist_confirmed"]

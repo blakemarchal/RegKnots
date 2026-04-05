@@ -178,8 +178,27 @@ async def chat(
     history = conversation_history[-_MAX_HISTORY:]
     messages = [{"role": msg.role, "content": msg.content} for msg in history]
 
+    # Build vessel context block if a vessel profile is provided
+    vessel_block = ""
+    if vessel_profile:
+        parts = [f"Vessel: {vessel_profile.get('vessel_name', 'Unknown')}"]
+        if vessel_profile.get("vessel_type"):
+            parts.append(f"Type: {vessel_profile['vessel_type']}")
+        if vessel_profile.get("route_types"):
+            parts.append(f"Route(s): {', '.join(vessel_profile['route_types'])}")
+        if vessel_profile.get("cargo_types"):
+            parts.append(f"Cargo: {', '.join(vessel_profile['cargo_types'])}")
+        if vessel_profile.get("gross_tonnage"):
+            parts.append(f"Gross Tonnage: {vessel_profile['gross_tonnage']}")
+        vessel_block = (
+            "Active vessel profile:\n" + " | ".join(parts) + "\n"
+            "Tailor your answer to this vessel's type, route, cargo, and tonnage.\n\n"
+        )
+        logger.info("Including vessel context in prompt: %s", " | ".join(parts))
+
     user_content = (
         f"{NAVIGATION_AID_REMINDER}\n\n"
+        f"{vessel_block}"
         f"Regulation context:\n{context_str}\n\n"
         f"Question: {query}"
     )
