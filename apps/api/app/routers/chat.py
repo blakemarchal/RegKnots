@@ -12,6 +12,7 @@ Flow:
 """
 
 import asyncio
+import json
 import logging
 import uuid
 from datetime import datetime, timezone
@@ -91,12 +92,14 @@ async def chat_endpoint(
     anthropic_client: AsyncAnthropic = request.app.state.anthropic
     openai_api_key: str = request.app.state.openai_api_key
 
-    # 1. Load vessel profile
+    # 1. Load vessel profile (including enriched fields)
     vessel_profile: dict | None = None
     if body.vessel_id:
         row = await pool.fetchrow(
             """
-            SELECT name, vessel_type, route_types, cargo_types, gross_tonnage
+            SELECT name, vessel_type, route_types, cargo_types, gross_tonnage,
+                   subchapter, inspection_certificate_type, manning_requirement,
+                   key_equipment, route_limitations, additional_details
             FROM vessels
             WHERE id = $1 AND user_id = $2
             """,
@@ -104,21 +107,29 @@ async def chat_endpoint(
             uuid.UUID(current_user.user_id),
         )
         if row:
-            vessel_profile = {
+            raw_profile = {
                 "vessel_name": row["name"],
                 "vessel_type": row["vessel_type"],
                 "route_types": list(row["route_types"] or []),
                 "cargo_types": list(row["cargo_types"] or []),
                 "gross_tonnage": row["gross_tonnage"],
+                "subchapter": row["subchapter"],
+                "inspection_certificate_type": row["inspection_certificate_type"],
+                "manning_requirement": row["manning_requirement"],
+                "key_equipment": list(row["key_equipment"] or []) if row["key_equipment"] else None,
+                "route_limitations": row["route_limitations"],
+                "additional_details": dict(row["additional_details"]) if row["additional_details"] else None,
+            }
+            # Remove None/empty values so the prompt isn't cluttered
+            vessel_profile = {
+                k: v for k, v in raw_profile.items()
+                if v is not None and v != {} and v != []
             }
             logger.info(
-                "Vessel profile loaded user=%s vessel=%s type=%s routes=%s cargo=%s gt=%s",
+                "Vessel profile loaded user=%s vessel=%s fields=%s",
                 current_user.user_id,
                 row["name"],
-                row["vessel_type"],
-                vessel_profile["route_types"],
-                vessel_profile["cargo_types"],
-                row["gross_tonnage"],
+                list(vessel_profile.keys()),
             )
         else:
             logger.warning(
@@ -213,13 +224,20 @@ async def chat_endpoint(
         cited_ids,
     )
 
-    # 6. Increment message count for billing
+    # 6. Apply vessel profile updates from chat response
+    if response.vessel_update and body.vessel_id:
+        try:
+            await _apply_vessel_update(pool, body.vessel_id, response.vessel_update)
+        except Exception:
+            logger.exception("Failed to apply vessel update for vessel %s", body.vessel_id)
+
+    # 7. Increment message count for billing
     await pool.execute(
         "UPDATE users SET message_count = message_count + 1 WHERE id = $1",
         uuid.UUID(current_user.user_id),
     )
 
-    # 7. Fire background title generation for brand-new conversations
+    # 8. Fire background title generation for brand-new conversations
     if is_new_conversation:
         asyncio.create_task(
             _generate_title(
@@ -231,6 +249,46 @@ async def chat_endpoint(
         )
 
     return response
+
+
+async def _apply_vessel_update(pool: asyncpg.Pool, vessel_id: uuid.UUID, update: dict) -> None:
+    """Apply progressive profile updates extracted from a chat response to a vessel."""
+    sets: list[str] = []
+    params: list = []
+    idx = 1
+
+    field_mapping = {
+        "subchapter": "subchapter",
+        "inspection_certificate_type": "inspection_certificate_type",
+        "manning_requirement": "manning_requirement",
+        "route_limitations": "route_limitations",
+    }
+
+    for update_key, db_column in field_mapping.items():
+        if update_key in update:
+            sets.append(f"{db_column} = ${idx}")
+            params.append(update[update_key])
+            idx += 1
+
+    if "key_equipment" in update:
+        sets.append(f"key_equipment = ${idx}")
+        params.append(update["key_equipment"])
+        idx += 1
+
+    # Store any extra fields in the JSONB column
+    known_keys = set(field_mapping.keys()) | {"key_equipment"}
+    additional = {k: v for k, v in update.items() if k not in known_keys}
+    if additional:
+        sets.append(f"additional_details = COALESCE(additional_details, '{{}}'::jsonb) || ${idx}::jsonb")
+        params.append(json.dumps(additional))
+        idx += 1
+
+    if sets:
+        sets.append("profile_enriched_at = NOW()")
+        params.append(vessel_id)
+        query = f"UPDATE vessels SET {', '.join(sets)} WHERE id = ${idx}"
+        await pool.execute(query, *params)
+        logger.info("Updated vessel profile %s with: %s", vessel_id, list(update.keys()))
 
 
 async def _generate_title(

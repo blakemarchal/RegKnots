@@ -33,6 +33,50 @@ _MAX_TOKENS = 2048
 # Matches both "(46 CFR 199.261)" and bare "46 CFR 199.261" — same as parseMessage.ts
 _CFR_RE = re.compile(r"\(?(\d+)\s+CFR\s+([\d]+(?:\.[\d]+(?:-[\d]+)?)?)\)?")
 
+_VESSEL_UPDATE_RE = re.compile(
+    r"\[VESSEL_UPDATE\]\s*\n(.*?)\n\[/VESSEL_UPDATE\]",
+    re.DOTALL,
+)
+
+
+def _extract_vessel_update(answer: str) -> tuple[str, dict | None]:
+    """Extract and remove VESSEL_UPDATE block from answer text.
+
+    Returns:
+        (cleaned_answer, update_dict) where update_dict is None if no block found.
+    """
+    match = _VESSEL_UPDATE_RE.search(answer)
+    if not match:
+        return answer, None
+
+    # Parse the key-value pairs
+    update: dict = {}
+    for line in match.group(1).strip().split("\n"):
+        line = line.strip()
+        if ":" not in line:
+            continue
+        key, _, value = line.partition(":")
+        key = key.strip().lower().replace(" ", "_")
+        value = value.strip()
+        if not value or value.lower() in ("none", "n/a", ""):
+            continue
+        if key == "key_equipment":
+            update[key] = [v.strip() for v in value.split(",") if v.strip()]
+        elif key == "additional":
+            # "additional: key: value" → store in dict
+            if ":" in value:
+                akey, _, aval = value.partition(":")
+                update[akey.strip().lower().replace(" ", "_")] = aval.strip()
+        else:
+            update[key] = value
+
+    # Remove the block from the answer
+    cleaned = _VESSEL_UPDATE_RE.sub("", answer).rstrip()
+
+    logger.info("Extracted vessel update: %s", list(update.keys()) if update else "empty")
+    return cleaned, update if update else None
+
+
 _UNVERIFIED_DISCLAIMER = (
     "\n\n*Note: Some referenced sections could not be verified in our current database "
     "and have been removed from this response. Please verify requirements directly on eCFR.*"
@@ -204,20 +248,37 @@ async def chat(
     # Build vessel context block if a vessel profile is provided
     vessel_block = ""
     if vessel_profile:
-        parts = [f"Vessel: {vessel_profile.get('vessel_name', 'Unknown')}"]
+        lines = [f"- Name: {vessel_profile.get('vessel_name', 'Unknown')}"]
         if vessel_profile.get("vessel_type"):
-            parts.append(f"Type: {vessel_profile['vessel_type']}")
+            lines.append(f"- Type: {vessel_profile['vessel_type']}")
         if vessel_profile.get("route_types"):
-            parts.append(f"Route(s): {', '.join(vessel_profile['route_types'])}")
+            lines.append(f"- Routes: {', '.join(vessel_profile['route_types'])}")
         if vessel_profile.get("cargo_types"):
-            parts.append(f"Cargo: {', '.join(vessel_profile['cargo_types'])}")
+            lines.append(f"- Cargo: {', '.join(vessel_profile['cargo_types'])}")
         if vessel_profile.get("gross_tonnage"):
-            parts.append(f"Gross Tonnage: {vessel_profile['gross_tonnage']}")
+            lines.append(f"- Tonnage: {vessel_profile['gross_tonnage']}")
+        if vessel_profile.get("subchapter"):
+            lines.append(f"- Subchapter: {vessel_profile['subchapter']}")
+        if vessel_profile.get("inspection_certificate_type"):
+            lines.append(f"- Inspection certificate: {vessel_profile['inspection_certificate_type']}")
+        if vessel_profile.get("manning_requirement"):
+            lines.append(f"- Manning: {vessel_profile['manning_requirement']}")
+        if vessel_profile.get("key_equipment"):
+            equip = vessel_profile["key_equipment"]
+            if isinstance(equip, list):
+                lines.append(f"- Key equipment: {', '.join(equip)}")
+            else:
+                lines.append(f"- Key equipment: {equip}")
+        if vessel_profile.get("route_limitations"):
+            lines.append(f"- Route limitations: {vessel_profile['route_limitations']}")
+        if vessel_profile.get("additional_details"):
+            for k, v in vessel_profile["additional_details"].items():
+                lines.append(f"- {k.replace('_', ' ').title()}: {v}")
         vessel_block = (
-            "Active vessel profile:\n" + " | ".join(parts) + "\n"
-            "Tailor your answer to this vessel's type, route, cargo, and tonnage.\n\n"
+            "Vessel profile:\n" + "\n".join(lines) + "\n"
+            "Tailor your answer to this vessel's characteristics.\n\n"
         )
-        logger.info("Including vessel context in prompt: %s", " | ".join(parts))
+        logger.info("Including vessel context in prompt: %d fields", len(lines))
 
     user_content = (
         f"{NAVIGATION_AID_REMINDER}\n\n"
@@ -236,6 +297,9 @@ async def chat(
     )
 
     answer = response.content[0].text
+
+    # 5b. Extract vessel update block (before citation verification)
+    answer, vessel_update = _extract_vessel_update(answer)
 
     # 6. Verify citations ─────────────────────────────────────────────────────
     #
@@ -285,4 +349,5 @@ async def chat(
         input_tokens=response.usage.input_tokens,
         output_tokens=response.usage.output_tokens,
         unverified_citations=all_unverified,
+        vessel_update=vessel_update,
     )

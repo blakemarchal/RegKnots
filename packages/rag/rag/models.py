@@ -35,3 +35,4 @@ class ChatResponse(BaseModel):
     input_tokens: int
     output_tokens: int
     unverified_citations: list[str] = []
+    vessel_update: dict | None = None
