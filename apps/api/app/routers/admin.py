@@ -435,7 +435,7 @@ async def list_citation_errors(
     rows = await pool.fetch(
         """
         SELECT id, conversation_id, unverified_citation, model_used,
-               LEFT(message_content, 200) AS message_preview, created_at
+               message_content AS message_preview, created_at
         FROM citation_errors
         ORDER BY created_at DESC
         LIMIT $1

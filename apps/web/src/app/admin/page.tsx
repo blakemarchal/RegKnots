@@ -102,6 +102,7 @@ function AdminContent() {
   const [exporting, setExporting] = useState<string | null>(null)
   const [citationErrors, setCitationErrors] = useState<CitationError[]>([])
   const [citationLoading, setCitationLoading] = useState(true)
+  const [expandedCitation, setExpandedCitation] = useState<string | null>(null)
 
   const fetchStats = useCallback(() => {
     apiRequest<AdminStats>('/admin/stats').then(setStats).catch(() => {})
@@ -368,23 +369,40 @@ function AdminContent() {
                     </tr>
                   </thead>
                   <tbody>
-                    {citationErrors.map((ce, i) => (
-                      <tr key={ce.id}
-                        className={`border-t border-white/5 ${i % 2 === 0 ? 'bg-[#111827]' : 'bg-[#0f1629]'}`}>
-                        <td className="px-3 py-2 text-[#f0ece4]/90 whitespace-nowrap font-bold">
-                          {ce.unverified_citation}
-                        </td>
-                        <td className="px-3 py-2 text-[#6b7594] whitespace-nowrap">
-                          {ce.model_used ?? 'unknown'}
-                        </td>
-                        <td className="px-3 py-2 text-[#f0ece4]/60 max-w-[300px] truncate" title={ce.message_preview}>
-                          {ce.message_preview.slice(0, 120)}{ce.message_preview.length > 120 ? '...' : ''}
-                        </td>
-                        <td className="px-3 py-2 text-[#6b7594] whitespace-nowrap">
-                          {fmtDate(ce.created_at)}
-                        </td>
-                      </tr>
-                    ))}
+                    {citationErrors.map((ce, i) => {
+                      const isExpanded = expandedCitation === ce.id
+                      const rowBg = i % 2 === 0 ? 'bg-[#111827]' : 'bg-[#0f1629]'
+                      return (
+                        <tr key={ce.id}
+                          onClick={() => setExpandedCitation(isExpanded ? null : ce.id)}
+                          className={`border-t border-white/5 ${rowBg} cursor-pointer
+                            hover:bg-white/[0.03] transition-colors`}>
+                          <td className="px-3 py-2 text-[#f0ece4]/90 whitespace-nowrap font-bold">
+                            {ce.unverified_citation}
+                          </td>
+                          <td className="px-3 py-2 text-[#6b7594] whitespace-nowrap">
+                            {ce.model_used ?? 'unknown'}
+                          </td>
+                          <td className="px-3 py-2 text-[#f0ece4]/60" colSpan={isExpanded ? 1 : 1}>
+                            {isExpanded ? (
+                              <div className="whitespace-pre-wrap break-words text-[#f0ece4]/80 leading-relaxed">
+                                {ce.message_preview}
+                              </div>
+                            ) : (
+                              <div className="truncate max-w-[300px]">
+                                {ce.message_preview.slice(0, 120)}{ce.message_preview.length > 120 ? '...' : ''}
+                                {ce.message_preview.length > 120 && (
+                                  <span className="text-[#2dd4bf]/60 ml-1">tap to expand</span>
+                                )}
+                              </div>
+                            )}
+                          </td>
+                          <td className="px-3 py-2 text-[#6b7594] whitespace-nowrap align-top">
+                            {fmtDate(ce.created_at)}
+                          </td>
+                        </tr>
+                      )
+                    })}
                   </tbody>
                 </table>
               </div>
