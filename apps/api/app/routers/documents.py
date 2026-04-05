@@ -157,9 +157,13 @@ async def _extract_with_vision(
 
     response = await client.messages.create(
         model="claude-sonnet-4-6",
-        max_tokens=2000,
+        max_tokens=4096,
         messages=[{"role": "user", "content": content_blocks}],
     )
+
+    if response.stop_reason == "max_tokens":
+        logger.warning("Vision extraction hit max_tokens — response may be truncated")
+
     return _parse_json_response(response.content[0].text)
 
 
