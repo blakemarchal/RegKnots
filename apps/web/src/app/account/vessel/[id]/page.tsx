@@ -58,6 +58,26 @@ const STATUS_COLORS: Record<string, string> = {
   failed: 'bg-red-500/15 text-red-400 border-red-500/25',
 }
 
+type ExtractionPhase = 'idle' | 'uploading' | 'reading' | 'extracting' | 'done' | 'error'
+
+const PHASE_LABELS: Record<ExtractionPhase, string> = {
+  idle: '',
+  uploading: 'Uploading document...',
+  reading: 'Reading your document...',
+  extracting: 'Extracting vessel details...',
+  done: 'Done!',
+  error: 'Extraction failed',
+}
+
+const PHASE_PROGRESS: Record<ExtractionPhase, number> = {
+  idle: 0,
+  uploading: 25,
+  reading: 55,
+  extracting: 85,
+  done: 100,
+  error: 0,
+}
+
 interface VesselData {
   id: string
   name: string
@@ -77,6 +97,27 @@ interface DocumentData {
   extracted_data: Record<string, unknown>
   extraction_status: string
   created_at: string
+}
+
+/* ── Extraction progress bar ───────────────────────────────────────── */
+
+function ExtractionProgress({ phase }: { phase: ExtractionPhase }) {
+  const pct = PHASE_PROGRESS[phase]
+  const label = PHASE_LABELS[phase]
+  if (phase === 'idle') return null
+
+  return (
+    <div className="space-y-2">
+      {/* Progress bar */}
+      <div className="h-1.5 w-full rounded-full bg-white/8 overflow-hidden">
+        <div
+          className="h-full rounded-full bg-[#2dd4bf] transition-all duration-700 ease-out"
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+      <p className="font-mono text-xs text-[#2dd4bf] animate-pulse">{label}</p>
+    </div>
+  )
 }
 
 /* ── Extracted data review card ────────────────────────────────────── */
@@ -199,12 +240,15 @@ function ExtractionReviewCard({
 function DocumentItem({
   doc,
   onDelete,
+  onRetry,
 }: {
   doc: DocumentData
   onDelete: (id: string) => void
+  onRetry: (id: string) => void
 }) {
   const [expanded, setExpanded] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [retrying, setRetrying] = useState(false)
 
   const data = doc.extracted_data
   const fields = Object.entries(data).filter(
@@ -266,18 +310,33 @@ function DocumentItem({
           ) : (
             <p className="font-mono text-[10px] text-[#6b7594]">No extracted data</p>
           )}
-          <button
-            onClick={(e) => {
-              e.stopPropagation()
-              if (!confirm('Delete this document?')) return
-              setDeleting(true)
-              onDelete(doc.id)
-            }}
-            disabled={deleting}
-            className="font-mono text-[10px] text-red-400 hover:text-red-300 transition-colors disabled:opacity-50"
-          >
-            {deleting ? 'Deleting...' : 'Delete document'}
-          </button>
+          <div className="flex gap-3">
+            {doc.extraction_status === 'failed' && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setRetrying(true)
+                  onRetry(doc.id)
+                }}
+                disabled={retrying}
+                className="font-mono text-[10px] text-[#2dd4bf] hover:text-[#2dd4bf]/80 transition-colors disabled:opacity-50"
+              >
+                {retrying ? 'Retrying...' : 'Retry extraction'}
+              </button>
+            )}
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                if (!confirm('Delete this document?')) return
+                setDeleting(true)
+                onDelete(doc.id)
+              }}
+              disabled={deleting}
+              className="font-mono text-[10px] text-red-400 hover:text-red-300 transition-colors disabled:opacity-50"
+            >
+              {deleting ? 'Deleting...' : 'Delete document'}
+            </button>
+          </div>
         </div>
       )}
     </div>
@@ -304,12 +363,33 @@ function VesselEditContent() {
 
   // Document state
   const [documents, setDocuments] = useState<DocumentData[]>([])
-  const [uploading, setUploading] = useState(false)
-  const [uploadProgress, setUploadProgress] = useState<string | null>(null)
+  const [extractionPhase, setExtractionPhase] = useState<ExtractionPhase>('idle')
   const [reviewDoc, setReviewDoc] = useState<DocumentData | null>(null)
   const [confirming, setConfirming] = useState(false)
   const [docType, setDocType] = useState('coi')
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // Phased progress timer
+  const phaseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  function startPhaseTimer() {
+    setExtractionPhase('uploading')
+    phaseTimerRef.current = setTimeout(() => {
+      setExtractionPhase('reading')
+      phaseTimerRef.current = setTimeout(() => {
+        setExtractionPhase('extracting')
+      }, 3000)
+    }, 2000)
+  }
+
+  function stopPhaseTimer(success: boolean) {
+    if (phaseTimerRef.current) {
+      clearTimeout(phaseTimerRef.current)
+      phaseTimerRef.current = null
+    }
+    setExtractionPhase(success ? 'done' : 'error')
+    setTimeout(() => setExtractionPhase('idle'), success ? 1500 : 3000)
+  }
 
   useEffect(() => {
     apiRequest<VesselData[]>('/vessels')
@@ -332,7 +412,7 @@ function VesselEditContent() {
   const fetchDocuments = useCallback(() => {
     apiRequest<DocumentData[]>(`/vessels/${vesselId}/documents`)
       .then(setDocuments)
-      .catch(() => {}) // silent fail
+      .catch(() => {})
   }, [vesselId])
 
   useEffect(() => {
@@ -373,7 +453,6 @@ function VesselEditContent() {
   }
 
   async function handleFileSelect(file: File) {
-    // Client-side validation
     const allowed = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf']
     if (!allowed.includes(file.type)) {
       setError('Unsupported file type. Use JPEG, PNG, WebP, or PDF.')
@@ -385,31 +464,27 @@ function VesselEditContent() {
     }
 
     setError(null)
-    setUploading(true)
-    setUploadProgress('Uploading...')
+    startPhaseTimer()
 
     try {
       const formData = new FormData()
       formData.append('file', file)
       formData.append('document_type', docType)
 
-      setUploadProgress('Analyzing document with AI...')
       const result = await apiUpload<DocumentData>(
         `/vessels/${vesselId}/documents`,
         formData,
       )
 
-      setUploadProgress(null)
-      setUploading(false)
+      stopPhaseTimer(result.extraction_status !== 'failed')
 
       if (result.extraction_status === 'extracted' || result.extraction_status === 'failed') {
         setReviewDoc(result)
       }
       fetchDocuments()
     } catch (e) {
+      stopPhaseTimer(false)
       setError(e instanceof Error ? e.message : 'Upload failed')
-      setUploading(false)
-      setUploadProgress(null)
     }
   }
 
@@ -430,6 +505,21 @@ function VesselEditContent() {
     }
   }
 
+  async function handleRetryDoc(docId: string) {
+    try {
+      const result = await apiRequest<DocumentData>(
+        `/vessels/${vesselId}/documents/${docId}/retry`,
+        { method: 'POST' },
+      )
+      if (result.extraction_status === 'extracted') {
+        setReviewDoc(result)
+      }
+      fetchDocuments()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Retry failed')
+    }
+  }
+
   async function handleDeleteDoc(docId: string) {
     try {
       await apiRequest(`/vessels/${vesselId}/documents/${docId}`, { method: 'DELETE' })
@@ -444,6 +534,8 @@ function VesselEditContent() {
     const file = e.dataTransfer.files[0]
     if (file) handleFileSelect(file)
   }
+
+  const isUploading = extractionPhase !== 'idle'
 
   if (loading) {
     return (
@@ -653,11 +745,11 @@ function VesselEditContent() {
             <div
               onDrop={handleDrop}
               onDragOver={(e) => e.preventDefault()}
-              onClick={() => !uploading && fileInputRef.current?.click()}
+              onClick={() => !isUploading && fileInputRef.current?.click()}
               className={`relative w-full rounded-xl border-2 border-dashed
                 flex flex-col items-center justify-center py-8 px-4 cursor-pointer
                 transition-all duration-200 group
-                ${uploading
+                ${isUploading
                   ? 'border-[#2dd4bf]/40 bg-[#2dd4bf]/5'
                   : 'border-white/15 hover:border-[#2dd4bf]/50 hover:bg-[#2dd4bf]/3 bg-[#0d1225]/50'
                 }`}
@@ -673,13 +765,11 @@ function VesselEditContent() {
                   e.target.value = ''
                 }}
               />
-              {uploading ? (
-                <>
-                  <div className="w-8 h-8 border-2 border-[#2dd4bf] border-t-transparent rounded-full animate-spin mb-3" />
-                  <p className="font-mono text-xs text-[#2dd4bf] animate-pulse">
-                    {uploadProgress}
-                  </p>
-                </>
+              {isUploading ? (
+                <div className="w-full px-4 space-y-3">
+                  <div className="w-8 h-8 border-2 border-[#2dd4bf] border-t-transparent rounded-full animate-spin mx-auto" />
+                  <ExtractionProgress phase={extractionPhase} />
+                </div>
               ) : (
                 <>
                   <div className="w-10 h-10 rounded-full bg-[#2dd4bf]/10 flex items-center justify-center mb-3
@@ -710,7 +800,12 @@ function VesselEditContent() {
                   Uploaded Documents
                 </p>
                 {documents.map((doc) => (
-                  <DocumentItem key={doc.id} doc={doc} onDelete={handleDeleteDoc} />
+                  <DocumentItem
+                    key={doc.id}
+                    doc={doc}
+                    onDelete={handleDeleteDoc}
+                    onRetry={handleRetryDoc}
+                  />
                 ))}
               </div>
             )}

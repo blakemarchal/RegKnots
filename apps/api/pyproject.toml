@@ -28,6 +28,8 @@ dependencies = [
     "tiktoken>=0.7.0",
     # Billing
     "stripe>=8.0.0",
+    # Document processing
+    "pdf2image>=1.16.0",
     # HTTP client
     "requests>=2.31.0",
     "httpx>=0.27.0",

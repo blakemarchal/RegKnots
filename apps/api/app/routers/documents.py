@@ -1,16 +1,20 @@
 """
 Vessel document upload, extraction, and management.
 
-POST   /vessels/{vessel_id}/documents              — upload + extract
-POST   /vessels/{vessel_id}/documents/{doc_id}/confirm — confirm extracted data
-GET    /vessels/{vessel_id}/documents              — list documents
-DELETE /vessels/{vessel_id}/documents/{doc_id}     — delete document
+POST   /vessels/{vessel_id}/documents                  — upload + extract
+POST   /vessels/{vessel_id}/documents/{doc_id}/confirm  — confirm extracted data
+POST   /vessels/{vessel_id}/documents/{doc_id}/retry    — re-run extraction
+POST   /vessels/{vessel_id}/documents/from-preview      — attach a previewed doc
+GET    /vessels/{vessel_id}/documents                   — list documents
+DELETE /vessels/{vessel_id}/documents/{doc_id}          — delete document
+
+POST   /documents/extract-preview  — extract without saving (for onboarding)
 """
 
 import base64
+import io
 import json
 import logging
-import os
 import uuid as _uuid
 from pathlib import Path
 from typing import Annotated
@@ -28,6 +32,7 @@ from app.db import get_pool
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/vessels", tags=["documents"])
+preview_router = APIRouter(prefix="/documents", tags=["documents"])
 
 _MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
 _ALLOWED_TYPES = {"image/jpeg", "image/png", "image/webp", "application/pdf"}
@@ -82,6 +87,19 @@ class ConfirmBody(BaseModel):
     corrections: dict = {}
 
 
+class PreviewOut(BaseModel):
+    extracted_data: dict
+    preview_id: str
+    filename: str
+    mime_type: str
+
+
+class AttachPreviewBody(BaseModel):
+    preview_id: str
+    document_type: str = "coi"
+    extracted_data: dict = {}
+
+
 # ── Helpers ─────────────────────────────────────────────────────────────────
 
 
@@ -97,54 +115,52 @@ async def _verify_vessel_ownership(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Vessel not found")
 
 
-async def _extract_with_vision(
-    file_path: str, mime_type: str, client: AsyncAnthropic,
-) -> dict:
-    """Send an image to Claude Vision for structured data extraction."""
-    with open(file_path, "rb") as f:
-        image_data = base64.b64encode(f.read()).decode("utf-8")
-
-    # For PDFs, use the document source type
-    if mime_type == "application/pdf":
-        content_block = {
-            "type": "document",
-            "source": {
-                "type": "base64",
-                "media_type": mime_type,
-                "data": image_data,
-            },
-        }
-    else:
-        content_block = {
-            "type": "image",
-            "source": {
-                "type": "base64",
-                "media_type": mime_type,
-                "data": image_data,
-            },
-        }
-
-    response = await client.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=2000,
-        messages=[{
-            "role": "user",
-            "content": [
-                content_block,
-                {"type": "text", "text": _EXTRACTION_PROMPT},
-            ],
-        }],
-    )
-
-    text = response.content[0].text.strip()
-    # Strip markdown fences if present
+def _parse_json_response(text: str) -> dict:
+    """Parse JSON from Claude's response, stripping markdown fences."""
+    text = text.strip()
     if text.startswith("```"):
         text = text.split("\n", 1)[1] if "\n" in text else text[3:]
     if text.endswith("```"):
         text = text[:-3]
     text = text.strip()
-
     return json.loads(text)
+
+
+async def _extract_with_vision(
+    file_path: str, mime_type: str, client: AsyncAnthropic,
+) -> dict:
+    """Send image(s) to Claude Vision for structured data extraction.
+
+    PDFs are converted to PNG images (up to 3 pages) via pdf2image.
+    """
+    if mime_type == "application/pdf":
+        from pdf2image import convert_from_path
+
+        images = convert_from_path(file_path, first_page=1, last_page=3, dpi=200)
+        content_blocks: list[dict] = []
+        for img in images:
+            buf = io.BytesIO()
+            img.save(buf, format="PNG")
+            b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+            content_blocks.append({
+                "type": "image",
+                "source": {"type": "base64", "media_type": "image/png", "data": b64},
+            })
+        content_blocks.append({"type": "text", "text": _EXTRACTION_PROMPT})
+    else:
+        with open(file_path, "rb") as f:
+            b64 = base64.b64encode(f.read()).decode("utf-8")
+        content_blocks = [
+            {"type": "image", "source": {"type": "base64", "media_type": mime_type, "data": b64}},
+            {"type": "text", "text": _EXTRACTION_PROMPT},
+        ]
+
+    response = await client.messages.create(
+        model="claude-sonnet-4-6",
+        max_tokens=2000,
+        messages=[{"role": "user", "content": content_blocks}],
+    )
+    return _parse_json_response(response.content[0].text)
 
 
 def _row_to_doc(r) -> DocumentOut:
@@ -166,7 +182,71 @@ def _row_to_doc(r) -> DocumentOut:
     )
 
 
-# ── Endpoints ───────────────────────────────────────────────────────────────
+def _save_upload(content: bytes, mime_type: str, subdir: str) -> tuple[_uuid.UUID, Path]:
+    """Save uploaded bytes to disk. Returns (file_uuid, path)."""
+    ext_map = {
+        "image/jpeg": ".jpg", "image/png": ".png",
+        "image/webp": ".webp", "application/pdf": ".pdf",
+    }
+    ext = ext_map.get(mime_type, ".bin")
+    file_id = _uuid.uuid4()
+    dir_path = Path(settings.upload_dir) / subdir
+    dir_path.mkdir(parents=True, exist_ok=True)
+    fp = dir_path / f"{file_id}{ext}"
+    fp.write_bytes(content)
+    return file_id, fp
+
+
+# ── Preview endpoint (no vessel_id needed) ──────────────────────────────────
+
+
+@preview_router.post("/extract-preview", status_code=status.HTTP_200_OK)
+async def extract_preview(
+    request: Request,
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    file: UploadFile = File(...),
+) -> PreviewOut:
+    """Extract data from a document without saving to DB.
+
+    Used by onboarding to pre-fill vessel details before the vessel exists.
+    The file is saved to a temp preview dir so it can be attached later via
+    ``POST /vessels/{vessel_id}/documents/from-preview``.
+    """
+    if file.content_type not in _ALLOWED_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Unsupported file type: {file.content_type}. Allowed: JPEG, PNG, WebP, PDF.",
+        )
+
+    content = await file.read()
+    if len(content) > _MAX_FILE_SIZE:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="File too large. Maximum size is 10 MB.",
+        )
+
+    file_id, fp = _save_upload(content, file.content_type, "_previews")
+    logger.info("Saved preview upload: user=%s size=%d path=%s", current_user.user_id, len(content), fp)
+
+    try:
+        anthropic_client: AsyncAnthropic = request.app.state.anthropic
+        extracted = await _extract_with_vision(str(fp), file.content_type, anthropic_client)
+    except Exception:
+        logger.exception("Preview extraction failed for %s", fp)
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Could not extract data from this document. Try a clearer photo.",
+        )
+
+    return PreviewOut(
+        extracted_data=extracted,
+        preview_id=str(file_id),
+        filename=file.filename or "upload",
+        mime_type=file.content_type,
+    )
+
+
+# ── Vessel document endpoints ───────────────────────────────────────────────
 
 
 @router.post("/{vessel_id}/documents", status_code=status.HTTP_201_CREATED)
@@ -181,14 +261,12 @@ async def upload_document(
     user_id = _uuid.UUID(current_user.user_id)
     await _verify_vessel_ownership(vessel_id, user_id, pool)
 
-    # Validate MIME type
     if file.content_type not in _ALLOWED_TYPES:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"Unsupported file type: {file.content_type}. Allowed: JPEG, PNG, WebP, PDF.",
         )
 
-    # Validate document_type
     valid_doc_types = {"coi", "safety_equipment", "safety_construction", "safety_radio", "isps", "ism", "other"}
     if document_type not in valid_doc_types:
         raise HTTPException(
@@ -196,7 +274,6 @@ async def upload_document(
             detail=f"Invalid document_type: {document_type}",
         )
 
-    # Read and validate file size
     content = await file.read()
     if len(content) > _MAX_FILE_SIZE:
         raise HTTPException(
@@ -204,28 +281,9 @@ async def upload_document(
             detail="File too large. Maximum size is 10 MB.",
         )
 
-    # Determine file extension from MIME type
-    ext_map = {
-        "image/jpeg": ".jpg",
-        "image/png": ".png",
-        "image/webp": ".webp",
-        "application/pdf": ".pdf",
-    }
-    ext = ext_map.get(file.content_type, ".bin")
+    _, file_path = _save_upload(content, file.content_type, str(vessel_id))
+    logger.info("Saved document upload: vessel=%s type=%s size=%d", vessel_id, document_type, len(content))
 
-    # Save to disk
-    file_id = _uuid.uuid4()
-    dir_path = Path(settings.upload_dir) / str(vessel_id)
-    dir_path.mkdir(parents=True, exist_ok=True)
-    file_path = dir_path / f"{file_id}{ext}"
-    file_path.write_bytes(content)
-
-    logger.info(
-        "Saved document upload: vessel=%s type=%s size=%d path=%s",
-        vessel_id, document_type, len(content), file_path,
-    )
-
-    # Create DB record
     row = await pool.fetchrow(
         """
         INSERT INTO vessel_documents
@@ -233,45 +291,75 @@ async def upload_document(
         VALUES ($1, $2, $3, $4, $5, $6, $7)
         RETURNING *
         """,
-        vessel_id,
-        user_id,
-        document_type,
-        file.filename or "upload",
-        str(file_path),
-        len(content),
-        file.content_type,
+        vessel_id, user_id, document_type,
+        file.filename or "upload", str(file_path), len(content), file.content_type,
     )
     doc_id = row["id"]
 
-    # Run extraction
     extraction_status = "pending"
     extracted: dict = {}
     try:
         anthropic_client: AsyncAnthropic = request.app.state.anthropic
         extracted = await _extract_with_vision(str(file_path), file.content_type, anthropic_client)
         extraction_status = "extracted"
-        logger.info(
-            "Extraction complete: doc=%s fields=%s",
-            doc_id, list(extracted.keys()),
-        )
+        logger.info("Extraction complete: doc=%s fields=%s", doc_id, list(extracted.keys()))
     except Exception:
         logger.exception("Extraction failed for document %s", doc_id)
         extraction_status = "failed"
 
-    # Update record with extraction results
     await pool.execute(
-        """
-        UPDATE vessel_documents
-        SET extracted_data = $1, extraction_status = $2
-        WHERE id = $3
-        """,
-        json.dumps(extracted),
-        extraction_status,
-        doc_id,
+        "UPDATE vessel_documents SET extracted_data = $1, extraction_status = $2 WHERE id = $3",
+        json.dumps(extracted), extraction_status, doc_id,
     )
 
-    # Re-fetch to get updated row
     row = await pool.fetchrow("SELECT * FROM vessel_documents WHERE id = $1", doc_id)
+    return _row_to_doc(row)
+
+
+@router.post("/{vessel_id}/documents/from-preview")
+async def attach_preview(
+    vessel_id: _uuid.UUID,
+    body: AttachPreviewBody,
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    pool: Annotated[asyncpg.Pool, Depends(get_pool)],
+) -> DocumentOut:
+    """Attach a previously extracted preview document to a vessel."""
+    user_id = _uuid.UUID(current_user.user_id)
+    await _verify_vessel_ownership(vessel_id, user_id, pool)
+
+    # Find the preview file
+    preview_dir = Path(settings.upload_dir) / "_previews"
+    matches = list(preview_dir.glob(f"{body.preview_id}.*"))
+    if not matches:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Preview file not found")
+    src = matches[0]
+
+    # Move to vessel directory
+    dest_dir = Path(settings.upload_dir) / str(vessel_id)
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest = dest_dir / src.name
+    src.rename(dest)
+
+    mime_map = {".jpg": "image/jpeg", ".png": "image/png", ".webp": "image/webp", ".pdf": "application/pdf"}
+    mime_type = mime_map.get(dest.suffix, "application/octet-stream")
+
+    row = await pool.fetchrow(
+        """
+        INSERT INTO vessel_documents
+            (vessel_id, user_id, document_type, filename, file_path,
+             file_size, mime_type, extracted_data, extraction_status)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'confirmed')
+        RETURNING *
+        """,
+        vessel_id, user_id, body.document_type,
+        dest.name, str(dest), dest.stat().st_size, mime_type,
+        json.dumps(body.extracted_data),
+    )
+
+    # Apply extracted data to vessel profile
+    if body.extracted_data:
+        await _apply_document_to_vessel(pool, vessel_id, body.extracted_data)
+
     return _row_to_doc(row)
 
 
@@ -286,7 +374,6 @@ async def confirm_document(
     user_id = _uuid.UUID(current_user.user_id)
     await _verify_vessel_ownership(vessel_id, user_id, pool)
 
-    # Fetch the document
     row = await pool.fetchrow(
         "SELECT * FROM vessel_documents WHERE id = $1 AND vessel_id = $2",
         doc_id, vessel_id,
@@ -294,7 +381,6 @@ async def confirm_document(
     if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
 
-    # Merge corrections into extracted data
     raw = row["extracted_data"]
     if isinstance(raw, str):
         extracted = json.loads(raw)
@@ -306,19 +392,58 @@ async def confirm_document(
     if body.corrections:
         extracted.update(body.corrections)
 
-    # Update document status
     await pool.execute(
-        """
-        UPDATE vessel_documents
-        SET extracted_data = $1, extraction_status = 'confirmed'
-        WHERE id = $2
-        """,
-        json.dumps(extracted),
-        doc_id,
+        "UPDATE vessel_documents SET extracted_data = $1, extraction_status = 'confirmed' WHERE id = $2",
+        json.dumps(extracted), doc_id,
     )
 
-    # Apply extracted data to vessel profile
     await _apply_document_to_vessel(pool, vessel_id, extracted)
+
+    row = await pool.fetchrow("SELECT * FROM vessel_documents WHERE id = $1", doc_id)
+    return _row_to_doc(row)
+
+
+@router.post("/{vessel_id}/documents/{doc_id}/retry")
+async def retry_extraction(
+    vessel_id: _uuid.UUID,
+    doc_id: _uuid.UUID,
+    request: Request,
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    pool: Annotated[asyncpg.Pool, Depends(get_pool)],
+) -> DocumentOut:
+    """Re-run extraction on a previously uploaded document."""
+    user_id = _uuid.UUID(current_user.user_id)
+    await _verify_vessel_ownership(vessel_id, user_id, pool)
+
+    row = await pool.fetchrow(
+        "SELECT * FROM vessel_documents WHERE id = $1 AND vessel_id = $2",
+        doc_id, vessel_id,
+    )
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+
+    fp = Path(row["file_path"])
+    if not fp.exists():
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Original file no longer exists. Please re-upload.",
+        )
+
+    extraction_status = "pending"
+    extracted: dict = {}
+    try:
+        anthropic_client: AsyncAnthropic = request.app.state.anthropic
+        extracted = await _extract_with_vision(str(fp), row["mime_type"], anthropic_client)
+        extraction_status = "extracted"
+        logger.info("Retry extraction complete: doc=%s fields=%s", doc_id, list(extracted.keys()))
+    except Exception:
+        logger.exception("Retry extraction failed for document %s", doc_id)
+        extraction_status = "failed"
+
+    await pool.execute(
+        "UPDATE vessel_documents SET extracted_data = $1, extraction_status = $2 WHERE id = $3",
+        json.dumps(extracted), extraction_status, doc_id,
+    )
 
     row = await pool.fetchrow("SELECT * FROM vessel_documents WHERE id = $1", doc_id)
     return _row_to_doc(row)
@@ -332,7 +457,6 @@ async def _apply_document_to_vessel(
     params: list = []
     idx = 1
 
-    # Direct column mappings
     field_map = {
         "subchapter": "subchapter",
         "manning_requirement": "manning_requirement",
@@ -346,7 +470,6 @@ async def _apply_document_to_vessel(
             params.append(str(val))
             idx += 1
 
-    # Gross tonnage — only if not already set
     gt = extracted.get("gross_tonnage")
     if gt and gt != "null":
         try:
@@ -357,7 +480,6 @@ async def _apply_document_to_vessel(
         except (ValueError, TypeError):
             pass
 
-    # Route → route_types
     route = extracted.get("route")
     if route and route != "null":
         route_str = str(route).lower()
@@ -373,7 +495,6 @@ async def _apply_document_to_vessel(
             params.append(route_types)
             idx += 1
 
-    # Store rich fields in additional_details JSONB
     rich_keys = [
         "official_number", "imo_number", "call_sign", "hull_material",
         "keel_date", "inspection_date", "expiration_date", "issuing_office",
@@ -409,11 +530,7 @@ async def list_documents(
     await _verify_vessel_ownership(vessel_id, user_id, pool)
 
     rows = await pool.fetch(
-        """
-        SELECT * FROM vessel_documents
-        WHERE vessel_id = $1
-        ORDER BY created_at DESC
-        """,
+        "SELECT * FROM vessel_documents WHERE vessel_id = $1 ORDER BY created_at DESC",
         vessel_id,
     )
     return [_row_to_doc(r) for r in rows]
@@ -436,12 +553,10 @@ async def delete_document(
     if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
 
-    # Delete file from disk
     try:
         fp = Path(row["file_path"])
         if fp.exists():
             fp.unlink()
-            logger.info("Deleted file: %s", fp)
     except Exception:
         logger.exception("Failed to delete file: %s", row["file_path"])
 

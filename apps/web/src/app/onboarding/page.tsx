@@ -1,8 +1,8 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
-import { apiRequest } from '@/lib/api'
+import { apiRequest, apiUpload } from '@/lib/api'
 import { useAuthStore } from '@/lib/auth'
 
 // ── Constants ──────────────────────────────────────────────────────────────────
@@ -25,19 +25,19 @@ const VESSEL_TYPES = [
 const ROUTE_OPTIONS = [
   {
     value: 'inland',
-    emoji: '🏠',
+    emoji: '\uD83C\uDFE0',
     label: 'Inland',
     desc: 'Rivers, lakes, and protected waters',
   },
   {
     value: 'coastal',
-    emoji: '🌊',
+    emoji: '\uD83C\uDF0A',
     label: 'Coastal',
     desc: 'Near-shore and coastal routes',
   },
   {
     value: 'international',
-    emoji: '🌐',
+    emoji: '\uD83C\uDF10',
     label: 'International',
     desc: 'Offshore and international voyages',
   },
@@ -76,6 +76,13 @@ interface VesselResponse {
   cargo_types: string[]
 }
 
+interface PreviewResult {
+  extracted_data: Record<string, unknown>
+  preview_id: string
+  filename: string
+  mime_type: string
+}
+
 const EMPTY_FORM: VesselForm = {
   name: '',
   imo_mmsi: '',
@@ -83,6 +90,46 @@ const EMPTY_FORM: VesselForm = {
   gross_tonnage: '',
   route_types: [],
   cargo_types: [],
+}
+
+type ExtractionPhase = 'idle' | 'uploading' | 'reading' | 'extracting' | 'done' | 'error'
+
+const PHASE_LABELS: Record<ExtractionPhase, string> = {
+  idle: '',
+  uploading: 'Uploading document...',
+  reading: 'Reading your COI...',
+  extracting: 'Extracting vessel details...',
+  done: 'Done!',
+  error: 'Could not read document',
+}
+
+const PHASE_PROGRESS: Record<ExtractionPhase, number> = {
+  idle: 0, uploading: 25, reading: 55, extracting: 85, done: 100, error: 0,
+}
+
+// ── Vessel type mapping (extracted text → dropdown value) ─────────────────────
+
+function mapVesselType(extracted: string): string {
+  const lower = extracted.toLowerCase()
+  if (lower.includes('container')) return 'Containership'
+  if (lower.includes('tanker') || lower.includes('tank vessel') || lower.includes('tank barge')) return 'Tanker'
+  if (lower.includes('bulk')) return 'Bulk Carrier'
+  if (lower.includes('osv') || lower.includes('offshore') || lower.includes('supply')) return 'OSV / Offshore Support'
+  if (lower.includes('tow') || lower.includes('tug')) return 'Towing / Tugboat'
+  if (lower.includes('passenger') || lower.includes('small passenger')) return 'Passenger Vessel'
+  if (lower.includes('ferry')) return 'Ferry'
+  if (lower.includes('fish')) return 'Fish Processing'
+  if (lower.includes('research')) return 'Research Vessel'
+  return 'Other'
+}
+
+function mapRouteTypes(extracted: string): string[] {
+  const lower = extracted.toLowerCase()
+  const routes: string[] = []
+  if (['inland', 'river', 'lake', 'great lakes'].some((k) => lower.includes(k))) routes.push('inland')
+  if (['coast', 'near-coastal', 'coastwise'].some((k) => lower.includes(k))) routes.push('coastal')
+  if (['ocean', 'international', 'unlimited'].some((k) => lower.includes(k))) routes.push('international')
+  return routes.length > 0 ? routes : ['coastal']
 }
 
 // ── Sub-components ─────────────────────────────────────────────────────────────
@@ -187,13 +234,40 @@ export default function OnboardingPage() {
   const router = useRouter()
   const { addVessel, setActiveVessel } = useAuthStore()
 
-  const [step, setStep] = useState(1)
+  // step=0 is the COI fast-track screen; steps 1-5 are the original flow
+  const [step, setStep] = useState(0)
   const [direction, setDirection] = useState<'forward' | 'back'>('forward')
   const [form, setForm] = useState<VesselForm>(EMPTY_FORM)
   const [errors, setErrors] = useState<Partial<Record<keyof VesselForm, string>>>({})
   const [completedVessels, setCompletedVessels] = useState<VesselForm[]>([])
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
+
+  // COI fast-track state
+  const [extractionPhase, setExtractionPhase] = useState<ExtractionPhase>('idle')
+  const [coiPreviewId, setCoiPreviewId] = useState<string | null>(null)
+  const [coiExtractedData, setCoiExtractedData] = useState<Record<string, unknown> | null>(null)
+  const [coiError, setCoiError] = useState<string | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const phaseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  function startPhaseTimer() {
+    setExtractionPhase('uploading')
+    phaseTimerRef.current = setTimeout(() => {
+      setExtractionPhase('reading')
+      phaseTimerRef.current = setTimeout(() => {
+        setExtractionPhase('extracting')
+      }, 3000)
+    }, 2000)
+  }
+
+  function stopPhaseTimer(success: boolean) {
+    if (phaseTimerRef.current) {
+      clearTimeout(phaseTimerRef.current)
+      phaseTimerRef.current = null
+    }
+    setExtractionPhase(success ? 'done' : 'error')
+  }
 
   // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -243,7 +317,8 @@ export default function OnboardingPage() {
   function goBack() {
     setErrors({})
     setDirection('back')
-    setStep((s) => s - 1)
+    // From step 1, go back to step 0 (COI screen)
+    setStep((s) => (s <= 1 ? 0 : s - 1))
   }
 
   function jumpToStep(n: number) {
@@ -255,10 +330,67 @@ export default function OnboardingPage() {
   function addAnotherVessel() {
     setCompletedVessels((prev) => [...prev, form])
     setForm(EMPTY_FORM)
+    setCoiPreviewId(null)
+    setCoiExtractedData(null)
     setErrors({})
     setDirection('forward')
-    setStep(1)
+    setStep(0)
   }
+
+  // ── COI upload handler ─────────────────────────────────────────────────────
+
+  async function handleCoiUpload(file: File) {
+    const allowed = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf']
+    if (!allowed.includes(file.type)) {
+      setCoiError('Unsupported file type. Use JPEG, PNG, WebP, or PDF.')
+      return
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      setCoiError('File too large. Maximum size is 10 MB.')
+      return
+    }
+
+    setCoiError(null)
+    startPhaseTimer()
+
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+
+      const result = await apiUpload<PreviewResult>(
+        '/documents/extract-preview',
+        formData,
+      )
+
+      stopPhaseTimer(true)
+      setCoiPreviewId(result.preview_id)
+      setCoiExtractedData(result.extracted_data)
+
+      // Pre-fill the form
+      const d = result.extracted_data
+      const preFilled: VesselForm = {
+        name: (d.vessel_name as string) || '',
+        imo_mmsi: (d.imo_number as string) || (d.official_number as string) || '',
+        vessel_type: d.vessel_type ? mapVesselType(d.vessel_type as string) : '',
+        gross_tonnage: d.gross_tonnage ? String(d.gross_tonnage).replace(',', '') : '',
+        route_types: d.route ? mapRouteTypes(d.route as string) : [],
+        cargo_types: [],
+      }
+      setForm(preFilled)
+
+      // Jump to review after a short delay to show "Done!"
+      setTimeout(() => {
+        setDirection('forward')
+        setStep(5)
+      }, 800)
+    } catch (e) {
+      stopPhaseTimer(false)
+      setCoiError(e instanceof Error ? e.message : 'Could not extract data. Try a clearer photo.')
+      setTimeout(() => setExtractionPhase('idle'), 2000)
+    }
+  }
+
+  // ── Final submit ────────────────────────────────────────────────────────────
 
   async function handleSetSail() {
     setIsSubmitting(true)
@@ -268,7 +400,8 @@ export default function OnboardingPage() {
     const created: { id: string; name: string }[] = []
 
     try {
-      for (const v of allForms) {
+      for (let i = 0; i < allForms.length; i++) {
+        const v = allForms[i]
         const result = await apiRequest<VesselResponse>('/vessels', {
           method: 'POST',
           body: JSON.stringify({
@@ -281,6 +414,23 @@ export default function OnboardingPage() {
           }),
         })
         created.push({ id: result.id, name: result.name })
+
+        // Attach the COI preview document to the first vessel (current form)
+        if (i === allForms.length - 1 && coiPreviewId && coiExtractedData) {
+          try {
+            await apiRequest(`/vessels/${result.id}/documents/from-preview`, {
+              method: 'POST',
+              body: JSON.stringify({
+                preview_id: coiPreviewId,
+                document_type: 'coi',
+                extracted_data: coiExtractedData,
+              }),
+            })
+          } catch {
+            // Non-fatal: vessel is created, COI attachment just failed
+            console.warn('Failed to attach COI preview document')
+          }
+        }
       }
 
       for (const v of created) {
@@ -301,7 +451,7 @@ export default function OnboardingPage() {
       if (e.key !== 'Enter') return
       const tag = (e.target as HTMLElement).tagName
       if (tag === 'BUTTON' || tag === 'SELECT' || tag === 'TEXTAREA') return
-      if (step < 5) advance()
+      if (step >= 1 && step < 5) advance()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -314,6 +464,102 @@ export default function OnboardingPage() {
   }
 
   // ── Step renderers ────────────────────────────────────────────────────────────
+
+  function renderStep0() {
+    const isExtracting = extractionPhase !== 'idle' && extractionPhase !== 'error'
+    const pct = PHASE_PROGRESS[extractionPhase]
+
+    return (
+      <div className="flex flex-col gap-6 items-center text-center">
+        <div>
+          <h2 className="font-display text-2xl font-bold text-[--color-off-white] tracking-wide">
+            Got your COI handy?
+          </h2>
+          <p className="font-mono text-sm text-[--color-muted] mt-2 max-w-xs mx-auto">
+            Upload a photo or PDF of your Certificate of Inspection and we&apos;ll fill in your vessel details automatically.
+          </p>
+        </div>
+
+        {/* Upload zone */}
+        <div
+          onClick={() => !isExtracting && fileInputRef.current?.click()}
+          onDrop={(e) => {
+            e.preventDefault()
+            const f = e.dataTransfer.files[0]
+            if (f) handleCoiUpload(f)
+          }}
+          onDragOver={(e) => e.preventDefault()}
+          className={`relative w-full rounded-xl border-2 border-dashed
+            flex flex-col items-center justify-center py-10 px-4 cursor-pointer
+            transition-all duration-200 group
+            ${isExtracting
+              ? 'border-[--color-teal]/40 bg-[--color-teal]/5'
+              : 'border-white/15 hover:border-[--color-teal]/50 hover:bg-[--color-teal]/3 bg-[--color-surface-dim]'
+            }`}
+        >
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/jpeg,image/png,image/webp,application/pdf"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0]
+              if (f) handleCoiUpload(f)
+              e.target.value = ''
+            }}
+          />
+          {isExtracting ? (
+            <div className="w-full px-4 space-y-3">
+              <div className="w-8 h-8 border-2 border-[--color-teal] border-t-transparent rounded-full animate-spin mx-auto" />
+              <div className="h-1.5 w-full rounded-full bg-white/8 overflow-hidden">
+                <div
+                  className="h-full rounded-full bg-[--color-teal] transition-all duration-700 ease-out"
+                  style={{ width: `${pct}%` }}
+                />
+              </div>
+              <p className="font-mono text-xs text-[--color-teal] animate-pulse">
+                {PHASE_LABELS[extractionPhase]}
+              </p>
+            </div>
+          ) : (
+            <>
+              <div className="w-12 h-12 rounded-full bg-[--color-teal]/10 flex items-center justify-center mb-3
+                group-hover:bg-[--color-teal]/20 transition-colors">
+                <svg className="w-6 h-6 text-[--color-teal]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" strokeLinecap="round" strokeLinejoin="round" />
+                  <polyline points="17 8 12 3 7 8" strokeLinecap="round" strokeLinejoin="round" />
+                  <line x1="12" y1="3" x2="12" y2="15" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </div>
+              <p className="font-mono text-sm text-[--color-off-white] font-medium mb-1">
+                Upload your COI
+              </p>
+              <p className="font-mono text-[10px] text-[--color-muted]">
+                Photo, scan, or PDF &middot; Max 10 MB
+              </p>
+            </>
+          )}
+        </div>
+
+        {coiError && (
+          <p className="font-mono text-xs text-red-400 bg-red-400/10 border border-red-400/20 rounded-lg px-3 py-2 w-full">
+            {coiError}
+          </p>
+        )}
+
+        {/* Skip link */}
+        <button
+          onClick={() => {
+            setDirection('forward')
+            setStep(1)
+          }}
+          className="font-mono text-sm text-[--color-muted] hover:text-[--color-off-white] transition-colors"
+        >
+          Skip &mdash; I&apos;ll enter details manually
+        </button>
+      </div>
+    )
+  }
 
   function renderStep1() {
     return (
@@ -471,6 +717,19 @@ export default function OnboardingPage() {
   function renderStep5() {
     return (
       <div className="flex flex-col gap-5">
+        {/* COI pre-fill banner */}
+        {coiPreviewId && (
+          <div className="flex items-center gap-2 bg-[--color-teal]/8 border border-[--color-teal]/25 rounded-xl px-4 py-3">
+            <svg className="w-4 h-4 text-[--color-teal] flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M9 12l2 2 4-4" strokeLinecap="round" strokeLinejoin="round" />
+              <circle cx="12" cy="12" r="10" />
+            </svg>
+            <p className="font-mono text-xs text-[--color-teal]">
+              Pre-filled from your COI — review and edit below
+            </p>
+          </div>
+        )}
+
         {/* Previously added vessels */}
         {completedVessels.length > 0 && (
           <div className="bg-[--color-surface-dim] border border-white/8 rounded-xl p-4">
@@ -537,7 +796,7 @@ export default function OnboardingPage() {
           disabled={isSubmitting}
           className="w-full bg-[--color-teal] hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed text-[--color-navy] font-bold font-mono text-sm uppercase tracking-wider rounded-xl py-3.5 transition-[filter] duration-150"
         >
-          {isSubmitting ? 'Saving vessels…' : 'Set Sail'}
+          {isSubmitting ? 'Saving vessels\u2026' : 'Set Sail'}
         </button>
       </div>
     )
@@ -545,22 +804,26 @@ export default function OnboardingPage() {
 
   // ── Layout ────────────────────────────────────────────────────────────────────
 
-  const stepContent = [renderStep1, renderStep2, renderStep3, renderStep4, renderStep5][step - 1]
+  const isStep0 = step === 0
+  const stepRenderers = [renderStep0, renderStep1, renderStep2, renderStep3, renderStep4, renderStep5]
+  const stepContent = stepRenderers[step]
 
   return (
     <main className="min-h-screen bg-[--color-navy] flex flex-col">
-      {/* Header */}
-      <header className="flex-shrink-0 px-5 pt-8 pb-5 bg-[--color-charcoal]/60 border-b border-white/8">
-        <div className="max-w-sm mx-auto">
-          <ProgressBar step={step} />
-        </div>
-      </header>
+      {/* Header — hide progress bar on step 0 */}
+      {!isStep0 && (
+        <header className="flex-shrink-0 px-5 pt-8 pb-5 bg-[--color-charcoal]/60 border-b border-white/8">
+          <div className="max-w-sm mx-auto">
+            <ProgressBar step={step} />
+          </div>
+        </header>
+      )}
 
       {/* Scrollable step area */}
       <div className="flex-1 overflow-y-auto">
         <div
           key={step}
-          className={`max-w-sm mx-auto px-5 py-7 animate-[${
+          className={`max-w-sm mx-auto px-5 ${isStep0 ? 'py-16' : 'py-7'} animate-[${
             direction === 'forward' ? 'stepInRight' : 'stepInLeft'
           }_0.28s_ease-out]`}
         >
@@ -568,33 +831,31 @@ export default function OnboardingPage() {
         </div>
       </div>
 
-      {/* Navigation footer */}
-      <footer className="flex-shrink-0 bg-[--color-charcoal]/60 border-t border-white/8 px-5 py-4">
-        <div className="max-w-sm mx-auto flex items-center justify-between gap-3">
-          {step > 1 ? (
+      {/* Navigation footer — hide on step 0 */}
+      {!isStep0 && (
+        <footer className="flex-shrink-0 bg-[--color-charcoal]/60 border-t border-white/8 px-5 py-4">
+          <div className="max-w-sm mx-auto flex items-center justify-between gap-3">
             <button
               type="button"
               onClick={goBack}
               disabled={isSubmitting}
               className="font-mono text-sm text-[--color-muted] hover:text-[#f0ece4] transition-[color] duration-150 disabled:opacity-50"
             >
-              ← Back
+              &larr; Back
             </button>
-          ) : (
-            <div />
-          )}
 
-          {step < 5 && (
-            <button
-              type="button"
-              onClick={advance}
-              className="font-mono bg-[--color-teal] hover:brightness-110 text-[--color-navy] font-bold text-sm uppercase tracking-wider rounded-lg px-6 py-2.5 transition-[filter] duration-150"
-            >
-              {step === 4 ? 'Review' : 'Continue →'}
-            </button>
-          )}
-        </div>
-      </footer>
+            {step < 5 && (
+              <button
+                type="button"
+                onClick={advance}
+                className="font-mono bg-[--color-teal] hover:brightness-110 text-[--color-navy] font-bold text-sm uppercase tracking-wider rounded-lg px-6 py-2.5 transition-[filter] duration-150"
+              >
+                {step === 4 ? 'Review' : 'Continue \u2192'}
+              </button>
+            )}
+          </div>
+        </footer>
+      )}
     </main>
   )
 }
