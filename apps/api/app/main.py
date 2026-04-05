@@ -19,7 +19,7 @@ if settings.sentry_dsn:
         environment=settings.environment,
     )
 from app.db import init_pool, close_pool, close_redis
-from app.routers import admin, auth, billing, health, chat, vessels, regulations, conversations, support, survey, waitlist
+from app.routers import admin, auth, billing, documents, health, chat, vessels, regulations, conversations, support, survey, waitlist
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +68,7 @@ app.include_router(health.router)
 app.include_router(auth.router)
 app.include_router(chat.router)
 app.include_router(vessels.router)
+app.include_router(documents.router)
 app.include_router(regulations.router)
 app.include_router(conversations.router)
 app.include_router(billing.router)

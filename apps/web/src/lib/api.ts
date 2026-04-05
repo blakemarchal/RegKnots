@@ -46,3 +46,42 @@ export async function apiRequest<T = unknown>(
 
   return res.json() as Promise<T>
 }
+
+/**
+ * Upload a file via multipart/form-data.
+ * Does NOT set Content-Type — the browser handles the boundary.
+ */
+export async function apiUpload<T = unknown>(
+  path: string,
+  formData: FormData,
+): Promise<T> {
+  const store = useAuthStore.getState()
+  let token = store.accessToken
+
+  const doUpload = (t: string | null) =>
+    fetch(`${API_URL}${path}`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: t ? { Authorization: `Bearer ${t}` } : {},
+      body: formData,
+    })
+
+  let res = await doUpload(token)
+
+  if (res.status === 401) {
+    const refreshed = await store.refreshAuth()
+    if (!refreshed) {
+      window.location.href = '/login'
+      throw new Error('Session expired')
+    }
+    token = useAuthStore.getState().accessToken
+    res = await doUpload(token)
+  }
+
+  if (!res.ok) {
+    const detail = await res.text().catch(() => res.statusText)
+    throw new Error(`API error ${res.status}: ${detail}`)
+  }
+
+  return res.json() as Promise<T>
+}

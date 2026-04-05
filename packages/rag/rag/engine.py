@@ -274,8 +274,34 @@ async def chat(
         if vessel_profile.get("additional_details"):
             for k, v in vessel_profile["additional_details"].items():
                 lines.append(f"- {k.replace('_', ' ').title()}: {v}")
+
+        # Include confirmed document extractions
+        doc_sections: list[str] = []
+        for doc_info in vessel_profile.get("_confirmed_documents", []):
+            doc_type = doc_info.get("type", "document")
+            data = doc_info.get("data", {})
+            if not data:
+                continue
+            type_labels = {
+                "coi": "Certificate of Inspection",
+                "safety_equipment": "Safety Equipment Certificate",
+                "safety_construction": "Safety Construction Certificate",
+                "safety_radio": "Safety Radio Certificate",
+                "isps": "ISPS Certificate",
+                "ism": "ISM Certificate",
+                "other": "Vessel Document",
+            }
+            label = type_labels.get(doc_type, "Vessel Document")
+            doc_lines = [f"\nFrom uploaded {label}:"]
+            for dk, dv in data.items():
+                if dv and str(dv).lower() not in ("null", "none", "n/a", ""):
+                    doc_lines.append(f"- {dk.replace('_', ' ').title()}: {dv}")
+            if len(doc_lines) > 1:
+                doc_sections.append("\n".join(doc_lines))
+
         vessel_block = (
             "Vessel profile:\n" + "\n".join(lines) + "\n"
+            + "".join(doc_sections) + "\n"
             "Tailor your answer to this vessel's characteristics.\n\n"
         )
         logger.info("Including vessel context in prompt: %d fields", len(lines))

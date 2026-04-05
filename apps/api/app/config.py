@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     stripe_annual_price_id: str = Field(default="", validation_alias="STRIPE_ANNUAL_PRICE_ID")
     app_url: str = "https://regknots.com"
 
+    # File uploads
+    upload_dir: str = str(_REPO_ROOT / "data" / "uploads" / "documents")
+
     # Monitoring
     sentry_dsn: str = Field(default="", validation_alias="SENTRY_DSN")
     sentry_auth_token: str = Field(default="", validation_alias="SENTRY_AUTH_TOKEN")

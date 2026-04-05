@@ -142,6 +142,33 @@ async def chat_endpoint(
                 current_user.user_id,
             )
 
+    # 1b. Load confirmed document data for this vessel
+    if body.vessel_id and vessel_profile:
+        doc_rows = await pool.fetch(
+            """SELECT document_type, extracted_data FROM vessel_documents
+               WHERE vessel_id = $1 AND extraction_status = 'confirmed'
+               ORDER BY created_at DESC LIMIT 3""",
+            body.vessel_id,
+        )
+        if doc_rows:
+            doc_data_list: list[dict] = []
+            for dr in doc_rows:
+                raw_ed = dr["extracted_data"]
+                if isinstance(raw_ed, str):
+                    ed = json.loads(raw_ed)
+                elif raw_ed:
+                    ed = dict(raw_ed)
+                else:
+                    ed = {}
+                if ed:
+                    doc_data_list.append({"type": dr["document_type"], "data": ed})
+            if doc_data_list:
+                vessel_profile["_confirmed_documents"] = doc_data_list
+                logger.info(
+                    "Loaded %d confirmed document(s) for vessel %s",
+                    len(doc_data_list), body.vessel_id,
+                )
+
     # 2. Resolve conversation — load history or create new record
     conversation_id = body.conversation_id
     is_new_conversation = conversation_id is None
