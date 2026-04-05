@@ -10,6 +10,7 @@ interface Props {
   onClose: () => void
   onNewChat: () => void
   onOpenVessels: () => void
+  onOpenSurvey?: () => void
 }
 
 const BASE_MENU_ITEMS = [
@@ -18,12 +19,13 @@ const BASE_MENU_ITEMS = [
   { icon: '\u2693', label: 'My Vessels', action: 'vessels' },
   { icon: '\u25A1', label: 'Certificates', action: 'certificates' },
   { icon: '?', label: 'Help', action: 'help' },
+  { icon: '\u2709', label: 'Give Feedback', action: 'feedback' },
   { icon: '\u25CE', label: 'Account', action: 'account' },
 ]
 
 const ADMIN_ITEM = { icon: '\u2318', label: 'Admin', action: 'admin' }
 
-export function HamburgerMenu({ open, onClose, onNewChat, onOpenVessels }: Props) {
+export function HamburgerMenu({ open, onClose, onNewChat, onOpenVessels, onOpenSurvey }: Props) {
   const router = useRouter()
   const logout = useAuthStore((s) => s.logout)
   const isAdmin = useAuthStore((s) => s.user?.is_admin ?? false)
@@ -43,6 +45,7 @@ export function HamburgerMenu({ open, onClose, onNewChat, onOpenVessels }: Props
     if (action === 'vessels') onOpenVessels()
     if (action === 'certificates') { signalNavigation(); onClose(); router.push('/certificates') }
     if (action === 'help') { signalNavigation(); onClose(); router.push('/support') }
+    if (action === 'feedback') { onClose(); onOpenSurvey?.() }
     if (action === 'admin') { signalNavigation(); onClose(); router.push('/admin') }
     if (action === 'account') { signalNavigation(); onClose(); router.push('/account') }
     if (action === 'signout') {

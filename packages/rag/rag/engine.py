@@ -34,8 +34,8 @@ _MAX_TOKENS = 2048
 _CFR_RE = re.compile(r"\(?(\d+)\s+CFR\s+([\d]+(?:\.[\d]+(?:-[\d]+)?)?)\)?")
 
 _UNVERIFIED_DISCLAIMER = (
-    "\n\n*Note: One or more cited sections could not be verified in the current "
-    "regulation database. Please verify directly on eCFR.*"
+    "\n\n*Note: Some referenced sections could not be verified in our current database "
+    "and have been removed from this response. Please verify requirements directly on eCFR.*"
 )
 
 
@@ -135,6 +135,29 @@ async def _log_citation_errors(
         len(unverified),
         conversation_id,
     )
+
+
+def _strip_unverified_citations(answer: str, unverified: list[str]) -> str:
+    """Remove inline references to unverified citations from the answer text.
+
+    Handles both parenthesized "(46 CFR 131)" and bare "46 CFR 131" formats.
+    Uses word-boundary guards so "46 CFR 131" doesn't match "46 CFR 131.45".
+    """
+    for section_number in unverified:
+        escaped = re.escape(section_number)
+        # Remove parenthesized format: "(46 CFR 131)" with optional leading space
+        answer = re.sub(r"\s*\(" + escaped + r"\)", "", answer)
+        # Remove bare format only when NOT followed by a dot+digit (sub-section)
+        answer = re.sub(r"\b" + escaped + r"\b(?!\.\d)", "", answer)
+
+    # Clean up artifacts: double spaces, orphaned punctuation patterns
+    answer = re.sub(r"  +", " ", answer)                      # collapse double spaces
+    answer = re.sub(r"\s+([,;.])", r"\1", answer)             # " ," → ","
+    answer = re.sub(r"(per|under|in|by|see|of)\s*[,;.]", r"\1", answer)  # "per ," → "per"
+    answer = re.sub(r"\(\s*\)", "", answer)                    # empty parens "()"
+    answer = re.sub(r"  +", " ", answer)                      # final collapse
+
+    return answer.strip()
 
 
 async def chat(
@@ -242,7 +265,7 @@ async def chat(
 
     # 7. Handle unverified citations ──────────────────────────────────────────
     if all_unverified:
-        answer = answer + _UNVERIFIED_DISCLAIMER
+        # Log citation errors BEFORE stripping (so admin can see original text)
         await _log_citation_errors(
             unverified=all_unverified,
             conversation_id=conversation_id,
@@ -250,6 +273,9 @@ async def chat(
             model_used=route.model,
             pool=pool,
         )
+        # Strip unverified inline citations from the answer text
+        answer = _strip_unverified_citations(answer, all_unverified)
+        answer = answer + _UNVERIFIED_DISCLAIMER
 
     return ChatResponse(
         answer=answer,

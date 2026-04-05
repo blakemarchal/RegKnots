@@ -43,6 +43,7 @@ function ChatInterfaceInner({ initialConversationId }: Props) {
   const [loading, setLoading] = useState(false)
   const [conversationId, setConversationId] = useState<string | null>(initialConversationId)
   const [menuOpen, setMenuOpen] = useState(false)
+  const [surveyOpen, setSurveyOpen] = useState(false)
   const [restoring, setRestoring] = useState(!!initialConversationId)
   const [rateLimitMsg, setRateLimitMsg] = useState<string | null>(null)
   const [pilotEndedMsg, setPilotEndedMsg] = useState<string | null>(null)
@@ -321,6 +322,7 @@ function ChatInterfaceInner({ initialConversationId }: Props) {
         onClose={() => setMenuOpen(false)}
         onNewChat={handleNewChat}
         onOpenVessels={openVesselSheet}
+        onOpenSurvey={() => setSurveyOpen(true)}
       />
 
       {/* ── Vessel selector sheet ────────────────────────────────── */}
@@ -346,8 +348,11 @@ function ChatInterfaceInner({ initialConversationId }: Props) {
         />
       )}
 
-      {/* ── Pilot survey modal ───────────────────────────────────── */}
+      {/* ── Pilot survey modal (auto-triggered by billing or menu) ── */}
       <PilotSurveyModal billing={billing} />
+      {surveyOpen && (
+        <PilotSurveyModal forceOpen onClose={() => setSurveyOpen(false)} />
+      )}
     </div>
   )
 }

@@ -6,6 +6,7 @@ import AuthGuard from '@/components/AuthGuard'
 import { AppHeader } from '@/components/AppHeader'
 import { useAuthStore } from '@/lib/auth'
 import { apiRequest } from '@/lib/api'
+import { PilotSurveyModal } from '@/components/PilotSurveyModal'
 
 // ── Types ───────────────────────────────────────────────────────────────────────
 
@@ -58,6 +59,29 @@ interface CitationError {
   created_at: string
 }
 
+interface SurveyResponse {
+  id: string
+  email: string
+  full_name: string | null
+  overall_rating: number
+  usefulness: string | null
+  favorite_feature: string | null
+  missing_feature: string | null
+  would_subscribe: boolean | null
+  price_feedback: string | null
+  vessel_type_used: string | null
+  additional_comments: string | null
+  created_at: string
+}
+
+interface SurveyAggregates {
+  total_responses: number
+  average_rating: number
+  would_subscribe_pct: number
+  top_missing_feature: string | null
+  responses: SurveyResponse[]
+}
+
 // Read-only admin emails — mirrors backend READONLY_ADMIN_EMAILS
 const READONLY_ADMIN_EMAILS = new Set(['kdmarchal@gmail.com'])
 
@@ -103,6 +127,9 @@ function AdminContent() {
   const [citationErrors, setCitationErrors] = useState<CitationError[]>([])
   const [citationLoading, setCitationLoading] = useState(true)
   const [expandedCitation, setExpandedCitation] = useState<string | null>(null)
+  const [surveyData, setSurveyData] = useState<SurveyAggregates | null>(null)
+  const [surveyLoading, setSurveyLoading] = useState(true)
+  const [surveyPreview, setSurveyPreview] = useState(false)
 
   const fetchStats = useCallback(() => {
     apiRequest<AdminStats>('/admin/stats').then(setStats).catch(() => {})
@@ -131,6 +158,13 @@ function AdminContent() {
       .finally(() => setCitationLoading(false))
   }, [])
 
+  const fetchSurvey = useCallback(() => {
+    apiRequest<SurveyAggregates>('/survey/admin/responses')
+      .then(setSurveyData)
+      .catch(() => {})
+      .finally(() => setSurveyLoading(false))
+  }, [])
+
   useEffect(() => {
     if (hydrated && !isAdmin) {
       router.replace('/')
@@ -142,11 +176,12 @@ function AdminContent() {
     fetchUsers(0, false)
     fetchSentry()
     fetchCitations()
+    fetchSurvey()
     setLoading(false)
 
-    const interval = setInterval(() => { fetchStats(); fetchSentry(); fetchCitations() }, 60_000)
+    const interval = setInterval(() => { fetchStats(); fetchSentry(); fetchCitations(); fetchSurvey() }, 60_000)
     return () => clearInterval(interval)
-  }, [hydrated, isAdmin, router, fetchStats, fetchUsers, fetchSentry, fetchCitations])
+  }, [hydrated, isAdmin, router, fetchStats, fetchUsers, fetchSentry, fetchCitations, fetchSurvey])
 
   function loadMore() {
     const next = usersOffset + 50
@@ -345,6 +380,88 @@ function AdminContent() {
                   </tbody>
                 </table>
               </div>
+            )}
+          </div>
+
+          {/* ── Survey Responses ────────────────────────────────────────── */}
+          <div className="mb-8">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="font-display text-lg font-bold text-[#f0ece4] tracking-wide">Survey Responses</h2>
+              {!isReadOnly && (
+                <button
+                  onClick={() => setSurveyPreview(true)}
+                  className="font-mono text-xs px-3 py-1.5 rounded-lg border border-[#2dd4bf]/30
+                    text-[#2dd4bf] hover:bg-[#2dd4bf]/10 transition-colors"
+                >
+                  Preview Survey
+                </button>
+              )}
+            </div>
+
+            {surveyLoading ? (
+              <div className="bg-[#111827] rounded-xl border border-white/8 px-4 py-6 h-[72px] animate-pulse" />
+            ) : !surveyData || surveyData.total_responses === 0 ? (
+              <div className="bg-[#111827] rounded-xl border border-white/8 px-4 py-4 text-center">
+                <p className="font-mono text-sm text-[#6b7594]">No survey responses yet</p>
+              </div>
+            ) : (
+              <>
+                {/* Aggregate stats */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+                  <StatCard label="Responses" value={surveyData.total_responses} />
+                  <StatCard label="Avg Rating" value={`${surveyData.average_rating} / 5`} />
+                  <StatCard label="Would Subscribe" value={`${surveyData.would_subscribe_pct}%`} />
+                  <StatCard label="Top Request" value={surveyData.top_missing_feature ?? '-'} />
+                </div>
+
+                {/* Responses table */}
+                <div className="rounded-xl border border-white/8 overflow-x-auto">
+                  <table className="w-full text-left font-mono text-xs" style={{ minWidth: '800px' }}>
+                    <thead>
+                      <tr className="bg-[#2dd4bf]/10 text-[#2dd4bf]">
+                        <th className="px-3 py-2.5 font-medium">User</th>
+                        <th className="px-3 py-2.5 font-medium">Rating</th>
+                        <th className="px-3 py-2.5 font-medium">Useful?</th>
+                        <th className="px-3 py-2.5 font-medium">Favorite</th>
+                        <th className="px-3 py-2.5 font-medium">Missing</th>
+                        <th className="px-3 py-2.5 font-medium">Subscribe?</th>
+                        <th className="px-3 py-2.5 font-medium">Comments</th>
+                        <th className="px-3 py-2.5 font-medium">Date</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {surveyData.responses.map((r, i) => (
+                        <tr key={r.id}
+                          className={`border-t border-white/5 ${i % 2 === 0 ? 'bg-[#111827]' : 'bg-[#0f1629]'}`}>
+                          <td className="px-3 py-2 text-[#f0ece4]/90 max-w-[160px] truncate" title={r.email}>
+                            {r.full_name ?? r.email}
+                          </td>
+                          <td className="px-3 py-2 text-[#2dd4bf] whitespace-nowrap">
+                            {'★'.repeat(r.overall_rating)}{'☆'.repeat(5 - r.overall_rating)}
+                          </td>
+                          <td className="px-3 py-2 text-[#f0ece4]/60 whitespace-nowrap">{r.usefulness ?? '-'}</td>
+                          <td className="px-3 py-2 text-[#f0ece4]/60 max-w-[120px] truncate" title={r.favorite_feature ?? ''}>
+                            {r.favorite_feature ?? '-'}
+                          </td>
+                          <td className="px-3 py-2 text-[#f0ece4]/60 max-w-[120px] truncate" title={r.missing_feature ?? ''}>
+                            {r.missing_feature ?? '-'}
+                          </td>
+                          <td className="px-3 py-2 whitespace-nowrap">
+                            <span className={r.would_subscribe === true ? 'text-[#2dd4bf]' : r.would_subscribe === false ? 'text-red-400/70' : 'text-[#6b7594]'}>
+                              {r.would_subscribe === true ? 'Yes' : r.would_subscribe === false ? 'No' : '-'}
+                            </span>
+                          </td>
+                          <td className="px-3 py-2 text-[#f0ece4]/60 max-w-[160px] truncate"
+                            title={[r.price_feedback, r.additional_comments].filter(Boolean).join(' | ')}>
+                            {r.additional_comments || r.price_feedback || '-'}
+                          </td>
+                          <td className="px-3 py-2 text-[#6b7594] whitespace-nowrap">{fmtDate(r.created_at)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
             )}
           </div>
 
@@ -582,6 +699,11 @@ function AdminContent() {
           )}
         </div>
       </main>
+
+      {/* Survey preview modal (admin-only, no save) */}
+      {surveyPreview && (
+        <PilotSurveyModal forceOpen preview onClose={() => setSurveyPreview(false)} />
+      )}
     </div>
   )
 }

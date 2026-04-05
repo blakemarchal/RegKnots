@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { HamburgerMenu } from './HamburgerMenu'
+import { PilotSurveyModal } from './PilotSurveyModal'
 
 interface Props {
   title?: string
@@ -15,6 +16,7 @@ interface Props {
  */
 export function AppHeader({ title, trailing }: Props) {
   const [menuOpen, setMenuOpen] = useState(false)
+  const [surveyOpen, setSurveyOpen] = useState(false)
 
   return (
     <>
@@ -53,7 +55,12 @@ export function AppHeader({ title, trailing }: Props) {
         onClose={() => setMenuOpen(false)}
         onNewChat={() => { setMenuOpen(false); window.location.href = '/' }}
         onOpenVessels={() => { setMenuOpen(false); window.location.href = '/account' }}
+        onOpenSurvey={() => setSurveyOpen(true)}
       />
+
+      {surveyOpen && (
+        <PilotSurveyModal forceOpen onClose={() => setSurveyOpen(false)} />
+      )}
     </>
   )
 }
