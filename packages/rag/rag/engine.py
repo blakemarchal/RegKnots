@@ -277,6 +277,17 @@ async def chat(
 
         # Include confirmed document extractions
         doc_sections: list[str] = []
+
+        def _flatten_value(v: object) -> str:
+            """Recursively flatten nested dicts/lists from Claude Vision extractions."""
+            if isinstance(v, dict):
+                return "; ".join(
+                    f"{k}: {_flatten_value(val)}" for k, val in v.items() if val
+                )
+            if isinstance(v, list):
+                return ", ".join(_flatten_value(i) for i in v)
+            return str(v)
+
         for doc_info in vessel_profile.get("_confirmed_documents", []):
             doc_type = doc_info.get("type", "document")
             data = doc_info.get("data", {})
@@ -295,7 +306,7 @@ async def chat(
             doc_lines = [f"\nFrom uploaded {label}:"]
             for dk, dv in data.items():
                 if dv and str(dv).lower() not in ("null", "none", "n/a", ""):
-                    doc_lines.append(f"- {dk.replace('_', ' ').title()}: {dv}")
+                    doc_lines.append(f"- {dk.replace('_', ' ').title()}: {_flatten_value(dv)}")
             if len(doc_lines) > 1:
                 doc_sections.append("\n".join(doc_lines))
 

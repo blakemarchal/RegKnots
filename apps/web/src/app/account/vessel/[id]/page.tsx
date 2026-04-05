@@ -99,6 +99,24 @@ interface DocumentData {
   created_at: string
 }
 
+/* ── Value formatting (handles nested objects from Claude Vision) ── */
+
+function formatValue(value: unknown): string {
+  if (value === null || value === undefined) return '\u2014'
+  if (typeof value === 'string') return value
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value)
+  if (Array.isArray(value)) {
+    return value.map((v) => formatValue(v)).join(', ')
+  }
+  if (typeof value === 'object') {
+    return Object.entries(value as Record<string, unknown>)
+      .filter(([, v]) => v !== null && v !== undefined)
+      .map(([k, v]) => `${k.replace(/_/g, ' ')}: ${formatValue(v)}`)
+      .join('; ')
+  }
+  return String(value)
+}
+
 /* ── Extraction progress bar ───────────────────────────────────────── */
 
 function ExtractionProgress({ phase }: { phase: ExtractionPhase }) {
@@ -138,7 +156,7 @@ function ExtractionReviewCard({
 
   const data = doc.extracted_data
   const fields = Object.entries(data).filter(
-    ([, v]) => v !== null && v !== 'null' && String(v).trim() !== '',
+    ([, v]) => v !== null && v !== 'null' && formatValue(v).trim() !== '',
   )
 
   if (doc.extraction_status === 'failed') {
@@ -191,7 +209,7 @@ function ExtractionReviewCard({
                 autoFocus
                 className="flex-1 font-mono text-xs text-[#f0ece4] bg-[#0d1225] border border-[#2dd4bf]/40
                   rounded px-2 py-1 outline-none"
-                defaultValue={edits[key] ?? String(value)}
+                defaultValue={edits[key] ?? formatValue(value)}
                 onBlur={(e) => {
                   setEdits((p) => ({ ...p, [key]: e.target.value }))
                   setEditingField(null)
@@ -206,7 +224,7 @@ function ExtractionReviewCard({
                 className="flex-1 text-right font-mono text-xs text-[#f0ece4] group-hover:text-[#2dd4bf]
                   transition-colors cursor-text"
               >
-                {edits[key] ?? String(value)}
+                {edits[key] ?? formatValue(value)}
               </button>
             )}
           </div>
@@ -252,7 +270,7 @@ function DocumentItem({
 
   const data = doc.extracted_data
   const fields = Object.entries(data).filter(
-    ([, v]) => v !== null && v !== 'null' && String(v).trim() !== '',
+    ([, v]) => v !== null && v !== 'null' && formatValue(v).trim() !== '',
   )
 
   return (
@@ -302,7 +320,7 @@ function DocumentItem({
                     {key.replace(/_/g, ' ')}
                   </span>
                   <span className="font-mono text-[10px] text-[#f0ece4]">
-                    {String(value)}
+                    {formatValue(value)}
                   </span>
                 </div>
               ))}
