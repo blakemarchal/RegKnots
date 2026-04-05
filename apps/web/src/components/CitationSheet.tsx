@@ -199,14 +199,12 @@ export function CitationSheet({ source, sectionNumber, sectionTitle, onClose }: 
           </div>
 
           {sourceLink && (
-            <a
-              href={sourceLink.url}
-              target="_blank"
-              rel="noopener noreferrer"
+            <button
+              onClick={() => window.open(sourceLink.url, '_blank', 'noopener')}
               className="font-mono text-xs text-[--color-teal] hover:underline whitespace-nowrap"
             >
               {sourceLink.label} ↗
-            </a>
+            </button>
           )}
         </div>
       </div>
