@@ -118,7 +118,11 @@ async def chat_endpoint(
                 "manning_requirement": row["manning_requirement"],
                 "key_equipment": list(row["key_equipment"] or []) if row["key_equipment"] else None,
                 "route_limitations": row["route_limitations"],
-                "additional_details": dict(row["additional_details"]) if row["additional_details"] else None,
+                "additional_details": (
+                    json.loads(row["additional_details"])
+                    if isinstance(row["additional_details"], str)
+                    else row["additional_details"]
+                ) if row["additional_details"] else None,
             }
             # Remove None/empty values so the prompt isn't cluttered
             vessel_profile = {
