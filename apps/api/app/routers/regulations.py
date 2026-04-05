@@ -16,7 +16,7 @@ from app.db import get_pool
 router = APIRouter(prefix="/regulations", tags=["regulations"])
 
 
-_IMO_COPYRIGHTED_SOURCES = {"solas", "solas_supplement", "colregs"}
+_IMO_COPYRIGHTED_SOURCES = {"solas", "colregs"}
 
 _SOURCE_DESCRIPTIONS: dict[str, str] = {
     "solas": "the SOLAS 2024 Consolidated Edition",

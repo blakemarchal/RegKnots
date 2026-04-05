@@ -175,14 +175,27 @@ async def chat_endpoint(
     history: list[ChatMessage] = []
 
     if conversation_id is not None:
-        # Verify ownership
-        exists = await pool.fetchval(
-            "SELECT id FROM conversations WHERE id = $1 AND user_id = $2",
+        # Verify ownership and get current vessel_id
+        conv_row = await pool.fetchrow(
+            "SELECT id, vessel_id FROM conversations WHERE id = $1 AND user_id = $2",
             conversation_id,
             uuid.UUID(current_user.user_id),
         )
-        if not exists:
+        if not conv_row:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
+
+        # Update conversation if vessel changed mid-conversation
+        current_vessel_id = conv_row["vessel_id"]
+        requested_vessel_id = body.vessel_id  # already UUID | None from Pydantic
+        if current_vessel_id != requested_vessel_id:
+            await pool.execute(
+                "UPDATE conversations SET vessel_id = $1 WHERE id = $2",
+                requested_vessel_id, conversation_id,
+            )
+            logger.info(
+                "Vessel changed mid-conversation: %s -> %s",
+                current_vessel_id, requested_vessel_id,
+            )
 
         rows = await pool.fetch(
             """
