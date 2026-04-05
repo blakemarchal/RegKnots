@@ -20,14 +20,30 @@ interface Props {
   onClose: () => void
 }
 
-function parseEcfrUrl(source: string, sectionNumber: string): string {
-  // source: "cfr_46" → title 46
-  const match = source.match(/cfr_(\d+)/)
-  if (!match) return `https://www.ecfr.gov`
-  const title = match[1]
-  // sectionNumber stored as "46 CFR 133.45" — strip title prefix, keep just "133.45"
-  const sectionPart = sectionNumber.replace(/^\d+\s+CFR\s+/i, '')
-  return `https://www.ecfr.gov/current/title-${title}/section-${sectionPart}`
+function getSourceLink(source: string, sectionNumber: string): { url: string; label: string } | null {
+  if (source.startsWith('cfr_')) {
+    const match = source.match(/cfr_(\d+)/)
+    if (!match) return null
+    const title = match[1]
+    const sectionPart = sectionNumber.replace(/^\d+\s+CFR\s+/i, '')
+    return {
+      url: `https://www.ecfr.gov/current/title-${title}/section-${sectionPart}`,
+      label: 'View on eCFR',
+    }
+  }
+  if (source === 'nvic') {
+    return { url: 'https://www.dco.uscg.mil/Our-Organization/NVIC/', label: 'View on USCG.mil' }
+  }
+  if (source === 'colregs') {
+    return { url: 'https://www.imo.org/en/About/Conventions/Pages/COLREG.aspx', label: 'View on IMO.org' }
+  }
+  if (source === 'solas') {
+    return { url: 'https://www.imo.org/en/publications', label: 'View official source' }
+  }
+  if (source === 'solas_supplement') {
+    return { url: 'https://www.imo.org/en/publications', label: 'View on IMO.org' }
+  }
+  return null
 }
 
 export function CitationSheet({ source, sectionNumber, sectionTitle, onClose }: Props) {
@@ -83,7 +99,7 @@ export function CitationSheet({ source, sectionNumber, sectionTitle, onClose }: 
     dragStartY.current = null
   }
 
-  const ecfrUrl = parseEcfrUrl(source, sectionNumber)
+  const sourceLink = getSourceLink(source, sectionNumber)
   const sheetTransform = dismissing
     ? 'translateY(100%)'
     : dragOffset > 0
@@ -182,23 +198,14 @@ export function CitationSheet({ source, sectionNumber, sectionTitle, onClose }: 
             </p>
           </div>
 
-          {detail?.copyrighted ? (
+          {sourceLink && (
             <a
-              href="https://www.imo.org/en/publications"
+              href={sourceLink.url}
               target="_blank"
               rel="noopener noreferrer"
               className="font-mono text-xs text-[--color-teal] hover:underline whitespace-nowrap"
             >
-              View official source ↗
-            </a>
-          ) : (
-            <a
-              href={ecfrUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="font-mono text-xs text-[--color-teal] hover:underline whitespace-nowrap"
-            >
-              View on eCFR ↗
+              {sourceLink.label} ↗
             </a>
           )}
         </div>
