@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useCallback, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import type { Message } from '@/types/chat'
 import { sendMessage } from '@/lib/mockApi'
 import { apiRequest } from '@/lib/api'
@@ -61,12 +61,22 @@ function ChatInterfaceInner({ initialConversationId }: Props) {
   const activeVessel = vessels.find(v => v.id === activeVesselId) ?? null
 
   const [vesselSheetOpen, setVesselSheetOpen] = useState(false)
+  const searchParams = useSearchParams()
 
   function openVesselSheet() {
     setMenuOpen(false)
     // Brief delay so hamburger closes before sheet opens — avoids z-index conflict
     setTimeout(() => setVesselSheetOpen(true), 50)
   }
+
+  // Auto-open vessel sheet when navigated with ?vessels=open (e.g. from hamburger menu)
+  useEffect(() => {
+    if (searchParams.get('vessels') === 'open') {
+      setVesselSheetOpen(true)
+      // Clean up the URL without triggering navigation
+      window.history.replaceState({}, '', '/')
+    }
+  }, [searchParams])
 
   const [citation, setCitation] = useState<{
     source: string

@@ -281,7 +281,16 @@ function AccountContent() {
 
           {/* ── My Vessels ───────────────────────────────────────── */}
           <section className="bg-[#111827] border border-white/8 rounded-xl p-5 flex flex-col gap-4">
-            <p className="font-mono text-xs text-[#6b7594] uppercase tracking-wider">My Vessels</p>
+            <div className="flex items-center justify-between">
+              <p className="font-mono text-xs text-[#6b7594] uppercase tracking-wider">My Vessels</p>
+              <button
+                onClick={() => router.push('/onboarding?add=true')}
+                className="font-mono text-xs text-[#2dd4bf] border border-[#2dd4bf]/40
+                  hover:bg-[#2dd4bf]/10 rounded-lg px-3 py-1.5 transition-colors duration-150"
+              >
+                + Add Vessel
+              </button>
+            </div>
 
             {vesselsLoading && (
               <div className="flex flex-col gap-2">

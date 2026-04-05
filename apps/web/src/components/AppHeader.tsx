@@ -54,7 +54,7 @@ export function AppHeader({ title, trailing }: Props) {
         open={menuOpen}
         onClose={() => setMenuOpen(false)}
         onNewChat={() => { setMenuOpen(false); window.location.href = '/' }}
-        onOpenVessels={() => { setMenuOpen(false); window.location.href = '/account' }}
+        onOpenVessels={() => { setMenuOpen(false); window.location.href = '/?vessels=open' }}
         onOpenSurvey={() => setSurveyOpen(true)}
       />
 

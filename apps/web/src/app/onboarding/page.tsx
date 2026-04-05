@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { apiRequest, apiUpload } from '@/lib/api'
 import { useAuthStore } from '@/lib/auth'
 
@@ -232,6 +232,8 @@ function ReviewRow({
 
 export default function OnboardingPage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const isAddMode = searchParams.get('add') === 'true'
   const { addVessel, setActiveVessel } = useAuthStore()
 
   // step=0 is the COI fast-track screen; steps 1-5 are the original flow
@@ -437,7 +439,7 @@ export default function OnboardingPage() {
         addVessel(v)
       }
       setActiveVessel(created[0].id)
-      router.replace('/')
+      router.replace(isAddMode ? '/account' : '/')
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : 'Failed to save vessel. Please try again.')
       setIsSubmitting(false)
@@ -473,7 +475,7 @@ export default function OnboardingPage() {
       <div className="flex flex-col gap-6 items-center text-center">
         <div>
           <h2 className="font-display text-2xl font-bold text-[--color-off-white] tracking-wide">
-            Got your COI handy?
+            {isAddMode ? 'Add a vessel' : 'Got your COI handy?'}
           </h2>
           <p className="font-mono text-sm text-[--color-muted] mt-2 max-w-xs mx-auto">
             Upload a photo or PDF of your Certificate of Inspection and we&apos;ll fill in your vessel details automatically.
@@ -796,7 +798,7 @@ export default function OnboardingPage() {
           disabled={isSubmitting}
           className="w-full bg-[--color-teal] hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed text-[--color-navy] font-bold font-mono text-sm uppercase tracking-wider rounded-xl py-3.5 transition-[filter] duration-150"
         >
-          {isSubmitting ? 'Saving vessels\u2026' : 'Set Sail'}
+          {isSubmitting ? 'Saving\u2026' : isAddMode ? 'Save Vessel' : 'Set Sail'}
         </button>
       </div>
     )
