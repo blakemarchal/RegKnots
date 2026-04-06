@@ -56,6 +56,10 @@ _PDF_SOURCE_CONFIG: dict[str, dict] = {
         "pdf":     _DATA_RAW / "solas_supplements" / "1QH110E_supplement_January2026_EBK.pdf",
         "adapter": "ingest.sources.solas_supplement",
     },
+    "stcw": {
+        "text_dir": _DATA_RAW / "stcw" / "extracted",
+        "adapter":  "ingest.sources.stcw",
+    },
 }
 
 _DATA_FAILED = Path(__file__).resolve().parents[3] / "data" / "failed"
@@ -113,6 +117,18 @@ Examples:
     )
 
     parser.add_argument(
+        "--extract",
+        action="store_true",
+        help="For image-based sources (e.g. stcw): run Vision extraction on raw images first.",
+    )
+
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Force re-extraction of already-processed images (use with --extract).",
+    )
+
+    parser.add_argument(
         "--verbose",
         action="store_true",
         help="Enable DEBUG logging",
@@ -126,13 +142,50 @@ Examples:
     sources = _SOURCES if args.all else [args.source]
     mode = "update" if args.update else "fresh"
 
-    asyncio.run(_run(sources, mode, dry_run=args.dry_run))
+    asyncio.run(_run(
+        sources, mode,
+        dry_run=args.dry_run,
+        extract=args.extract,
+        force=args.force,
+    ))
 
 
-async def _run(sources: list[str], mode: str, dry_run: bool = False) -> None:
+async def _run(
+    sources: list[str],
+    mode: str,
+    dry_run: bool = False,
+    extract: bool = False,
+    force: bool = False,
+) -> None:
     import importlib
 
     console = Console()
+
+    # ── Extract: run Vision OCR on raw images ────────────────────────────────
+    if extract:
+        for source in sources:
+            cfg = _PDF_SOURCE_CONFIG.get(source)
+            if cfg is None or "text_dir" not in cfg:
+                console.print(
+                    f"[yellow]--extract not supported for '{source}'[/yellow]"
+                )
+                sys.exit(1)
+            adapter = importlib.import_module(cfg["adapter"])
+            if not hasattr(adapter, "extract_images"):
+                console.print(
+                    f"[yellow]'{source}' does not support image extraction[/yellow]"
+                )
+                sys.exit(1)
+            # Extract raw_dir is the PARENT of text_dir (stcw/ not stcw/extracted/)
+            raw_dir = cfg["text_dir"].parent
+            await adapter.extract_images(raw_dir, force=force)
+            console.print(f"[green]Extraction complete for {source}.[/green]")
+        if not dry_run and mode == "fresh" or mode == "update":
+            pass  # continue to ingest
+        elif dry_run:
+            pass  # fall through to dry-run
+        else:
+            return  # --extract only, no ingest
 
     # ── Dry-run: no DB or API calls needed ────────────────────────────────────
     if dry_run:
@@ -303,26 +356,38 @@ async def _run_text_source(
     raw_dir: Path = cfg["text_dir"]
     raw_dir.mkdir(parents=True, exist_ok=True)
 
-    headers_path = raw_dir / "headers.txt"
-    if not headers_path.exists():
-        console.print(
-            f"[red]headers.txt not found: {headers_path}\n"
-            f"Create it with lines like: '5-12: Chapter I Part A — General'[/red]"
-        )
-        return IngestResult(source=source, errors=1)
+    # STCW uses auto-detected structure from extracted .txt files (no headers.txt).
+    # SOLAS uses headers.txt + range-named .txt files.
+    needs_headers = source != "stcw"
 
-    # Check at least one range txt file exists
-    txt_files = list(raw_dir.glob("[0-9]*-[0-9]*.txt"))
-    if not txt_files:
-        console.print(
-            f"[red]No <start>-<end>.txt files found in {raw_dir}\n"
-            f"Expected files named like '5-12.txt'.[/red]"
-        )
-        return IngestResult(source=source, errors=1)
+    if needs_headers:
+        headers_path = raw_dir / "headers.txt"
+        if not headers_path.exists():
+            console.print(
+                f"[red]headers.txt not found: {headers_path}\n"
+                f"Create it with lines like: '5-12: Chapter I Part A — General'[/red]"
+            )
+            return IngestResult(source=source, errors=1)
+
+        txt_files = list(raw_dir.glob("[0-9]*-[0-9]*.txt"))
+        if not txt_files:
+            console.print(
+                f"[red]No <start>-<end>.txt files found in {raw_dir}\n"
+                f"Expected files named like '5-12.txt'.[/red]"
+            )
+            return IngestResult(source=source, errors=1)
+    else:
+        txt_files = [f for f in raw_dir.iterdir() if f.suffix == ".txt"]
+        if not txt_files:
+            console.print(
+                f"[red]No .txt files found in {raw_dir}\n"
+                f"Run --extract first to generate them from page images.[/red]"
+            )
+            return IngestResult(source=source, errors=1)
 
     console.print(
         f"  [cyan]Text dir:[/cyan] {raw_dir} "
-        f"([bold]{len(txt_files)}[/bold] range files)"
+        f"([bold]{len(txt_files)}[/bold] text files)"
     )
 
     section_loader = lambda: adapter.parse_source(raw_dir)  # noqa: E731

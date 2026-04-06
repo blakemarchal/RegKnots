@@ -43,6 +43,9 @@ function getSourceLink(source: string, sectionNumber: string): { url: string; la
   if (source === 'solas_supplement') {
     return { url: 'https://www.imo.org/en/publications/Pages/default.aspx', label: 'View on IMO.org' }
   }
+  if (source === 'stcw') {
+    return { url: 'https://www.imo.org/en/OurWork/HumanElement/Pages/STCW-Conv-LINK.aspx', label: 'View on IMO.org' }
+  }
   return null
 }
 

@@ -20,6 +20,8 @@ dependencies = [
     "rich>=13.0.0",
     # PDF parsing (COLREGs, SOLAS, MARPOL, STCW)
     "pdfplumber>=0.11.0",
+    # Vision extraction (STCW image-based ingestion)
+    "anthropic>=0.40.0",
     # HTML parsing (NVIC index scraper)
     "beautifulsoup4>=4.12.0",
 ]
