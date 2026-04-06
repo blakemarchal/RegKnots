@@ -187,6 +187,15 @@ async def _run(sources: list[str], mode: str, dry_run: bool = False) -> None:
                     console=console,
                 )
             all_results.append(result)
+
+        # Rebuild the HNSW vector index after ingest to prevent stale results
+        total_upserts = sum(r.upserts for r in all_results)
+        if total_upserts > 0:
+            console.print()
+            console.print("[cyan]Rebuilding HNSW vector index...[/cyan]")
+            async with pool.acquire() as conn:
+                await conn.execute("REINDEX INDEX idx_regulations_embedding")
+            console.print("[green]HNSW index rebuilt successfully.[/green]")
     finally:
         await pool.close()
 

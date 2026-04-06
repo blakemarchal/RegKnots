@@ -1,9 +1,11 @@
 'use client'
 
+import { useState } from 'react'
 import Link from 'next/link'
 import { CompassRose } from '@/components/CompassRose'
 import { AppHeader } from '@/components/AppHeader'
 import { useAuthStore } from '@/lib/auth'
+import { apiRequest } from '@/lib/api'
 
 const CHARITIES = [
   {
@@ -31,6 +33,131 @@ const CHARITIES = [
     linkText: 'Visit elijahrising.org',
   },
 ]
+
+function CharitySuggestionSection() {
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
+  const [suggestionOpen, setSuggestionOpen] = useState(false)
+  const [orgName, setOrgName] = useState('')
+  const [reason, setReason] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [submitResult, setSubmitResult] = useState<{ ok: boolean; msg: string } | null>(null)
+
+  async function handleSubmitSuggestion() {
+    setSubmitting(true)
+    setSubmitResult(null)
+    try {
+      await apiRequest('/support/charity-suggestion', {
+        method: 'POST',
+        body: JSON.stringify({ org_name: orgName.trim(), reason: reason.trim() }),
+      })
+      setSubmitResult({ ok: true, msg: 'Thank you! Your suggestion has been received.' })
+      setOrgName('')
+      setReason('')
+      setTimeout(() => { setSuggestionOpen(false); setSubmitResult(null) }, 3000)
+    } catch {
+      setSubmitResult({ ok: false, msg: 'Something went wrong. Please try again.' })
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <section className="px-5 md:px-10 pb-20">
+      <div className="max-w-xl mx-auto text-center">
+        <h2 className="font-display font-black text-[#f0ece4] text-xl md:text-2xl mb-3">
+          Know a Cause That Belongs Here?
+        </h2>
+        <p className="font-mono text-sm text-[#6b7594] mb-6 leading-relaxed">
+          We review charity partner suggestions annually. If you know an organization making
+          a difference in maritime communities, we&apos;d love to hear about it.
+        </p>
+
+        {!isAuthenticated ? (
+          <>
+            <Link
+              href="/login"
+              className="inline-block font-mono font-bold text-sm uppercase tracking-wider
+                bg-[#2dd4bf] text-[#0a0e1a] rounded-xl px-6 py-3
+                hover:brightness-110 transition-[filter] duration-150"
+            >
+              Sign In to Suggest a Charity
+            </Link>
+            <p className="font-mono text-xs text-[#6b7594] mt-4">
+              We review all suggestions and announce new partners annually.
+            </p>
+          </>
+        ) : !suggestionOpen ? (
+          <>
+            <button
+              onClick={() => setSuggestionOpen(true)}
+              className="inline-block font-mono font-bold text-sm uppercase tracking-wider
+                bg-[#2dd4bf] text-[#0a0e1a] rounded-xl px-6 py-3
+                hover:brightness-110 transition-[filter] duration-150"
+            >
+              Suggest a Charity
+            </button>
+            <p className="font-mono text-xs text-[#6b7594] mt-4">
+              We review all suggestions and announce new partners annually.
+            </p>
+          </>
+        ) : (
+          <div className="bg-[#111827] rounded-xl border border-white/8 p-6 text-left space-y-4">
+            <div>
+              <label className="block font-mono text-xs text-[#6b7594] mb-1.5">Organization name *</label>
+              <input
+                type="text"
+                value={orgName}
+                onChange={(e) => setOrgName(e.target.value)}
+                className="w-full bg-[#0d1225] border border-white/10 rounded-lg px-3 py-2
+                  font-mono text-sm text-[#f0ece4] placeholder:text-[#6b7594]/50
+                  focus:outline-none focus:border-[#2dd4bf]/50 transition-colors"
+                placeholder="e.g. Mercy Ships"
+              />
+            </div>
+            <div>
+              <label className="block font-mono text-xs text-[#6b7594] mb-1.5">
+                Why should RegKnots partner with this organization? *
+              </label>
+              <textarea
+                value={reason}
+                onChange={(e) => setReason(e.target.value)}
+                rows={3}
+                className="w-full bg-[#0d1225] border border-white/10 rounded-lg px-3 py-2
+                  font-mono text-sm text-[#f0ece4] placeholder:text-[#6b7594]/50
+                  focus:outline-none focus:border-[#2dd4bf]/50 transition-colors resize-none"
+                placeholder="Tell us why this charity should be a RegKnots partner..."
+              />
+            </div>
+            {submitResult && (
+              <p className={`font-mono text-xs ${submitResult.ok ? 'text-green-400' : 'text-red-400'}`}>
+                {submitResult.msg}
+              </p>
+            )}
+            <div className="flex gap-3">
+              <button
+                onClick={handleSubmitSuggestion}
+                disabled={submitting || !orgName.trim() || !reason.trim()}
+                className="flex-1 font-mono font-bold text-sm uppercase tracking-wider
+                  bg-[#2dd4bf] text-[#0a0e1a] rounded-xl px-6 py-3
+                  hover:brightness-110 transition-[filter] duration-150
+                  disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {submitting ? 'Sending...' : 'Submit'}
+              </button>
+              <button
+                onClick={() => { setSuggestionOpen(false); setSubmitResult(null) }}
+                className="font-mono text-sm text-[#6b7594] hover:text-[#f0ece4]
+                  transition-colors duration-150 px-4"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </section>
+  )
+}
 
 export default function GivingPage() {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
@@ -123,28 +250,7 @@ export default function GivingPage() {
       </section>
 
       {/* ── Suggest a charity ─────────────────────────────────────────── */}
-      <section className="px-5 md:px-10 pb-20">
-        <div className="max-w-xl mx-auto text-center">
-          <h2 className="font-display font-black text-[#f0ece4] text-xl md:text-2xl mb-3">
-            Know a Cause That Belongs Here?
-          </h2>
-          <p className="font-mono text-sm text-[#6b7594] mb-6 leading-relaxed">
-            We review charity partner suggestions annually. If you know an organization making
-            a difference in maritime communities, we&apos;d love to hear about it.
-          </p>
-          <a
-            href="mailto:hello@regknots.com?subject=Charity%20Suggestion%20for%20RegKnots"
-            className="inline-block font-mono font-bold text-sm uppercase tracking-wider
-              bg-[#2dd4bf] text-[#0a0e1a] rounded-xl px-6 py-3
-              hover:brightness-110 transition-[filter] duration-150"
-          >
-            Suggest a Charity
-          </a>
-          <p className="font-mono text-xs text-[#6b7594] mt-4">
-            We review all suggestions and announce new partners annually.
-          </p>
-        </div>
-      </section>
+      <CharitySuggestionSection />
 
       {/* ── Footer ────────────────────────────────────────────────────── */}
       <footer className="border-t border-white/8 px-5 md:px-10 py-8 mt-auto">

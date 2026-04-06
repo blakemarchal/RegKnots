@@ -84,6 +84,30 @@ async def _send_trial_reminders_async():
         await conn.close()
 
 
+@celery.task(name="app.tasks.reindex_vector_embeddings", bind=True, max_retries=1)
+def reindex_vector_embeddings(self):
+    """Rebuild the HNSW vector index to prevent stale results after bulk inserts."""
+    logger.info("Starting HNSW index rebuild")
+    try:
+        _run_async(_reindex_async())
+        logger.info("HNSW index rebuild complete")
+    except Exception as exc:
+        logger.exception("HNSW index rebuild failed: %s", exc)
+        raise self.retry(exc=exc, countdown=600)
+
+
+async def _reindex_async():
+    import asyncpg
+    from app.config import settings
+
+    dsn = settings.database_url.replace("postgresql+asyncpg://", "postgresql://")
+    conn = await asyncpg.connect(dsn)
+    try:
+        await conn.execute("REINDEX INDEX idx_regulations_embedding")
+    finally:
+        await conn.close()
+
+
 @celery.task(name="app.tasks.check_solas_supplements")
 def check_solas_supplements():
     """Check for new SOLAS supplements from public marine notice sources."""

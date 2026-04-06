@@ -284,6 +284,30 @@ async def send_subscription_paused_email(to_email: str, full_name: str) -> None:
     })
 
 
+async def send_charity_suggestion_email(
+    user_email: str, org_name: str, website: str, reason: str
+) -> None:
+    website_html = (
+        f'<p><strong>Website:</strong> <a href="{website}">{website}</a></p>'
+        if website else ""
+    )
+    resend.Emails.send({
+        "from": FROM_EMAIL,
+        "to": ["hello@regknots.com"],
+        "reply_to": user_email,
+        "subject": f"[Charity Suggestion] {org_name}",
+        "html": (
+            f"<h2>New Charity Partner Suggestion</h2>"
+            f"<p><strong>From:</strong> {user_email}</p>"
+            f"<p><strong>Organization:</strong> {org_name}</p>"
+            f"{website_html}"
+            f"<hr>"
+            f"<p><strong>Why this organization:</strong></p>"
+            f"<p>{reason}</p>"
+        ),
+    })
+
+
 async def send_subscription_resumed_email(to_email: str, full_name: str) -> None:
     first_name = full_name.split()[0] if full_name.strip() else "Mariner"
     html = _html(f"""

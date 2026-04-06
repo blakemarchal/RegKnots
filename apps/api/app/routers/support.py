@@ -96,6 +96,48 @@ async def support_chat(
 
 # ── Email Escalation ─────────────────────────────────────────────────────────────
 
+class CharitySuggestionRequest(BaseModel):
+    org_name: str
+    website: str = ""
+    reason: str
+
+
+class CharitySuggestionResponse(BaseModel):
+    sent: bool
+
+
+@router.post("/charity-suggestion", response_model=CharitySuggestionResponse)
+async def charity_suggestion(
+    body: CharitySuggestionRequest,
+    user: Annotated[CurrentUser, Depends(get_current_user)],
+) -> CharitySuggestionResponse:
+    if not body.org_name.strip() or not body.reason.strip():
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Organization name and reason are required.",
+        )
+
+    from app.email import send_charity_suggestion_email
+
+    try:
+        await send_charity_suggestion_email(
+            user_email=user.email,
+            org_name=body.org_name.strip(),
+            website=body.website.strip(),
+            reason=body.reason.strip(),
+        )
+    except Exception as exc:
+        logger.error("Charity suggestion email error: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Failed to send suggestion. Please try again.",
+        )
+
+    return CharitySuggestionResponse(sent=True)
+
+
+# ── Email Escalation ─────────────────────────────────────────────────────────────
+
 class SupportEmailRequest(BaseModel):
     subject: str
     message: str

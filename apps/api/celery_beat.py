@@ -24,4 +24,9 @@ celery.conf.beat_schedule = {
         # Every Monday at 10:00 UTC
         "schedule": crontab(hour=10, minute=0, day_of_week="monday"),
     },
+    "reindex-vector-embeddings-monthly": {
+        "task": "app.tasks.reindex_vector_embeddings",
+        # 1st of every month at 03:00 UTC
+        "schedule": crontab(hour=3, minute=0, day_of_month="1"),
+    },
 }
