@@ -25,6 +25,7 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 _COOKIE_NAME = "refresh_token"
 _COOKIE_PATH = "/"
+_VALID_ROLES = {"captain", "mate", "engineer", "chief_engineer", "other"}
 
 
 def _set_refresh_cookie(response: Response, raw_token: str) -> None:
@@ -51,7 +52,7 @@ async def register(data: RegisterRequest, response: Response) -> TokenResponse:
     if existing:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
 
-    if data.role not in ("captain", "mate", "engineer", "other"):
+    if data.role not in _VALID_ROLES:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid role")
 
     hashed_pw = hash_password(data.password)
@@ -221,9 +222,6 @@ async def logout(
 
 
 # ── Profile & password management ─────────────────────────────────────────────
-
-_VALID_ROLES = {"captain", "mate", "engineer", "chief_engineer", "other"}
-
 
 class ProfileUpdate(BaseModel):
     full_name: str | None = None

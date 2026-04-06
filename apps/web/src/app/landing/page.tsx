@@ -112,7 +112,7 @@ export default function LandingPage() {
         </div>
         <div className="flex items-center gap-3">
           <Link href="/giving"
-            className="font-mono text-sm text-[#6b7594] hover:text-[#f0ece4] transition-colors duration-150">
+            className="hidden md:inline font-mono text-sm text-[#6b7594] hover:text-[#f0ece4] transition-colors duration-150">
             Giving Back
           </Link>
           <Link href="/login"
