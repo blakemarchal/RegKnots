@@ -35,6 +35,10 @@ export interface BillingStatus {
   message_count: number
   messages_remaining: number | null
   needs_subscription: boolean
+  cancel_at_period_end: boolean
+  current_period_end: string | null
+  billing_interval: string | null
+  price_amount: number | null
 }
 
 export interface VesselSummary {

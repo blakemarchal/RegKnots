@@ -51,8 +51,11 @@ function AccountContent() {
   const [pwSaving, setPwSaving] = useState(false)
   const [pwMsg, setPwMsg] = useState<{ text: string; ok: boolean } | null>(null)
 
-  // ── Subscription ────────────────────────────────────────────────
+  // ─�� Subscription ────────��────────────────────────���──────────────
   const [portalLoading, setPortalLoading] = useState(false)
+  const [portalError, setPortalError] = useState<string | null>(null)
+  const [billingLoading, setBillingLoading] = useState(true)
+  const [billingError, setBillingError] = useState(false)
 
   // ── Vessels ────────────────────────────────────────────────────
   const [vessels, setVessels] = useState<VesselItem[]>([])
@@ -65,9 +68,12 @@ function AccountContent() {
       .then(setVessels)
       .catch(() => {})
       .finally(() => setVesselsLoading(false))
-    if (!billing) {
-      apiRequest<BillingStatus>('/billing/status').then(setBilling).catch(() => {})
-    }
+    setBillingLoading(true)
+    setBillingError(false)
+    apiRequest<BillingStatus>('/billing/status')
+      .then(setBilling)
+      .catch(() => setBillingError(true))
+      .finally(() => setBillingLoading(false))
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function saveProfile() {
@@ -131,11 +137,30 @@ function AccountContent() {
 
   async function openBillingPortal() {
     setPortalLoading(true)
+    setPortalError(null)
     try {
       const data = await apiRequest<{ portal_url: string }>('/billing/portal', { method: 'POST' })
+
+      const isStandalone = window.matchMedia('(display-mode: standalone)').matches
+        || (window.navigator as any).standalone === true
+
+      if (isStandalone) {
+        window.open(data.portal_url, '_blank')
+        setPortalLoading(false)
+        const handleVisibility = () => {
+          if (document.visibilityState === 'visible') {
+            apiRequest<BillingStatus>('/billing/status').then(setBilling).catch(() => {})
+            document.removeEventListener('visibilitychange', handleVisibility)
+          }
+        }
+        document.addEventListener('visibilitychange', handleVisibility)
+        return
+      }
+
       window.location.href = data.portal_url
     } catch {
       setPortalLoading(false)
+      setPortalError('Unable to open billing portal. Please try again.')
     }
   }
 
@@ -207,13 +232,73 @@ function AccountContent() {
             </div>
           </section>
 
-          {/* ── Subscription ──────────────────────────────────────── */}
-          {billing && billing.tier === 'pro' && (
+          {/* ── Subscription ───────────────────────────────────��──── */}
+          {billingLoading && (
+            <section className="bg-[#111827] border border-white/8 rounded-xl p-5">
+              <p className="font-mono text-xs text-[#6b7594] uppercase tracking-wider">Subscription</p>
+              <div className="h-5 bg-white/5 rounded animate-pulse mt-3" />
+              <div className="h-10 bg-white/5 rounded-lg animate-pulse mt-3" />
+            </section>
+          )}
+
+          {!billingLoading && billingError && (
+            <section className="bg-[#111827] border border-white/8 rounded-xl p-5 flex flex-col gap-3">
+              <p className="font-mono text-xs text-[#6b7594] uppercase tracking-wider">Subscription</p>
+              <p className="font-mono text-sm text-red-400">Unable to load subscription info.</p>
+              <button
+                onClick={() => {
+                  setBillingError(false)
+                  setBillingLoading(true)
+                  apiRequest<BillingStatus>('/billing/status')
+                    .then(setBilling)
+                    .catch(() => setBillingError(true))
+                    .finally(() => setBillingLoading(false))
+                }}
+                className="font-mono text-xs text-[#2dd4bf] hover:underline"
+              >
+                Retry
+              </button>
+            </section>
+          )}
+
+          {!billingLoading && !billingError && billing && billing.tier !== 'free' && (
             <section className="bg-[#111827] border border-white/8 rounded-xl p-5 flex flex-col gap-3">
               <p className="font-mono text-xs text-[#6b7594] uppercase tracking-wider">Subscription</p>
               <p className="font-mono text-sm text-[#f0ece4]/80">
-                <span className="text-[#2dd4bf] font-bold">Pro</span> — $39/month
+                <span className="text-[#2dd4bf] font-bold">Pro</span>
+                {' — '}
+                {billing.price_amount
+                  ? billing.billing_interval === 'year'
+                    ? `$${Math.round(billing.price_amount / 100 / 12)}/month (Annual)`
+                    : `$${billing.price_amount / 100}/month`
+                  : 'Active'}
               </p>
+
+              {billing.cancel_at_period_end && billing.current_period_end && (
+                <div className="bg-amber-400/10 border border-amber-400/30 rounded-lg p-3">
+                  <p className="font-mono text-xs text-amber-400">
+                    Your subscription will end on {new Date(billing.current_period_end).toLocaleDateString()}.
+                    You have full access until then.
+                  </p>
+                </div>
+              )}
+
+              {billing.subscription_status === 'past_due' && (
+                <div className="bg-red-400/10 border border-red-400/30 rounded-lg p-3">
+                  <p className="font-mono text-xs text-red-400">
+                    Your last payment failed. Please update your payment method to keep your subscription active.
+                  </p>
+                </div>
+              )}
+
+              {billing.subscription_status === 'paused' && (
+                <div className="bg-amber-400/10 border border-amber-400/30 rounded-lg p-3">
+                  <p className="font-mono text-xs text-amber-400">
+                    Your subscription is paused. Resume it to regain access.
+                  </p>
+                </div>
+              )}
+
               <button
                 onClick={openBillingPortal}
                 disabled={portalLoading}
@@ -223,7 +308,29 @@ function AccountContent() {
               >
                 {portalLoading ? 'Loading...' : 'Manage Subscription'}
               </button>
+              {portalError && (
+                <p className="font-mono text-xs text-red-400 text-center">{portalError}</p>
+              )}
               <p className="font-mono text-[10px] text-[#6b7594] text-center">Powered by Stripe</p>
+            </section>
+          )}
+
+          {!billingLoading && !billingError && billing && billing.tier === 'free' && (
+            <section className="bg-[#111827] border border-white/8 rounded-xl p-5 flex flex-col gap-3">
+              <p className="font-mono text-xs text-[#6b7594] uppercase tracking-wider">Subscription</p>
+              <p className="font-mono text-sm text-[#f0ece4]/80">
+                {billing.trial_active
+                  ? `Free trial — ${billing.messages_remaining ?? 0} messages remaining`
+                  : 'No active subscription'}
+              </p>
+              <a
+                href="/pricing"
+                className="w-full text-center font-mono text-sm font-bold text-[#0a0e1a]
+                  bg-[#2dd4bf] hover:brightness-110 rounded-lg py-2.5
+                  transition-[filter] duration-150 block"
+              >
+                Upgrade to Pro
+              </a>
             </section>
           )}
 

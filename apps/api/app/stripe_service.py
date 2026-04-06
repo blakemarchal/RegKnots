@@ -1,6 +1,7 @@
 """Stripe helpers for checkout sessions and webhook processing."""
 
 import logging
+from datetime import datetime, timezone
 
 import stripe
 
@@ -98,8 +99,14 @@ async def handle_webhook_event(payload: bytes, sig_header: str, pool) -> None:
         "customer.subscription.created",
         "customer.subscription.updated",
         "customer.subscription.deleted",
+        "customer.subscription.paused",
+        "customer.subscription.resumed",
     ):
         await _on_subscription_change(data, pool)
+    elif etype == "invoice.paid":
+        await _on_invoice_paid(data, pool)
+    elif etype == "invoice.payment_failed":
+        await _on_invoice_payment_failed(data, pool)
     else:
         logger.info("Ignoring Stripe event: %s", etype)
 
@@ -152,7 +159,7 @@ async def _on_checkout_completed(session, pool) -> None:
 async def _on_subscription_change(subscription, pool) -> None:
     sub_id = subscription.id
     customer_id = subscription.customer
-    status = subscription.status  # active, past_due, canceled, unpaid
+    status = subscription.status  # active, past_due, canceled, unpaid, paused, etc.
     cancel_at_period_end = getattr(subscription, "cancel_at_period_end", False)
     logger.info(
         "Subscription change: sub_id=%s customer_id=%s status=%s cancel_at_period_end=%s",
@@ -168,8 +175,26 @@ async def _on_subscription_change(subscription, pool) -> None:
             "past_due": ("pro", "past_due"),
             "canceled": ("free", "canceled"),
             "unpaid": ("free", "inactive"),
+            "paused": ("free", "paused"),
+            "incomplete": ("free", "inactive"),
+            "incomplete_expired": ("free", "inactive"),
+            "trialing": ("pro", "active"),
         }
         tier, sub_status = status_map.get(status, ("free", "inactive"))
+
+    # Extract billing details for DB persistence
+    current_period_end_ts = getattr(subscription, "current_period_end", None)
+    current_period_end = (
+        datetime.fromtimestamp(current_period_end_ts, tz=timezone.utc)
+        if current_period_end_ts else None
+    )
+
+    billing_interval = None
+    try:
+        if subscription.items and subscription.items.data:
+            billing_interval = subscription.items.data[0].price.recurring.interval
+    except Exception:
+        pass
 
     # Check previous state before updating
     prev = await pool.fetchrow(
@@ -190,12 +215,18 @@ async def _on_subscription_change(subscription, pool) -> None:
         UPDATE users
         SET subscription_tier = $1,
             subscription_status = $2,
-            stripe_subscription_id = $3
+            stripe_subscription_id = $3,
+            cancel_at_period_end = $4,
+            current_period_end = $5,
+            billing_interval = $6
         WHERE stripe_subscription_id = $3
         """,
         tier,
         sub_status,
         sub_id,
+        cancel_at_period_end,
+        current_period_end,
+        billing_interval,
     )
     logger.info("Sub change UPDATE by subscription_id: %s", result)
 
@@ -206,12 +237,18 @@ async def _on_subscription_change(subscription, pool) -> None:
             UPDATE users
             SET subscription_tier = $1,
                 subscription_status = $2,
-                stripe_subscription_id = $3
-            WHERE stripe_customer_id = $4
+                stripe_subscription_id = $3,
+                cancel_at_period_end = $4,
+                current_period_end = $5,
+                billing_interval = $6
+            WHERE stripe_customer_id = $7
             """,
             tier,
             sub_status,
             sub_id,
+            cancel_at_period_end,
+            current_period_end,
+            billing_interval,
             customer_id,
         )
         logger.info("Sub change UPDATE by customer_id fallback: %s", result)
@@ -239,3 +276,80 @@ async def _on_subscription_change(subscription, pool) -> None:
             logger.info("Sent Pro welcome email to %s", row["email"])
         except Exception as exc:
             logger.error("Failed to send subscription confirmed email: %s", exc)
+
+    # Send pause email when transitioning to paused
+    if sub_status == "paused" and prev_status != "paused" and row:
+        try:
+            from app.email import send_subscription_paused_email
+            await send_subscription_paused_email(row["email"], row["full_name"] or "")
+            logger.info("Sent subscription paused email to %s", row["email"])
+        except Exception as exc:
+            logger.error("Failed to send subscription paused email: %s", exc)
+
+    # Send resume email when coming back from paused
+    if sub_status == "active" and prev_status == "paused" and row:
+        try:
+            from app.email import send_subscription_resumed_email
+            await send_subscription_resumed_email(row["email"], row["full_name"] or "")
+            logger.info("Sent subscription resumed email to %s", row["email"])
+        except Exception as exc:
+            logger.error("Failed to send subscription resumed email: %s", exc)
+
+
+async def _on_invoice_paid(invoice, pool) -> None:
+    """Handle invoice.paid — update current_period_end."""
+    customer_id = invoice.customer
+    subscription_id = invoice.subscription
+    if not customer_id or not subscription_id:
+        return
+
+    try:
+        _configure()
+        sub = stripe.Subscription.retrieve(subscription_id)
+        current_period_end_ts = sub.current_period_end
+        current_period_end = (
+            datetime.fromtimestamp(current_period_end_ts, tz=timezone.utc)
+            if current_period_end_ts else None
+        )
+
+        await pool.execute(
+            """
+            UPDATE users
+            SET current_period_end = $1,
+                subscription_status = 'active'
+            WHERE stripe_customer_id = $2
+            """,
+            current_period_end,
+            customer_id,
+        )
+        logger.info("Invoice paid for customer %s, period end updated", customer_id)
+    except Exception as exc:
+        logger.error("Failed to process invoice.paid for customer %s: %s", customer_id, exc)
+
+
+async def _on_invoice_payment_failed(invoice, pool) -> None:
+    """Handle invoice.payment_failed — set past_due, send warning email."""
+    customer_id = invoice.customer
+    if not customer_id:
+        return
+
+    await pool.execute(
+        """
+        UPDATE users
+        SET subscription_status = 'past_due'
+        WHERE stripe_customer_id = $1 AND subscription_tier = 'pro'
+        """,
+        customer_id,
+    )
+    logger.warning("Payment failed for customer %s — set to past_due", customer_id)
+
+    try:
+        from app.email import send_payment_failed_email
+        user_row = await pool.fetchrow(
+            "SELECT email, full_name FROM users WHERE stripe_customer_id = $1",
+            customer_id,
+        )
+        if user_row:
+            await send_payment_failed_email(user_row["email"], user_row["full_name"] or "")
+    except Exception as exc:
+        logger.error("Failed to send payment failed email: %s", exc)

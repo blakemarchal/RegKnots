@@ -68,6 +68,10 @@ class BillingStatus(BaseModel):
     message_count: int
     messages_remaining: int | None
     needs_subscription: bool
+    cancel_at_period_end: bool
+    current_period_end: str | None
+    billing_interval: str | None  # "month" or "year"
+    price_amount: int | None  # cents, e.g. 3900
 
 
 _FREE_MESSAGE_LIMIT = 50
@@ -81,7 +85,9 @@ async def billing_status(
     row = await pool.fetchrow(
         """
         SELECT subscription_tier, subscription_status,
-               trial_ends_at, message_count
+               trial_ends_at, message_count,
+               cancel_at_period_end, current_period_end, billing_interval,
+               stripe_subscription_id
         FROM users WHERE id = $1
         """,
         uuid.UUID(user.user_id),
@@ -92,7 +98,7 @@ async def billing_status(
     sub_status = row["subscription_status"]
     trial_ends_at = row["trial_ends_at"]
     message_count = row["message_count"]
-    trial_active = tier == "free" and trial_ends_at > now
+    trial_active = tier == "free" and trial_ends_at is not None and trial_ends_at > now
 
     if tier != "free":
         needs_subscription = False
@@ -104,14 +110,36 @@ async def billing_status(
         needs_subscription = True
         messages_remaining = 0
 
+    # Paused = full lockout
+    if sub_status == "paused":
+        needs_subscription = True
+        messages_remaining = 0
+
+    # Fetch live price from Stripe if user has a subscription
+    price_amount = None
+    if tier != "free" and row["stripe_subscription_id"]:
+        try:
+            import stripe as _stripe
+            from app.config import settings as _s
+            _stripe.api_key = _s.stripe_secret_key
+            sub = _stripe.Subscription.retrieve(row["stripe_subscription_id"])
+            if sub.items.data:
+                price_amount = sub.items.data[0].price.unit_amount
+        except Exception:
+            pass
+
     return BillingStatus(
         tier=tier,
-        subscription_status=row["subscription_status"],
+        subscription_status=sub_status,
         trial_ends_at=trial_ends_at.isoformat() if trial_ends_at else None,
         trial_active=trial_active,
         message_count=message_count,
         messages_remaining=messages_remaining,
         needs_subscription=needs_subscription,
+        cancel_at_period_end=row["cancel_at_period_end"],
+        current_period_end=row["current_period_end"].isoformat() if row["current_period_end"] else None,
+        billing_interval=row["billing_interval"],
+        price_amount=price_amount,
     )
 
 

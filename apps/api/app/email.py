@@ -232,3 +232,72 @@ async def send_subscription_confirmed_email(to_email: str, full_name: str) -> No
         "subject": f"Welcome to RegKnots Pro, {first_name}",
         "html": html,
     })
+
+
+async def send_payment_failed_email(to_email: str, full_name: str) -> None:
+    first_name = full_name.split()[0] if full_name.strip() else "Mariner"
+    html = _html(f"""
+      <h1>Action Required: Payment Failed</h1>
+      <p>
+        Hi {first_name} — we were unable to process your latest RegKnots Pro payment.
+        Your payment method may have expired or been declined.
+      </p>
+      <p>
+        You still have access for now, but your subscription may be interrupted if the
+        payment isn't resolved soon. Please update your payment method in the billing portal:
+      </p>
+      <a href="{APP_URL}/account" class="cta">Update Payment Method</a>
+      <p style="font-size:12px; color:rgba(107,117,148,0.7); margin-top:8px;">
+        If you believe this is an error, reply to this email and we'll look into it.
+      </p>
+    """)
+    resend.Emails.send({
+        "from": CAPTAIN_EMAIL,
+        "to": [to_email],
+        "subject": f"RegKnots — Action Required: Payment Failed",
+        "html": html,
+    })
+
+
+async def send_subscription_paused_email(to_email: str, full_name: str) -> None:
+    first_name = full_name.split()[0] if full_name.strip() else "Mariner"
+    html = _html(f"""
+      <h1>Your Subscription is Paused</h1>
+      <p>
+        Hi {first_name} — your RegKnots Pro subscription has been paused.
+        You won't be charged during the pause period.
+      </p>
+      <p>
+        While paused, your access to RegKnots Pro features is suspended.
+        When you're ready to come back, you can resume your subscription anytime:
+      </p>
+      <a href="{APP_URL}/account" class="cta">Resume Subscription</a>
+      <p style="font-size:12px; color:rgba(107,117,148,0.7); margin-top:8px;">
+        Your vessel profiles and chat history are saved and will be waiting for you.
+      </p>
+    """)
+    resend.Emails.send({
+        "from": CAPTAIN_EMAIL,
+        "to": [to_email],
+        "subject": "RegKnots — Your Subscription is Paused",
+        "html": html,
+    })
+
+
+async def send_subscription_resumed_email(to_email: str, full_name: str) -> None:
+    first_name = full_name.split()[0] if full_name.strip() else "Mariner"
+    html = _html(f"""
+      <h1>Welcome Back, {first_name}!</h1>
+      <p>
+        Your RegKnots Pro subscription has been resumed. Full access is restored —
+        unlimited questions, vessel-specific answers, and all regulation sources
+        are available again.
+      </p>
+      <a href="{APP_URL}" class="cta">Start Asking Questions</a>
+    """)
+    resend.Emails.send({
+        "from": CAPTAIN_EMAIL,
+        "to": [to_email],
+        "subject": f"RegKnots — Welcome Back! Subscription Resumed",
+        "html": html,
+    })

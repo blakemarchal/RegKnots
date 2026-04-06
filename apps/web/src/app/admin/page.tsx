@@ -236,13 +236,13 @@ function AdminContent() {
     }
     if (!hydrated) return
 
+    setLoading(true)
     fetchStats()
     fetchUsers(0, false)
     fetchSentry()
     fetchCitations()
     fetchSurvey()
     fetchAnalytics()
-    setLoading(false)
 
     const interval = setInterval(() => { fetchStats(); fetchSentry(); fetchCitations(); fetchSurvey(); fetchAnalytics() }, 60_000)
     return () => clearInterval(interval)
@@ -376,7 +376,7 @@ function AdminContent() {
           </div>
 
           {/* ── Stats grid ───────────────────────────────────────────── */}
-          {loading && !stats && (
+          {!stats && (
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-8">
               {Array.from({ length: 12 }).map((_, i) => (
                 <div key={i} className="bg-[#111827] rounded-xl border border-white/8 px-4 py-3 h-[72px] animate-pulse" />
