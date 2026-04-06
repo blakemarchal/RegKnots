@@ -146,10 +146,11 @@ async def extract_images(raw_dir: Path, force: bool = False) -> None:
         print("ERROR: ANTHROPIC_API_KEY not set in .env", file=sys.stderr)
         sys.exit(1)
 
-    # Collect and sort images numerically
+    # Collect and sort images alphabetically by filename.
+    # Windows Game Bar timestamps in filenames preserve chronological/page order.
     images = sorted(
         [f for f in raw_dir.iterdir() if f.suffix.lower() in _IMAGE_EXTS],
-        key=lambda f: int(re.match(r"(\d+)", f.stem).group(1)),  # type: ignore[union-attr]
+        key=lambda f: f.name,
     )
     if not images:
         print(f"ERROR: No images found in {raw_dir}", file=sys.stderr)
@@ -174,7 +175,10 @@ async def extract_images(raw_dir: Path, force: bool = False) -> None:
     extracted = 0
 
     for batch_idx, pair in enumerate(pairs):
-        page_nums = [re.match(r"(\d+)", f.stem).group(1) for f in pair]  # type: ignore[union-attr]
+        # Use the full image stem as the page identifier (filenames may be
+        # arbitrary, e.g. Windows Game Bar timestamps). Extracted .txt files
+        # mirror image stems 1:1.
+        page_nums = [f.stem for f in pair]
 
         # Check if all pages in this pair already have .txt
         out_paths = [extracted_dir / f"{pn}.txt" for pn in page_nums]
@@ -259,9 +263,11 @@ def parse_source(raw_dir: Path) -> list[Section]:
     Returns:
         List of Section objects ordered by page sequence.
     """
+    # Sort alphabetically — .txt filenames mirror source image stems, which
+    # are chronologically ordered (Windows Game Bar timestamps).
     txt_files = sorted(
         [f for f in raw_dir.iterdir() if f.suffix == ".txt"],
-        key=lambda f: int(re.match(r"(\d+)", f.stem).group(1)),  # type: ignore[union-attr]
+        key=lambda f: f.name,
     )
     if not txt_files:
         raise ValueError(
