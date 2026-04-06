@@ -69,6 +69,14 @@ async def register(data: RegisterRequest, response: Response) -> TokenResponse:
         str(trial_days),
     )
 
+    # Auto-mark internal accounts
+    base_email = data.email.split('+')[0] + '@' + data.email.split('@')[1] if '+' in data.email else data.email
+    is_internal_check = await pool.fetchval(
+        "SELECT is_internal FROM users WHERE email = $1", base_email
+    )
+    if is_internal_check:
+        await pool.execute("UPDATE users SET is_internal = TRUE WHERE id = $1", user["id"])
+
     access_token = create_access_token(
         str(user["id"]), user["email"], user["role"], user["subscription_tier"],
         full_name=user["full_name"], is_admin=user["is_admin"],

@@ -61,53 +61,64 @@ class AdminStats(BaseModel):
 @router.get("/stats", response_model=AdminStats)
 async def get_stats(
     _admin: Annotated[CurrentUser, Depends(require_admin)],
+    exclude_internal: bool = Query(default=False),
 ) -> AdminStats:
     pool = await get_pool()
+    # When filtering, exclude users where is_internal = TRUE and their data
+    uf = " AND u.is_internal = FALSE" if exclude_internal else ""
+    muf = (
+        " AND m.conversation_id IN (SELECT c2.id FROM conversations c2 JOIN users u2 ON u2.id = c2.user_id WHERE u2.is_internal = FALSE)"
+        if exclude_internal else ""
+    )
     async with pool.acquire() as conn:
-        total_users = await conn.fetchval("SELECT COUNT(*) FROM users")
+        total_users = await conn.fetchval(
+            f"SELECT COUNT(*) FROM users u WHERE 1=1{uf}"
+        )
 
         active_users_24h = await conn.fetchval(
-            "SELECT COUNT(DISTINCT m.conversation_id) FROM messages m "
-            "JOIN conversations c ON c.id = m.conversation_id "
-            "WHERE m.created_at > NOW() - INTERVAL '24 hours'"
-        )
-        # Use distinct user_id from conversations joined to messages
-        active_users_24h = await conn.fetchval(
-            "SELECT COUNT(DISTINCT c.user_id) FROM conversations c "
-            "JOIN messages m ON m.conversation_id = c.id "
-            "WHERE m.created_at > NOW() - INTERVAL '24 hours'"
+            f"SELECT COUNT(DISTINCT c.user_id) FROM conversations c "
+            f"JOIN messages m ON m.conversation_id = c.id "
+            f"JOIN users u ON u.id = c.user_id "
+            f"WHERE m.created_at > NOW() - INTERVAL '24 hours'{uf}"
         )
         active_users_7d = await conn.fetchval(
-            "SELECT COUNT(DISTINCT c.user_id) FROM conversations c "
-            "JOIN messages m ON m.conversation_id = c.id "
-            "WHERE m.created_at > NOW() - INTERVAL '7 days'"
+            f"SELECT COUNT(DISTINCT c.user_id) FROM conversations c "
+            f"JOIN messages m ON m.conversation_id = c.id "
+            f"JOIN users u ON u.id = c.user_id "
+            f"WHERE m.created_at > NOW() - INTERVAL '7 days'{uf}"
         )
 
-        total_conversations = await conn.fetchval("SELECT COUNT(*) FROM conversations")
-        total_messages = await conn.fetchval("SELECT COUNT(*) FROM messages")
+        total_conversations = await conn.fetchval(
+            f"SELECT COUNT(*) FROM conversations c JOIN users u ON u.id = c.user_id WHERE 1=1{uf}"
+            if exclude_internal else "SELECT COUNT(*) FROM conversations"
+        )
+        total_messages = await conn.fetchval(
+            f"SELECT COUNT(*) FROM messages m{muf}"
+            if exclude_internal else "SELECT COUNT(*) FROM messages"
+        )
 
         messages_today = await conn.fetchval(
-            "SELECT COUNT(*) FROM messages WHERE created_at >= DATE_TRUNC('day', NOW() AT TIME ZONE 'UTC')"
+            f"SELECT COUNT(*) FROM messages m WHERE m.created_at >= DATE_TRUNC('day', NOW() AT TIME ZONE 'UTC'){muf}"
         )
         messages_7d = await conn.fetchval(
-            "SELECT COUNT(*) FROM messages WHERE created_at > NOW() - INTERVAL '7 days'"
+            f"SELECT COUNT(*) FROM messages m WHERE m.created_at > NOW() - INTERVAL '7 days'{muf}"
         )
 
         pro_subscribers = await conn.fetchval(
-            "SELECT COUNT(*) FROM users "
-            "WHERE subscription_tier = 'pro' AND subscription_status = 'active'"
+            f"SELECT COUNT(*) FROM users u "
+            f"WHERE subscription_tier = 'pro' AND subscription_status = 'active'{uf}"
         )
         trial_active = await conn.fetchval(
-            "SELECT COUNT(*) FROM users "
-            "WHERE trial_ends_at > NOW() AND subscription_tier = 'free'"
+            f"SELECT COUNT(*) FROM users u "
+            f"WHERE trial_ends_at > NOW() AND subscription_tier = 'free'{uf}"
         )
         trial_expired = await conn.fetchval(
-            "SELECT COUNT(*) FROM users "
-            "WHERE trial_ends_at <= NOW() AND subscription_tier = 'free'"
+            f"SELECT COUNT(*) FROM users u "
+            f"WHERE trial_ends_at <= NOW() AND subscription_tier = 'free'{uf}"
         )
         message_limit_reached = await conn.fetchval(
-            "SELECT COUNT(*) FROM users "
-            "WHERE subscription_tier = 'free' AND message_count >= 50"
+            f"SELECT COUNT(*) FROM users u "
+            f"WHERE subscription_tier = 'free' AND message_count >= 50{uf}"
         )
 
         total_chunks = await conn.fetchval("SELECT COUNT(*) FROM regulations")
@@ -118,6 +129,11 @@ async def get_stats(
         chunks_by_source = {r["source"]: r["cnt"] for r in chunk_rows}
 
         citation_errors_7d = await conn.fetchval(
+            "SELECT COUNT(*) FROM citation_errors ce "
+            "JOIN conversations c ON c.id = ce.conversation_id "
+            "JOIN users u ON u.id = c.user_id "
+            f"WHERE ce.created_at > NOW() - INTERVAL '7 days'{uf}"
+            if exclude_internal else
             "SELECT COUNT(*) FROM citation_errors WHERE created_at > NOW() - INTERVAL '7 days'"
         )
 
@@ -159,13 +175,16 @@ async def list_users(
     _admin: Annotated[CurrentUser, Depends(require_admin)],
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
+    exclude_internal: bool = Query(default=False),
 ) -> list[AdminUser]:
     pool = await get_pool()
+    where = "WHERE is_internal = FALSE" if exclude_internal else ""
     rows = await pool.fetch(
-        """
+        f"""
         SELECT id, email, full_name, role, subscription_tier,
                subscription_status, message_count, trial_ends_at, created_at, is_admin
         FROM users
+        {where}
         ORDER BY created_at DESC
         LIMIT $1 OFFSET $2
         """,
@@ -429,19 +448,35 @@ class CitationError(BaseModel):
 async def list_citation_errors(
     _admin: Annotated[CurrentUser, Depends(require_admin)],
     limit: int = Query(default=50, ge=1, le=200),
+    exclude_internal: bool = Query(default=False),
 ) -> list[CitationError]:
     """Return recent citation errors for the admin dashboard."""
     pool = await get_pool()
-    rows = await pool.fetch(
-        """
-        SELECT id, conversation_id, unverified_citation, model_used,
-               message_content AS message_preview, created_at
-        FROM citation_errors
-        ORDER BY created_at DESC
-        LIMIT $1
-        """,
-        limit,
-    )
+    if exclude_internal:
+        rows = await pool.fetch(
+            """
+            SELECT ce.id, ce.conversation_id, ce.unverified_citation, ce.model_used,
+                   ce.message_content AS message_preview, ce.created_at
+            FROM citation_errors ce
+            JOIN conversations c ON c.id = ce.conversation_id
+            JOIN users u ON u.id = c.user_id
+            WHERE u.is_internal = FALSE
+            ORDER BY ce.created_at DESC
+            LIMIT $1
+            """,
+            limit,
+        )
+    else:
+        rows = await pool.fetch(
+            """
+            SELECT id, conversation_id, unverified_citation, model_used,
+                   message_content AS message_preview, created_at
+            FROM citation_errors
+            ORDER BY created_at DESC
+            LIMIT $1
+            """,
+            limit,
+        )
     return [
         CitationError(
             id=str(r["id"]),
@@ -638,3 +673,152 @@ async def export_chats(
         "exported_at": datetime.now(timezone.utc).isoformat(),
         "conversations": conversations,
     })
+
+
+# ── Analytics endpoints ─────────────────────────────────────────────────────
+
+
+class TopTopic(BaseModel):
+    topic: str
+    conversation_count: int
+    last_asked: str
+
+
+@router.get("/analytics/top-topics", response_model=list[TopTopic])
+async def top_topics(
+    _admin: Annotated[CurrentUser, Depends(require_admin)],
+    exclude_internal: bool = Query(default=False),
+) -> list[TopTopic]:
+    pool = await get_pool()
+    rows = await pool.fetch(
+        """
+        SELECT c.title AS topic, COUNT(*) AS conversation_count,
+               MAX(c.created_at) AS last_asked
+        FROM conversations c
+        JOIN users u ON c.user_id = u.id
+        WHERE c.title IS NOT NULL
+          AND ($1 = FALSE OR u.is_internal = FALSE)
+        GROUP BY c.title
+        ORDER BY conversation_count DESC
+        LIMIT 20
+        """,
+        exclude_internal,
+    )
+    return [
+        TopTopic(
+            topic=r["topic"],
+            conversation_count=r["conversation_count"],
+            last_asked=r["last_asked"].isoformat() if r["last_asked"] else "",
+        )
+        for r in rows
+    ]
+
+
+class TopCitation(BaseModel):
+    source: str
+    section_number: str
+    section_title: str | None
+    cite_count: int
+
+
+@router.get("/analytics/top-citations", response_model=list[TopCitation])
+async def top_citations(
+    _admin: Annotated[CurrentUser, Depends(require_admin)],
+    exclude_internal: bool = Query(default=False),
+) -> list[TopCitation]:
+    pool = await get_pool()
+    rows = await pool.fetch(
+        """
+        SELECT r.source, r.section_number, r.section_title, COUNT(*) AS cite_count
+        FROM messages m, unnest(m.cited_regulation_ids) AS reg_id
+        JOIN regulations r ON r.id = reg_id
+        JOIN conversations c ON m.conversation_id = c.id
+        JOIN users u ON c.user_id = u.id
+        WHERE m.role = 'assistant'
+          AND ($1 = FALSE OR u.is_internal = FALSE)
+        GROUP BY r.source, r.section_number, r.section_title
+        ORDER BY cite_count DESC
+        LIMIT 20
+        """,
+        exclude_internal,
+    )
+    return [
+        TopCitation(
+            source=r["source"],
+            section_number=r["section_number"],
+            section_title=r["section_title"],
+            cite_count=r["cite_count"],
+        )
+        for r in rows
+    ]
+
+
+class VesselTypeUsage(BaseModel):
+    vessel_type: str
+    message_count: int
+    user_count: int
+
+
+@router.get("/analytics/usage-by-vessel-type", response_model=list[VesselTypeUsage])
+async def usage_by_vessel_type(
+    _admin: Annotated[CurrentUser, Depends(require_admin)],
+    exclude_internal: bool = Query(default=False),
+) -> list[VesselTypeUsage]:
+    pool = await get_pool()
+    rows = await pool.fetch(
+        """
+        SELECT v.vessel_type, COUNT(m.id) AS message_count,
+               COUNT(DISTINCT c.user_id) AS user_count
+        FROM messages m
+        JOIN conversations c ON m.conversation_id = c.id
+        JOIN vessels v ON c.vessel_id = v.id
+        JOIN users u ON c.user_id = u.id
+        WHERE m.role = 'user'
+          AND ($1 = FALSE OR u.is_internal = FALSE)
+        GROUP BY v.vessel_type
+        ORDER BY message_count DESC
+        """,
+        exclude_internal,
+    )
+    return [
+        VesselTypeUsage(
+            vessel_type=r["vessel_type"],
+            message_count=r["message_count"],
+            user_count=r["user_count"],
+        )
+        for r in rows
+    ]
+
+
+class DayMessageCount(BaseModel):
+    day: str
+    message_count: int
+
+
+@router.get("/analytics/messages-per-day", response_model=list[DayMessageCount])
+async def messages_per_day(
+    _admin: Annotated[CurrentUser, Depends(require_admin)],
+    exclude_internal: bool = Query(default=False),
+) -> list[DayMessageCount]:
+    pool = await get_pool()
+    rows = await pool.fetch(
+        """
+        SELECT DATE(m.created_at) AS day, COUNT(*) AS message_count
+        FROM messages m
+        JOIN conversations c ON m.conversation_id = c.id
+        JOIN users u ON c.user_id = u.id
+        WHERE m.created_at > NOW() - INTERVAL '30 days'
+          AND m.role = 'user'
+          AND ($1 = FALSE OR u.is_internal = FALSE)
+        GROUP BY DATE(m.created_at)
+        ORDER BY day
+        """,
+        exclude_internal,
+    )
+    return [
+        DayMessageCount(
+            day=r["day"].isoformat(),
+            message_count=r["message_count"],
+        )
+        for r in rows
+    ]

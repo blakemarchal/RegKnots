@@ -286,6 +286,22 @@ function ChatInterfaceInner({ initialConversationId }: Props) {
         </div>
       )}
 
+      {/* ── Paused subscription banner ─────────────────────────── */}
+      {billing && billing.subscription_status === 'paused' && (
+        <div className="flex-shrink-0 flex items-center justify-between gap-3 px-4 py-2.5
+          bg-amber-950/40 border-b border-amber-800/30">
+          <p className="font-mono text-xs text-amber-400 leading-relaxed">
+            Your subscription is paused. Resume in Account → Manage Subscription to continue asking questions.
+          </p>
+          <button
+            onClick={() => router.push('/account')}
+            className="font-mono text-xs font-bold text-[#2dd4bf] hover:underline flex-shrink-0"
+          >
+            Account
+          </button>
+        </div>
+      )}
+
       {/* ── Chat thread ──────────────────────────────────────────── */}
       <main className="chat-thread flex-1 overflow-y-auto overscroll-contain
         bg-[image:repeating-linear-gradient(0deg,transparent,transparent_47px,rgba(45,212,191,0.018)_47px,rgba(45,212,191,0.018)_48px),repeating-linear-gradient(90deg,transparent,transparent_47px,rgba(45,212,191,0.018)_47px,rgba(45,212,191,0.018)_48px)]">

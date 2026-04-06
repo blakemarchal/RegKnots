@@ -7,6 +7,10 @@ import { AppHeader } from '@/components/AppHeader'
 import { useAuthStore } from '@/lib/auth'
 import { apiRequest } from '@/lib/api'
 import { PilotSurveyModal } from '@/components/PilotSurveyModal'
+import {
+  LineChart, Line, BarChart, Bar, PieChart, Pie, Cell,
+  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
+} from 'recharts'
 
 // ── Types ───────────────────────────────────────────────────────────────────────
 
@@ -82,6 +86,34 @@ interface SurveyAggregates {
   responses: SurveyResponse[]
 }
 
+interface DayMessageCount {
+  day: string
+  message_count: number
+}
+
+interface TopCitation {
+  source: string
+  section_number: string
+  section_title: string | null
+  cite_count: number
+}
+
+interface VesselTypeUsage {
+  vessel_type: string
+  message_count: number
+  user_count: number
+}
+
+interface ModelUsageItem {
+  model: string
+  message_count: number
+  total_input_tokens: number
+  total_output_tokens: number
+}
+
+// Chart color ramp
+const CHART_COLORS = ['#2dd4bf', '#1d9e75', '#0f6e56', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899']
+
 // Read-only admin emails — mirrors backend READONLY_ADMIN_EMAILS
 const READONLY_ADMIN_EMAILS = new Set(['kdmarchal@gmail.com'])
 
@@ -131,18 +163,35 @@ function AdminContent() {
   const [surveyLoading, setSurveyLoading] = useState(true)
   const [surveyPreview, setSurveyPreview] = useState(false)
 
+  // Internal filtering toggle
+  const [excludeInternal, setExcludeInternal] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('admin_exclude_internal') !== 'false'
+    }
+    return true
+  })
+
+  // Analytics state
+  const [messagesPerDay, setMessagesPerDay] = useState<DayMessageCount[]>([])
+  const [topCitations, setTopCitations] = useState<TopCitation[]>([])
+  const [vesselUsage, setVesselUsage] = useState<VesselTypeUsage[]>([])
+  const [modelUsage, setModelUsage] = useState<ModelUsageItem[]>([])
+  const [analyticsLoading, setAnalyticsLoading] = useState(true)
+
+  const ei = excludeInternal ? 'true' : 'false'
+
   const fetchStats = useCallback(() => {
-    apiRequest<AdminStats>('/admin/stats').then(setStats).catch(() => {})
-  }, [])
+    apiRequest<AdminStats>(`/admin/stats?exclude_internal=${ei}`).then(setStats).catch(() => {})
+  }, [ei])
 
   const fetchUsers = useCallback((offset: number, append: boolean) => {
-    apiRequest<AdminUser[]>(`/admin/users?limit=50&offset=${offset}`)
+    apiRequest<AdminUser[]>(`/admin/users?limit=50&offset=${offset}&exclude_internal=${ei}`)
       .then((data) => {
         setUsers((prev) => append ? [...prev, ...data] : data)
         setHasMore(data.length === 50)
       })
       .catch(() => {})
-  }, [])
+  }, [ei])
 
   const fetchSentry = useCallback(() => {
     apiRequest<SentryIssue[]>('/admin/sentry-issues')
@@ -152,11 +201,11 @@ function AdminContent() {
   }, [])
 
   const fetchCitations = useCallback(() => {
-    apiRequest<CitationError[]>('/admin/citation-errors?limit=50')
+    apiRequest<CitationError[]>(`/admin/citation-errors?limit=50&exclude_internal=${ei}`)
       .then(setCitationErrors)
       .catch(() => {})
       .finally(() => setCitationLoading(false))
-  }, [])
+  }, [ei])
 
   const fetchSurvey = useCallback(() => {
     apiRequest<SurveyAggregates>('/survey/admin/responses')
@@ -164,6 +213,21 @@ function AdminContent() {
       .catch(() => {})
       .finally(() => setSurveyLoading(false))
   }, [])
+
+  const fetchAnalytics = useCallback(() => {
+    setAnalyticsLoading(true)
+    Promise.all([
+      apiRequest<DayMessageCount[]>(`/admin/analytics/messages-per-day?exclude_internal=${ei}`).catch(() => []),
+      apiRequest<TopCitation[]>(`/admin/analytics/top-citations?exclude_internal=${ei}`).catch(() => []),
+      apiRequest<VesselTypeUsage[]>(`/admin/analytics/usage-by-vessel-type?exclude_internal=${ei}`).catch(() => []),
+      apiRequest<ModelUsageItem[]>('/admin/model-usage').catch(() => []),
+    ]).then(([mpd, tc, vu, mu]) => {
+      setMessagesPerDay(mpd)
+      setTopCitations(tc)
+      setVesselUsage(vu)
+      setModelUsage(mu)
+    }).finally(() => setAnalyticsLoading(false))
+  }, [ei])
 
   useEffect(() => {
     if (hydrated && !isAdmin) {
@@ -177,11 +241,18 @@ function AdminContent() {
     fetchSentry()
     fetchCitations()
     fetchSurvey()
+    fetchAnalytics()
     setLoading(false)
 
-    const interval = setInterval(() => { fetchStats(); fetchSentry(); fetchCitations(); fetchSurvey() }, 60_000)
+    const interval = setInterval(() => { fetchStats(); fetchSentry(); fetchCitations(); fetchSurvey(); fetchAnalytics() }, 60_000)
     return () => clearInterval(interval)
-  }, [hydrated, isAdmin, router, fetchStats, fetchUsers, fetchSentry, fetchCitations, fetchSurvey])
+  }, [hydrated, isAdmin, router, fetchStats, fetchUsers, fetchSentry, fetchCitations, fetchSurvey, fetchAnalytics])
+
+  function toggleExcludeInternal() {
+    const next = !excludeInternal
+    setExcludeInternal(next)
+    localStorage.setItem('admin_exclude_internal', String(next))
+  }
 
   function loadMore() {
     const next = usersOffset + 50
@@ -282,6 +353,27 @@ function AdminContent() {
 
       <main className="flex-1 overflow-y-auto">
         <div className="max-w-5xl mx-auto px-4 py-6">
+
+          {/* ── Internal filter toggle ────────────────────────────────── */}
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <button
+                onClick={toggleExcludeInternal}
+                className={`relative w-10 h-5 rounded-full transition-colors duration-200
+                  ${excludeInternal ? 'bg-[#2dd4bf]' : 'bg-[#6b7594]/40'}`}
+              >
+                <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full
+                  transition-transform duration-200 ${excludeInternal ? 'translate-x-5' : 'translate-x-0'}`} />
+              </button>
+              <span className="font-mono text-xs text-[#f0ece4]/80">Hide internal data</span>
+              {excludeInternal && (
+                <span className="font-mono text-[9px] text-[#6b7594] bg-[#6b7594]/10
+                  border border-[#6b7594]/20 rounded px-1.5 py-0.5">
+                  Filtering: Blake, Karynn, test accounts
+                </span>
+              )}
+            </div>
+          </div>
 
           {/* ── Stats grid ───────────────────────────────────────────── */}
           {loading && !stats && (
@@ -522,6 +614,145 @@ function AdminContent() {
                     })}
                   </tbody>
                 </table>
+              </div>
+            )}
+          </div>
+
+          {/* ── Analytics Charts ─────────────────────────────────────── */}
+          <div className="mb-8">
+            <h2 className="font-display text-lg font-bold text-[#f0ece4] tracking-wide mb-3">Analytics</h2>
+
+            {analyticsLoading ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {[1, 2, 3, 4].map(i => (
+                  <div key={i} className="bg-[#111827] rounded-xl border border-white/8 h-[280px] animate-pulse" />
+                ))}
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Chart 1: Messages per day */}
+                <div className="bg-[#111827] rounded-xl border border-white/8 p-4">
+                  <p className="font-mono text-[10px] text-[#6b7594] uppercase tracking-wider mb-3">Messages per Day (30d)</p>
+                  {messagesPerDay.length > 0 ? (
+                    <ResponsiveContainer width="100%" height={220}>
+                      <LineChart data={messagesPerDay}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                        <XAxis
+                          dataKey="day"
+                          tick={{ fontSize: 10, fill: '#6b7594' }}
+                          tickFormatter={(v: string) => new Date(v).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                          interval="preserveStartEnd"
+                        />
+                        <YAxis tick={{ fontSize: 10, fill: '#6b7594' }} allowDecimals={false} />
+                        <Tooltip
+                          contentStyle={{ backgroundColor: '#1a2332', border: '1px solid #2dd4bf33', borderRadius: '8px', fontSize: '11px', fontFamily: 'monospace' }}
+                          labelStyle={{ color: '#6b7594' }}
+                          itemStyle={{ color: '#2dd4bf' }}
+                          labelFormatter={(v) => new Date(String(v)).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                        />
+                        <Line type="monotone" dataKey="message_count" stroke="#2dd4bf" strokeWidth={2} dot={false} />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <p className="font-mono text-xs text-[#6b7594] text-center py-16">No data yet</p>
+                  )}
+                </div>
+
+                {/* Chart 2: Top cited regulations */}
+                <div className="bg-[#111827] rounded-xl border border-white/8 p-4">
+                  <p className="font-mono text-[10px] text-[#6b7594] uppercase tracking-wider mb-3">Top Cited Regulations</p>
+                  {topCitations.length > 0 ? (
+                    <ResponsiveContainer width="100%" height={220}>
+                      <BarChart data={topCitations.slice(0, 10)} layout="vertical" margin={{ left: 80 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                        <XAxis type="number" tick={{ fontSize: 10, fill: '#6b7594' }} allowDecimals={false} />
+                        <YAxis
+                          type="category"
+                          dataKey="section_number"
+                          tick={{ fontSize: 9, fill: '#6b7594' }}
+                          width={80}
+                        />
+                        <Tooltip
+                          contentStyle={{ backgroundColor: '#1a2332', border: '1px solid #2dd4bf33', borderRadius: '8px', fontSize: '11px', fontFamily: 'monospace' }}
+                          labelStyle={{ color: '#f0ece4' }}
+                          itemStyle={{ color: '#2dd4bf' }}
+                        />
+                        <Bar dataKey="cite_count" fill="#2dd4bf" radius={[0, 4, 4, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <p className="font-mono text-xs text-[#6b7594] text-center py-16">No data yet</p>
+                  )}
+                </div>
+
+                {/* Chart 3: Usage by vessel type */}
+                <div className="bg-[#111827] rounded-xl border border-white/8 p-4">
+                  <p className="font-mono text-[10px] text-[#6b7594] uppercase tracking-wider mb-3">Usage by Vessel Type</p>
+                  {vesselUsage.length > 0 ? (
+                    <ResponsiveContainer width="100%" height={220}>
+                      <PieChart>
+                        <Pie
+                          data={vesselUsage}
+                          dataKey="message_count"
+                          nameKey="vessel_type"
+                          cx="50%"
+                          cy="50%"
+                          innerRadius={50}
+                          outerRadius={80}
+                          paddingAngle={2}
+                        >
+                          {vesselUsage.map((_, i) => (
+                            <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
+                          ))}
+                        </Pie>
+                        <Tooltip
+                          contentStyle={{ backgroundColor: '#1a2332', border: '1px solid #2dd4bf33', borderRadius: '8px', fontSize: '11px', fontFamily: 'monospace' }}
+                        />
+                        <Legend
+                          wrapperStyle={{ fontSize: '10px', fontFamily: 'monospace' }}
+                          formatter={(value) => <span style={{ color: '#6b7594' }}>{String(value)}</span>}
+                        />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <p className="font-mono text-xs text-[#6b7594] text-center py-16">No data yet</p>
+                  )}
+                </div>
+
+                {/* Chart 4: Model usage distribution */}
+                <div className="bg-[#111827] rounded-xl border border-white/8 p-4">
+                  <p className="font-mono text-[10px] text-[#6b7594] uppercase tracking-wider mb-3">Model Usage Distribution</p>
+                  {modelUsage.length > 0 ? (
+                    <ResponsiveContainer width="100%" height={220}>
+                      <PieChart>
+                        <Pie
+                          data={modelUsage}
+                          dataKey="message_count"
+                          nameKey="model"
+                          cx="50%"
+                          cy="50%"
+                          innerRadius={50}
+                          outerRadius={80}
+                          paddingAngle={2}
+                        >
+                          {modelUsage.map((_, i) => (
+                            <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
+                          ))}
+                        </Pie>
+                        <Tooltip
+                          contentStyle={{ backgroundColor: '#1a2332', border: '1px solid #2dd4bf33', borderRadius: '8px', fontSize: '11px', fontFamily: 'monospace' }}
+                          formatter={(value) => [Number(value).toLocaleString(), 'Messages']}
+                        />
+                        <Legend
+                          wrapperStyle={{ fontSize: '10px', fontFamily: 'monospace' }}
+                          formatter={(value) => <span style={{ color: '#6b7594' }}>{String(value)}</span>}
+                        />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <p className="font-mono text-xs text-[#6b7594] text-center py-16">No data yet</p>
+                  )}
+                </div>
               </div>
             )}
           </div>
