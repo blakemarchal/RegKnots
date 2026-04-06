@@ -1,5 +1,9 @@
+'use client'
+
 import Link from 'next/link'
 import { CompassRose } from '@/components/CompassRose'
+import { AppHeader } from '@/components/AppHeader'
+import { useAuthStore } from '@/lib/auth'
 
 const CHARITIES = [
   {
@@ -29,34 +33,40 @@ const CHARITIES = [
 ]
 
 export default function GivingPage() {
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
+
   return (
-    <div className="min-h-screen bg-[#0a0e1a]">
+    <div className="min-h-screen bg-[#0a0e1a] flex flex-col">
 
       {/* ── Nav ───────────────────────────────────────────────────────── */}
-      <nav className="fixed top-0 inset-x-0 z-40 flex items-center justify-between
-        px-5 md:px-10 py-4 bg-[#0a0e1a]/80 backdrop-blur-md border-b border-white/5">
-        <Link href="/landing" className="flex items-center gap-2">
-          <CompassRose className="w-5 h-5 text-[#2dd4bf]" />
-          <span className="font-display text-xl font-bold text-[#f0ece4] tracking-widest uppercase">
-            RegKnots
-          </span>
-        </Link>
-        <div className="flex items-center gap-3">
-          <Link href="/login"
-            className="font-mono text-sm text-[#6b7594] hover:text-[#f0ece4] transition-colors duration-150">
-            Sign In
+      {isAuthenticated ? (
+        <AppHeader title="Giving Back" />
+      ) : (
+        <nav className="fixed top-0 inset-x-0 z-40 flex items-center justify-between
+          px-5 md:px-10 py-4 bg-[#0a0e1a]/80 backdrop-blur-md border-b border-white/5">
+          <Link href="/landing" className="flex items-center gap-2">
+            <CompassRose className="w-5 h-5 text-[#2dd4bf]" />
+            <span className="font-display text-xl font-bold text-[#f0ece4] tracking-widest uppercase">
+              RegKnots
+            </span>
           </Link>
-          <Link href="/register"
-            className="font-mono text-sm font-bold text-[#0a0e1a] bg-[#2dd4bf]
-              hover:brightness-110 transition-[filter] duration-150
-              rounded-lg px-4 py-1.5">
-            Get Access
-          </Link>
-        </div>
-      </nav>
+          <div className="flex items-center gap-3">
+            <Link href="/login"
+              className="font-mono text-sm text-[#6b7594] hover:text-[#f0ece4] transition-colors duration-150">
+              Sign In
+            </Link>
+            <Link href="/register"
+              className="font-mono text-sm font-bold text-[#0a0e1a] bg-[#2dd4bf]
+                hover:brightness-110 transition-[filter] duration-150
+                rounded-lg px-4 py-1.5">
+              Get Access
+            </Link>
+          </div>
+        </nav>
+      )}
 
       {/* ── Hero ──────────────────────────────────────────────────────── */}
-      <section className="flex flex-col items-center justify-center px-5 pt-32 pb-16 text-center">
+      <section className={`flex flex-col items-center justify-center px-5 pb-16 text-center ${isAuthenticated ? 'pt-10' : 'pt-32'}`}>
         <CompassRose className="w-12 h-12 text-[#2dd4bf] mb-6 opacity-60" />
 
         <h1 className="font-display font-black text-[#f0ece4] text-3xl md:text-5xl tracking-tight mb-4">
@@ -137,7 +147,7 @@ export default function GivingPage() {
       </section>
 
       {/* ── Footer ────────────────────────────────────────────────────── */}
-      <footer className="border-t border-white/8 px-5 md:px-10 py-8">
+      <footer className="border-t border-white/8 px-5 md:px-10 py-8 mt-auto">
         <div className="max-w-4xl mx-auto flex flex-col md:flex-row items-center
           justify-between gap-4 text-center md:text-left">
           <div className="flex items-center gap-2">
@@ -156,7 +166,7 @@ export default function GivingPage() {
             <Link href="/privacy" className="font-mono text-xs text-[#6b7594] hover:text-[#f0ece4]/80 transition-colors">
               Privacy
             </Link>
-            <Link href="/landing" className="font-mono text-xs text-[#6b7594] hover:text-[#f0ece4]/80 transition-colors">
+            <Link href={isAuthenticated ? '/' : '/landing'} className="font-mono text-xs text-[#6b7594] hover:text-[#f0ece4]/80 transition-colors">
               Home
             </Link>
             <p className="font-mono text-xs text-[#6b7594]">
