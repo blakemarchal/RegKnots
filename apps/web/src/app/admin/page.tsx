@@ -180,8 +180,16 @@ function AdminContent() {
 
   const ei = excludeInternal ? 'true' : 'false'
 
+  const [statsError, setStatsError] = useState(false)
+
   const fetchStats = useCallback(() => {
-    apiRequest<AdminStats>(`/admin/stats?exclude_internal=${ei}`).then(setStats).catch(() => {})
+    setStatsError(false)
+    apiRequest<AdminStats>(`/admin/stats?exclude_internal=${ei}`)
+      .then(setStats)
+      .catch((err) => {
+        console.error('Failed to fetch admin stats:', err)
+        setStatsError(true)
+      })
   }, [ei])
 
   const fetchUsers = useCallback((offset: number, append: boolean) => {
@@ -251,6 +259,7 @@ function AdminContent() {
   function toggleExcludeInternal() {
     const next = !excludeInternal
     setExcludeInternal(next)
+    setStats(null)
     localStorage.setItem('admin_exclude_internal', String(next))
   }
 
@@ -376,11 +385,25 @@ function AdminContent() {
           </div>
 
           {/* ── Stats grid ───────────────────────────────────────────── */}
-          {!stats && (
+          {!stats && !statsError && (
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-8">
               {Array.from({ length: 12 }).map((_, i) => (
                 <div key={i} className="bg-[#111827] rounded-xl border border-white/8 px-4 py-3 h-[72px] animate-pulse" />
               ))}
+            </div>
+          )}
+
+          {statsError && !stats && (
+            <div className="bg-[#111827] rounded-xl border border-red-500/30 px-6 py-5 mb-8 text-center">
+              <p className="font-mono text-sm text-red-400 mb-3">Failed to load stats</p>
+              <button
+                onClick={fetchStats}
+                className="font-mono text-xs font-bold uppercase tracking-wider
+                  bg-[#2dd4bf] text-[#0a0e1a] rounded-lg px-4 py-2
+                  hover:brightness-110 transition-[filter] duration-150"
+              >
+                Retry
+              </button>
             </div>
           )}
 

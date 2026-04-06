@@ -65,9 +65,9 @@ async def get_stats(
 ) -> AdminStats:
     pool = await get_pool()
     # When filtering, exclude users where is_internal = TRUE and their data
-    uf = " AND u.is_internal = FALSE" if exclude_internal else ""
+    uf = " AND u.is_internal IS NOT TRUE" if exclude_internal else ""
     muf = (
-        " AND m.conversation_id IN (SELECT c2.id FROM conversations c2 JOIN users u2 ON u2.id = c2.user_id WHERE u2.is_internal = FALSE)"
+        " AND m.conversation_id IN (SELECT c2.id FROM conversations c2 JOIN users u2 ON u2.id = c2.user_id WHERE u2.is_internal IS NOT TRUE)"
         if exclude_internal else ""
     )
     async with pool.acquire() as conn:
@@ -93,7 +93,7 @@ async def get_stats(
             if exclude_internal else "SELECT COUNT(*) FROM conversations"
         )
         total_messages = await conn.fetchval(
-            f"SELECT COUNT(*) FROM messages m{muf}"
+            f"SELECT COUNT(*) FROM messages m WHERE 1=1{muf}"
             if exclude_internal else "SELECT COUNT(*) FROM messages"
         )
 
@@ -178,7 +178,7 @@ async def list_users(
     exclude_internal: bool = Query(default=False),
 ) -> list[AdminUser]:
     pool = await get_pool()
-    where = "WHERE is_internal = FALSE" if exclude_internal else ""
+    where = "WHERE is_internal IS NOT TRUE" if exclude_internal else ""
     rows = await pool.fetch(
         f"""
         SELECT id, email, full_name, role, subscription_tier,
@@ -460,7 +460,7 @@ async def list_citation_errors(
             FROM citation_errors ce
             JOIN conversations c ON c.id = ce.conversation_id
             JOIN users u ON u.id = c.user_id
-            WHERE u.is_internal = FALSE
+            WHERE u.is_internal IS NOT TRUE
             ORDER BY ce.created_at DESC
             LIMIT $1
             """,
@@ -697,7 +697,7 @@ async def top_topics(
         FROM conversations c
         JOIN users u ON c.user_id = u.id
         WHERE c.title IS NOT NULL
-          AND ($1 = FALSE OR u.is_internal = FALSE)
+          AND ($1 = FALSE OR u.is_internal IS NOT TRUE)
         GROUP BY c.title
         ORDER BY conversation_count DESC
         LIMIT 20
@@ -735,7 +735,7 @@ async def top_citations(
         JOIN conversations c ON m.conversation_id = c.id
         JOIN users u ON c.user_id = u.id
         WHERE m.role = 'assistant'
-          AND ($1 = FALSE OR u.is_internal = FALSE)
+          AND ($1 = FALSE OR u.is_internal IS NOT TRUE)
         GROUP BY r.source, r.section_number, r.section_title
         ORDER BY cite_count DESC
         LIMIT 20
@@ -774,7 +774,7 @@ async def usage_by_vessel_type(
         JOIN vessels v ON c.vessel_id = v.id
         JOIN users u ON c.user_id = u.id
         WHERE m.role = 'user'
-          AND ($1 = FALSE OR u.is_internal = FALSE)
+          AND ($1 = FALSE OR u.is_internal IS NOT TRUE)
         GROUP BY v.vessel_type
         ORDER BY message_count DESC
         """,
@@ -809,7 +809,7 @@ async def messages_per_day(
         JOIN users u ON c.user_id = u.id
         WHERE m.created_at > NOW() - INTERVAL '30 days'
           AND m.role = 'user'
-          AND ($1 = FALSE OR u.is_internal = FALSE)
+          AND ($1 = FALSE OR u.is_internal IS NOT TRUE)
         GROUP BY DATE(m.created_at)
         ORDER BY day
         """,
