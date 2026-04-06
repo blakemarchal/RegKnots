@@ -492,6 +492,9 @@ export default function LandingPage() {
             <a href="/privacy" className="font-mono text-xs text-[#6b7594] hover:text-[#f0ece4]/80 transition-colors">
               Privacy
             </a>
+            <a href="/whitelisting" className="font-mono text-xs text-[#6b7594] hover:text-[#f0ece4]/80 transition-colors">
+              Ship network issues?
+            </a>
             <p className="font-mono text-xs text-[#6b7594]">
               © 2026 RegKnots
             </p>

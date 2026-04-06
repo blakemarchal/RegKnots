@@ -91,16 +91,37 @@ const FAQ_ITEMS: FaqItem[] = [
     q: 'Which browsers are supported?',
     a: 'RegKnots works best on Chrome, Safari, Edge, and Firefox \u2014 both mobile and desktop. For the best experience on iPhone, use Safari and install the PWA to your home screen.',
   },
+  {
+    category: 'Technical',
+    q: "RegKnots won\u2019t load on my ship\u2019s Wi-Fi",
+    a: "Many ship networks restrict web applications by default. If RegKnots works on your personal mobile data but not on ship Wi-Fi, your vessel\u2019s network is likely blocking the connection. You can request your IT department to whitelist RegKnots \u2014 we\u2019ve prepared a ready-to-forward request document at [regknots.com/whitelisting](/whitelisting). As a workaround, you can use RegKnots on personal mobile data while in cellular range.",
+  },
 ]
 
 // ── FAQ Accordion ───────────────────────────────────────────────────────────────
 
+const faqMdComponents: Components = {
+  p: ({ children }) => <span>{children}</span>,
+  a: ({ href, children }) => (
+    <a
+      href={href}
+      onClick={(e) => e.stopPropagation()}
+      className="text-[#2dd4bf] hover:underline"
+    >
+      {children}
+    </a>
+  ),
+}
+
 function FaqAccordion({ item, open, onToggle }: { item: FaqItem; open: boolean; onToggle: () => void }) {
   return (
-    <button
+    <div
+      role="button"
+      tabIndex={0}
       onClick={onToggle}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggle() } }}
       className="w-full text-left bg-[#111827] border border-white/8 rounded-xl px-4 py-3
-        hover:border-[#2dd4bf]/30 transition-colors duration-150"
+        hover:border-[#2dd4bf]/30 transition-colors duration-150 cursor-pointer"
     >
       <div className="flex items-start justify-between gap-3">
         <p className="font-mono text-sm text-[#f0ece4] leading-snug">{item.q}</p>
@@ -110,11 +131,11 @@ function FaqAccordion({ item, open, onToggle }: { item: FaqItem; open: boolean; 
         </span>
       </div>
       {open && (
-        <p className="font-mono text-xs text-[#f0ece4]/70 mt-3 leading-relaxed border-t border-white/5 pt-3">
-          {item.a}
-        </p>
+        <div className="font-mono text-xs text-[#f0ece4]/70 mt-3 leading-relaxed border-t border-white/5 pt-3">
+          <ReactMarkdown components={faqMdComponents}>{item.a}</ReactMarkdown>
+        </div>
       )}
-    </button>
+    </div>
   )
 }
 

@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import Link from 'next/link'
 import type { NetworkDiagnosis } from '@/lib/networkError'
 import { getNetworkErrorMessage, WHITELIST_TEXT } from '@/lib/networkError'
 
@@ -47,20 +48,27 @@ export function NetworkErrorCard({ diagnosis, onRetry }: Props) {
 
       {/* Firewall-specific expandable section */}
       {diagnosis === 'firewall_blocked' && (
-        <div className="ml-6">
+        <div className="ml-6 flex flex-col gap-2">
+          <Link
+            href="/whitelisting"
+            className="font-mono text-[11px] text-[--color-teal] hover:underline"
+          >
+            View full whitelisting request →
+          </Link>
+
           <button
             type="button"
             onClick={() => setExpanded(!expanded)}
-            className="font-mono text-[11px] text-[--color-teal] hover:underline flex items-center gap-1"
+            className="font-mono text-[11px] text-[--color-teal] hover:underline flex items-center gap-1 self-start"
           >
             <span className={`inline-block transition-transform duration-200 ${expanded ? 'rotate-90' : ''}`}>
               ▸
             </span>
-            Whitelisting instructions for IT
+            Quick whitelisting instructions
           </button>
 
           {expanded && (
-            <div className="mt-2 bg-[--color-surface-dim] border border-white/8 rounded-lg p-3 flex flex-col gap-2.5">
+            <div className="mt-1 bg-[--color-surface-dim] border border-white/8 rounded-lg p-3 flex flex-col gap-2.5">
               <pre className="font-mono text-[10px] text-[--color-off-white]/60 whitespace-pre-wrap leading-relaxed">
                 {WHITELIST_TEXT}
               </pre>
