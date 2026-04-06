@@ -234,7 +234,7 @@ function ChatInterfaceInner({ initialConversationId }: Props) {
               RegKnots
             </h1>
             <p className="text-[9px] text-[#6b7594] tracking-[0.2em] uppercase leading-tight mt-0.5">
-              CFR Co-Pilot
+              Maritime Compliance Co-Pilot
             </p>
           </div>
         </div>

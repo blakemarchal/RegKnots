@@ -19,7 +19,7 @@ const ibm = IBM_Plex_Mono({
 
 export const metadata: Metadata = {
   title: 'RegKnots',
-  description: 'Maritime regulatory compliance platform',
+  description: 'AI-powered maritime compliance assistant. Cited answers from CFR, SOLAS, COLREGs, and USCG guidance.',
   manifest: '/manifest.json',
   icons: {
     icon: [

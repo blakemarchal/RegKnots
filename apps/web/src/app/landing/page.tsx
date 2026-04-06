@@ -111,6 +111,10 @@ export default function LandingPage() {
           </span>
         </div>
         <div className="flex items-center gap-3">
+          <Link href="/giving"
+            className="font-mono text-sm text-[#6b7594] hover:text-[#f0ece4] transition-colors duration-150">
+            Giving Back
+          </Link>
           <Link href="/login"
             className="font-mono text-sm text-[#6b7594] hover:text-[#f0ece4] transition-colors duration-150">
             Sign In
@@ -159,7 +163,7 @@ export default function LandingPage() {
             animate-[heroFadeUp_0.8s_ease-out_0.15s]"
           style={{ animationFillMode: 'both' }}
         >
-          Your CFR Co-Pilot.<br />Always On Watch.
+          Your Compliance Co-Pilot.<br />Always On Watch.
         </h1>
 
         {/* Subheadline */}
@@ -282,7 +286,7 @@ export default function LandingPage() {
                 <path d="M12 8l1.5 3.5L12 16l-1.5-4.5L12 8z" fill="currentColor" stroke="none" />
               </svg>
               <span className="font-display text-base font-bold text-[#f0ece4] tracking-wide">RegKnots</span>
-              <span className="font-mono text-[9px] text-[#6b7594] tracking-[0.2em] uppercase ml-0.5">CFR Co-Pilot</span>
+              <span className="font-mono text-[9px] text-[#6b7594] tracking-[0.2em] uppercase ml-0.5">Maritime Compliance Co-Pilot</span>
             </div>
 
             <div className="flex flex-col gap-0.5 py-3">
@@ -471,6 +475,30 @@ export default function LandingPage() {
       </section>
 
       {/* ══════════════════════════════════════════════════════════════════════
+          SECTION 6 — GIVING BACK
+      ══════════════════════════════════════════════════════════════════════ */}
+      <section className="py-16 px-5 md:px-10 border-t border-white/5">
+        <div className="max-w-3xl mx-auto text-center">
+          <p className="font-mono text-xs text-[#2dd4bf] uppercase tracking-widest mb-3">
+            Giving Back
+          </p>
+          <h2 className="font-display font-black text-[#f0ece4] text-2xl md:text-3xl mb-4">
+            10% of Every Dollar Goes to Charity
+          </h2>
+          <p className="font-mono text-sm text-[#6b7594] mb-6 max-w-lg mx-auto">
+            Your subscription supports Mercy Ships, Waves of Impact, and Elijah Rising &mdash;
+            organizations making a real difference in maritime communities and beyond.
+          </p>
+          <Link
+            href="/giving"
+            className="font-mono text-sm text-[#2dd4bf] hover:underline"
+          >
+            Learn more about our partners &rarr;
+          </Link>
+        </div>
+      </section>
+
+      {/* ══════════════════════════════════════════════════════════════════════
           FOOTER
       ══════════════════════════════════════════════════════════════════════ */}
       <footer className="border-t border-white/8 px-5 md:px-10 py-8">
@@ -491,6 +519,9 @@ export default function LandingPage() {
             </a>
             <a href="/privacy" className="font-mono text-xs text-[#6b7594] hover:text-[#f0ece4]/80 transition-colors">
               Privacy
+            </a>
+            <a href="/giving" className="font-mono text-xs text-[#6b7594] hover:text-[#f0ece4]/80 transition-colors">
+              Giving Back
             </a>
             <a href="/whitelisting" className="font-mono text-xs text-[#6b7594] hover:text-[#f0ece4]/80 transition-colors">
               Ship network issues?

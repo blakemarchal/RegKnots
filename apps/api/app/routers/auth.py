@@ -222,7 +222,7 @@ async def logout(
 
 # ── Profile & password management ─────────────────────────────────────────────
 
-_VALID_ROLES = {"captain", "mate", "engineer", "other"}
+_VALID_ROLES = {"captain", "mate", "engineer", "chief_engineer", "other"}
 
 
 class ProfileUpdate(BaseModel):

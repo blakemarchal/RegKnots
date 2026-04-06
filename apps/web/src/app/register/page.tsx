@@ -12,6 +12,7 @@ const ROLES = [
   { value: 'captain', label: 'Captain / Master' },
   { value: 'mate', label: 'Chief Mate / Officer' },
   { value: 'engineer', label: 'Engineer' },
+  { value: 'chief_engineer', label: 'Chief Engineer' },
   { value: 'other', label: 'Other / Shore-side' },
 ]
 

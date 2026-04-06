@@ -20,6 +20,7 @@ const BASE_MENU_ITEMS = [
   { icon: '\u25A1', label: 'Certificates', action: 'certificates' },
   { icon: '?', label: 'Help', action: 'help' },
   { icon: '\u2709', label: 'Give Feedback', action: 'feedback' },
+  { icon: '\u2665', label: 'Giving Back', action: 'giving' },
   { icon: '\u25CE', label: 'Account', action: 'account' },
 ]
 
@@ -46,6 +47,7 @@ export function HamburgerMenu({ open, onClose, onNewChat, onOpenVessels, onOpenS
     if (action === 'certificates') { signalNavigation(); onClose(); router.push('/certificates') }
     if (action === 'help') { signalNavigation(); onClose(); router.push('/support') }
     if (action === 'feedback') { onClose(); onOpenSurvey?.() }
+    if (action === 'giving') { signalNavigation(); onClose(); router.push('/giving') }
     if (action === 'admin') { signalNavigation(); onClose(); router.push('/admin') }
     if (action === 'account') { signalNavigation(); onClose(); router.push('/account') }
     if (action === 'signout') {

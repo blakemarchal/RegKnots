@@ -1,9 +1,10 @@
 import { CompassRose } from './CompassRose'
 
 const SUGGESTED = [
-  'Lifeboat inspection checklist',
-  'SOLAS certificate requirements',
-  'Watch schedule regulations',
+  'What fire safety equipment does my cargo vessel need?',
+  'Explain COLREGs Rule 15 \u2014 crossing situations',
+  'What SOLAS certificates need annual renewal?',
+  'NVIC guidelines for ballast water management',
 ]
 
 interface Props {
@@ -27,10 +28,10 @@ export function EmptyState({ onPrompt, isNewConversation }: Props) {
         RegKnots
       </h1>
       <p className="text-[11px] text-[#6b7594] tracking-[0.25em] uppercase mb-2 font-semibold">
-        CFR Co-Pilot
+        Maritime Compliance Co-Pilot
       </p>
       <p className="text-sm text-[#6b7594] max-w-xs mb-10 leading-relaxed">
-        Ask anything about federal maritime regulations. Cite-referenced answers from Titles 33, 46 &amp; 49.
+        Ask anything about U.S. maritime regulations. Cited answers from CFR, SOLAS, COLREGs, and USCG guidance.
       </p>
 
       {/* Suggested prompts — only on a fresh new conversation */}
