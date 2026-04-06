@@ -168,7 +168,6 @@ async def _on_subscription_change(subscription, pool) -> None:
             "past_due": ("pro", "past_due"),
             "canceled": ("free", "canceled"),
             "unpaid": ("free", "inactive"),
-            "paused": ("pro", "paused"),
         }
         tier, sub_status = status_map.get(status, ("free", "inactive"))
 

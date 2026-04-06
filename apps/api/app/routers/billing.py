@@ -94,11 +94,7 @@ async def billing_status(
     message_count = row["message_count"]
     trial_active = tier == "free" and trial_ends_at > now
 
-    if tier == "pro" and sub_status == "paused":
-        # Paused: keep pro tier but block chat
-        needs_subscription = True
-        messages_remaining = None
-    elif tier != "free":
+    if tier != "free":
         needs_subscription = False
         messages_remaining = None
     elif trial_active:
