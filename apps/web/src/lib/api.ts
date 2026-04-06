@@ -1,4 +1,5 @@
 import { useAuthStore } from './auth'
+import { diagnoseNetworkError, getNetworkErrorMessage } from './networkError'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'
 
@@ -27,7 +28,17 @@ export async function apiRequest<T = unknown>(
   const store = useAuthStore.getState()
   let token = store.accessToken
 
-  let res = await doFetch(path, init, token)
+  let res: Response
+  try {
+    res = await doFetch(path, init, token)
+  } catch (err) {
+    if (err instanceof TypeError) {
+      const diag = await diagnoseNetworkError()
+      const msg = getNetworkErrorMessage(diag)
+      throw new Error(`${msg.title}: ${msg.message}`)
+    }
+    throw err
+  }
 
   if (res.status === 401) {
     const refreshed = await store.refreshAuth()

@@ -5,6 +5,8 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { useAuthStore } from '@/lib/auth'
 import { CompassRose } from '@/components/CompassRose'
+import { diagnoseNetworkError, type NetworkDiagnosis } from '@/lib/networkError'
+import { NetworkErrorCard } from '@/components/NetworkErrorCard'
 
 function LoginForm() {
   const router = useRouter()
@@ -14,6 +16,7 @@ function LoginForm() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
+  const [networkDiag, setNetworkDiag] = useState<NetworkDiagnosis | null>(null)
   const [loading, setLoading] = useState(false)
 
   const resetSuccess = searchParams.get('reset') === '1'
@@ -21,12 +24,19 @@ function LoginForm() {
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
     setError('')
+    setNetworkDiag(null)
     setLoading(true)
     try {
       await login(email, password)
       router.replace('/')
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Login failed')
+      // TypeError means a network-level failure (DNS, firewall, offline, etc.)
+      if (err instanceof TypeError) {
+        const diag = await diagnoseNetworkError()
+        setNetworkDiag(diag)
+      } else {
+        setError(err instanceof Error ? err.message : 'Login failed')
+      }
     } finally {
       setLoading(false)
     }
@@ -88,7 +98,14 @@ function LoginForm() {
             />
           </div>
 
-          {error && (
+          {networkDiag && (
+            <NetworkErrorCard
+              diagnosis={networkDiag}
+              onRetry={() => { setNetworkDiag(null); handleSubmit(new Event('submit') as unknown as FormEvent) }}
+            />
+          )}
+
+          {error && !networkDiag && (
             <p className="font-mono text-xs text-red-400 bg-red-400/10 border border-red-400/20 rounded-lg px-3 py-2">
               {error}
             </p>
