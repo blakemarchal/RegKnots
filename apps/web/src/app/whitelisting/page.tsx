@@ -20,7 +20,7 @@ DOMAIN TO WHITELIST
 
 ──────────────────────────────────────
 
-WHAT IS REGKNOTS?
+WHAT IS REGKNOT?
 
 RegKnot is a maritime regulatory compliance reference tool used by U.S. commercial vessel officers and engineers. It provides instant lookup of U.S. Code of Federal Regulations (Titles 33, 46, 49), COLREGs, SOLAS 2024 + amendments, and USCG NVICs.
 

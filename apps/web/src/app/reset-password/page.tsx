@@ -119,7 +119,7 @@ export default function ResetPasswordPage() {
           <CompassRose className="w-12 h-12 text-[--color-teal]" />
           <div>
             <h1 className="font-display text-3xl font-black tracking-widest uppercase text-[--color-off-white]">
-              Reg<span className="text-[--color-teal]">Knots</span>
+              Reg<span className="text-[--color-teal]">Knot</span>
             </h1>
             <p className="mt-1 text-xs text-[--color-muted] tracking-wider uppercase font-mono">
               Maritime Compliance Co-pilot
