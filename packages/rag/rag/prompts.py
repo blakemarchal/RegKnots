@@ -24,6 +24,8 @@ Cite as: (NVIC 01-20)
 - STCW 2017 Consolidated Edition — International Convention on Standards of Training, \
 Certification and Watchkeeping for Seafarers, including the STCW Code (Parts A and B). \
 Cite as: (STCW Reg. II/1) or (STCW Code A-II/1) or (STCW Code B-I/2)
+- STCW January 2025 Supplement — MSC resolution amendments to STCW 2017 (MSC.540(107), MSC.541(107)). \
+Cite by resolution number, e.g.: (MSC.540(107))
 
 IMPORTANT RULES:
 - Always cite specific sections inline using the citation formats listed above.

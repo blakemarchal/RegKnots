@@ -16,13 +16,14 @@ from app.db import get_pool
 router = APIRouter(prefix="/regulations", tags=["regulations"])
 
 
-_IMO_COPYRIGHTED_SOURCES = {"solas", "solas_supplement", "colregs", "stcw"}
+_IMO_COPYRIGHTED_SOURCES = {"solas", "solas_supplement", "colregs", "stcw", "stcw_supplement"}
 
 _SOURCE_DESCRIPTIONS: dict[str, str] = {
     "solas": "the SOLAS 2024 Consolidated Edition",
     "solas_supplement": "the SOLAS January 2026 Supplement",
     "colregs": "the International Regulations for Preventing Collisions at Sea (COLREGs)",
     "stcw": "the STCW Convention, Consolidated Edition 2017",
+    "stcw_supplement": "the STCW January 2025 Supplement",
 }
 
 

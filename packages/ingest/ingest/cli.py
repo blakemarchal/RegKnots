@@ -60,6 +60,10 @@ _PDF_SOURCE_CONFIG: dict[str, dict] = {
         "text_dir": _DATA_RAW / "stcw" / "extracted",
         "adapter":  "ingest.sources.stcw",
     },
+    "stcw_supplement": {
+        "pdf":     _DATA_RAW / "stcw_supplements" / "QQQQD938E_supplement_January2025_EBK.pdf",
+        "adapter": "ingest.sources.stcw_supplement",
+    },
 }
 
 _DATA_FAILED = Path(__file__).resolve().parents[3] / "data" / "failed"
