@@ -19,13 +19,31 @@ from uuid import UUID
 
 import asyncpg
 import tiktoken
-from anthropic import AsyncAnthropic
+from anthropic import (
+    APIConnectionError,
+    APIError,
+    APITimeoutError,
+    AsyncAnthropic,
+    RateLimitError,
+)
 
 from rag.context import build_context
+from rag.fallback import fallback_chat
 from rag.models import ChatMessage, ChatResponse, CitedRegulation
 from rag.prompts import NAVIGATION_AID_REMINDER, SYSTEM_PROMPT
 from rag.retriever import retrieve
 from rag.router import route_query
+
+# Anthropic exceptions that indicate Claude itself is unavailable — these are
+# the only errors we fall back on. Application-level bugs (ValueError,
+# KeyError, DB errors, etc.) are intentionally NOT caught so they still fail
+# loudly.
+_CLAUDE_FAILURE_EXCEPTIONS = (
+    APIError,
+    APIConnectionError,
+    APITimeoutError,
+    RateLimitError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -511,22 +529,46 @@ async def chat(
     # 4. Construct messages
     messages = _build_chat_messages(query, conversation_history, vessel_profile, context_str)
 
-    # 5. Call Claude
-    response = await anthropic_client.messages.create(
-        model=route.model,
-        max_tokens=_MAX_TOKENS,
-        system=SYSTEM_PROMPT,
-        messages=messages,
-    )
-
-    answer = response.content[0].text
+    # 5. Call Claude — fall back to OpenAI GPT-4o on Anthropic API failures.
+    model_used = route.model
+    try:
+        response = await anthropic_client.messages.create(
+            model=route.model,
+            max_tokens=_MAX_TOKENS,
+            system=SYSTEM_PROMPT,
+            messages=messages,
+        )
+        answer = response.content[0].text
+        input_tokens = response.usage.input_tokens
+        output_tokens = response.usage.output_tokens
+    except _CLAUDE_FAILURE_EXCEPTIONS as exc:
+        logger.warning(
+            "Claude API failed (%s: %s), falling back to OpenAI GPT-4o",
+            type(exc).__name__,
+            str(exc)[:200],
+        )
+        fallback_result = await fallback_chat(
+            system_prompt=SYSTEM_PROMPT,
+            messages=messages,
+            max_tokens=_MAX_TOKENS,
+            openai_api_key=openai_api_key,
+        )
+        answer = fallback_result["answer"]
+        input_tokens = fallback_result["input_tokens"]
+        output_tokens = fallback_result["output_tokens"]
+        model_used = fallback_result["model"]
+        logger.warning(
+            "Fallback response received: %d input tokens, %d output tokens",
+            input_tokens,
+            output_tokens,
+        )
 
     # 6. Post-process: vessel update extraction, citation verification, cleanup
     cleaned_answer, verified_cited, all_unverified, vessel_update = await _finalize_answer(
         answer=answer,
         cited=cited,
         conversation_id=conversation_id,
-        model_used=route.model,
+        model_used=model_used,
         pool=pool,
     )
 
@@ -534,9 +576,9 @@ async def chat(
         answer=cleaned_answer,
         conversation_id=conversation_id,
         cited_regulations=verified_cited,
-        model_used=route.model,
-        input_tokens=response.usage.input_tokens,
-        output_tokens=response.usage.output_tokens,
+        model_used=model_used,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
         unverified_citations=all_unverified,
         vessel_update=vessel_update,
     )
@@ -596,13 +638,40 @@ async def chat_with_progress(
     messages = _build_chat_messages(query, conversation_history, vessel_profile, context_str)
 
     yield {"event": "status", "data": "Consulting compliance engine…"}
-    response = await anthropic_client.messages.create(
-        model=route.model,
-        max_tokens=_MAX_TOKENS,
-        system=SYSTEM_PROMPT,
-        messages=messages,
-    )
-    answer = response.content[0].text
+    model_used = route.model
+    try:
+        response = await anthropic_client.messages.create(
+            model=route.model,
+            max_tokens=_MAX_TOKENS,
+            system=SYSTEM_PROMPT,
+            messages=messages,
+        )
+        answer = response.content[0].text
+        input_tokens = response.usage.input_tokens
+        output_tokens = response.usage.output_tokens
+    except _CLAUDE_FAILURE_EXCEPTIONS as exc:
+        logger.warning(
+            "Claude API failed (%s: %s), falling back to OpenAI GPT-4o",
+            type(exc).__name__,
+            str(exc)[:200],
+        )
+        # Neutral status — never surface "Claude is down" to the user.
+        yield {"event": "status", "data": "Processing your question…"}
+        fallback_result = await fallback_chat(
+            system_prompt=SYSTEM_PROMPT,
+            messages=messages,
+            max_tokens=_MAX_TOKENS,
+            openai_api_key=openai_api_key,
+        )
+        answer = fallback_result["answer"]
+        input_tokens = fallback_result["input_tokens"]
+        output_tokens = fallback_result["output_tokens"]
+        model_used = fallback_result["model"]
+        logger.warning(
+            "Fallback response received: %d input tokens, %d output tokens",
+            input_tokens,
+            output_tokens,
+        )
 
     # Stage 5: Post-processing
     yield {"event": "status", "data": "Verifying citations…"}
@@ -610,7 +679,7 @@ async def chat_with_progress(
         answer=answer,
         cited=cited,
         conversation_id=conversation_id,
-        model_used=route.model,
+        model_used=model_used,
         pool=pool,
     )
 
@@ -628,9 +697,9 @@ async def chat_with_progress(
                 for c in verified_cited
             ],
             "conversation_id": str(conversation_id),
-            "model_used": route.model,
-            "input_tokens": response.usage.input_tokens,
-            "output_tokens": response.usage.output_tokens,
+            "model_used": model_used,
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
             "unverified_citations": all_unverified,
             "vessel_update": vessel_update,
         },

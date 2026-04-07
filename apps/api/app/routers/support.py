@@ -4,13 +4,27 @@ import logging
 import uuid
 from typing import Annotated
 
-from anthropic import AsyncAnthropic
+from anthropic import (
+    APIConnectionError,
+    APIError,
+    APITimeoutError,
+    AsyncAnthropic,
+    RateLimitError,
+)
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
 
 from app.auth.deps import get_current_user
 from app.auth.schemas import CurrentUser
 from app.db import get_pool, get_redis
+from rag.fallback import fallback_chat
+
+_CLAUDE_FAILURE_EXCEPTIONS = (
+    APIError,
+    APIConnectionError,
+    APITimeoutError,
+    RateLimitError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -73,18 +87,33 @@ async def support_chat(
         pass  # Redis down — allow request
 
     client: AsyncAnthropic = request.app.state.anthropic
+    openai_api_key: str = request.app.state.openai_api_key
 
     messages = [{"role": m.role, "content": m.content} for m in body.history]
     messages.append({"role": "user", "content": body.message})
 
     try:
-        resp = await client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=1024,
-            system=_SUPPORT_SYSTEM_PROMPT,
-            messages=messages,
-        )
-        text = resp.content[0].text if resp.content else "I'm sorry, I couldn't generate a response."
+        try:
+            resp = await client.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=1024,
+                system=_SUPPORT_SYSTEM_PROMPT,
+                messages=messages,
+            )
+            text = resp.content[0].text if resp.content else "I'm sorry, I couldn't generate a response."
+        except _CLAUDE_FAILURE_EXCEPTIONS as exc:
+            logger.warning(
+                "Support chat: Claude API failed (%s: %s), falling back to OpenAI GPT-4o",
+                type(exc).__name__,
+                str(exc)[:200],
+            )
+            fallback_result = await fallback_chat(
+                system_prompt=_SUPPORT_SYSTEM_PROMPT,
+                messages=messages,
+                max_tokens=1024,
+                openai_api_key=openai_api_key,
+            )
+            text = fallback_result["answer"] or "I'm sorry, I couldn't generate a response."
     except Exception as exc:
         logger.error("Support chat error: %s", exc)
         raise HTTPException(

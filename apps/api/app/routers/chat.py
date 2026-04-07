@@ -36,11 +36,15 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
-# Maps full Anthropic model IDs to the short aliases stored in the DB
+# Maps full Anthropic model IDs to the short aliases stored in the DB.
+# The "fallback:gpt-4o" entry shows up as a distinct bucket in the admin
+# dashboard's model-usage view when Claude is unavailable and the engine
+# swaps over to OpenAI GPT-4o.
 _MODEL_ALIAS: dict[str, str] = {
     "claude-haiku-4-5-20251001": "haiku",
     "claude-sonnet-4-6": "sonnet",
     "claude-opus-4-6": "opus",
+    "fallback:gpt-4o": "fallback_gpt4o",
 }
 
 
