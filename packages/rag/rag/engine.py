@@ -17,6 +17,7 @@ import re
 from uuid import UUID
 
 import asyncpg
+import tiktoken
 from anthropic import AsyncAnthropic
 
 from rag.context import build_context
@@ -27,8 +28,51 @@ from rag.router import route_query
 
 logger = logging.getLogger(__name__)
 
-_MAX_HISTORY = 10
+# Conversation history limits.
+# _MAX_HISTORY is the hard cap on message count (10 user/assistant pairs).
+# _MAX_HISTORY_TOKENS is a token-aware safety valve — if the selected window
+# still exceeds this budget, we drop the oldest messages until it fits.
+# No summarization is applied; trimming is purely FIFO.
+_MAX_HISTORY = 20
+_MAX_HISTORY_TOKENS = 12_000
 _MAX_TOKENS = 2048
+
+_HISTORY_ENCODER = tiktoken.get_encoding("cl100k_base")
+
+
+def _trim_history_by_tokens(
+    messages: list[dict],
+    budget: int = _MAX_HISTORY_TOKENS,
+) -> list[dict]:
+    """Drop oldest messages until total token count is within budget.
+
+    Operates on the list of Claude API message dicts (role + content). Counts
+    tokens on the content string via cl100k_base as a portable proxy — exact
+    Claude tokenization differs slightly but cl100k is close enough for a
+    safety-valve budget check. No summarization, purely FIFO eviction.
+    """
+    def _count(msgs: list[dict]) -> int:
+        return sum(len(_HISTORY_ENCODER.encode(m["content"])) for m in msgs)
+
+    total = _count(messages)
+    if total <= budget:
+        return messages
+
+    original_count = len(messages)
+    original_tokens = total
+    trimmed = list(messages)
+    while trimmed and _count(trimmed) > budget:
+        trimmed.pop(0)
+
+    logger.info(
+        "Trimmed conversation history: %d→%d messages, %d→%d tokens (budget=%d)",
+        original_count,
+        len(trimmed),
+        original_tokens,
+        _count(trimmed),
+        budget,
+    )
+    return trimmed
 
 # Matches both "(46 CFR 199.261)" and bare "46 CFR 199.261" — same as parseMessage.ts
 _CFR_RE = re.compile(r"\(?(\d+)\s+CFR\s+([\d]+(?:\.[\d]+(?:-[\d]+)?)?)\)?")
@@ -244,6 +288,7 @@ async def chat(
     # 4. Construct messages
     history = conversation_history[-_MAX_HISTORY:]
     messages = [{"role": msg.role, "content": msg.content} for msg in history]
+    messages = _trim_history_by_tokens(messages)
 
     # Build vessel context block if a vessel profile is provided
     vessel_block = ""

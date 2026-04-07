@@ -730,11 +730,13 @@ async def top_citations(
     rows = await pool.fetch(
         """
         SELECT r.source, r.section_number, r.section_title, COUNT(*) AS cite_count
-        FROM messages m, unnest(m.cited_regulation_ids) AS reg_id
+        FROM messages m
+        CROSS JOIN LATERAL unnest(m.cited_regulation_ids) AS reg_id
         JOIN regulations r ON r.id = reg_id
         JOIN conversations c ON m.conversation_id = c.id
         JOIN users u ON c.user_id = u.id
         WHERE m.role = 'assistant'
+          AND m.cited_regulation_ids IS NOT NULL
           AND ($1 = FALSE OR u.is_internal IS NOT TRUE)
         GROUP BY r.source, r.section_number, r.section_title
         ORDER BY cite_count DESC
@@ -906,6 +908,7 @@ async def reply_to_ticket(
             user_name=ticket["user_name"] or "Mariner",
             original_subject=ticket["subject"],
             reply_text=body.reply,
+            original_message=ticket["message"],
         )
     except Exception as exc:
         logger.error("Support reply email failed for ticket %s: %s", ticket_id, exc)

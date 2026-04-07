@@ -132,11 +132,13 @@ async def send_support_reply_email(
     user_name: str,
     original_subject: str,
     reply_text: str,
+    original_message: str,
 ) -> None:
     """Personal reply from the captain. reply_to → support@ for follow-ups."""
     first_name = user_name.split()[0] if user_name and user_name.strip() else "Mariner"
     safe_subject = _html_lib.escape(original_subject)
     safe_reply = _html_lib.escape(reply_text)
+    safe_original = _html_lib.escape(original_message)
     html = _html(f"""
       <h1>Re: {safe_subject}</h1>
       <p>Hey {_html_lib.escape(first_name)},</p>
@@ -147,6 +149,12 @@ async def send_support_reply_email(
         If you have follow-up questions, reply to this email or submit another
         request through the Support page in RegKnots.
       </p>
+      <p style="color:rgba(107,117,148,0.9); font-size:12px; margin-top:24px; margin-bottom:4px;">
+        Your original message:
+      </p>
+      <div style="background-color:rgba(13,18,37,0.6); border-left:2px solid rgba(107,117,148,0.4); padding:12px 16px; border-radius:6px; margin:0;">
+        <p style="color:rgba(240,236,228,0.7); white-space:pre-wrap; margin:0; font-size:13px;">{safe_original}</p>
+      </div>
     """)
     resend.Emails.send({
         "from": CAPTAIN_EMAIL,

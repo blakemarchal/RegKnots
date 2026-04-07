@@ -414,7 +414,11 @@ function AdminContent() {
   }
 
   async function closeTicket(ticketId: string) {
-    if (!confirm('Close this ticket without replying?')) return
+    const ticket = tickets.find((t) => t.id === ticketId)
+    const prompt = ticket?.status === 'replied'
+      ? 'Close this ticket?'
+      : 'Close this ticket without replying?'
+    if (!confirm(prompt)) return
     setTicketActionId(`${ticketId}-close`)
     try {
       await apiRequest(`/admin/support-tickets/${ticketId}/close`, { method: 'POST' })
