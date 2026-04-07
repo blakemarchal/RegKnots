@@ -124,6 +124,13 @@ interface SupportTicket {
   created_at: string
 }
 
+interface FoundingEmailPreview {
+  subject: string
+  recipients: { email: string; name: string | null }[]
+  total_count: number
+  sample_html: string
+}
+
 type TicketFilter = 'all' | 'open' | 'replied' | 'closed'
 
 // Chart color ramp
@@ -198,6 +205,12 @@ function AdminContent() {
   const [ticketsLoading, setTicketsLoading] = useState(true)
   const [ticketFilter, setTicketFilter] = useState<TicketFilter>('all')
   const [expandedTicket, setExpandedTicket] = useState<string | null>(null)
+
+  // Founding member email state
+  const [foundingPreview, setFoundingPreview] = useState<FoundingEmailPreview | null>(null)
+  const [foundingLoading, setFoundingLoading] = useState(true)
+  const [foundingAction, setFoundingAction] = useState<'test' | 'send' | null>(null)
+  const [foundingResult, setFoundingResult] = useState<{ msg: string; ok: boolean } | null>(null)
   const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({})
   const [ticketActionId, setTicketActionId] = useState<string | null>(null)
   const [ticketToast, setTicketToast] = useState<{ msg: string; ok: boolean } | null>(null)
@@ -268,6 +281,13 @@ function AdminContent() {
       .finally(() => setTicketsLoading(false))
   }, [])
 
+  const fetchFoundingPreview = useCallback(() => {
+    apiRequest<FoundingEmailPreview>('/admin/founding-email/preview')
+      .then(setFoundingPreview)
+      .catch(() => {})
+      .finally(() => setFoundingLoading(false))
+  }, [])
+
   useEffect(() => {
     if (hydrated && !isAdmin) {
       router.replace('/')
@@ -283,10 +303,11 @@ function AdminContent() {
     fetchSurvey()
     fetchAnalytics()
     fetchTickets()
+    fetchFoundingPreview()
 
     const interval = setInterval(() => { fetchStats(); fetchSentry(); fetchCitations(); fetchSurvey(); fetchAnalytics(); fetchTickets() }, 60_000)
     return () => clearInterval(interval)
-  }, [hydrated, isAdmin, router, fetchStats, fetchUsers, fetchSentry, fetchCitations, fetchSurvey, fetchAnalytics, fetchTickets])
+  }, [hydrated, isAdmin, router, fetchStats, fetchUsers, fetchSentry, fetchCitations, fetchSurvey, fetchAnalytics, fetchTickets, fetchFoundingPreview])
 
   function toggleExcludeInternal() {
     const next = !excludeInternal
@@ -413,6 +434,48 @@ function AdminContent() {
     setTimeout(() => setTicketToast(null), 4000)
   }
 
+  async function sendFoundingTest() {
+    setFoundingAction('test')
+    setFoundingResult(null)
+    try {
+      const res = await apiRequest<{ sent_to: string }>(
+        '/admin/founding-email/test',
+        { method: 'POST' },
+      )
+      setFoundingResult({ msg: `Test sent to ${res.sent_to}`, ok: true })
+    } catch {
+      setFoundingResult({ msg: 'Failed to send test email', ok: false })
+    }
+    setFoundingAction(null)
+    setTimeout(() => setFoundingResult(null), 6000)
+  }
+
+  async function sendFoundingToAll() {
+    if (!foundingPreview || foundingPreview.total_count === 0) return
+    if (!confirm(`Send founding member email to ${foundingPreview.total_count} pilots?`)) return
+    setFoundingAction('send')
+    setFoundingResult(null)
+    try {
+      const res = await apiRequest<{ sent_count: number; failed: string[] }>(
+        '/admin/founding-email/send',
+        { method: 'POST' },
+      )
+      const failedNote = res.failed.length > 0
+        ? ` · ${res.failed.length} failed`
+        : ''
+      setFoundingResult({
+        msg: `Sent to ${res.sent_count} pilots${failedNote}`,
+        ok: res.failed.length === 0,
+      })
+      fetchFoundingPreview()
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to send'
+      setFoundingResult({ msg, ok: false })
+    }
+    setFoundingAction(null)
+    setTimeout(() => setFoundingResult(null), 8000)
+  }
+
   async function closeTicket(ticketId: string) {
     const ticket = tickets.find((t) => t.id === ticketId)
     const prompt = ticket?.status === 'replied'
@@ -466,6 +529,77 @@ function AdminContent() {
                 </span>
               )}
             </div>
+          </div>
+
+          {/* ── Founding Member Email ────────────────────────────────── */}
+          <div className="mb-8">
+            <h2 className="font-display text-lg font-bold text-[#f0ece4] tracking-wide mb-3">
+              Founding Member Email
+            </h2>
+            {foundingLoading ? (
+              <div className="bg-[#111827] rounded-xl border border-white/8 px-4 py-6 h-[88px] animate-pulse" />
+            ) : !foundingPreview ? (
+              <div className="bg-[#111827] rounded-xl border border-red-500/30 px-4 py-3">
+                <p className="font-mono text-xs text-red-400">Failed to load preview</p>
+              </div>
+            ) : foundingPreview.total_count === 0 ? (
+              <div className="bg-[#111827] rounded-xl border border-[#2dd4bf]/30 px-4 py-4 flex items-center gap-3">
+                <span className="text-[#2dd4bf] text-lg" aria-hidden="true">{'\u2713'}</span>
+                <p className="font-mono text-sm text-[#f0ece4]/85">
+                  All founding member emails have been sent.
+                </p>
+              </div>
+            ) : (
+              <div className="bg-[#111827] rounded-xl border border-[#2dd4bf]/20 px-5 py-4">
+                <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                  <div>
+                    <p className="font-mono text-[10px] text-[#6b7594] uppercase tracking-wider">
+                      Pending Recipients
+                    </p>
+                    <p className="font-mono text-3xl font-bold text-[#2dd4bf] mt-1">
+                      {foundingPreview.total_count.toLocaleString()}
+                    </p>
+                    <p className="font-mono text-[11px] text-[#6b7594] mt-1">
+                      Subject: <span className="text-[#f0ece4]/80">{foundingPreview.subject}</span>
+                    </p>
+                  </div>
+                  {!isReadOnly && (
+                    <div className="flex flex-col sm:flex-row gap-2">
+                      <button
+                        onClick={sendFoundingTest}
+                        disabled={foundingAction !== null}
+                        className="font-mono text-xs font-bold uppercase tracking-wider
+                          border border-[#2dd4bf]/40 text-[#2dd4bf]
+                          hover:bg-[#2dd4bf]/10 rounded-lg px-4 py-2.5
+                          transition-colors duration-150 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {foundingAction === 'test' ? 'Sending…' : 'Send Test to Me'}
+                      </button>
+                      <button
+                        onClick={sendFoundingToAll}
+                        disabled={foundingAction !== null}
+                        className="font-mono text-xs font-bold uppercase tracking-wider
+                          bg-[#2dd4bf] text-[#0a0e1a]
+                          hover:brightness-110 rounded-lg px-4 py-2.5
+                          transition-[filter] duration-150 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {foundingAction === 'send'
+                          ? 'Sending…'
+                          : `Send to All Pilots (${foundingPreview.total_count})`}
+                      </button>
+                    </div>
+                  )}
+                </div>
+                {foundingResult && (
+                  <div className={`mt-3 font-mono text-xs px-3 py-2 rounded
+                    ${foundingResult.ok
+                      ? 'bg-[#2dd4bf]/10 text-[#2dd4bf] border border-[#2dd4bf]/30'
+                      : 'bg-red-500/10 text-red-400 border border-red-500/30'}`}>
+                    {foundingResult.msg}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* ── Stats grid ───────────────────────────────────────────── */}

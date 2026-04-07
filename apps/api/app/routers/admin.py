@@ -541,6 +541,140 @@ async def send_test_email(
     return TestEmailResult(success=True, type=body.type, recipient=recipient)
 
 
+# ── Founding member email ────────────────────────────────────────────────────
+
+
+class FoundingEmailRecipient(BaseModel):
+    email: str
+    name: str | None
+
+
+class FoundingEmailPreview(BaseModel):
+    subject: str
+    recipients: list[FoundingEmailRecipient]
+    total_count: int
+    sample_html: str
+
+
+class FoundingEmailSendResult(BaseModel):
+    sent_count: int
+    failed: list[str]
+
+
+class FoundingEmailTestResult(BaseModel):
+    sent_to: str
+
+
+@router.get("/founding-email/preview", response_model=FoundingEmailPreview)
+async def founding_email_preview(
+    _admin: Annotated[CurrentUser, Depends(require_admin)],
+) -> FoundingEmailPreview:
+    """Preview the founding member email and list pending recipients."""
+    from app.email import render_founding_member_email
+
+    pool = await get_pool()
+    rows = await pool.fetch(
+        """
+        SELECT email, full_name
+        FROM users
+        WHERE is_admin = false
+          AND founding_email_sent = false
+        ORDER BY created_at ASC
+        """
+    )
+    recipients = [
+        FoundingEmailRecipient(email=r["email"], name=r["full_name"]) for r in rows
+    ]
+    sample_name = recipients[0].name if recipients else None
+    subject, sample_html = render_founding_member_email(sample_name)
+    return FoundingEmailPreview(
+        subject=subject,
+        recipients=recipients,
+        total_count=len(recipients),
+        sample_html=sample_html,
+    )
+
+
+@router.post("/founding-email/test", response_model=FoundingEmailTestResult)
+async def founding_email_test(
+    admin: Annotated[CurrentUser, Depends(require_write_admin)],
+) -> FoundingEmailTestResult:
+    """Send the founding member email to the requesting admin only (no DB writes)."""
+    from app.email import send_founding_member_email
+
+    try:
+        await send_founding_member_email(admin.email, admin.full_name)
+    except Exception as exc:
+        logger.error("Founding email test send failed: %s", exc)
+        raise HTTPException(status_code=502, detail=str(exc))
+
+    logger.info("Admin %s sent founding-email test to self", admin.email)
+    return FoundingEmailTestResult(sent_to=admin.email)
+
+
+@router.post("/founding-email/send", response_model=FoundingEmailSendResult)
+async def founding_email_send(
+    admin: Annotated[CurrentUser, Depends(require_write_admin)],
+    force: bool = Query(default=False),
+) -> FoundingEmailSendResult:
+    """Send the founding member email to all non-admin users who haven't received it.
+
+    Guard: if any sends have already happened (any user has founding_email_sent=true)
+    require ?force=true to send again to the remaining users.
+    """
+    from app.email import send_founding_member_email
+
+    pool = await get_pool()
+
+    already_sent = await pool.fetchval(
+        "SELECT COUNT(*) FROM users WHERE founding_email_sent = true"
+    )
+    if already_sent and not force:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Founding email already sent to {already_sent} users. "
+                "Pass ?force=true to send to remaining recipients."
+            ),
+        )
+
+    rows = await pool.fetch(
+        """
+        SELECT id, email, full_name
+        FROM users
+        WHERE is_admin = false
+          AND founding_email_sent = false
+        ORDER BY created_at ASC
+        """
+    )
+
+    sent_count = 0
+    failed: list[str] = []
+    for row in rows:
+        try:
+            await send_founding_member_email(row["email"], row["full_name"])
+        except Exception as exc:
+            logger.error("Founding email send failed for %s: %s", row["email"], exc)
+            failed.append(row["email"])
+            continue
+
+        try:
+            await pool.execute(
+                "UPDATE users SET founding_email_sent = true WHERE id = $1",
+                row["id"],
+            )
+            sent_count += 1
+        except Exception as exc:
+            logger.error("Failed to mark founding_email_sent for %s: %s", row["email"], exc)
+            failed.append(row["email"])
+
+    logger.info(
+        "Admin %s ran founding-email/send: sent=%d failed=%d force=%s",
+        admin.email, sent_count, len(failed), force,
+    )
+    return FoundingEmailSendResult(sent_count=sent_count, failed=failed)
+
+
 # ── Sentry issues ────────────────────────────────────────────────────────────
 
 SENTRY_PROJECTS = ["regknots-api", "regknots-web"]

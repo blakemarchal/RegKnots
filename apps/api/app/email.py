@@ -422,6 +422,98 @@ async def send_charity_suggestion_email(
     })
 
 
+def render_founding_member_email(full_name: str | None) -> tuple[str, str]:
+    """Return (subject, html) for the founding member announcement email.
+
+    Used by both the send function and the admin preview endpoint.
+    """
+    raw_first = (full_name or "").split()[0] if (full_name or "").strip() else ""
+    first_name = _html_lib.escape(raw_first) if raw_first else "Captain"
+    subject = "Your RegKnot Pro access is ready"
+    html = _html(f"""
+      <h1>Hi {first_name},</h1>
+      <p>
+        Thank you for being one of the first mariners to try RegKnot during our pilot.
+        Your questions, feedback, and patience while we tuned things have shaped this
+        product in ways we couldn&rsquo;t have done alone.
+      </p>
+      <p>
+        RegKnot Pro is now live &mdash; and because you were here from the beginning,
+        you get to lock in the founding member rate:
+        <strong style="color:#f0ece4;">$49/month</strong>, forever.
+        Even when we raise prices down the road, your rate stays the same.
+      </p>
+      <p style="color:#f0ece4; font-weight:700; margin-top:24px; margin-bottom:8px;">
+        What you get with Pro:
+      </p>
+      <ul style="padding-left:20px; margin:0 0 16px;">
+        <li style="color:#6b7594; font-size:14px; line-height:1.7;">
+          Unlimited compliance questions across CFR, SOLAS, COLREGs, STCW, NVICs, and ISM
+        </li>
+        <li style="color:#6b7594; font-size:14px; line-height:1.7;">
+          Cited, regulation-backed answers you can trust
+        </li>
+        <li style="color:#6b7594; font-size:14px; line-height:1.7;">
+          Vessel-aware context that remembers your ship&rsquo;s profile
+        </li>
+        <li style="color:#6b7594; font-size:14px; line-height:1.7;">
+          Real-time progress tracking as your question is researched across regulations
+        </li>
+        <li style="color:#6b7594; font-size:14px; line-height:1.7;">
+          Export your chat history for personal records
+        </li>
+        <li style="color:#6b7594; font-size:14px; line-height:1.7;">
+          Enterprise subdomains for fleet-wide deployment
+        </li>
+        <li style="color:#6b7594; font-size:14px; line-height:1.7;">
+          Priority access to new features as we add them
+        </li>
+      </ul>
+      <p style="color:#f0ece4; font-weight:700; margin-top:24px; margin-bottom:8px;">
+        What your subscription supports:
+      </p>
+      <p>
+        10% of every dollar goes directly to maritime charities &mdash; Mercy Ships,
+        Waves of Impact, and Elijah Rising. When you subscribe, you&rsquo;re not just
+        getting a tool. You&rsquo;re supporting organizations that serve the maritime
+        community.
+        <a href="{APP_URL}/giving" style="color:#2dd4bf; text-decoration:none;">Learn more &rarr;</a>
+      </p>
+      <p>
+        Your trial is still active, so there&rsquo;s no rush. But when you&rsquo;re
+        ready, you can upgrade in the app:
+      </p>
+      <a href="{APP_URL}/pricing" class="cta">Upgrade to Pro</a>
+      <p>
+        If you have questions, feedback, or just want to say hey &mdash; reply to this
+        email. It comes straight to us, not a support queue.
+      </p>
+      <p style="margin-top:24px;">
+        Fair winds,<br>
+        <strong style="color:#f0ece4;">Karynn Marchal</strong><br>
+        <span style="color:rgba(107,117,148,0.85);">Co-founder &amp; Captain</span><br>
+        <span style="color:rgba(107,117,148,0.85);">RegKnot</span>
+      </p>
+      <p style="font-size:12px; color:rgba(107,117,148,0.75); margin-top:24px;">
+        P.S. &mdash; If you know another mariner who&rsquo;d find RegKnot useful, send
+        them to <a href="{APP_URL}" style="color:#2dd4bf; text-decoration:none;">regknots.com</a>.
+        We&rsquo;re building this for the fleet, not just the bridge.
+      </p>
+    """)
+    return subject, html
+
+
+async def send_founding_member_email(to: str, name: str | None) -> None:
+    subject, html = render_founding_member_email(name)
+    resend.Emails.send({
+        "from": CAPTAIN_EMAIL,
+        "to": [to],
+        "reply_to": ["hello@regknots.com"],
+        "subject": subject,
+        "html": html,
+    })
+
+
 async def send_subscription_resumed_email(to_email: str, full_name: str) -> None:
     first_name = full_name.split()[0] if full_name.strip() else "Mariner"
     html = _html(f"""
