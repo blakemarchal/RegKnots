@@ -14,8 +14,12 @@ const pwaConfig = withPWA({
   dynamicStartUrl: false,
   extendDefaultRuntimeCaching: true,
   workboxOptions: {
-    cacheId: "regknots-v3",
+    cacheId: "regknots-v4",
     disableDevLogs: true,
+    // Eliminate the precache manifest entirely. Hashed chunk URLs in a stale
+    // precache list cause bad-precaching-response 404s after every redeploy.
+    // We rely solely on runtime caching (defaults extended below).
+    exclude: [/.*/],
     runtimeCaching: [
       {
         urlPattern: /\/api\/auth\/.*/,
