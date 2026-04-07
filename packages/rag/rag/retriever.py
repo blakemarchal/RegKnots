@@ -1,21 +1,31 @@
 """
-pgvector semantic search with soft re-ranking.
+pgvector semantic search with source-diversified fetch and soft re-ranking.
 
-Fetch strategy:
-  - Always fetch a wider pool (top _RERANK_POOL_SIZE) so the re-rank pass has
-    room to promote chunks that score higher under the boost rules.
-  - Re-rank applies two soft boosts:
-      1. Source-affinity: when the query mentions COLREGs / nav-rule keywords,
-         boost chunks from the `colregs` source so they aren't outranked by
-         semantically-similar 33 CFR or 49 CFR content.
-      2. Vessel profile: when a vessel_profile is provided, boost chunks whose
-         text contains the vessel's type / route / cargo terms.
-  - The two boosts are additive. The final list is sorted by (similarity + boost)
-    and the top `limit` are returned.
+Retrieval strategy:
+
+1. Embed the query once.
+2. Run one vector search per configured source group, CONCURRENTLY. Each
+   group gets its own top-N candidate pool, so small sources (COLREGs: 102,
+   SOLAS: 742) aren't outranked by large ones (CFR: ~33K chunks) just
+   because the large sources have more chunks to draw from.
+3. Merge and deduplicate by chunk id.
+4. Apply two soft boosts:
+     - Source affinity: when the query unambiguously targets a source
+       (e.g., mentions COLREGs, 46 CFR, SOLAS chapter, STCW), boost chunks
+       from that source's group.
+     - Vessel profile: when a vessel_profile is provided, boost chunks
+       whose full_text mentions the vessel's type / route / cargo.
+5. Sort by similarity + boosts, return top `limit`.
+
+Adding a new source (e.g., MARPOL) is just a one-line edit to SOURCE_GROUPS
+and an entry in _source_affinity if it has distinctive keywords. No other
+code changes required — the diversified fetch adapts automatically.
 """
 
+import asyncio
 import logging
 import re
+import time
 
 import asyncpg
 from openai import AsyncOpenAI
@@ -23,80 +33,178 @@ from openai import AsyncOpenAI
 logger = logging.getLogger(__name__)
 
 _EMBED_MODEL = "text-embedding-3-small"
-_RERANK_POOL_SIZE = 20  # fetch this many before re-ranking
 
-# ── COLREGs / navigation-rule source affinity ──────────────────────────────
+# ── Source groups ────────────────────────────────────────────────────────────
 #
-# When the query unambiguously references COLREGs or one of the rule numbers
-# (Rules 1-38, Annexes I-V), we boost the score of `colregs` source chunks so
-# they aren't outranked by semantically-similar 33 CFR Subchapter E or 49 CFR
-# rail-collision content.
-#
-# Each keyword match adds _COLREGS_BOOST_PER_MATCH; the total per chunk is
-# capped at _COLREGS_MAX_BOOST to prevent runaway boosting on long queries.
+# Sources are grouped by regulatory body/type so related sub-sources stay
+# together. Each group fetches its own top-N independently in Phase 1.
+SOURCE_GROUPS: dict[str, tuple[str, ...]] = {
+    "cfr": ("cfr_33", "cfr_46", "cfr_49"),
+    "colregs": ("colregs",),
+    "solas": ("solas", "solas_supplement"),
+    "nvic": ("nvic",),
+    "stcw": ("stcw", "stcw_supplement"),
+    # Future:
+    # "marpol": ("marpol", "marpol_supplement"),
+}
 
-_COLREGS_KEYWORDS: tuple[str, ...] = (
-    # Direct mentions
-    "colreg",
-    "collision regulation",
-    "rules of the road",
-    "rule of the road",
+# Per-group candidate pool sizes. CFR is larger because it covers three
+# sub-titles (~33K total chunks) and needs room for intra-CFR diversity.
+_CANDIDATES_PER_GROUP: dict[str, int] = {
+    "cfr": 12,
+}
+_DEFAULT_CANDIDATES_PER_GROUP = 6
+
+# Reverse index: source_code → group_name. Built once at module load.
+_SOURCE_TO_GROUP: dict[str, str] = {
+    src: group_name
+    for group_name, srcs in SOURCE_GROUPS.items()
+    for src in srcs
+}
+
+# ── Source-existence cache ───────────────────────────────────────────────────
+#
+# Populated lazily on the first retrieve() call with a single
+# `SELECT DISTINCT source` query, then reused for the life of the process.
+# This lets us skip groups whose sources haven't been ingested yet (e.g.,
+# MARPOL before it exists) without a per-call overhead.
+_AVAILABLE_SOURCES: set[str] | None = None
+_AVAILABLE_SOURCES_LOCK = asyncio.Lock()
+
+
+async def _get_available_sources(pool: asyncpg.Pool) -> set[str]:
+    global _AVAILABLE_SOURCES
+    if _AVAILABLE_SOURCES is not None:
+        return _AVAILABLE_SOURCES
+    async with _AVAILABLE_SOURCES_LOCK:
+        if _AVAILABLE_SOURCES is not None:
+            return _AVAILABLE_SOURCES
+        rows = await pool.fetch(
+            "SELECT DISTINCT source FROM regulations WHERE embedding IS NOT NULL"
+        )
+        _AVAILABLE_SOURCES = {r["source"] for r in rows}
+        logger.info(
+            "Retriever source cache populated: %s",
+            sorted(_AVAILABLE_SOURCES),
+        )
+    return _AVAILABLE_SOURCES
+
+
+# ── Source affinity (query-keyword → group boost) ────────────────────────────
+#
+# A soft nudge, NOT a filter. The diversified fetch already guarantees each
+# group has candidates in the pool; these boosts just promote the clearly-
+# targeted group within the final top-8.
+
+_COLREGS_TERMS: tuple[str, ...] = (
+    "colreg", "collision regulation", "rules of the road", "rule of the road",
     "72 colregs",
-    # Behavior rules
-    "head-on",
-    "head on situation",
-    "crossing situation",
-    "overtaking",
-    "give-way",
-    "give way vessel",
-    "stand-on",
-    "stand on vessel",
-    "look-out",
-    "lookout",
-    "risk of collision",
-    "narrow channel",
-    "traffic separation",
-    "restricted visibility",
-    # Light & sound rules
-    "navigation light",
-    "navigation lights",
-    "masthead light",
-    "sidelight",
-    "side light",
-    "stern light",
-    "anchor light",
-    "fog signal",
-    "sound signal",
-    "manoeuvring signal",
-    "maneuvering signal",
-    "whistle signal",
+    "head-on", "head on situation", "crossing situation", "overtaking",
+    "give-way", "give way vessel", "stand-on", "stand on vessel",
+    "look-out", "lookout", "risk of collision", "narrow channel",
+    "traffic separation", "restricted visibility",
+    "navigation light", "navigation lights", "masthead light",
+    "sidelight", "side light", "stern light", "anchor light",
+    "fog signal", "sound signal", "whistle signal",
+    "manoeuvring signal", "maneuvering signal",
+    "shapes",
 )
-_COLREGS_RULE_RE = re.compile(r"\brule\s*([0-9]{1,2})\b", re.IGNORECASE)
+_COLREGS_RULE_RE = re.compile(r"\brules?\s*([0-9]{1,2})\b", re.IGNORECASE)
 _COLREGS_ANNEX_RE = re.compile(r"\bannex\s*([ivx]+|[0-9])\b", re.IGNORECASE)
-_COLREGS_BOOST_PER_MATCH = 0.15
-_COLREGS_MAX_BOOST = 0.30
-# When the query has any COLREGs affinity, also fetch the top-N colregs-source
-# chunks and merge them into the pool. Without this safety net, COLREGs chunks
-# whose raw similarity falls outside the global top _RERANK_POOL_SIZE never get
-# a chance to be boosted (e.g., "how do I determine risk of collision?", which
-# is dominated by 49 CFR rail-collision content).
-_COLREGS_SUPPLEMENTAL_LIMIT = 10
+
+_SOLAS_TERMS: tuple[str, ...] = (
+    "solas", "safety of life at sea", "msc.",
+    "regulation ii", "regulation iii", "regulation iv", "regulation v",
+    "chapter ii", "chapter iii", "chapter iv", "chapter v",
+)
+
+_STCW_TERMS: tuple[str, ...] = (
+    "stcw", "training certification watchkeeping", "seafarer credential",
+    "endorsement", "certificate of competency", "watchkeeping",
+)
+
+_NVIC_TERMS: tuple[str, ...] = (
+    "nvic", "navigation vessel inspection circular",
+    "uscg policy", "coast guard guidance", "coast guard policy",
+)
 
 
-def _colregs_boost_for_query(query: str) -> float:
-    """Return the COLREGs source-affinity boost amount for this query.
+def _source_affinity(query: str) -> dict[str, float]:
+    """Return a boost value per source group based on query keywords.
 
-    Returns 0.0 when the query has no COLREGs or rule-number keywords.
+    The diversified fetch guarantees each group has candidates — this
+    function just nudges ranking when the query clearly targets a source.
     """
     q = query.lower()
-    matches = sum(1 for kw in _COLREGS_KEYWORDS if kw in q)
-    if _COLREGS_RULE_RE.search(q):
-        matches += 1
-    if _COLREGS_ANNEX_RE.search(q):
-        matches += 1
-    if matches == 0:
-        return 0.0
-    return min(_COLREGS_BOOST_PER_MATCH * matches, _COLREGS_MAX_BOOST)
+    boosts: dict[str, float] = {}
+
+    if (
+        any(t in q for t in _COLREGS_TERMS)
+        or _COLREGS_RULE_RE.search(q)
+        or _COLREGS_ANNEX_RE.search(q)
+    ):
+        boosts["colregs"] = 0.20
+
+    if any(t in q for t in _SOLAS_TERMS):
+        boosts["solas"] = 0.20
+
+    if any(t in q for t in _STCW_TERMS):
+        boosts["stcw"] = 0.20
+
+    if any(t in q for t in _NVIC_TERMS):
+        boosts["nvic"] = 0.20
+
+    if "cfr" in q or "code of federal" in q:
+        boosts["cfr"] = 0.15
+        if any(
+            t in q
+            for t in ("33 cfr", "title 33", "46 cfr", "title 46", "49 cfr", "title 49")
+        ):
+            boosts["cfr"] = 0.25
+
+    return boosts
+
+
+# ── Query embedding ──────────────────────────────────────────────────────────
+
+
+async def _embed_query(openai_api_key: str, query: str) -> str:
+    oai = AsyncOpenAI(api_key=openai_api_key)
+    try:
+        resp = await oai.embeddings.create(model=_EMBED_MODEL, input=[query])
+    finally:
+        await oai.close()
+    embedding = resp.data[0].embedding
+    return "[" + ",".join(f"{x:.8f}" for x in embedding) + "]"
+
+
+# ── Per-group SQL fetch ──────────────────────────────────────────────────────
+
+
+async def _fetch_group(
+    pool: asyncpg.Pool,
+    vec_literal: str,
+    group_sources: list[str],
+    candidates: int,
+) -> list[dict]:
+    rows = await pool.fetch(
+        """
+        SELECT id, source, section_number, section_title, full_text,
+               1 - (embedding <=> $1::vector) AS similarity
+        FROM regulations
+        WHERE embedding IS NOT NULL
+          AND source = ANY($3)
+        ORDER BY embedding <=> $1::vector
+        LIMIT $2
+        """,
+        vec_literal,
+        candidates,
+        group_sources,
+    )
+    return [dict(r) for r in rows]
+
+
+# ── Public API ───────────────────────────────────────────────────────────────
 
 
 async def retrieve(
@@ -107,34 +215,30 @@ async def retrieve(
     limit: int = 8,
     sources: list[str] | None = None,
 ) -> list[dict]:
-    """Return semantically relevant regulation chunks, optionally re-ranked by vessel profile.
+    """Return semantically relevant regulation chunks.
 
     Args:
         query:          The user's question.
         pool:           asyncpg connection pool.
         openai_api_key: Key for OpenAI embeddings API.
-        vessel_profile: Dict with optional keys vessel_type, route_type, cargo_types (list).
-        limit:          Maximum chunks to return after re-ranking.
-        sources:        Restrict search to these source values (e.g. ['cfr_46']).
+        vessel_profile: Optional vessel profile dict for soft re-ranking.
+        limit:          Max chunks to return (default 8).
+        sources:        Explicit source filter (e.g. ['cfr_46']). When given,
+                        the diversified fetch is skipped and a single
+                        filtered query is run — preserves the citation-
+                        lookup code path.
 
     Returns:
-        List of dicts: id, source, section_number, section_title, full_text, similarity.
+        List of dicts: id, source, section_number, section_title, full_text,
+        similarity, plus an internal `_score` added by _rerank.
     """
-    # 1. Embed query
-    oai = AsyncOpenAI(api_key=openai_api_key)
-    try:
-        resp = await oai.embeddings.create(model=_EMBED_MODEL, input=[query])
-    finally:
-        await oai.close()
+    t0 = time.perf_counter()
 
-    embedding = resp.data[0].embedding
-    vec_literal = "[" + ",".join(f"{x:.8f}" for x in embedding) + "]"
-
-    # 2. Build SQL — optional source filter. Always fetch a wider pool so
-    # the re-rank pass below can promote boost-eligible chunks.
-    fetch_limit = max(_RERANK_POOL_SIZE, limit)
+    vec_literal = await _embed_query(openai_api_key, query)
 
     if sources:
+        # Explicit source filter — single query, no diversification.
+        fetch_limit = max(limit * 3, 20)
         rows = await pool.fetch(
             """
             SELECT id, source, section_number, section_title, full_text,
@@ -149,54 +253,50 @@ async def retrieve(
             fetch_limit,
             sources,
         )
+        candidates = [dict(r) for r in rows]
+        active_groups: list[str] = []
     else:
-        rows = await pool.fetch(
-            """
-            SELECT id, source, section_number, section_title, full_text,
-                   1 - (embedding <=> $1::vector) AS similarity
-            FROM regulations
-            WHERE embedding IS NOT NULL
-            ORDER BY embedding <=> $1::vector
-            LIMIT $2
-            """,
-            vec_literal,
-            fetch_limit,
-        )
+        # Diversified fetch: one query per source group that has data, all
+        # running concurrently on the HNSW index.
+        available = await _get_available_sources(pool)
+        tasks: list = []
+        active_groups = []
+        for group_name, group_sources in SOURCE_GROUPS.items():
+            present = [s for s in group_sources if s in available]
+            if not present:
+                continue
+            n = _CANDIDATES_PER_GROUP.get(group_name, _DEFAULT_CANDIDATES_PER_GROUP)
+            active_groups.append(group_name)
+            tasks.append(_fetch_group(pool, vec_literal, present, n))
 
-    results = [dict(row) for row in rows]
+        results_per_group = await asyncio.gather(*tasks)
 
-    # 2b. Supplemental COLREGs fetch — guarantee colregs chunks are eligible
-    # for boosting when the query has navigation-rule affinity. Skipped if the
-    # caller already restricted `sources` (the explicit filter wins).
-    if not sources and _colregs_boost_for_query(query) > 0:
-        extra_rows = await pool.fetch(
-            """
-            SELECT id, source, section_number, section_title, full_text,
-                   1 - (embedding <=> $1::vector) AS similarity
-            FROM regulations
-            WHERE embedding IS NOT NULL
-              AND source = 'colregs'
-            ORDER BY embedding <=> $1::vector
-            LIMIT $2
-            """,
-            vec_literal,
-            _COLREGS_SUPPLEMENTAL_LIMIT,
-        )
-        seen_ids = {r["id"] for r in results}
-        for row in extra_rows:
-            if row["id"] not in seen_ids:
-                results.append(dict(row))
-                seen_ids.add(row["id"])
-        logger.info(
-            "COLREGs supplemental fetch: pool grew to %d chunks",
-            len(results),
-        )
+        candidates = []
+        seen_ids: set = set()
+        for group_results in results_per_group:
+            for chunk in group_results:
+                chunk_id = chunk["id"]
+                if chunk_id in seen_ids:
+                    continue
+                seen_ids.add(chunk_id)
+                candidates.append(chunk)
 
-    # 3. Soft re-ranking (COLREGs source affinity + optional vessel profile)
-    if results:
-        results = _rerank(results, query, vessel_profile)
+    if candidates:
+        candidates = _rerank(candidates, query, vessel_profile)
 
-    return results[:limit]
+    elapsed_ms = (time.perf_counter() - t0) * 1000
+    logger.info(
+        "Retrieval: %d candidates from %d group(s) → top %d in %.1fms",
+        len(candidates),
+        len(active_groups) if not sources else 1,
+        min(limit, len(candidates)),
+        elapsed_ms,
+    )
+
+    return candidates[:limit]
+
+
+# ── Soft re-ranking ──────────────────────────────────────────────────────────
 
 
 def _rerank(
@@ -204,14 +304,8 @@ def _rerank(
     query: str,
     vessel_profile: dict | None,
 ) -> list[dict]:
-    """Apply soft boosts and resort:
-
-    1. COLREGs source-affinity: when the query mentions navigation-rule
-       keywords, boost `colregs`-source chunks by up to _COLREGS_MAX_BOOST.
-    2. Vessel profile: when a vessel profile is provided, boost chunks
-       whose full_text contains the vessel's type / route / cargo terms.
-    """
-    colregs_boost = _colregs_boost_for_query(query)
+    """Apply vessel-profile + source-affinity boosts and sort in place."""
+    source_boosts = _source_affinity(query)
 
     profile_terms: list[str] = []
     if vessel_profile:
@@ -222,16 +316,18 @@ def _rerank(
         for cargo in vessel_profile.get("cargo_types") or []:
             profile_terms.append(cargo.lower())
 
-    if colregs_boost:
-        logger.info("COLREGs source boost applied: +%.2f", colregs_boost)
+    if source_boosts:
+        logger.info("Source affinity boosts: %s", source_boosts)
 
     for result in results:
         text_lower = (result.get("full_text") or "").lower()
         boost = 0.0
         if profile_terms:
             boost += sum(0.05 for term in profile_terms if term in text_lower)
-        if colregs_boost and result.get("source") == "colregs":
-            boost += colregs_boost
+        if source_boosts:
+            group = _SOURCE_TO_GROUP.get(result.get("source", ""), "")
+            if group in source_boosts:
+                boost += source_boosts[group]
         result["_score"] = float(result["similarity"]) + boost
 
     results.sort(key=lambda x: x["_score"], reverse=True)

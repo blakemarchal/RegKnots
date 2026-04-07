@@ -451,6 +451,7 @@ def _summarize_found_sources(chunks: list[dict]) -> str:
         "colregs": "COLREGs",
         "nvic": "NVICs",
         "stcw": "STCW",
+        "stcw_supplement": "STCW",
     }
     found: list[str] = []
     seen: set[str] = set()
