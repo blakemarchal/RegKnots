@@ -8,6 +8,11 @@ import { apiRequest } from '@/lib/api'
 import { CompassRose } from '@/components/CompassRose'
 import { signalNavigation } from '@/components/NavigationProgress'
 import { useAuthStore } from '@/lib/auth'
+import {
+  formatSingleConversationAsText,
+  triggerDownload,
+  type ExportConversation,
+} from '@/lib/export'
 
 interface ConversationSummary {
   id: string
@@ -46,6 +51,28 @@ function SkeletonCard() {
   )
 }
 
+// ── Download icon ──────────────────────────────────────────────────────────────
+
+function DownloadIcon({ className = '' }: { className?: string }) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 20 20"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.75"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden="true"
+    >
+      <path d="M10 3v10" />
+      <path d="m6 9 4 4 4-4" />
+      <path d="M4 16h12" />
+    </svg>
+  )
+}
+
 // ── Vessel group ───────────────────────────────────────────────────────────────
 
 interface VesselGroup {
@@ -58,11 +85,15 @@ function VesselGroupSection({
   expanded,
   onToggle,
   onOpen,
+  onExport,
+  exportingId,
 }: {
   group: VesselGroup
   expanded: boolean
   onToggle: () => void
   onOpen: (id: string) => void
+  onExport: (id: string, title: string) => void
+  exportingId: string | null
 }) {
   return (
     <div>
@@ -86,20 +117,38 @@ function VesselGroupSection({
       {expanded && (
         <div className="flex flex-col gap-1.5 ml-1 mb-3">
           {group.conversations.map(c => (
-            <button
+            <div
               key={c.id}
-              onClick={() => onOpen(c.id)}
-              className="w-full text-left bg-[#111827] border-l-2 border-[#2dd4bf]/30
+              className="relative bg-[#111827] border-l-2 border-[#2dd4bf]/30
                 hover:border-[#2dd4bf] hover:bg-[#111827]/80
-                rounded-r-xl px-4 py-3 transition-all duration-150"
+                rounded-r-xl transition-all duration-150"
             >
-              <p className="font-mono text-sm text-[#f0ece4] truncate leading-snug">
-                {c.title}
-              </p>
-              <p className="font-mono text-xs text-[#6b7594] mt-1">
-                {formatDate(c.updated_at)}
-              </p>
-            </button>
+              <button
+                onClick={() => onOpen(c.id)}
+                className="w-full text-left px-4 py-3 pr-11"
+              >
+                <p className="font-mono text-sm text-[#f0ece4] truncate leading-snug">
+                  {c.title}
+                </p>
+                <p className="font-mono text-xs text-[#6b7594] mt-1">
+                  {formatDate(c.updated_at)}
+                </p>
+              </button>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onExport(c.id, c.title)
+                }}
+                disabled={exportingId === c.id}
+                aria-label="Export conversation"
+                title="Export conversation"
+                className="absolute top-2 right-2 p-1.5 rounded-md
+                  text-[#6b7594] hover:text-[#2dd4bf] hover:bg-[#2dd4bf]/10
+                  disabled:opacity-40 transition-colors duration-150"
+              >
+                <DownloadIcon className="w-4 h-4" />
+              </button>
+            </div>
           ))}
         </div>
       )}
@@ -117,6 +166,7 @@ function HistoryContent() {
   const [error, setError] = useState(false)
   const [filter, setFilter] = useState<string>('all')
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set())
+  const [exportingId, setExportingId] = useState<string | null>(null)
 
   useEffect(() => {
     apiRequest<ConversationSummary[]>('/conversations')
@@ -134,6 +184,28 @@ function HistoryContent() {
   function openConversation(id: string) {
     signalNavigation()
     router.push(`/?conversation_id=${id}`)
+  }
+
+  async function exportConversation(id: string, title: string) {
+    if (exportingId) return
+    setExportingId(id)
+    try {
+      const data = await apiRequest<ExportConversation>(`/conversations/${id}/export`)
+      const safeTitle = (title || 'conversation')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '_')
+        .replace(/^_+|_+$/g, '')
+        .slice(0, 40) || 'conversation'
+      const stamp = new Date().toISOString().slice(0, 10)
+      const blob = new Blob([formatSingleConversationAsText(data)], {
+        type: 'text/plain;charset=utf-8',
+      })
+      triggerDownload(blob, `regknot_${safeTitle}_${stamp}.txt`)
+    } catch {
+      // Silent failure — secondary action, no prominent error UI here.
+    } finally {
+      setExportingId(null)
+    }
   }
 
   function toggleGroup(name: string) {
@@ -268,6 +340,8 @@ function HistoryContent() {
                   expanded={expandedGroups.has(group.name === 'General' ? '__general__' : group.name)}
                   onToggle={() => toggleGroup(group.name === 'General' ? '__general__' : group.name)}
                   onOpen={openConversation}
+                  onExport={exportConversation}
+                  exportingId={exportingId}
                 />
               ))}
             </div>
@@ -275,24 +349,42 @@ function HistoryContent() {
 
           {/* Flat list when filtering by vessel */}
           {!loading && filter !== 'all' && filtered.map(c => (
-            <button
+            <div
               key={c.id}
-              onClick={() => openConversation(c.id)}
-              className="w-full text-left bg-[#111827] border-l-2 border-[#2dd4bf]/30
+              className="relative bg-[#111827] border-l-2 border-[#2dd4bf]/30
                 hover:border-[#2dd4bf] hover:bg-[#111827]/80
-                rounded-r-xl px-4 py-3.5 transition-all duration-150
+                rounded-r-xl transition-all duration-150
                 animate-[fadeSlideIn_0.2s_ease-out]"
             >
-              <p className="font-mono text-sm text-[#f0ece4] truncate leading-snug">
-                {c.title}
-              </p>
-              <p className="font-mono text-xs text-[#6b7594] mt-1">
-                {c.vessel_name
-                  ? <><span className="text-[#2dd4bf]">{c.vessel_name}</span> · {formatDate(c.updated_at)}</>
-                  : formatDate(c.updated_at)
-                }
-              </p>
-            </button>
+              <button
+                onClick={() => openConversation(c.id)}
+                className="w-full text-left px-4 py-3.5 pr-11"
+              >
+                <p className="font-mono text-sm text-[#f0ece4] truncate leading-snug">
+                  {c.title}
+                </p>
+                <p className="font-mono text-xs text-[#6b7594] mt-1">
+                  {c.vessel_name
+                    ? <><span className="text-[#2dd4bf]">{c.vessel_name}</span> · {formatDate(c.updated_at)}</>
+                    : formatDate(c.updated_at)
+                  }
+                </p>
+              </button>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  exportConversation(c.id, c.title)
+                }}
+                disabled={exportingId === c.id}
+                aria-label="Export conversation"
+                title="Export conversation"
+                className="absolute top-2 right-2 p-1.5 rounded-md
+                  text-[#6b7594] hover:text-[#2dd4bf] hover:bg-[#2dd4bf]/10
+                  disabled:opacity-40 transition-colors duration-150"
+              >
+                <DownloadIcon className="w-4 h-4" />
+              </button>
+            </div>
           ))}
 
         </div>

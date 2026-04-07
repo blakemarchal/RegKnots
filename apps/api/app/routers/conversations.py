@@ -1,10 +1,13 @@
 """
-GET /conversations          — list current user's conversations (newest first, limit 50)
-GET /conversations/{id}/messages — full message thread with citations resolved
+GET /conversations                       — list current user's conversations (newest first, limit 50)
+GET /conversations/{id}/messages         — full message thread with citations resolved
+GET /conversations/{id}/export           — single conversation export (JSON, with citations)
+GET /conversations/export-all            — bulk export of last 100 conversations
 """
 
 import uuid
-from typing import Annotated
+from datetime import datetime, timezone
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Path, status
 from pydantic import BaseModel
@@ -142,3 +145,177 @@ async def get_conversation_messages(
         )
 
     return result
+
+
+# ── Export ─────────────────────────────────────────────────────────────────────
+
+async def _build_export_messages(
+    conn,
+    conv_ids: list[uuid.UUID],
+) -> dict[uuid.UUID, list[dict[str, Any]]]:
+    """Fetch messages + resolved citations for the given conversation ids."""
+    if not conv_ids:
+        return {}
+
+    msg_rows = await conn.fetch(
+        """
+        SELECT conversation_id, role, content, cited_regulation_ids, created_at
+        FROM messages
+        WHERE conversation_id = ANY($1)
+        ORDER BY conversation_id, created_at ASC
+        """,
+        conv_ids,
+    )
+
+    # Collect every regulation id referenced across all messages.
+    all_reg_ids: set[uuid.UUID] = set()
+    for m in msg_rows:
+        for rid in (m["cited_regulation_ids"] or []):
+            all_reg_ids.add(rid)
+
+    regs_by_id: dict[uuid.UUID, Any] = {}
+    if all_reg_ids:
+        reg_rows = await conn.fetch(
+            """
+            SELECT id, source, section_number, section_title
+            FROM regulations
+            WHERE id = ANY($1)
+            """,
+            list(all_reg_ids),
+        )
+        regs_by_id = {r["id"]: r for r in reg_rows}
+
+    by_conv: dict[uuid.UUID, list[dict[str, Any]]] = {}
+    for m in msg_rows:
+        cited: list[dict[str, Any]] = []
+        seen_sections: set[str] = set()
+        for rid in (m["cited_regulation_ids"] or []):
+            reg = regs_by_id.get(rid)
+            if not reg:
+                continue
+            if reg["section_number"] in seen_sections:
+                continue
+            seen_sections.add(reg["section_number"])
+            cited.append(
+                {
+                    "source": reg["source"],
+                    "section_number": reg["section_number"],
+                    "section_title": reg["section_title"],
+                }
+            )
+
+        by_conv.setdefault(m["conversation_id"], []).append(
+            {
+                "role": m["role"],
+                "content": m["content"],
+                "timestamp": m["created_at"].isoformat(),
+                "cited_regulations": cited,
+            }
+        )
+
+    return by_conv
+
+
+@router.get("/export-all")
+async def export_all_conversations(
+    user: Annotated[CurrentUser, Depends(get_current_user)],
+    pool=Depends(get_pool),
+) -> dict[str, Any]:
+    """Bulk export — last 100 conversations for the current user."""
+    async with pool.acquire() as conn:
+        conv_rows = await conn.fetch(
+            """
+            SELECT
+                c.id,
+                COALESCE(
+                    c.title,
+                    LEFT(
+                        (SELECT content FROM messages m
+                         WHERE m.conversation_id = c.id AND m.role = 'user'
+                         ORDER BY m.created_at ASC LIMIT 1),
+                        80
+                    )
+                ) AS title,
+                c.created_at,
+                c.updated_at,
+                v.name AS vessel_name
+            FROM conversations c
+            LEFT JOIN vessels v ON v.id = c.vessel_id
+            WHERE c.user_id = $1
+            ORDER BY c.updated_at DESC
+            LIMIT 100
+            """,
+            uuid.UUID(user.user_id),
+        )
+
+        conv_ids = [c["id"] for c in conv_rows]
+        msgs_by_conv = await _build_export_messages(conn, conv_ids)
+
+    conversations = [
+        {
+            "id": str(c["id"]),
+            "title": c["title"] or "Untitled conversation",
+            "vessel_name": c["vessel_name"],
+            "created_at": c["created_at"].isoformat(),
+            "updated_at": c["updated_at"].isoformat(),
+            "messages": msgs_by_conv.get(c["id"], []),
+        }
+        for c in conv_rows
+    ]
+
+    return {
+        "exported_at": datetime.now(timezone.utc).isoformat(),
+        "user_email": user.email,
+        "conversation_count": len(conversations),
+        "conversations": conversations,
+    }
+
+
+@router.get("/{conversation_id}/export")
+async def export_conversation(
+    conversation_id: Annotated[uuid.UUID, Path()],
+    user: Annotated[CurrentUser, Depends(get_current_user)],
+    pool=Depends(get_pool),
+) -> dict[str, Any]:
+    """Export a single conversation belonging to the current user."""
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT
+                c.id,
+                COALESCE(
+                    c.title,
+                    LEFT(
+                        (SELECT content FROM messages m
+                         WHERE m.conversation_id = c.id AND m.role = 'user'
+                         ORDER BY m.created_at ASC LIMIT 1),
+                        80
+                    )
+                ) AS title,
+                c.created_at,
+                c.updated_at,
+                v.name AS vessel_name
+            FROM conversations c
+            LEFT JOIN vessels v ON v.id = c.vessel_id
+            WHERE c.id = $1 AND c.user_id = $2
+            """,
+            conversation_id,
+            uuid.UUID(user.user_id),
+        )
+        if not row:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Conversation not found",
+            )
+
+        msgs_by_conv = await _build_export_messages(conn, [row["id"]])
+
+    return {
+        "exported_at": datetime.now(timezone.utc).isoformat(),
+        "id": str(row["id"]),
+        "title": row["title"] or "Untitled conversation",
+        "vessel_name": row["vessel_name"],
+        "created_at": row["created_at"].isoformat(),
+        "updated_at": row["updated_at"].isoformat(),
+        "messages": msgs_by_conv.get(row["id"], []),
+    }

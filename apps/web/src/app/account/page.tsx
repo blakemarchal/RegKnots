@@ -7,6 +7,11 @@ import { AppHeader } from '@/components/AppHeader'
 import { useAuthStore } from '@/lib/auth'
 import type { BillingStatus } from '@/lib/auth'
 import { apiRequest } from '@/lib/api'
+import {
+  formatExportAsText,
+  triggerDownload,
+  type ExportAllResponse,
+} from '@/lib/export'
 
 const ROLE_OPTIONS = [
   { value: 'captain', label: 'Captain / Master' },
@@ -63,6 +68,10 @@ function AccountContent() {
   const [vesselsLoading, setVesselsLoading] = useState(true)
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
+
+  // ── Chat history export ────────────────────────────────────────
+  const [exporting, setExporting] = useState<'json' | 'text' | null>(null)
+  const [exportError, setExportError] = useState<string | null>(null)
 
   useEffect(() => {
     apiRequest<VesselItem[]>('/vessels')
@@ -162,6 +171,25 @@ function AccountContent() {
     } catch {
       setPortalLoading(false)
       setPortalError('Unable to open billing portal. Please try again.')
+    }
+  }
+
+  async function handleExportAll(format: 'json' | 'text') {
+    setExporting(format)
+    setExportError(null)
+    try {
+      const data = await apiRequest<ExportAllResponse>('/conversations/export-all')
+      const stamp = new Date().toISOString().slice(0, 10)
+      const isText = format === 'text'
+      const blob = isText
+        ? new Blob([formatExportAsText(data)], { type: 'text/plain;charset=utf-8' })
+        : new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+      const filename = `regknot_export_${stamp}.${isText ? 'txt' : 'json'}`
+      triggerDownload(blob, filename)
+    } catch (e) {
+      setExportError(e instanceof Error ? e.message : 'Export failed')
+    } finally {
+      setExporting(null)
     }
   }
 
@@ -459,6 +487,37 @@ function AccountContent() {
                 </div>
               </div>
             ))}
+          </section>
+
+          {/* ── Chat History export ──────────────────────────────── */}
+          <section className="bg-[#111827] border border-white/8 rounded-xl p-5 flex flex-col gap-4">
+            <p className="font-mono text-xs text-[#6b7594] uppercase tracking-wider">Chat History</p>
+            <p className="font-mono text-xs text-[#f0ece4]/60 leading-relaxed">
+              Download your conversations with all cited regulations.
+            </p>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => handleExportAll('json')}
+                disabled={exporting !== null}
+                className="flex-1 font-mono text-xs font-bold text-[#2dd4bf]
+                  border border-[#2dd4bf]/40 hover:bg-[#2dd4bf]/10
+                  disabled:opacity-50 rounded-lg py-2.5 transition-colors duration-150"
+              >
+                {exporting === 'json' ? 'Exporting...' : 'Export All Chats'}
+              </button>
+              <button
+                onClick={() => handleExportAll('text')}
+                disabled={exporting !== null}
+                className="flex-1 font-mono text-xs font-bold text-[#2dd4bf]
+                  border border-[#2dd4bf]/40 hover:bg-[#2dd4bf]/10
+                  disabled:opacity-50 rounded-lg py-2.5 transition-colors duration-150"
+              >
+                {exporting === 'text' ? 'Exporting...' : 'Export as Text'}
+              </button>
+            </div>
+            {exportError && (
+              <p className="font-mono text-xs text-red-400">{exportError}</p>
+            )}
           </section>
 
           {/* ── Sign Out ─────────────────────────────────────────── */}
