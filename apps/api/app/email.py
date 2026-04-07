@@ -440,7 +440,10 @@ def render_founding_member_email(full_name: str | None) -> tuple[str, str]:
       <p>
         RegKnot Pro is now live &mdash; and because you were here from the beginning,
         you get to lock in the founding member rate:
-        <strong style="color:#f0ece4;">$49/month</strong>, forever.
+        <strong style="color:#f0ece4;">$39/month</strong>
+        (or save 26% with the annual plan at
+        <strong style="color:#f0ece4;">$29/month</strong>, billed
+        <strong style="color:#f0ece4;">$348/year</strong>).
         Even when we raise prices down the road, your rate stays the same.
       </p>
       <p style="color:#f0ece4; font-weight:700; margin-top:24px; margin-bottom:8px;">
