@@ -111,6 +111,21 @@ interface ModelUsageItem {
   total_output_tokens: number
 }
 
+interface SupportTicket {
+  id: string
+  user_id: string
+  user_email: string
+  user_name: string | null
+  subject: string
+  message: string
+  status: 'open' | 'replied' | 'closed'
+  admin_reply: string | null
+  replied_at: string | null
+  created_at: string
+}
+
+type TicketFilter = 'all' | 'open' | 'replied' | 'closed'
+
 // Chart color ramp
 const CHART_COLORS = ['#2dd4bf', '#1d9e75', '#0f6e56', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899']
 
@@ -178,6 +193,15 @@ function AdminContent() {
   const [modelUsage, setModelUsage] = useState<ModelUsageItem[]>([])
   const [analyticsLoading, setAnalyticsLoading] = useState(true)
 
+  // Support tickets state
+  const [tickets, setTickets] = useState<SupportTicket[]>([])
+  const [ticketsLoading, setTicketsLoading] = useState(true)
+  const [ticketFilter, setTicketFilter] = useState<TicketFilter>('all')
+  const [expandedTicket, setExpandedTicket] = useState<string | null>(null)
+  const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({})
+  const [ticketActionId, setTicketActionId] = useState<string | null>(null)
+  const [ticketToast, setTicketToast] = useState<{ msg: string; ok: boolean } | null>(null)
+
   const ei = excludeInternal ? 'true' : 'false'
 
   const [statsError, setStatsError] = useState(false)
@@ -237,6 +261,13 @@ function AdminContent() {
     }).finally(() => setAnalyticsLoading(false))
   }, [ei])
 
+  const fetchTickets = useCallback(() => {
+    apiRequest<SupportTicket[]>('/admin/support-tickets')
+      .then(setTickets)
+      .catch(() => {})
+      .finally(() => setTicketsLoading(false))
+  }, [])
+
   useEffect(() => {
     if (hydrated && !isAdmin) {
       router.replace('/')
@@ -251,10 +282,11 @@ function AdminContent() {
     fetchCitations()
     fetchSurvey()
     fetchAnalytics()
+    fetchTickets()
 
-    const interval = setInterval(() => { fetchStats(); fetchSentry(); fetchCitations(); fetchSurvey(); fetchAnalytics() }, 60_000)
+    const interval = setInterval(() => { fetchStats(); fetchSentry(); fetchCitations(); fetchSurvey(); fetchAnalytics(); fetchTickets() }, 60_000)
     return () => clearInterval(interval)
-  }, [hydrated, isAdmin, router, fetchStats, fetchUsers, fetchSentry, fetchCitations, fetchSurvey, fetchAnalytics])
+  }, [hydrated, isAdmin, router, fetchStats, fetchUsers, fetchSentry, fetchCitations, fetchSurvey, fetchAnalytics, fetchTickets])
 
   function toggleExcludeInternal() {
     const next = !excludeInternal
@@ -347,6 +379,54 @@ function AdminContent() {
       URL.revokeObjectURL(url)
     } catch { /* ignore */ }
     setExporting(null)
+  }
+
+  async function sendTicketReply(ticketId: string) {
+    const reply = (replyDrafts[ticketId] ?? '').trim()
+    if (!reply) {
+      setTicketToast({ msg: 'Reply text is required', ok: false })
+      setTimeout(() => setTicketToast(null), 3000)
+      return
+    }
+    setTicketActionId(`${ticketId}-reply`)
+    try {
+      await apiRequest(`/admin/support-tickets/${ticketId}/reply`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reply }),
+      })
+      setTickets((prev) => prev.map((t) =>
+        t.id === ticketId
+          ? { ...t, status: 'replied', admin_reply: reply, replied_at: new Date().toISOString() }
+          : t,
+      ))
+      setReplyDrafts((prev) => {
+        const next = { ...prev }
+        delete next[ticketId]
+        return next
+      })
+      setTicketToast({ msg: 'Reply sent', ok: true })
+    } catch {
+      setTicketToast({ msg: 'Failed to send reply', ok: false })
+    }
+    setTicketActionId(null)
+    setTimeout(() => setTicketToast(null), 4000)
+  }
+
+  async function closeTicket(ticketId: string) {
+    if (!confirm('Close this ticket without replying?')) return
+    setTicketActionId(`${ticketId}-close`)
+    try {
+      await apiRequest(`/admin/support-tickets/${ticketId}/close`, { method: 'POST' })
+      setTickets((prev) => prev.map((t) =>
+        t.id === ticketId ? { ...t, status: 'closed' } : t,
+      ))
+      setTicketToast({ msg: 'Ticket closed', ok: true })
+    } catch {
+      setTicketToast({ msg: 'Failed to close ticket', ok: false })
+    }
+    setTicketActionId(null)
+    setTimeout(() => setTicketToast(null), 4000)
   }
 
   if (!hydrated || !isAdmin) return null
@@ -494,6 +574,169 @@ function AdminContent() {
                     })}
                   </tbody>
                 </table>
+              </div>
+            )}
+          </div>
+
+          {/* ── Support Tickets ─────────────────────────────────────────── */}
+          <div className="mb-8">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="font-display text-lg font-bold text-[#f0ece4] tracking-wide">
+                Support Tickets
+                {tickets.length > 0 && (
+                  <span className="ml-2 font-mono text-xs text-[#6b7594] font-normal">
+                    ({tickets.filter((t) => t.status === 'open').length} open)
+                  </span>
+                )}
+              </h2>
+              <div className="flex items-center gap-1">
+                {(['all', 'open', 'replied', 'closed'] as const).map((f) => (
+                  <button
+                    key={f}
+                    onClick={() => setTicketFilter(f)}
+                    className={`font-mono text-[10px] uppercase tracking-wider px-2.5 py-1 rounded-md
+                      transition-colors ${
+                        ticketFilter === f
+                          ? 'bg-[#2dd4bf]/15 text-[#2dd4bf] border border-[#2dd4bf]/30'
+                          : 'text-[#6b7594] border border-transparent hover:text-[#f0ece4]/80'
+                      }`}
+                  >
+                    {f}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {ticketsLoading ? (
+              <div className="bg-[#111827] rounded-xl border border-white/8 px-4 py-6 h-[72px] animate-pulse" />
+            ) : (() => {
+              const filtered = ticketFilter === 'all'
+                ? tickets
+                : tickets.filter((t) => t.status === ticketFilter)
+              if (filtered.length === 0) {
+                return (
+                  <div className="bg-[#111827] rounded-xl border border-white/8 px-4 py-4 text-center">
+                    <p className="font-mono text-sm text-[#6b7594]">
+                      {ticketFilter === 'all' ? 'No support tickets yet' : `No ${ticketFilter} tickets`}
+                    </p>
+                  </div>
+                )
+              }
+              return (
+                <div className="space-y-2">
+                  {filtered.map((t) => {
+                    const isExpanded = expandedTicket === t.id
+                    const statusStyles =
+                      t.status === 'open'
+                        ? 'bg-amber-500/15 text-amber-400 border-amber-500/30'
+                        : t.status === 'replied'
+                        ? 'bg-[#2dd4bf]/15 text-[#2dd4bf] border-[#2dd4bf]/30'
+                        : 'bg-[#6b7594]/15 text-[#6b7594] border-[#6b7594]/30'
+                    return (
+                      <div key={t.id} className="bg-[#111827] rounded-xl border border-white/8 overflow-hidden">
+                        <button
+                          onClick={() => setExpandedTicket(isExpanded ? null : t.id)}
+                          className="w-full px-4 py-3 text-left hover:bg-white/[0.02] transition-colors"
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 mb-1">
+                                <span className={`font-mono text-[9px] font-bold uppercase tracking-wider
+                                  px-1.5 py-0.5 rounded border ${statusStyles}`}>
+                                  {t.status}
+                                </span>
+                                <span className="font-mono text-[10px] text-[#6b7594] truncate">
+                                  {t.user_email}
+                                </span>
+                              </div>
+                              <p className="font-mono text-sm text-[#f0ece4]/90 truncate">{t.subject}</p>
+                              {!isExpanded && (
+                                <p className="font-mono text-xs text-[#6b7594] truncate mt-0.5">
+                                  {t.message.slice(0, 120)}{t.message.length > 120 ? '…' : ''}
+                                </p>
+                              )}
+                            </div>
+                            <span className="font-mono text-[10px] text-[#6b7594] whitespace-nowrap pt-0.5">
+                              {fmtDate(t.created_at)}
+                            </span>
+                          </div>
+                        </button>
+
+                        {isExpanded && (
+                          <div className="border-t border-white/8 px-4 py-3 space-y-3">
+                            <div>
+                              <p className="font-mono text-[10px] text-[#6b7594] uppercase tracking-wider mb-1">
+                                Message
+                              </p>
+                              <p className="font-mono text-xs text-[#f0ece4]/85 leading-relaxed whitespace-pre-wrap">
+                                {t.message}
+                              </p>
+                            </div>
+
+                            {t.admin_reply && (
+                              <div>
+                                <p className="font-mono text-[10px] text-[#2dd4bf] uppercase tracking-wider mb-1">
+                                  Your reply{t.replied_at ? ` · ${fmtDate(t.replied_at)}` : ''}
+                                </p>
+                                <p className="font-mono text-xs text-[#f0ece4]/85 leading-relaxed whitespace-pre-wrap
+                                  bg-[#0d1225] border-l-2 border-[#2dd4bf]/40 pl-3 py-2 rounded">
+                                  {t.admin_reply}
+                                </p>
+                              </div>
+                            )}
+
+                            {!isReadOnly && t.status !== 'closed' && (
+                              <div>
+                                <p className="font-mono text-[10px] text-[#6b7594] uppercase tracking-wider mb-1">
+                                  {t.status === 'replied' ? 'Send another reply' : 'Reply'}
+                                </p>
+                                <textarea
+                                  value={replyDrafts[t.id] ?? ''}
+                                  onChange={(e) => setReplyDrafts((prev) => ({ ...prev, [t.id]: e.target.value }))}
+                                  placeholder="Write your reply…"
+                                  rows={4}
+                                  className="w-full bg-[#0d1225] border border-white/10 rounded-lg px-3 py-2
+                                    font-mono text-xs text-[#f0ece4] placeholder:text-[#6b7594]
+                                    focus:outline-none focus:border-[#2dd4bf]/40 resize-y"
+                                />
+                                <div className="flex items-center gap-2 mt-2">
+                                  <button
+                                    onClick={() => sendTicketReply(t.id)}
+                                    disabled={ticketActionId === `${t.id}-reply`}
+                                    className="font-mono text-xs font-bold uppercase tracking-wider px-4 py-1.5
+                                      rounded-lg bg-[#2dd4bf] text-[#0a0e1a] hover:brightness-110
+                                      disabled:opacity-50 disabled:cursor-not-allowed transition-[filter] duration-150"
+                                  >
+                                    {ticketActionId === `${t.id}-reply` ? 'Sending…' : 'Send Reply'}
+                                  </button>
+                                  <button
+                                    onClick={() => closeTicket(t.id)}
+                                    disabled={ticketActionId === `${t.id}-close`}
+                                    className="font-mono text-xs font-bold uppercase tracking-wider px-4 py-1.5
+                                      rounded-lg border border-[#6b7594]/40 text-[#6b7594]
+                                      hover:bg-[#6b7594]/10 disabled:opacity-50 transition-colors"
+                                  >
+                                    {ticketActionId === `${t.id}-close` ? 'Closing…' : 'Close'}
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              )
+            })()}
+
+            {ticketToast && (
+              <div className={`mt-3 font-mono text-xs px-3 py-2 rounded-lg border ${
+                ticketToast.ok
+                  ? 'bg-[#2dd4bf]/10 border-[#2dd4bf]/30 text-[#2dd4bf]'
+                  : 'bg-red-500/10 border-red-500/30 text-red-400'
+              }`}>
+                {ticketToast.msg}
               </div>
             )}
           </div>

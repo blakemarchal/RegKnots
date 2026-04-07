@@ -822,3 +822,124 @@ async def messages_per_day(
         )
         for r in rows
     ]
+
+
+# ── Support tickets ──────────────────────────────────────────────────────────
+
+
+class SupportTicket(BaseModel):
+    id: str
+    user_id: str
+    user_email: str
+    user_name: str | None
+    subject: str
+    message: str
+    status: str
+    admin_reply: str | None
+    replied_at: str | None
+    created_at: str
+
+
+@router.get("/support-tickets", response_model=list[SupportTicket])
+async def list_support_tickets(
+    _admin: Annotated[CurrentUser, Depends(require_admin)],
+    status_filter: str = Query(default="all", alias="status"),
+) -> list[SupportTicket]:
+    pool = await get_pool()
+    if status_filter == "all":
+        rows = await pool.fetch(
+            "SELECT * FROM support_tickets ORDER BY created_at DESC LIMIT 100"
+        )
+    else:
+        rows = await pool.fetch(
+            "SELECT * FROM support_tickets WHERE status = $1 ORDER BY created_at DESC LIMIT 100",
+            status_filter,
+        )
+    return [
+        SupportTicket(
+            id=str(r["id"]),
+            user_id=str(r["user_id"]),
+            user_email=r["user_email"],
+            user_name=r["user_name"],
+            subject=r["subject"],
+            message=r["message"],
+            status=r["status"],
+            admin_reply=r["admin_reply"],
+            replied_at=r["replied_at"].isoformat() if r["replied_at"] else None,
+            created_at=r["created_at"].isoformat() if r["created_at"] else "",
+        )
+        for r in rows
+    ]
+
+
+class AdminReplyBody(BaseModel):
+    reply: str
+
+
+@router.post("/support-tickets/{ticket_id}/reply", response_model=AdminActionResult)
+async def reply_to_ticket(
+    ticket_id: str,
+    body: AdminReplyBody,
+    admin: Annotated[CurrentUser, Depends(require_write_admin)],
+) -> AdminActionResult:
+    if not body.reply.strip():
+        raise HTTPException(status_code=422, detail="Reply text is required")
+
+    pool = await get_pool()
+    try:
+        ticket_uuid = uuid.UUID(ticket_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid ticket id")
+
+    ticket = await pool.fetchrow(
+        "SELECT * FROM support_tickets WHERE id = $1",
+        ticket_uuid,
+    )
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+
+    from app.email import send_support_reply_email
+
+    try:
+        await send_support_reply_email(
+            to_email=ticket["user_email"],
+            user_name=ticket["user_name"] or "Mariner",
+            original_subject=ticket["subject"],
+            reply_text=body.reply,
+        )
+    except Exception as exc:
+        logger.error("Support reply email failed for ticket %s: %s", ticket_id, exc)
+        raise HTTPException(status_code=502, detail="Failed to send reply email")
+
+    await pool.execute(
+        """
+        UPDATE support_tickets
+        SET status = 'replied', admin_reply = $1, replied_at = NOW()
+        WHERE id = $2
+        """,
+        body.reply,
+        ticket_uuid,
+    )
+    logger.info("Admin %s replied to ticket %s", admin.email, ticket_id)
+    return AdminActionResult(ok=True)
+
+
+@router.post("/support-tickets/{ticket_id}/close", response_model=AdminActionResult)
+async def close_ticket(
+    ticket_id: str,
+    admin: Annotated[CurrentUser, Depends(require_write_admin)],
+) -> AdminActionResult:
+    pool = await get_pool()
+    try:
+        ticket_uuid = uuid.UUID(ticket_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid ticket id")
+
+    result = await pool.execute(
+        "UPDATE support_tickets SET status = 'closed' WHERE id = $1",
+        ticket_uuid,
+    )
+    if result == "UPDATE 0":
+        raise HTTPException(status_code=404, detail="Ticket not found")
+    logger.info("Admin %s closed ticket %s", admin.email, ticket_id)
+    return AdminActionResult(ok=True)

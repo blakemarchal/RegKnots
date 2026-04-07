@@ -1,6 +1,7 @@
 """Support endpoints: AI chat and email escalation."""
 
 import logging
+import uuid
 from typing import Annotated
 
 from anthropic import AsyncAnthropic
@@ -9,7 +10,7 @@ from pydantic import BaseModel
 
 from app.auth.deps import get_current_user
 from app.auth.schemas import CurrentUser
-from app.db import get_redis
+from app.db import get_pool, get_redis
 
 logger = logging.getLogger(__name__)
 
@@ -190,5 +191,23 @@ async def support_email(
         await send_support_confirmation_email(user.email, display_name, body.subject.strip())
     except Exception as exc:
         logger.warning("Support confirmation email failed: %s", exc)
+
+    # Persist the ticket so admins can view and reply via the dashboard.
+    # Non-fatal if it fails — the support email has already gone out.
+    try:
+        pool = await get_pool()
+        await pool.execute(
+            """
+            INSERT INTO support_tickets (user_id, user_email, user_name, subject, message)
+            VALUES ($1, $2, $3, $4, $5)
+            """,
+            uuid.UUID(user.user_id),
+            user.email,
+            display_name,
+            body.subject.strip(),
+            body.message.strip(),
+        )
+    except Exception as exc:
+        logger.warning("Support ticket DB insert failed: %s", exc)
 
     return SupportEmailResponse(sent=True)

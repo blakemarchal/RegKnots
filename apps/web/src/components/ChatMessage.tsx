@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import type { Components } from 'react-markdown'
 import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import type { Message, CitedRegulation } from '@/types/chat'
 import { CitationChip } from './CitationChip'
 
@@ -146,6 +147,43 @@ function makeComponents(
 
     // ── Horizontal rule ──────────────────────────────────────────────────────
     hr: () => <hr className="border-white/10 my-3" />,
+
+    // ── Tables (GFM) ─────────────────────────────────────────────────────────
+    // Wrapper div with overflow-x-auto enables horizontal scroll on narrow
+    // viewports so wide tables stay readable on mobile instead of breaking
+    // the layout or leaking raw pipe characters.
+    table: ({ children }) => (
+      <div className="overflow-x-auto my-3 -mx-1 rounded-lg border border-white/8">
+        <table className="min-w-full text-xs font-mono border-collapse">
+          {children}
+        </table>
+      </div>
+    ),
+    thead: ({ children }) => (
+      <thead className="bg-[#0d1225] border-b border-white/10">
+        {children}
+      </thead>
+    ),
+    tbody: ({ children }) => (
+      <tbody className="divide-y divide-white/8">
+        {children}
+      </tbody>
+    ),
+    tr: ({ children }) => (
+      <tr className="hover:bg-white/[0.03]">
+        {children}
+      </tr>
+    ),
+    th: ({ children }) => (
+      <th className="px-3 py-2 text-left text-[10px] uppercase tracking-wider text-[#2dd4bf] font-bold whitespace-nowrap">
+        <Inline prefix="th">{children}</Inline>
+      </th>
+    ),
+    td: ({ children }) => (
+      <td className="px-3 py-2 text-[#f0ece4]/85 align-top">
+        <Inline prefix="td">{children}</Inline>
+      </td>
+    ),
   }
 }
 
@@ -172,7 +210,7 @@ export function ChatMessage({ message, onCitationTap }: Props) {
       <div className="w-0.5 self-stretch bg-teal/40 rounded-full flex-shrink-0 mt-0.5" />
 
       <div className="flex-1 min-w-0 text-sm text-[#f0ece4] leading-relaxed">
-        <ReactMarkdown components={components}>
+        <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
           {message.content}
         </ReactMarkdown>
 
