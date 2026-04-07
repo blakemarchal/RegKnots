@@ -55,6 +55,11 @@
   40%           { transform: translateY(-5px); opacity: 1; }
 }
 
+@keyframes progressPulse {
+  0%, 100% { opacity: 0.4; transform: scale(0.85); }
+  50%      { opacity: 1;   transform: scale(1.0);  }
+}
+
 @keyframes slideInRight {
   from { transform: translateX(100%); }
   to   { transform: translateX(0); }

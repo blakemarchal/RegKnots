@@ -3,7 +3,7 @@
 import { useState, useCallback, useEffect } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import type { Message } from '@/types/chat'
-import { sendMessage } from '@/lib/mockApi'
+import { sendMessageStream } from '@/lib/mockApi'
 import { apiRequest } from '@/lib/api'
 import { useAuthStore } from '@/lib/auth'
 import type { BillingStatus } from '@/lib/auth'
@@ -42,6 +42,7 @@ function ChatInterfaceInner({ initialConversationId }: Props) {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
+  const [progressMsg, setProgressMsg] = useState<string | null>(null)
   const [conversationId, setConversationId] = useState<string | null>(initialConversationId)
   const [menuOpen, setMenuOpen] = useState(false)
   const [surveyOpen, setSurveyOpen] = useState(false)
@@ -129,20 +130,30 @@ function ChatInterfaceInner({ initialConversationId }: Props) {
     setMessages(prev => [...prev, userMsg])
     setInput('')
     setLoading(true)
+    setProgressMsg(null)
 
     try {
       const currentVesselId = useAuthStore.getState().activeVesselId
-      const response = await sendMessage(query, conversationId, currentVesselId)
-      setConversationId(response.conversation_id)
-      const assistantMsg: Message = {
-        id: crypto.randomUUID(),
-        role: 'assistant',
-        content: response.answer,
-        citations: response.cited_regulations,
-      }
-      setMessages(prev => [...prev, assistantMsg])
-      // Refresh billing status in background after each message
-      apiRequest<BillingStatus>('/billing/status').then(setBilling).catch(() => {})
+      await sendMessageStream(
+        query,
+        conversationId,
+        currentVesselId,
+        (status) => setProgressMsg(status),
+        (data) => {
+          setConversationId(data.conversation_id)
+          setMessages(prev => [
+            ...prev,
+            {
+              id: crypto.randomUUID(),
+              role: 'assistant',
+              content: data.answer,
+              citations: data.cited_regulations,
+            },
+          ])
+          // Refresh billing status in background after each message
+          apiRequest<BillingStatus>('/billing/status').then(setBilling).catch(() => {})
+        },
+      )
     } catch (err) {
       if (err instanceof Error && err.message.includes('402')) {
         router.push('/pricing')
@@ -174,14 +185,15 @@ function ChatInterfaceInner({ initialConversationId }: Props) {
         {
           id: crypto.randomUUID(),
           role: 'assistant',
-          content: 'Something went wrong. Please try again.',
+          content: 'Connection lost. Please try again.',
           citations: [],
         },
       ])
     } finally {
+      setProgressMsg(null)
       setLoading(false)
     }
-  }, [input, loading, conversationId])
+  }, [input, loading, conversationId, router, setBilling])
 
   function handlePrompt(text: string) {
     setInput(text)
@@ -195,25 +207,37 @@ function ChatInterfaceInner({ initialConversationId }: Props) {
       }
       setMessages([userMsg])
       setLoading(true)
-      sendMessage(text, null, useAuthStore.getState().activeVesselId).then(response => {
-        setConversationId(response.conversation_id)
-        setMessages(prev => [
-          ...prev,
-          {
-            id: crypto.randomUUID(),
-            role: 'assistant',
-            content: response.answer,
-            citations: response.cited_regulations,
-          },
-        ])
-        // Refresh billing status in background
-        apiRequest<BillingStatus>('/billing/status').then(setBilling).catch(() => {})
-      }).catch(() => {
-        setMessages(prev => [
-          ...prev,
-          { id: crypto.randomUUID(), role: 'assistant', content: 'Something went wrong.', citations: [] },
-        ])
-      }).finally(() => setLoading(false))
+      setProgressMsg(null)
+      sendMessageStream(
+        text,
+        null,
+        useAuthStore.getState().activeVesselId,
+        (status) => setProgressMsg(status),
+        (data) => {
+          setConversationId(data.conversation_id)
+          setMessages(prev => [
+            ...prev,
+            {
+              id: crypto.randomUUID(),
+              role: 'assistant',
+              content: data.answer,
+              citations: data.cited_regulations,
+            },
+          ])
+          // Refresh billing status in background
+          apiRequest<BillingStatus>('/billing/status').then(setBilling).catch(() => {})
+        },
+      )
+        .catch(() => {
+          setMessages(prev => [
+            ...prev,
+            { id: crypto.randomUUID(), role: 'assistant', content: 'Connection lost. Please try again.', citations: [] },
+          ])
+        })
+        .finally(() => {
+          setProgressMsg(null)
+          setLoading(false)
+        })
     }, 50)
   }
 
@@ -330,6 +354,7 @@ function ChatInterfaceInner({ initialConversationId }: Props) {
           <ChatThread
             messages={messages}
             loading={loading}
+            progressMsg={progressMsg}
             onPrompt={handlePrompt}
             onCitationTap={handleCitationTap}
             isNewConversation={initialConversationId === null}

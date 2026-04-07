@@ -9,6 +9,11 @@ Flow:
   5. Call engine.chat()
   6. Persist user message + assistant response to messages table
   7. Return ChatResponse
+
+POST /chat/stream — same flow, but emits SSE progress events while
+the RAG pipeline runs and a final `done` event with the complete answer.
+Auth/billing/rate-limit checks all run BEFORE the stream starts and surface
+as normal HTTP error responses.
 """
 
 import asyncio
@@ -21,6 +26,7 @@ from typing import Annotated
 import asyncpg
 from anthropic import AsyncAnthropic
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import StreamingResponse
 
 from app.auth.deps import get_current_user
 from app.auth.schemas import CurrentUser
@@ -38,15 +44,20 @@ _MODEL_ALIAS: dict[str, str] = {
 }
 
 
-@router.post("", status_code=status.HTTP_200_OK)
-async def chat_endpoint(
+async def _run_chat_preflight(
     body: "ChatRequestBody",
-    request: Request,
-    current_user: Annotated[CurrentUser, Depends(get_current_user)],
-    pool: Annotated[asyncpg.Pool, Depends(get_pool)],
-):
-    from rag.engine import chat
-    from rag.models import ChatMessage, ChatResponse
+    current_user: CurrentUser,
+    pool: asyncpg.Pool,
+) -> tuple[dict | None, uuid.UUID, list, bool]:
+    """Run all auth/billing/rate-limit checks and load vessel + conversation state.
+
+    Raises HTTPException for any failure (401/402/403/404/429), so callers
+    can rely on normal FastAPI HTTP error handling.
+
+    Returns:
+        (vessel_profile, conversation_id, history, is_new_conversation)
+    """
+    from rag.models import ChatMessage
 
     # ── Rate limit: 10 messages per minute per user ──────────────────────────
     try:
@@ -100,9 +111,6 @@ async def chat_endpoint(
                 status_code=status.HTTP_402_PAYMENT_REQUIRED,
                 detail="Trial expired or message limit reached. Subscribe to continue.",
             )
-
-    anthropic_client: AsyncAnthropic = request.app.state.anthropic
-    openai_api_key: str = request.app.state.openai_api_key
 
     # 1. Load vessel profile (including enriched fields)
     vessel_profile: dict | None = None
@@ -187,7 +195,6 @@ async def chat_endpoint(
     history: list[ChatMessage] = []
 
     if conversation_id is not None:
-        # Verify ownership and get current vessel_id
         conv_row = await pool.fetchrow(
             "SELECT id, vessel_id FROM conversations WHERE id = $1 AND user_id = $2",
             conversation_id,
@@ -198,7 +205,7 @@ async def chat_endpoint(
 
         # Update conversation if vessel changed mid-conversation
         current_vessel_id = conv_row["vessel_id"]
-        requested_vessel_id = body.vessel_id  # already UUID | None from Pydantic
+        requested_vessel_id = body.vessel_id
         if current_vessel_id != requested_vessel_id:
             await pool.execute(
                 "UPDATE conversations SET vessel_id = $1 WHERE id = $2",
@@ -230,7 +237,105 @@ async def chat_endpoint(
             body.vessel_id,
         )
 
-    # 3. Run RAG engine
+    return vessel_profile, conversation_id, history, is_new_conversation
+
+
+async def _persist_chat_outcome(
+    pool: asyncpg.Pool,
+    anthropic_client: AsyncAnthropic,
+    conversation_id: uuid.UUID,
+    user_id: uuid.UUID,
+    user_query: str,
+    answer: str,
+    model_used: str,
+    input_tokens: int,
+    output_tokens: int,
+    cited_section_numbers: list[str],
+    vessel_id: uuid.UUID | None,
+    vessel_update: dict | None,
+    is_new_conversation: bool,
+) -> None:
+    """Persist a completed chat turn: insert messages, apply vessel update,
+    increment message count, fire background title generation for new conversations."""
+    # Resolve cited regulation UUIDs for FK storage
+    cited_ids: list[uuid.UUID] = []
+    if cited_section_numbers:
+        id_rows = await pool.fetch(
+            """
+            SELECT DISTINCT ON (section_number) id
+            FROM regulations
+            WHERE section_number = ANY($1)
+            """,
+            cited_section_numbers,
+        )
+        cited_ids = [r["id"] for r in id_rows]
+
+    model_alias = _MODEL_ALIAS.get(model_used)
+    total_tokens = input_tokens + output_tokens
+
+    await pool.execute(
+        """
+        INSERT INTO messages (conversation_id, role, content, cited_regulation_ids)
+        VALUES ($1, 'user', $2, '{}')
+        """,
+        conversation_id,
+        user_query,
+    )
+    await pool.execute(
+        """
+        INSERT INTO messages
+            (conversation_id, role, content, model_used, tokens_used, cited_regulation_ids)
+        VALUES ($1, 'assistant', $2, $3, $4, $5)
+        """,
+        conversation_id,
+        answer,
+        model_alias,
+        total_tokens,
+        cited_ids,
+    )
+
+    # Apply vessel profile updates from chat response
+    if vessel_update and vessel_id:
+        try:
+            await _apply_vessel_update(pool, vessel_id, vessel_update)
+        except Exception:
+            logger.exception("Failed to apply vessel update for vessel %s", vessel_id)
+
+    # Increment message count for billing
+    await pool.execute(
+        "UPDATE users SET message_count = message_count + 1 WHERE id = $1",
+        user_id,
+    )
+
+    # Fire background title generation for brand-new conversations
+    if is_new_conversation:
+        asyncio.create_task(
+            _generate_title(
+                conversation_id=conversation_id,
+                query=user_query,
+                anthropic_client=anthropic_client,
+                pool=pool,
+            )
+        )
+
+
+@router.post("", status_code=status.HTTP_200_OK)
+async def chat_endpoint(
+    body: "ChatRequestBody",
+    request: Request,
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    pool: Annotated[asyncpg.Pool, Depends(get_pool)],
+):
+    from rag.engine import chat
+    from rag.models import ChatResponse
+
+    vessel_profile, conversation_id, history, is_new_conversation = await _run_chat_preflight(
+        body, current_user, pool
+    )
+
+    anthropic_client: AsyncAnthropic = request.app.state.anthropic
+    openai_api_key: str = request.app.state.openai_api_key
+
     response: ChatResponse = await chat(
         query=body.query,
         conversation_history=history,
@@ -241,70 +346,110 @@ async def chat_endpoint(
         conversation_id=conversation_id,
     )
 
-    # 4. Resolve cited regulation UUIDs for FK storage
-    cited_ids: list[uuid.UUID] = []
-    if response.cited_regulations:
-        section_numbers = [c.section_number for c in response.cited_regulations]
-        id_rows = await pool.fetch(
-            """
-            SELECT DISTINCT ON (section_number) id
-            FROM regulations
-            WHERE section_number = ANY($1)
-            """,
-            section_numbers,
-        )
-        cited_ids = [r["id"] for r in id_rows]
-
-    # 5. Persist messages
-    model_alias = _MODEL_ALIAS.get(response.model_used)
-    total_tokens = response.input_tokens + response.output_tokens
-
-    await pool.execute(
-        """
-        INSERT INTO messages (conversation_id, role, content, cited_regulation_ids)
-        VALUES ($1, 'user', $2, '{}')
-        """,
-        conversation_id,
-        body.query,
+    await _persist_chat_outcome(
+        pool=pool,
+        anthropic_client=anthropic_client,
+        conversation_id=conversation_id,
+        user_id=uuid.UUID(current_user.user_id),
+        user_query=body.query,
+        answer=response.answer,
+        model_used=response.model_used,
+        input_tokens=response.input_tokens,
+        output_tokens=response.output_tokens,
+        cited_section_numbers=[c.section_number for c in response.cited_regulations],
+        vessel_id=body.vessel_id,
+        vessel_update=response.vessel_update,
+        is_new_conversation=is_new_conversation,
     )
-    await pool.execute(
-        """
-        INSERT INTO messages
-            (conversation_id, role, content, model_used, tokens_used, cited_regulation_ids)
-        VALUES ($1, 'assistant', $2, $3, $4, $5)
-        """,
-        conversation_id,
-        response.answer,
-        model_alias,
-        total_tokens,
-        cited_ids,
-    )
-
-    # 6. Apply vessel profile updates from chat response
-    if response.vessel_update and body.vessel_id:
-        try:
-            await _apply_vessel_update(pool, body.vessel_id, response.vessel_update)
-        except Exception:
-            logger.exception("Failed to apply vessel update for vessel %s", body.vessel_id)
-
-    # 7. Increment message count for billing
-    await pool.execute(
-        "UPDATE users SET message_count = message_count + 1 WHERE id = $1",
-        uuid.UUID(current_user.user_id),
-    )
-
-    # 8. Fire background title generation for brand-new conversations
-    if is_new_conversation:
-        asyncio.create_task(
-            _generate_title(
-                conversation_id=conversation_id,
-                query=body.query,
-                anthropic_client=anthropic_client,
-                pool=pool,
-            )
-        )
 
     return response
+
+
+@router.post("/stream")
+async def chat_stream_endpoint(
+    body: "ChatRequestBody",
+    request: Request,
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    pool: Annotated[asyncpg.Pool, Depends(get_pool)],
+):
+    """SSE streaming variant of /chat.
+
+    Auth/billing/rate-limit checks run synchronously before the stream is
+    opened so they surface as normal HTTP errors. Once the stream begins, the
+    server emits `status` events at each pipeline stage and finishes with a
+    single `done` event carrying the full ChatResponse payload. Persistence
+    happens inside the generator after the `done` event so the connection
+    stays open until DB writes complete.
+    """
+    from rag.engine import chat_with_progress
+
+    vessel_profile, conversation_id, history, is_new_conversation = await _run_chat_preflight(
+        body, current_user, pool
+    )
+
+    anthropic_client: AsyncAnthropic = request.app.state.anthropic
+    openai_api_key: str = request.app.state.openai_api_key
+    user_uuid = uuid.UUID(current_user.user_id)
+
+    async def event_generator():
+        final_data: dict | None = None
+        try:
+            async for event in chat_with_progress(
+                query=body.query,
+                conversation_history=history,
+                vessel_profile=vessel_profile,
+                pool=pool,
+                anthropic_client=anthropic_client,
+                openai_api_key=openai_api_key,
+                conversation_id=conversation_id,
+            ):
+                event_type = event["event"]
+                payload = event["data"]
+                if event_type == "done":
+                    final_data = payload
+                yield f"event: {event_type}\ndata: {json.dumps(payload)}\n\n"
+        except Exception:
+            logger.exception("Streaming chat error during generation")
+            yield (
+                "event: error\n"
+                f"data: {json.dumps({'message': 'An error occurred processing your request.'})}\n\n"
+            )
+            return
+
+        # Persist after the final event has been sent. Stays inside the
+        # generator so the SSE connection remains open until the DB writes
+        # finish — keeps everything sequential and error-loggable.
+        if final_data is not None:
+            try:
+                await _persist_chat_outcome(
+                    pool=pool,
+                    anthropic_client=anthropic_client,
+                    conversation_id=conversation_id,
+                    user_id=user_uuid,
+                    user_query=body.query,
+                    answer=final_data["answer"],
+                    model_used=final_data["model_used"],
+                    input_tokens=final_data["input_tokens"],
+                    output_tokens=final_data["output_tokens"],
+                    cited_section_numbers=[
+                        c["section_number"] for c in final_data["cited_regulations"]
+                    ],
+                    vessel_id=body.vessel_id,
+                    vessel_update=final_data.get("vessel_update"),
+                    is_new_conversation=is_new_conversation,
+                )
+            except Exception:
+                logger.exception("Failed to persist streaming chat outcome")
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 async def _apply_vessel_update(pool: asyncpg.Pool, vessel_id: uuid.UUID, update: dict) -> None:
