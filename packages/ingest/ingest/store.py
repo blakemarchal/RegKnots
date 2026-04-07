@@ -45,6 +45,15 @@ async def get_previous_as_of(pool: asyncpg.Pool, source: str) -> date | None:
     return val
 
 
+async def get_existing_chunk_count(pool: asyncpg.Pool, source: str) -> int:
+    """Return the number of chunks currently stored for a source."""
+    val = await pool.fetchval(
+        "SELECT count(*) FROM regulations WHERE source = $1",
+        source,
+    )
+    return int(val or 0)
+
+
 async def get_existing_hashes(pool: asyncpg.Pool, source: str) -> set[str]:
     """Return all non-null content_hash values stored for this source."""
     rows = await pool.fetch(

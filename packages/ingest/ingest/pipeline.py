@@ -144,6 +144,38 @@ async def run_pipeline(
                 description=f"Chunked: {len(all_chunks):,} chunks",
             )
 
+            # ── 5b. Chunk-loss safeguard (update mode only) ──────────────────
+            if mode == "update":
+                existing_chunk_count = await store.get_existing_chunk_count(
+                    pool, source
+                )
+                if existing_chunk_count > 0:
+                    incoming = len(all_chunks)
+                    ratio = incoming / existing_chunk_count if existing_chunk_count else 1.0
+                    if incoming == 0:
+                        msg = (
+                            f"SAFEGUARD: {source} produced 0 chunks but has "
+                            f"{existing_chunk_count} existing chunks. Aborting to "
+                            f"prevent data loss. Use --fresh to force a full re-ingest "
+                            f"if this is intentional."
+                        )
+                        console.print(f"  [red]{msg}[/red]")
+                        result.errors += 1
+                        result.error_details.append(msg)
+                        return result
+                    if ratio < 0.5:
+                        msg = (
+                            f"SAFEGUARD: {source} update would drop from "
+                            f"{existing_chunk_count} to {incoming} chunks "
+                            f"({ratio:.0%} of current). Aborting to prevent data loss. "
+                            f"This usually means an external source returned partial "
+                            f"results. Try again later or use --fresh to force."
+                        )
+                        console.print(f"  [red]{msg}[/red]")
+                        result.errors += 1
+                        result.error_details.append(msg)
+                        return result
+
             # ── 6. Dedup (update mode skips unchanged hashes) ────────────────
             if mode == "update":
                 existing_hashes = await store.get_existing_hashes(pool, source)
