@@ -31,7 +31,7 @@ export function AppHeader({ title, trailing }: Props) {
           </svg>
           <div className="flex items-center gap-2">
             <h1 className="font-display text-xl font-bold text-[#f0ece4] tracking-wide leading-none">
-              {title ?? 'RegKnots'}
+              {title ?? 'RegKnot'}
             </h1>
             {trailing}
           </div>

@@ -5,8 +5,8 @@ from app.config import settings
 
 resend.api_key = settings.resend_api_key
 
-FROM_EMAIL = "RegKnots <hello@mail.regknots.com>"
-CAPTAIN_EMAIL = "RegKnots <captain@mail.regknots.com>"
+FROM_EMAIL = "RegKnot <hello@mail.regknots.com>"
+CAPTAIN_EMAIL = "RegKnot <captain@mail.regknots.com>"
 APP_URL = "https://regknots.com"
 
 _BASE_STYLES = """
@@ -37,12 +37,12 @@ def _html(body: str) -> str:
   <div class="wrapper">
     <div class="card">
       <div class="logo">
-        <span class="logo-text">Reg<span>Knots</span></span>
+        <span class="logo-text">Reg<span>Knot</span></span>
       </div>
       {body}
       <hr class="divider">
       <p class="disclaimer">
-        RegKnots is a navigation aid only — not legal advice. Always verify compliance requirements with
+        RegKnot is a navigation aid only — not legal advice. Always verify compliance requirements with
         the applicable regulations and consult qualified maritime counsel for legal matters.
       </p>
     </div>
@@ -56,7 +56,7 @@ async def send_welcome_email(to_email: str, full_name: str) -> None:
     html = _html(f"""
       <h1>Welcome aboard, {first_name}</h1>
       <p>
-        You're now registered with RegKnots — your AI-powered CFR co-pilot for U.S. maritime compliance.
+        You're now registered with RegKnot — your AI-powered CFR co-pilot for U.S. maritime compliance.
         Get instant cited answers to questions across Titles 33, 46 &amp; 49, COLREGs, and NVICs, tailored
         to your vessel profile.
       </p>
@@ -83,7 +83,7 @@ async def send_verification_email(to_email: str, full_name: str, token: str) -> 
     html = _html(f"""
       <h1>Verify your email, {first_name}</h1>
       <p>
-        Welcome to RegKnots! Please confirm your email address to unlock full access.
+        Welcome to RegKnot! Please confirm your email address to unlock full access.
         You can send up to 5 messages before verifying.
       </p>
       <a href="{verify_url}" class="cta">Verify Email</a>
@@ -92,13 +92,13 @@ async def send_verification_email(to_email: str, full_name: str, token: str) -> 
       </p>
       <div class="token-box">{verify_url}</div>
       <p style="font-size:12px; color:rgba(107,117,148,0.6);">
-        If you didn't create a RegKnots account, you can safely ignore this email.
+        If you didn't create a RegKnot account, you can safely ignore this email.
       </p>
     """)
     resend.Emails.send({
         "from": FROM_EMAIL,
         "to": [to_email],
-        "subject": "Verify your email — RegKnots",
+        "subject": "Verify your email — RegKnot",
         "html": html,
     })
 
@@ -122,7 +122,7 @@ async def send_support_confirmation_email(to_email: str, full_name: str, subject
         "from": FROM_EMAIL,
         "to": [to_email],
         "reply_to": ["support@regknots.com"],
-        "subject": "We received your message — RegKnots Support",
+        "subject": "We received your message — RegKnot Support",
         "html": html,
     })
 
@@ -147,7 +147,7 @@ async def send_support_reply_email(
       </div>
       <p>
         If you have follow-up questions, reply to this email or submit another
-        request through the Support page in RegKnots.
+        request through the Support page in RegKnot.
       </p>
       <p style="color:rgba(107,117,148,0.9); font-size:12px; margin-top:24px; margin-bottom:4px;">
         Your original message:
@@ -160,7 +160,7 @@ async def send_support_reply_email(
         "from": CAPTAIN_EMAIL,
         "to": [to_email],
         "reply_to": ["support@regknots.com"],
-        "subject": f"Re: {original_subject} — RegKnots Support",
+        "subject": f"Re: {original_subject} — RegKnot Support",
         "html": html,
     })
 
@@ -170,7 +170,7 @@ async def send_password_changed_email(to_email: str, full_name: str) -> None:
     html = _html(f"""
       <h1>Password changed</h1>
       <p>
-        Hey {first_name} — this is a confirmation that the password for your RegKnots account
+        Hey {first_name} — this is a confirmation that the password for your RegKnot account
         (<strong style="color:#f0ece4;">{to_email}</strong>) was just changed.
       </p>
       <p>
@@ -184,7 +184,7 @@ async def send_password_changed_email(to_email: str, full_name: str) -> None:
     resend.Emails.send({
         "from": FROM_EMAIL,
         "to": [to_email],
-        "subject": "Your RegKnots password was changed",
+        "subject": "Your RegKnot password was changed",
         "html": html,
     })
 
@@ -194,7 +194,7 @@ async def send_password_reset_email(to_email: str, reset_token: str) -> None:
     html = _html(f"""
       <h1>Reset your password</h1>
       <p>
-        We received a request to reset the password for your RegKnots account.
+        We received a request to reset the password for your RegKnot account.
         Click the button below to choose a new password. This link expires in <strong style="color:#f0ece4;">1 hour</strong>.
       </p>
       <a href="{reset_url}" class="cta">Reset Password</a>
@@ -210,7 +210,7 @@ async def send_password_reset_email(to_email: str, reset_token: str) -> None:
     resend.Emails.send({
         "from": FROM_EMAIL,
         "to": [to_email],
-        "subject": "Reset your RegKnots password",
+        "subject": "Reset your RegKnot password",
         "html": html,
     })
 
@@ -220,12 +220,12 @@ async def send_trial_expiring_email(to_email: str, full_name: str, messages_used
     html = _html(f"""
       <h1>Your trial ends in 3 days</h1>
       <p>
-        Hey {first_name} — just a heads up that your RegKnots trial expires in 3 days.
+        Hey {first_name} — just a heads up that your RegKnot trial expires in 3 days.
         You've sent <strong style="color:#f0ece4;">{messages_used}</strong> messages so far.
       </p>
       <p>
         To keep your access to unlimited CFR queries, vessel-specific answers, and all regulation
-        sources, subscribe to RegKnots Pro for <strong style="color:#f0ece4;">$39/month</strong>.
+        sources, subscribe to RegKnot Pro for <strong style="color:#f0ece4;">$39/month</strong>.
       </p>
       <p style="font-size:13px; color:#2dd4bf;">
         As a pilot member, this price is locked in forever — even when we raise it.
@@ -235,7 +235,7 @@ async def send_trial_expiring_email(to_email: str, full_name: str, messages_used
     resend.Emails.send({
         "from": CAPTAIN_EMAIL,
         "to": [to_email],
-        "subject": "Your RegKnots trial ends in 3 days",
+        "subject": "Your RegKnot trial ends in 3 days",
         "html": html,
     })
 
@@ -245,12 +245,12 @@ async def send_pilot_ended_email(to_email: str, full_name: str) -> None:
     html = _html(f"""
       <h1>Your pilot trial has ended</h1>
       <p>
-        Hey {first_name} — your 14-day RegKnots pilot has expired. You've reached the end of your
+        Hey {first_name} — your 14-day RegKnot pilot has expired. You've reached the end of your
         complimentary access period.
       </p>
       <p>
         To continue getting instant cited answers to CFR, COLREGs, NVIC, and SOLAS questions —
-        subscribe to RegKnots Pro for <strong style="color:#f0ece4;">$39/month</strong>.
+        subscribe to RegKnot Pro for <strong style="color:#f0ece4;">$39/month</strong>.
       </p>
       <p style="font-size:13px; color:#2dd4bf;">
         As a founding pilot member, this price is locked in forever — even when we raise it.
@@ -263,7 +263,7 @@ async def send_pilot_ended_email(to_email: str, full_name: str) -> None:
     resend.Emails.send({
         "from": CAPTAIN_EMAIL,
         "to": [to_email],
-        "subject": f"Your RegKnots trial has ended, {first_name}",
+        "subject": f"Your RegKnot trial has ended, {first_name}",
         "html": html,
     })
 
@@ -273,7 +273,7 @@ async def send_waitlist_confirmed_email(to_email: str, full_name: str) -> None:
     html = _html(f"""
       <h1>You're on the list, {first_name}</h1>
       <p>
-        Thanks for your interest in RegKnots. You've been added to our waitlist and we'll notify you
+        Thanks for your interest in RegKnot. You've been added to our waitlist and we'll notify you
         as soon as a spot opens up.
       </p>
       <p>
@@ -289,7 +289,7 @@ async def send_waitlist_confirmed_email(to_email: str, full_name: str) -> None:
     resend.Emails.send({
         "from": FROM_EMAIL,
         "to": [to_email],
-        "subject": f"You're on the RegKnots waitlist, {first_name}",
+        "subject": f"You're on the RegKnot waitlist, {first_name}",
         "html": html,
     })
 
@@ -299,7 +299,7 @@ async def send_subscription_cancelled_email(to_email: str, full_name: str) -> No
     html = _html(f"""
       <h1>Your subscription has been cancelled</h1>
       <p>
-        Hi {first_name} — your RegKnots Pro subscription has been cancelled.
+        Hi {first_name} — your RegKnot Pro subscription has been cancelled.
         You'll continue to have Pro access until the end of your current billing period.
       </p>
       <p>
@@ -314,7 +314,7 @@ async def send_subscription_cancelled_email(to_email: str, full_name: str) -> No
     resend.Emails.send({
         "from": CAPTAIN_EMAIL,
         "to": [to_email],
-        "subject": "Your RegKnots subscription has been cancelled",
+        "subject": "Your RegKnot subscription has been cancelled",
         "html": html,
     })
 
@@ -322,7 +322,7 @@ async def send_subscription_cancelled_email(to_email: str, full_name: str) -> No
 async def send_subscription_confirmed_email(to_email: str, full_name: str) -> None:
     first_name = full_name.split()[0] if full_name.strip() else "Mariner"
     html = _html(f"""
-      <h1>Welcome to RegKnots Pro</h1>
+      <h1>Welcome to RegKnot Pro</h1>
       <p>
         Thanks for subscribing, {first_name}! Your Pro plan is now active.
       </p>
@@ -343,7 +343,7 @@ async def send_subscription_confirmed_email(to_email: str, full_name: str) -> No
     resend.Emails.send({
         "from": CAPTAIN_EMAIL,
         "to": [to_email],
-        "subject": f"Welcome to RegKnots Pro, {first_name}",
+        "subject": f"Welcome to RegKnot Pro, {first_name}",
         "html": html,
     })
 
@@ -353,7 +353,7 @@ async def send_payment_failed_email(to_email: str, full_name: str) -> None:
     html = _html(f"""
       <h1>Action Required: Payment Failed</h1>
       <p>
-        Hi {first_name} — we were unable to process your latest RegKnots Pro payment.
+        Hi {first_name} — we were unable to process your latest RegKnot Pro payment.
         Your payment method may have expired or been declined.
       </p>
       <p>
@@ -368,7 +368,7 @@ async def send_payment_failed_email(to_email: str, full_name: str) -> None:
     resend.Emails.send({
         "from": CAPTAIN_EMAIL,
         "to": [to_email],
-        "subject": f"RegKnots — Action Required: Payment Failed",
+        "subject": f"RegKnot — Action Required: Payment Failed",
         "html": html,
     })
 
@@ -378,11 +378,11 @@ async def send_subscription_paused_email(to_email: str, full_name: str) -> None:
     html = _html(f"""
       <h1>Your Subscription is Paused</h1>
       <p>
-        Hi {first_name} — your RegKnots Pro subscription has been paused.
+        Hi {first_name} — your RegKnot Pro subscription has been paused.
         You won't be charged during the pause period.
       </p>
       <p>
-        While paused, your access to RegKnots Pro features is suspended.
+        While paused, your access to RegKnot Pro features is suspended.
         When you're ready to come back, you can resume your subscription anytime:
       </p>
       <a href="{APP_URL}/account" class="cta">Resume Subscription</a>
@@ -393,7 +393,7 @@ async def send_subscription_paused_email(to_email: str, full_name: str) -> None:
     resend.Emails.send({
         "from": CAPTAIN_EMAIL,
         "to": [to_email],
-        "subject": "RegKnots — Your Subscription is Paused",
+        "subject": "RegKnot — Your Subscription is Paused",
         "html": html,
     })
 
@@ -427,7 +427,7 @@ async def send_subscription_resumed_email(to_email: str, full_name: str) -> None
     html = _html(f"""
       <h1>Welcome Back, {first_name}!</h1>
       <p>
-        Your RegKnots Pro subscription has been resumed. Full access is restored —
+        Your RegKnot Pro subscription has been resumed. Full access is restored —
         unlimited questions, vessel-specific answers, and all regulation sources
         are available again.
       </p>
@@ -436,6 +436,6 @@ async def send_subscription_resumed_email(to_email: str, full_name: str) -> None
     resend.Emails.send({
         "from": CAPTAIN_EMAIL,
         "to": [to_email],
-        "subject": f"RegKnots — Welcome Back! Subscription Resumed",
+        "subject": f"RegKnot — Welcome Back! Subscription Resumed",
         "html": html,
     })

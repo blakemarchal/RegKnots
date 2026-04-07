@@ -73,7 +73,7 @@ function VerifyEmailInner() {
             Email verified
           </h2>
           <p className="font-mono text-xs text-[--color-muted]">
-            Your RegKnots account is unlocked. Full access restored.
+            Your RegKnot account is unlocked. Full access restored.
           </p>
           <Link
             href="/"
@@ -81,7 +81,7 @@ function VerifyEmailInner() {
               font-bold text-sm uppercase tracking-wider rounded-lg py-2.5
               transition-[filter] font-mono"
           >
-            Continue to RegKnots
+            Continue to RegKnot
           </Link>
         </>
       )}

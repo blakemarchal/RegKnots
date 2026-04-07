@@ -38,37 +38,37 @@ interface FaqItem {
 }
 
 const FAQ_ITEMS: FaqItem[] = [
-  // Using RegKnots
+  // Using RegKnot
   {
-    category: 'Using RegKnots',
-    q: 'What regulations does RegKnots cover?',
-    a: 'RegKnots covers U.S. Code of Federal Regulations Titles 33 (Navigation and Navigable Waters), 46 (Shipping), and 49 (Transportation) \u2014 plus the International Regulations for Preventing Collisions at Sea (COLREGs), U.S. Coast Guard Navigation and Vessel Inspection Circulars (NVICs), and the SOLAS 2024 Consolidated Edition with the January 2026 Supplement. We\u2019re actively adding MARPOL and STCW.',
+    category: 'Using RegKnot',
+    q: 'What regulations does RegKnot cover?',
+    a: 'RegKnot covers U.S. Code of Federal Regulations Titles 33 (Navigation and Navigable Waters), 46 (Shipping), and 49 (Transportation) \u2014 plus the International Regulations for Preventing Collisions at Sea (COLREGs), U.S. Coast Guard Navigation and Vessel Inspection Circulars (NVICs), and the SOLAS 2024 Consolidated Edition with the January 2026 Supplement. We\u2019re actively adding MARPOL and STCW.',
   },
   {
-    category: 'Using RegKnots',
+    category: 'Using RegKnot',
     q: 'How do citations work?',
-    a: 'When RegKnots answers a question, it cites the specific regulation sections inline \u2014 like (46 CFR 133.45). Tap any teal citation chip to see more details about that regulation. For CFR regulations, you can view the full text. For SOLAS and COLREGs, we show a summary due to IMO copyright \u2014 you can access official text through IMO publications.',
+    a: 'When RegKnot answers a question, it cites the specific regulation sections inline \u2014 like (46 CFR 133.45). Tap any teal citation chip to see more details about that regulation. For CFR regulations, you can view the full text. For SOLAS and COLREGs, we show a summary due to IMO copyright \u2014 you can access official text through IMO publications.',
   },
   {
-    category: 'Using RegKnots',
+    category: 'Using RegKnot',
     q: 'What are the vessel profiles for?',
-    a: 'Your vessel profile helps RegKnots tailor answers to your specific situation. Requirements vary significantly by vessel type, tonnage, route (inland/coastal/international), and cargo. Adding your vessel details means answers automatically account for which regulations apply to you.',
+    a: 'Your vessel profile helps RegKnot tailor answers to your specific situation. Requirements vary significantly by vessel type, tonnage, route (inland/coastal/international), and cargo. Adding your vessel details means answers automatically account for which regulations apply to you.',
   },
   {
-    category: 'Using RegKnots',
+    category: 'Using RegKnot',
     q: 'How accurate are the answers?',
-    a: 'RegKnots pulls directly from official regulation databases \u2014 eCFR for CFR titles, official USCG publications for NVICs, and the SOLAS 2024 Consolidated Edition. Every answer cites its sources. However, RegKnots is a navigation aid, not legal advice. Always verify critical compliance decisions with your company\u2019s designated person ashore (DPA) or legal counsel.',
+    a: 'RegKnot pulls directly from official regulation databases \u2014 eCFR for CFR titles, official USCG publications for NVICs, and the SOLAS 2024 Consolidated Edition. Every answer cites its sources. However, RegKnot is a navigation aid, not legal advice. Always verify critical compliance decisions with your company\u2019s designated person ashore (DPA) or legal counsel.',
   },
   // Account & billing
   {
     category: 'Account & Billing',
     q: 'What does the free trial include?',
-    a: 'The free pilot trial gives you 50 messages over 14 days to test RegKnots with your real compliance questions. All regulation sources and features are available during the trial.',
+    a: 'The free pilot trial gives you 50 messages over 14 days to test RegKnot with your real compliance questions. All regulation sources and features are available during the trial.',
   },
   {
     category: 'Account & Billing',
-    q: 'How much does RegKnots Pro cost?',
-    a: 'RegKnots Pro is $39/month with unlimited questions. Founding members who subscribe lock in this price permanently \u2014 even when we raise prices later.',
+    q: 'How much does RegKnot Pro cost?',
+    a: 'RegKnot Pro is $39/month with unlimited questions. Founding members who subscribe lock in this price permanently \u2014 even when we raise prices later.',
   },
   {
     category: 'Account & Billing',
@@ -83,18 +83,18 @@ const FAQ_ITEMS: FaqItem[] = [
   // Technical
   {
     category: 'Technical',
-    q: 'Can I use RegKnots offline?',
-    a: 'RegKnots works as a Progressive Web App (PWA) \u2014 install it on your phone\u2019s home screen for an app-like experience. Currently, an internet connection is required for all queries. Offline cached answers are planned for a future update.',
+    q: 'Can I use RegKnot offline?',
+    a: 'RegKnot works as a Progressive Web App (PWA) \u2014 install it on your phone\u2019s home screen for an app-like experience. Currently, an internet connection is required for all queries. Offline cached answers are planned for a future update.',
   },
   {
     category: 'Technical',
     q: 'Which browsers are supported?',
-    a: 'RegKnots works best on Chrome, Safari, Edge, and Firefox \u2014 both mobile and desktop. For the best experience on iPhone, use Safari and install the PWA to your home screen.',
+    a: 'RegKnot works best on Chrome, Safari, Edge, and Firefox \u2014 both mobile and desktop. For the best experience on iPhone, use Safari and install the PWA to your home screen.',
   },
   {
     category: 'Technical',
-    q: "RegKnots won\u2019t load on my ship\u2019s Wi-Fi",
-    a: "Many ship networks restrict web applications by default. If RegKnots works on your personal mobile data but not on ship Wi-Fi, your vessel\u2019s network is likely blocking the connection. You can request your IT department to whitelist RegKnots \u2014 we\u2019ve prepared a ready-to-forward request document at [regknots.com/whitelisting](/whitelisting). As a workaround, you can use RegKnots on personal mobile data while in cellular range.",
+    q: "RegKnot won\u2019t load on my ship\u2019s Wi-Fi",
+    a: "Many ship networks restrict web applications by default. If RegKnot works on your personal mobile data but not on ship Wi-Fi, your vessel\u2019s network is likely blocking the connection. You can request your IT department to whitelist RegKnot \u2014 we\u2019ve prepared a ready-to-forward request document at [regknots.com/whitelisting](/whitelisting). As a workaround, you can use RegKnot on personal mobile data while in cellular range.",
   },
 ]
 
@@ -212,7 +212,7 @@ function SupportChat() {
       <div ref={scrollRef} className="h-64 overflow-y-auto px-4 py-3 flex flex-col gap-3 chat-thread">
         {messages.length === 0 && (
           <p className="font-mono text-xs text-[#6b7594] italic">
-            Ask about account, billing, or how to use RegKnots features.
+            Ask about account, billing, or how to use RegKnot features.
           </p>
         )}
         {messages.map((m, i) => (
@@ -424,7 +424,7 @@ function SupportContent() {
 
           {/* Footer note */}
           <p className="font-mono text-[10px] text-[#6b7594] text-center pb-4">
-            RegKnots is a navigation aid only and does not constitute legal advice.
+            RegKnot is a navigation aid only and does not constitute legal advice.
           </p>
         </div>
       </main>

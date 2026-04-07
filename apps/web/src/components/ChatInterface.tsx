@@ -157,14 +157,14 @@ function ChatInterfaceInner({ initialConversationId }: Props) {
       }
       if (err instanceof Error && err.message.includes('403') && err.message.includes('pilot')) {
         setPilotEndedMsg(
-          'The RegKnots pilot program has ended. Thank you for your feedback! Stay tuned for our official launch at regknots.com.'
+          'The RegKnot pilot program has ended. Thank you for your feedback! Stay tuned for our official launch at regknots.com.'
         )
         setMessages(prev => prev.slice(0, -1))
         return
       }
       if (err instanceof Error && err.message.includes('403') && err.message.toLowerCase().includes('verify')) {
         setVerifyRequiredMsg(
-          'Please verify your email to continue using RegKnots. Check your inbox for a verification link.'
+          'Please verify your email to continue using RegKnot. Check your inbox for a verification link.'
         )
         setMessages(prev => prev.slice(0, -1))
         return
@@ -256,7 +256,7 @@ function ChatInterfaceInner({ initialConversationId }: Props) {
           </svg>
           <div>
             <h1 className="font-display text-xl font-bold text-[#f0ece4] tracking-wide leading-none">
-              RegKnots
+              RegKnot
             </h1>
             <p className="text-[9px] text-[#6b7594] tracking-[0.2em] uppercase leading-tight mt-0.5">
               Maritime Compliance Co-Pilot

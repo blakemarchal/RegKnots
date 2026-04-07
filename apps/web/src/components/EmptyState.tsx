@@ -25,7 +25,7 @@ export function EmptyState({ onPrompt, isNewConversation }: Props) {
 
       {/* Logo wordmark */}
       <h1 className="font-display text-5xl font-bold tracking-wide text-[#f0ece4] mb-1">
-        RegKnots
+        RegKnot
       </h1>
       <p className="text-[11px] text-[#6b7594] tracking-[0.25em] uppercase mb-2 font-semibold">
         Maritime Compliance Co-Pilot

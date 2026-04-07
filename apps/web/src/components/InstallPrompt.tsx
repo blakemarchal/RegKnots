@@ -11,7 +11,7 @@ export function InstallPrompt() {
     <div className="flex items-center justify-between gap-3 px-4 py-2.5
       bg-[#0d1225] border-b border-[#2dd4bf]/15 text-[#f0ece4]">
       <p className="font-mono text-xs text-[#6b7594] leading-snug">
-        Add <span className="text-[#f0ece4]/80">RegKnots</span> to your home screen for the best experience
+        Add <span className="text-[#f0ece4]/80">RegKnot</span> to your home screen for the best experience
       </p>
       <div className="flex items-center gap-2 shrink-0">
         <button

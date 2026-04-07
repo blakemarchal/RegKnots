@@ -74,7 +74,7 @@ async def chat_endpoint(
         if verify_row and not verify_row["email_verified"] and verify_row["message_count"] >= 5:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Please verify your email to continue using RegKnots. Check your inbox for a verification link.",
+                detail="Please verify your email to continue using RegKnot. Check your inbox for a verification link.",
             )
 
     # ── Pilot mode gate ────────────────────────────────────────────────────
@@ -88,7 +88,7 @@ async def chat_endpoint(
         if account_age_days > 14:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="The RegKnots pilot program has ended. Thank you for your feedback! Stay tuned for our official launch at regknots.com.",
+                detail="The RegKnot pilot program has ended. Thank you for your feedback! Stay tuned for our official launch at regknots.com.",
             )
 
     # ── Subscription gate ────────────────────────────────────────────────────

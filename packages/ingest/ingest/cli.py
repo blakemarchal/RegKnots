@@ -1,5 +1,5 @@
 """
-RegKnots CFR ingest CLI.
+RegKnot CFR ingest CLI.
 
 Usage:
     uv run python -m ingest.cli --source cfr_33 --fresh
@@ -76,7 +76,7 @@ def main() -> None:
     )
 
     parser = argparse.ArgumentParser(
-        description="RegKnots CFR ingest pipeline",
+        description="RegKnot CFR ingest pipeline",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -217,7 +217,7 @@ async def _run(
         console.print("[bold red]Error:[/bold red] OPENAI_API_KEY not set in .env")
         sys.exit(1)
 
-    console.rule("[bold]RegKnots CFR Ingest")
+    console.rule("[bold]RegKnot CFR Ingest")
     console.print(f"  Sources : {', '.join(sources)}")
     console.print(f"  Mode    : {mode}")
     # Show DB host only — never log credentials

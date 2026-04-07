@@ -1,6 +1,6 @@
 {
-  "name": "RegKnots \u2014 Maritime Compliance Co-Pilot",
-  "short_name": "RegKnots",
+  "name": "RegKnot \u2014 Maritime Compliance Co-Pilot",
+  "short_name": "RegKnot",
   "description": "AI-powered maritime compliance assistant. Cited answers from CFR, SOLAS, COLREGs, and USCG guidance.",
   "start_url": "/",
   "display": "standalone",

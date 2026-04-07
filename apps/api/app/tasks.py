@@ -256,13 +256,13 @@ def _send_amendment_alert(findings: list[dict]):
         scope = ", ".join(sorted(conv_summary)) if conv_summary else "IMO"
 
         resend.Emails.send({
-            "from": "RegKnots <hello@mail.regknots.com>",
+            "from": "RegKnot <hello@mail.regknots.com>",
             "to": ["hello@regknots.com"],
-            "subject": "New IMO amendments detected — RegKnots",
+            "subject": "New IMO amendments detected — RegKnot",
             "html": (
                 f"<h2>New IMO Amendment References Detected ({scope})</h2>"
                 f"<p>The following MSC resolution references were found that are not yet "
-                f"in the RegKnots database. Each is tagged with the convention(s) it "
+                f"in the RegKnot database. Each is tagged with the convention(s) it "
                 f"appears to relate to based on surrounding context:</p>"
                 f"<ul>{items_html}</ul>"
                 f"<p><strong>Action required:</strong> Download and review the source PDFs, "

@@ -1,7 +1,7 @@
 import Link from 'next/link'
 
 export const metadata = {
-  title: 'Privacy Policy — RegKnots',
+  title: 'Privacy Policy — RegKnot',
 }
 
 export default function PrivacyPage() {
@@ -10,7 +10,7 @@ export default function PrivacyPage() {
       <header className="border-b border-white/8 px-5 md:px-10 py-4">
         <div className="max-w-3xl mx-auto flex items-center justify-between">
           <Link href="/landing" className="font-display text-xl font-bold text-[#f0ece4] tracking-wide">
-            RegKnots
+            RegKnot
           </Link>
           <Link href="/landing" className="font-mono text-xs text-[#6b7594] hover:text-[#f0ece4]/80 transition-colors">
             Back
@@ -27,7 +27,7 @@ export default function PrivacyPage() {
         <div className="prose-custom space-y-6 font-mono text-sm leading-relaxed text-[#f0ece4]/75">
           <section>
             <h2 className="font-display text-lg font-bold text-[#2dd4bf] mb-2">1. Information We Collect</h2>
-            <p>We collect the following information when you use RegKnots:</p>
+            <p>We collect the following information when you use RegKnot:</p>
             <ul className="list-disc list-inside mt-2 space-y-1">
               <li><strong>Account data:</strong> email address, name, professional role</li>
               <li><strong>Vessel profiles:</strong> vessel names, IMO numbers, flag states, and other details you provide</li>
@@ -40,7 +40,7 @@ export default function PrivacyPage() {
           <section>
             <h2 className="font-display text-lg font-bold text-[#2dd4bf] mb-2">2. How We Use Your Data</h2>
             <ul className="list-disc list-inside space-y-1">
-              <li>To provide and improve the RegKnots service</li>
+              <li>To provide and improve the RegKnot service</li>
               <li>To personalize regulatory responses based on your vessel profile</li>
               <li>To process payments and manage subscriptions</li>
               <li>To send service-related communications (account, billing, support)</li>
@@ -97,7 +97,7 @@ export default function PrivacyPage() {
           <section>
             <h2 className="font-display text-lg font-bold text-[#2dd4bf] mb-2">7. Children</h2>
             <p>
-              RegKnots is not intended for use by anyone under the age of 18. We do not knowingly
+              RegKnot is not intended for use by anyone under the age of 18. We do not knowingly
               collect data from children.
             </p>
           </section>

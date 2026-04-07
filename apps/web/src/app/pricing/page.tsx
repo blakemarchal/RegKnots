@@ -49,7 +49,7 @@ export default function PricingPage() {
         <Link href="/" className="flex items-center gap-2">
           <CompassRose className="w-5 h-5 text-[#2dd4bf]" />
           <span className="font-display text-xl font-bold text-[#f0ece4] tracking-widest uppercase">
-            RegKnots
+            RegKnot
           </span>
         </Link>
         <Link href="/" className="font-mono text-sm text-[#6b7594] hover:text-[#f0ece4] transition-colors">
@@ -68,7 +68,7 @@ export default function PricingPage() {
             {billing.trial_active
               ? `You've used ${billing.message_count} of 50 free messages.`
               : 'Your pilot trial has ended.'}
-            {' '}Subscribe to continue using RegKnots.
+            {' '}Subscribe to continue using RegKnot.
           </p>
         )}
 

@@ -4,9 +4,9 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { CompassRose } from '@/components/CompassRose'
 
-const PLAIN_TEXT = `Ship Network Whitelisting Request — RegKnots Maritime Compliance Tool
+const PLAIN_TEXT = `Ship Network Whitelisting Request — RegKnot Maritime Compliance Tool
 
-If RegKnots is blocked on your vessel's Wi-Fi, forward this information to your IT department or network administrator.
+If RegKnot is blocked on your vessel's Wi-Fi, forward this information to your IT department or network administrator.
 
 ──────────────────────────────────────
 
@@ -22,7 +22,7 @@ DOMAIN TO WHITELIST
 
 WHAT IS REGKNOTS?
 
-RegKnots is a maritime regulatory compliance reference tool used by U.S. commercial vessel officers and engineers. It provides instant lookup of U.S. Code of Federal Regulations (Titles 33, 46, 49), COLREGs, SOLAS 2024 + amendments, and USCG NVICs.
+RegKnot is a maritime regulatory compliance reference tool used by U.S. commercial vessel officers and engineers. It provides instant lookup of U.S. Code of Federal Regulations (Titles 33, 46, 49), COLREGs, SOLAS 2024 + amendments, and USCG NVICs.
 
 ──────────────────────────────────────
 
@@ -83,7 +83,7 @@ export default function WhitelistingPage() {
   }
 
   function emailIT() {
-    const subject = encodeURIComponent('Request to whitelist RegKnots maritime compliance tool')
+    const subject = encodeURIComponent('Request to whitelist RegKnot maritime compliance tool')
     const body = encodeURIComponent(PLAIN_TEXT)
     window.open(`mailto:?subject=${subject}&body=${body}`, '_self')
   }
@@ -109,7 +109,7 @@ export default function WhitelistingPage() {
           <Link href="/landing" className="flex items-center gap-2">
             <CompassRose className="w-5 h-5 text-[#2dd4bf]" />
             <span className="font-display text-xl font-bold text-[#f0ece4] tracking-widest uppercase">
-              RegKnots
+              RegKnot
             </span>
           </Link>
           <div className="flex items-center gap-3">
@@ -137,7 +137,7 @@ export default function WhitelistingPage() {
               </h1>
             </div>
             <p className="font-mono text-sm text-[#6b7594] leading-relaxed">
-              If RegKnots is blocked on your vessel&apos;s Wi-Fi, forward this information to your IT department.
+              If RegKnot is blocked on your vessel&apos;s Wi-Fi, forward this information to your IT department.
             </p>
           </div>
 
@@ -164,13 +164,13 @@ export default function WhitelistingPage() {
             </div>
           </section>
 
-          {/* What is RegKnots */}
+          {/* What is RegKnot */}
           <section className="bg-[#111827] border border-white/8 rounded-xl p-5 md:p-6 mb-6 print-white">
             <p className="font-display text-lg font-bold text-[#2dd4bf] print-teal tracking-wide mb-3">
-              What is RegKnots?
+              What is RegKnot?
             </p>
             <p className="font-mono text-sm text-[#f0ece4]/80 leading-relaxed">
-              RegKnots is a maritime regulatory compliance reference tool used by U.S. commercial vessel officers
+              RegKnot is a maritime regulatory compliance reference tool used by U.S. commercial vessel officers
               and engineers. It provides instant lookup of U.S. Code of Federal Regulations (Titles 33, 46, 49),
               COLREGs, SOLAS 2024 + amendments, and USCG NVICs.
             </p>
@@ -245,7 +245,7 @@ export default function WhitelistingPage() {
 
           {/* Footer note */}
           <p className="no-print font-mono text-[10px] text-[#6b7594] text-center mt-8">
-            RegKnots is a navigation aid only and does not constitute legal advice.
+            RegKnot is a navigation aid only and does not constitute legal advice.
           </p>
         </main>
       </div>

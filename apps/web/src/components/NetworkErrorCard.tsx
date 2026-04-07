@@ -28,7 +28,7 @@ export function NetworkErrorCard({ diagnosis, onRetry }: Props) {
   }
 
   function emailSupport() {
-    const subject = encodeURIComponent('Firewall Whitelist Request — RegKnots')
+    const subject = encodeURIComponent('Firewall Whitelist Request — RegKnot')
     const body = encodeURIComponent(WHITELIST_TEXT)
     window.open(`mailto:?subject=${subject}&body=${body}`, '_self')
   }

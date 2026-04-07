@@ -72,7 +72,7 @@ export function HamburgerMenu({ open, onClose, onNewChat, onOpenVessels, onOpenS
         {/* Drawer header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-white/8">
           <span className="font-display text-2xl font-bold text-[#f0ece4] tracking-wide">
-            RegKnots
+            RegKnot
           </span>
           <button
             onClick={onClose}

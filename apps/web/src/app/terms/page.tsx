@@ -1,7 +1,7 @@
 import Link from 'next/link'
 
 export const metadata = {
-  title: 'Terms of Service — RegKnots',
+  title: 'Terms of Service — RegKnot',
 }
 
 export default function TermsPage() {
@@ -10,7 +10,7 @@ export default function TermsPage() {
       <header className="border-b border-white/8 px-5 md:px-10 py-4">
         <div className="max-w-3xl mx-auto flex items-center justify-between">
           <Link href="/landing" className="font-display text-xl font-bold text-[#f0ece4] tracking-wide">
-            RegKnots
+            RegKnot
           </Link>
           <Link href="/landing" className="font-mono text-xs text-[#6b7594] hover:text-[#f0ece4]/80 transition-colors">
             Back
@@ -28,7 +28,7 @@ export default function TermsPage() {
           <section>
             <h2 className="font-display text-lg font-bold text-[#2dd4bf] mb-2">1. Acceptance</h2>
             <p>
-              By accessing or using RegKnots (&quot;the Service&quot;), you agree to these Terms of Service.
+              By accessing or using RegKnot (&quot;the Service&quot;), you agree to these Terms of Service.
               If you do not agree, do not use the Service. We may update these terms at any time;
               continued use constitutes acceptance.
             </p>
@@ -37,7 +37,7 @@ export default function TermsPage() {
           <section>
             <h2 className="font-display text-lg font-bold text-[#2dd4bf] mb-2">2. Description of Service</h2>
             <p>
-              RegKnots is an AI-powered maritime compliance assistant. It provides navigation
+              RegKnot is an AI-powered maritime compliance assistant. It provides navigation
               assistance for U.S. Code of Federal Regulations (CFR) Title 46 and related maritime
               regulations. The Service is a <strong>navigation aid only</strong> — it does not
               constitute legal, regulatory, or professional advice.
@@ -88,7 +88,7 @@ export default function TermsPage() {
           <section>
             <h2 className="font-display text-lg font-bold text-[#2dd4bf] mb-2">7. Limitation of Liability</h2>
             <p>
-              To the maximum extent permitted by law, RegKnots and its operators shall not be liable
+              To the maximum extent permitted by law, RegKnot and its operators shall not be liable
               for any indirect, incidental, special, or consequential damages arising from your use
               of the Service. Our total liability shall not exceed the fees paid by you in the
               12 months preceding the claim.
@@ -98,7 +98,7 @@ export default function TermsPage() {
           <section>
             <h2 className="font-display text-lg font-bold text-[#2dd4bf] mb-2">8. Intellectual Property</h2>
             <p>
-              RegKnots owns all rights to the Service, its design, and its proprietary features.
+              RegKnot owns all rights to the Service, its design, and its proprietary features.
               U.S. federal regulations (CFR) are public domain. Third-party regulation texts
               (e.g., SOLAS, IMO conventions) are subject to their respective copyright holders.
             </p>

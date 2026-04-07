@@ -87,7 +87,7 @@ export function getNetworkErrorMessage(diagnosis: NetworkDiagnosis): NetworkErro
       return {
         title: 'Connection blocked',
         message:
-          'Your network can reach the internet but RegKnots is being blocked — likely by a shipboard firewall or corporate network filter.',
+          'Your network can reach the internet but RegKnot is being blocked — likely by a shipboard firewall or corporate network filter.',
         action: 'Ask your IT administrator to whitelist regknots.com',
       }
 
@@ -95,7 +95,7 @@ export function getNetworkErrorMessage(diagnosis: NetworkDiagnosis): NetworkErro
       return {
         title: 'Service temporarily unavailable',
         message:
-          'The RegKnots server is not responding. This is usually brief — please try again in a few minutes.',
+          'The RegKnot server is not responding. This is usually brief — please try again in a few minutes.',
         action: 'Try again shortly',
       }
 
@@ -104,20 +104,20 @@ export function getNetworkErrorMessage(diagnosis: NetworkDiagnosis): NetworkErro
       return {
         title: 'Connection error',
         message:
-          'Unable to reach RegKnots. Please check your connection and try again.',
+          'Unable to reach RegKnot. Please check your connection and try again.',
         action: 'Retry',
       }
   }
 }
 
 /** Whitelist text for IT / firewall administrators. */
-export const WHITELIST_TEXT = `RegKnots Maritime Compliance Platform — Firewall Whitelist Request
+export const WHITELIST_TEXT = `RegKnot Maritime Compliance Platform — Firewall Whitelist Request
 
 Please allow outbound HTTPS (port 443) traffic to the following domain:
 
   • regknots.com
 
-This is required for the RegKnots maritime compliance application used by crew onboard. The service uses standard HTTPS only — no unusual ports or protocols.
+This is required for the RegKnot maritime compliance application used by crew onboard. The service uses standard HTTPS only — no unusual ports or protocols.
 
 If you use domain-based filtering, add:
   regknots.com

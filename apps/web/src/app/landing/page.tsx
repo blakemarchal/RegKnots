@@ -107,7 +107,7 @@ export default function LandingPage() {
         <div className="flex items-center gap-2">
           <CompassRose className="w-5 h-5 text-[#2dd4bf]" />
           <span className="font-display text-xl font-bold text-[#f0ece4] tracking-widest uppercase">
-            RegKnots
+            RegKnot
           </span>
         </div>
         <div className="flex items-center gap-3">
@@ -226,7 +226,7 @@ export default function LandingPage() {
 
           {/* Label */}
           <p className="font-mono text-xs text-[#2dd4bf] uppercase tracking-[0.25em] mb-4">
-            Why RegKnots
+            Why RegKnot
           </p>
 
           {/* Headline */}
@@ -245,7 +245,7 @@ export default function LandingPage() {
               litigation.
             </p>
             <p className="font-mono text-[#6b7594] leading-relaxed text-sm md:text-base">
-              RegKnots was built by a licensed containership captain and her engineer brother.
+              RegKnot was built by a licensed containership captain and her engineer brother.
               We know these regulations because we live them. This is the tool we wished existed.
             </p>
           </div>
@@ -285,7 +285,7 @@ export default function LandingPage() {
                 <path d="M12 2v4M12 18v4M2 12h4M18 12h4" strokeLinecap="round" />
                 <path d="M12 8l1.5 3.5L12 16l-1.5-4.5L12 8z" fill="currentColor" stroke="none" />
               </svg>
-              <span className="font-display text-base font-bold text-[#f0ece4] tracking-wide">RegKnots</span>
+              <span className="font-display text-base font-bold text-[#f0ece4] tracking-wide">RegKnot</span>
               <span className="font-mono text-[9px] text-[#6b7594] tracking-[0.2em] uppercase ml-0.5">Maritime Compliance Co-Pilot</span>
             </div>
 
@@ -507,7 +507,7 @@ export default function LandingPage() {
           <div className="flex items-center gap-2">
             <CompassRose className="w-4 h-4 text-[#2dd4bf]/60" />
             <span className="font-display text-base font-bold text-[#f0ece4]/60 tracking-widest uppercase">
-              RegKnots
+              RegKnot
             </span>
           </div>
           <p className="font-mono text-xs text-[#6b7594]">
@@ -527,7 +527,7 @@ export default function LandingPage() {
               Ship network issues?
             </a>
             <p className="font-mono text-xs text-[#6b7594]">
-              © 2026 RegKnots
+              © 2026 RegKnot
             </p>
           </div>
         </div>

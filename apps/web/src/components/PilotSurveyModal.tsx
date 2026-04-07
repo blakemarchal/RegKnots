@@ -234,7 +234,7 @@ export function PilotSurveyModal({ billing, forceOpen, onClose, preview }: Props
 
           {/* 2. Usefulness */}
           <RadioGroup
-            label="How useful was RegKnots for your work?"
+            label="How useful was RegKnot for your work?"
             options={[
               { value: 'Very useful', label: 'Very useful' },
               { value: 'Somewhat useful', label: 'Somewhat useful' },
@@ -313,7 +313,7 @@ export function PilotSurveyModal({ billing, forceOpen, onClose, preview }: Props
 
           {/* 7. Vessel type */}
           <div className="flex flex-col gap-1.5">
-            <p className="font-mono text-sm text-[#f0ece4] font-medium">What vessel type(s) did you use RegKnots with?</p>
+            <p className="font-mono text-sm text-[#f0ece4] font-medium">What vessel type(s) did you use RegKnot with?</p>
             <input
               type="text"
               value={vesselType}

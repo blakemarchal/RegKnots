@@ -72,7 +72,7 @@ export function PilotEndedModal({ message, onClose }: Props) {
           </>
         ) : (
           <p className="font-mono text-sm text-[#2dd4bf] text-center mb-3">
-            You&apos;re on the list! We&apos;ll let you know when RegKnots launches.
+            You&apos;re on the list! We&apos;ll let you know when RegKnot launches.
           </p>
         )}
 

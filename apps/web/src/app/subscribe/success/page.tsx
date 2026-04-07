@@ -60,7 +60,7 @@ export default function SubscribeSuccessPage() {
             Welcome to Pro
           </h1>
           <p className="font-mono text-[#6b7594] text-center max-w-sm mb-8">
-            Your subscription is active. You now have unlimited access to RegKnots.
+            Your subscription is active. You now have unlimited access to RegKnot.
           </p>
           <Link
             href="/"

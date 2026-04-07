@@ -116,7 +116,7 @@ function CharitySuggestionSection() {
             </div>
             <div>
               <label className="block font-mono text-xs text-[#6b7594] mb-1.5">
-                Why should RegKnots partner with this organization? *
+                Why should RegKnot partner with this organization? *
               </label>
               <textarea
                 value={reason}
@@ -125,7 +125,7 @@ function CharitySuggestionSection() {
                 className="w-full bg-[#0d1225] border border-white/10 rounded-lg px-3 py-2
                   font-mono text-sm text-[#f0ece4] placeholder:text-[#6b7594]/50
                   focus:outline-none focus:border-[#2dd4bf]/50 transition-colors resize-none"
-                placeholder="Tell us why this charity should be a RegKnots partner..."
+                placeholder="Tell us why this charity should be a RegKnot partner..."
               />
             </div>
             {submitResult && (
@@ -174,7 +174,7 @@ export default function GivingPage() {
           <Link href="/landing" className="flex items-center gap-2">
             <CompassRose className="w-5 h-5 text-[#2dd4bf]" />
             <span className="font-display text-xl font-bold text-[#f0ece4] tracking-widest uppercase">
-              RegKnots
+              RegKnot
             </span>
           </Link>
           <div className="flex items-center gap-3">
@@ -203,7 +203,7 @@ export default function GivingPage() {
           10% of all revenue goes directly to charity
         </p>
         <p className="font-mono text-sm text-[#6b7594] max-w-xl leading-relaxed">
-          RegKnots was built by mariners, for mariners. We believe the tools you trust
+          RegKnot was built by mariners, for mariners. We believe the tools you trust
           should reflect the values you carry. That&apos;s why 10% of every dollar &mdash; not profit,
           revenue &mdash; goes directly to organizations making a real difference in maritime
           communities and beyond.
@@ -259,7 +259,7 @@ export default function GivingPage() {
           <div className="flex items-center gap-2">
             <CompassRose className="w-4 h-4 text-[#2dd4bf]/60" />
             <span className="font-display text-base font-bold text-[#f0ece4]/60 tracking-widest uppercase">
-              RegKnots
+              RegKnot
             </span>
           </div>
           <p className="font-mono text-xs text-[#6b7594]">
@@ -276,7 +276,7 @@ export default function GivingPage() {
               Home
             </Link>
             <p className="font-mono text-xs text-[#6b7594]">
-              &copy; 2026 RegKnots
+              &copy; 2026 RegKnot
             </p>
           </div>
         </div>
