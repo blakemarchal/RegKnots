@@ -19,7 +19,12 @@ from app.auth.service import (
 )
 from app.config import settings
 from app.db import get_pool
-from app.email import send_password_reset_email, send_welcome_email
+from app.email import (
+    send_password_changed_email,
+    send_password_reset_email,
+    send_verification_email,
+    send_welcome_email,
+)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -61,7 +66,7 @@ async def register(data: RegisterRequest, response: Response) -> TokenResponse:
         """
         INSERT INTO users (email, hashed_password, full_name, role, trial_ends_at)
         VALUES ($1, $2, $3, $4, NOW() + ($5 || ' days')::INTERVAL)
-        RETURNING id, email, full_name, role, subscription_tier, is_admin
+        RETURNING id, email, full_name, role, subscription_tier, is_admin, email_verified
         """,
         data.email,
         hashed_pw,
@@ -78,9 +83,18 @@ async def register(data: RegisterRequest, response: Response) -> TokenResponse:
     if is_internal_check:
         await pool.execute("UPDATE users SET is_internal = TRUE WHERE id = $1", user["id"])
 
+    # Generate and store email verification token
+    verification_token = secrets.token_urlsafe(32)
+    await pool.execute(
+        "UPDATE users SET email_verification_token = $1, email_verification_sent_at = NOW() WHERE id = $2",
+        verification_token,
+        user["id"],
+    )
+
     access_token = create_access_token(
         str(user["id"]), user["email"], user["role"], user["subscription_tier"],
         full_name=user["full_name"], is_admin=user["is_admin"],
+        email_verified=user["email_verified"],
     )
     raw_refresh, token_hash = create_refresh_token()
     expires_at = datetime.now(timezone.utc) + timedelta(days=settings.refresh_token_expire_days)
@@ -100,6 +114,12 @@ async def register(data: RegisterRequest, response: Response) -> TokenResponse:
     except Exception:
         pass
 
+    # Fire verification email — non-blocking
+    try:
+        await send_verification_email(user["email"], user["full_name"], verification_token)
+    except Exception:
+        pass
+
     return TokenResponse(access_token=access_token)
 
 
@@ -108,7 +128,7 @@ async def login(data: LoginRequest, response: Response) -> TokenResponse:
     pool = await get_pool()
 
     user = await pool.fetchrow(
-        "SELECT id, email, full_name, hashed_password, role, subscription_tier, is_admin FROM users WHERE email = $1",
+        "SELECT id, email, full_name, hashed_password, role, subscription_tier, is_admin, email_verified FROM users WHERE email = $1",
         data.email,
     )
     if not user or not verify_password(data.password, user["hashed_password"]):
@@ -119,6 +139,7 @@ async def login(data: LoginRequest, response: Response) -> TokenResponse:
     access_token = create_access_token(
         str(user["id"]), user["email"], user["role"], user["subscription_tier"],
         full_name=user["full_name"], is_admin=user["is_admin"],
+        email_verified=user["email_verified"],
     )
     raw_refresh, token_hash = create_refresh_token()
     expires_at = datetime.now(timezone.utc) + timedelta(days=settings.refresh_token_expire_days)
@@ -155,7 +176,7 @@ async def refresh(
     row = await pool.fetchrow(
         """
         SELECT rt.id, rt.user_id, rt.expires_at, rt.revoked, rt.revoked_at,
-               u.email, u.full_name, u.role, u.subscription_tier, u.is_admin
+               u.email, u.full_name, u.role, u.subscription_tier, u.is_admin, u.email_verified
         FROM   refresh_tokens rt
         JOIN   users u ON u.id = rt.user_id
         WHERE  rt.token_hash = $1
@@ -200,6 +221,7 @@ async def refresh(
     access_token = create_access_token(
         str(row["user_id"]), row["email"], row["role"], row["subscription_tier"],
         full_name=row["full_name"], is_admin=row["is_admin"],
+        email_verified=row["email_verified"],
     )
 
     _set_refresh_cookie(response, raw_refresh)
@@ -268,7 +290,7 @@ async def update_profile(
         f"""
         UPDATE users SET {', '.join(sets)}
         WHERE id = ${idx}
-        RETURNING id, email, full_name, role, subscription_tier, is_admin
+        RETURNING id, email, full_name, role, subscription_tier, is_admin, email_verified
         """,
         *params,
     )
@@ -276,6 +298,7 @@ async def update_profile(
     access_token = create_access_token(
         str(row["id"]), row["email"], row["role"], row["subscription_tier"],
         full_name=row["full_name"], is_admin=row["is_admin"],
+        email_verified=row["email_verified"],
     )
     return ProfileResponse(access_token=access_token)
 
@@ -313,6 +336,11 @@ async def change_password(
         new_hash,
         uuid.UUID(user.user_id),
     )
+
+    try:
+        await send_password_changed_email(user.email, user.full_name or user.email)
+    except Exception:
+        pass
 
 
 # ── Password reset (unauthenticated) ──────────────────────────────────────────
@@ -404,4 +432,89 @@ async def reset_password(body: ResetPasswordRequest) -> dict:
                 row["id"],
             )
 
+    # Fetch user for notification email — non-fatal if it fails
+    reset_user = await pool.fetchrow(
+        "SELECT email, full_name FROM users WHERE id = $1",
+        row["user_id"],
+    )
+    if reset_user:
+        try:
+            await send_password_changed_email(
+                reset_user["email"],
+                reset_user["full_name"] or reset_user["email"],
+            )
+        except Exception:
+            pass
+
     return {"detail": "Password updated successfully"}
+
+
+# ── Email verification ────────────────────────────────────────────────────────
+
+
+@router.get("/verify-email", status_code=status.HTTP_200_OK)
+async def verify_email(token: str) -> dict:
+    pool = await get_pool()
+
+    user = await pool.fetchrow(
+        "SELECT id, email, email_verified FROM users WHERE email_verification_token = $1",
+        token,
+    )
+
+    if not user:
+        raise HTTPException(status_code=400, detail="Invalid verification link")
+
+    if user["email_verified"]:
+        return {"detail": "Email already verified", "already_verified": True}
+
+    await pool.execute(
+        "UPDATE users SET email_verified = TRUE, email_verification_token = NULL WHERE id = $1",
+        user["id"],
+    )
+
+    return {"detail": "Email verified successfully", "already_verified": False}
+
+
+@router.post("/resend-verification", status_code=status.HTTP_200_OK)
+async def resend_verification(
+    user: Annotated[CurrentUser, Depends(get_current_user)],
+) -> dict:
+    pool = await get_pool()
+
+    row = await pool.fetchrow(
+        "SELECT email, full_name, email_verified, email_verification_sent_at FROM users WHERE id = $1",
+        uuid.UUID(user.user_id),
+    )
+
+    if not row:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if row["email_verified"]:
+        return {"detail": "Email already verified"}
+
+    # Rate limit: max once per 60 seconds
+    if row["email_verification_sent_at"]:
+        elapsed = (
+            datetime.now(timezone.utc) - row["email_verification_sent_at"]
+        ).total_seconds()
+        if elapsed < 60:
+            raise HTTPException(
+                status_code=429,
+                detail="Please wait before requesting another verification email",
+            )
+
+    new_token = secrets.token_urlsafe(32)
+    await pool.execute(
+        "UPDATE users SET email_verification_token = $1, email_verification_sent_at = NOW() WHERE id = $2",
+        new_token,
+        uuid.UUID(user.user_id),
+    )
+
+    try:
+        await send_verification_email(row["email"], row["full_name"], new_token)
+    except Exception:
+        raise HTTPException(
+            status_code=502, detail="Failed to send verification email"
+        )
+
+    return {"detail": "Verification email sent"}

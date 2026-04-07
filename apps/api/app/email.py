@@ -75,6 +75,80 @@ async def send_welcome_email(to_email: str, full_name: str) -> None:
     })
 
 
+async def send_verification_email(to_email: str, full_name: str, token: str) -> None:
+    first_name = full_name.split()[0] if full_name and full_name.strip() else "Mariner"
+    verify_url = f"{APP_URL}/verify-email?token={token}"
+    html = _html(f"""
+      <h1>Verify your email, {first_name}</h1>
+      <p>
+        Welcome to RegKnots! Please confirm your email address to unlock full access.
+        You can send up to 5 messages before verifying.
+      </p>
+      <a href="{verify_url}" class="cta">Verify Email</a>
+      <p style="font-size:12px; color:rgba(107,117,148,0.7); margin-top:4px;">
+        Or copy this link into your browser:
+      </p>
+      <div class="token-box">{verify_url}</div>
+      <p style="font-size:12px; color:rgba(107,117,148,0.6);">
+        If you didn't create a RegKnots account, you can safely ignore this email.
+      </p>
+    """)
+    resend.Emails.send({
+        "from": FROM_EMAIL,
+        "to": [to_email],
+        "subject": "Verify your email — RegKnots",
+        "html": html,
+    })
+
+
+async def send_support_confirmation_email(to_email: str, full_name: str, subject: str) -> None:
+    first_name = full_name.split()[0] if full_name and full_name.strip() else "Mariner"
+    html = _html(f"""
+      <h1>We got your message, {first_name}</h1>
+      <p>
+        Your support request has been received:
+      </p>
+      <div class="token-box" style="color:#f0ece4; border-color:rgba(255,255,255,0.1);">
+        <strong>Subject:</strong> {subject}
+      </div>
+      <p>
+        We typically respond within 24 hours. If your issue is urgent, you can also reply
+        directly to this email.
+      </p>
+    """)
+    resend.Emails.send({
+        "from": FROM_EMAIL,
+        "to": [to_email],
+        "reply_to": ["support@regknots.com"],
+        "subject": "We received your message — RegKnots Support",
+        "html": html,
+    })
+
+
+async def send_password_changed_email(to_email: str, full_name: str) -> None:
+    first_name = full_name.split()[0] if full_name and full_name.strip() else "Mariner"
+    html = _html(f"""
+      <h1>Password changed</h1>
+      <p>
+        Hey {first_name} — this is a confirmation that the password for your RegKnots account
+        (<strong style="color:#f0ece4;">{to_email}</strong>) was just changed.
+      </p>
+      <p>
+        If you made this change, no action is needed.
+      </p>
+      <p style="color:#f59e0b;">
+        If you did <strong>not</strong> change your password, please contact us immediately
+        at <a href="mailto:support@regknots.com" style="color:#2dd4bf;">support@regknots.com</a>.
+      </p>
+    """)
+    resend.Emails.send({
+        "from": FROM_EMAIL,
+        "to": [to_email],
+        "subject": "Your RegKnots password was changed",
+        "html": html,
+    })
+
+
 async def send_password_reset_email(to_email: str, reset_token: str) -> None:
     reset_url = f"{APP_URL}/reset-password?token={reset_token}"
     html = _html(f"""

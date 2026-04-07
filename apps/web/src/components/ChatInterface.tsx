@@ -17,6 +17,7 @@ import { InstallPrompt } from './InstallPrompt'
 import { PwaProvider, usePwa } from '@/lib/pwa'
 import { PilotEndedModal } from './PilotEndedModal'
 import { PilotSurveyModal } from './PilotSurveyModal'
+import { VerificationBanner } from './VerificationBanner'
 
 interface ConversationMessage {
   role: string
@@ -47,6 +48,8 @@ function ChatInterfaceInner({ initialConversationId }: Props) {
   const [restoring, setRestoring] = useState(!!initialConversationId)
   const [rateLimitMsg, setRateLimitMsg] = useState<string | null>(null)
   const [pilotEndedMsg, setPilotEndedMsg] = useState<string | null>(null)
+  const [verifyRequiredMsg, setVerifyRequiredMsg] = useState<string | null>(null)
+  const [resendStatus, setResendStatus] = useState<string | null>(null)
 
   const router = useRouter()
   const { canInstall, install } = usePwa()
@@ -159,6 +162,13 @@ function ChatInterfaceInner({ initialConversationId }: Props) {
         setMessages(prev => prev.slice(0, -1))
         return
       }
+      if (err instanceof Error && err.message.includes('403') && err.message.toLowerCase().includes('verify')) {
+        setVerifyRequiredMsg(
+          'Please verify your email to continue using RegKnots. Check your inbox for a verification link.'
+        )
+        setMessages(prev => prev.slice(0, -1))
+        return
+      }
       setMessages(prev => [
         ...prev,
         {
@@ -205,6 +215,21 @@ function ChatInterfaceInner({ initialConversationId }: Props) {
         ])
       }).finally(() => setLoading(false))
     }, 50)
+  }
+
+  async function handleResendVerification() {
+    setResendStatus(null)
+    try {
+      await apiRequest('/auth/resend-verification', { method: 'POST' })
+      setResendStatus('Verification email sent — check your inbox.')
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to send'
+      if (msg.includes('429')) {
+        setResendStatus('Please wait a moment before requesting another email.')
+      } else {
+        setResendStatus('Failed to send verification email. Try again shortly.')
+      }
+    }
   }
 
   function handleNewChat() {
@@ -270,6 +295,9 @@ function ChatInterfaceInner({ initialConversationId }: Props) {
         </div>
       </header>
 
+      {/* ── Email verification banner ─────────────────────────────── */}
+      <VerificationBanner />
+
       {/* ── Trial banner ─────────────────────────────────────────── */}
       {billing && billing.tier === 'free' && billing.trial_active && (
         <div className="flex-shrink-0 flex items-center justify-between gap-3 px-4 py-2
@@ -323,6 +351,39 @@ function ChatInterfaceInner({ initialConversationId }: Props) {
           <p className="px-4 py-2 font-mono text-xs text-amber-400 bg-amber-950/30 border-t border-amber-800/20">
             {rateLimitMsg}
           </p>
+        )}
+        {verifyRequiredMsg && (
+          <div className="px-4 py-3 bg-teal-950/30 border-t border-[#2dd4bf]/20 flex items-start justify-between gap-3">
+            <div className="flex flex-col min-w-0">
+              <p className="font-mono text-xs text-[#2dd4bf] leading-snug">
+                {verifyRequiredMsg}
+              </p>
+              {resendStatus && (
+                <p className="font-mono text-[10px] text-[#f0ece4]/80 mt-1">
+                  {resendStatus}
+                </p>
+              )}
+            </div>
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <button
+                onClick={handleResendVerification}
+                className="font-mono text-xs font-bold text-[#2dd4bf] hover:underline whitespace-nowrap"
+              >
+                Resend email
+              </button>
+              <button
+                onClick={() => { setVerifyRequiredMsg(null); setResendStatus(null) }}
+                className="w-6 h-6 flex items-center justify-center rounded
+                  text-[#6b7594] hover:text-[#f0ece4] hover:bg-white/5 transition-colors"
+                aria-label="Dismiss"
+              >
+                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+            </div>
+          </div>
         )}
       </div>
 

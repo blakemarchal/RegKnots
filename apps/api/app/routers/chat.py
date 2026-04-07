@@ -65,6 +65,18 @@ async def chat_endpoint(
     except Exception:
         pass  # If Redis is down, don't block chat
 
+    # ── Email verification gate (soft — 5 messages before required) ─────────
+    if not current_user.email_verified:
+        verify_row = await pool.fetchrow(
+            "SELECT message_count, email_verified FROM users WHERE id = $1",
+            uuid.UUID(current_user.user_id),
+        )
+        if verify_row and not verify_row["email_verified"] and verify_row["message_count"] >= 5:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Please verify your email to continue using RegKnots. Check your inbox for a verification link.",
+            )
+
     # ── Pilot mode gate ────────────────────────────────────────────────────
     from app.config import settings as _cfg
     sub_row = await pool.fetchrow(

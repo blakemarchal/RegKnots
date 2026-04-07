@@ -159,7 +159,9 @@ async def support_email(
         )
 
     import resend
-    from app.email import FROM_EMAIL
+    from app.email import FROM_EMAIL, send_support_confirmation_email
+
+    display_name = user.full_name or user.email
 
     try:
         resend.Emails.send({
@@ -169,7 +171,7 @@ async def support_email(
             "subject": f"[Support] {body.subject.strip()}",
             "html": (
                 f"<p><strong>From:</strong> {user.email}</p>"
-                f"<p><strong>Name:</strong> {user.email}</p>"
+                f"<p><strong>Name:</strong> {display_name}</p>"
                 f"<p><strong>Role:</strong> {user.role}</p>"
                 f"<p><strong>Tier:</strong> {user.tier}</p>"
                 f"<hr>"
@@ -182,5 +184,11 @@ async def support_email(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="Failed to send email. Please try again or email support@regknots.com directly.",
         )
+
+    # Send confirmation to user — non-fatal if it fails (support email already sent)
+    try:
+        await send_support_confirmation_email(user.email, display_name, body.subject.strip())
+    except Exception as exc:
+        logger.warning("Support confirmation email failed: %s", exc)
 
     return SupportEmailResponse(sent=True)

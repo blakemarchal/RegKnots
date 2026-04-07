@@ -24,3 +24,5 @@ class CurrentUser(BaseModel):
     role: str
     tier: str
     is_admin: bool = False
+    email_verified: bool = False
+    full_name: str | None = None

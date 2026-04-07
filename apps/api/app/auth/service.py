@@ -25,6 +25,7 @@ def verify_password(plain: str, hashed: str) -> bool:
 def create_access_token(
     user_id: str, email: str, role: str, tier: str,
     full_name: str | None = None, is_admin: bool = False,
+    email_verified: bool = False,
 ) -> str:
     now = datetime.now(timezone.utc)
     payload = {
@@ -34,6 +35,7 @@ def create_access_token(
         "tier": tier,
         "full_name": full_name,
         "is_admin": is_admin or email in _APP_LEVEL_ADMINS,
+        "email_verified": email_verified,
         "type": "access",
         "iat": now,
         "exp": now + timedelta(minutes=settings.access_token_expire_minutes),
