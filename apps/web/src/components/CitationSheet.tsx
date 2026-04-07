@@ -65,8 +65,11 @@ export function CitationSheet({ source, sectionNumber, sectionTitle, onClose }: 
   const [dismissing, setDismissing] = useState(false)
 
   useEffect(() => {
-    const encoded = encodeURIComponent(sectionNumber)
-    apiRequest<RegulationDetail>(`/regulations/${source}/${encoded}`)
+    // Use the query-param lookup endpoint so section_numbers containing
+    // forward slashes (e.g. "STCW Ch.II Reg.II/2") aren't mangled by the
+    // reverse proxy into extra path segments.
+    const qs = new URLSearchParams({ source, section_number: sectionNumber })
+    apiRequest<RegulationDetail>(`/regulations/lookup?${qs.toString()}`)
       .then((d) => { setDetail(d); setLoading(false) })
       .catch(() => { setError(true); setLoading(false) })
   }, [source, sectionNumber])

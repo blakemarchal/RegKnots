@@ -5,7 +5,7 @@ section_number is URL-encoded by the client (e.g. "133.45" → "133.45", "164.01
 If a section has multiple chunks they are concatenated in chunk_index order.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Path, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from pydantic import BaseModel
 from typing import Annotated
 
@@ -37,13 +37,8 @@ class RegulationDetail(BaseModel):
     copyrighted: bool = False
 
 
-@router.get("/{source}/{section_number}", response_model=RegulationDetail)
-async def get_regulation(
-    source: Annotated[str, Path(description="Regulation source, e.g. cfr_46")],
-    section_number: Annotated[str, Path(description="CFR section number, e.g. 133.45")],
-    _user: Annotated[CurrentUser, Depends(get_current_user)],
-    pool=Depends(get_pool),
-) -> RegulationDetail:
+async def _load_regulation(pool, source: str, section_number: str) -> RegulationDetail:
+    """Shared loader used by both the path-based and query-based endpoints."""
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             """
@@ -88,3 +83,29 @@ async def get_regulation(
         up_to_date_as_of=str(up_to_date_as_of) if up_to_date_as_of else None,
         copyrighted=is_copyrighted,
     )
+
+
+@router.get("/lookup", response_model=RegulationDetail)
+async def lookup_regulation(
+    source: Annotated[str, Query(description="Regulation source, e.g. stcw")],
+    section_number: Annotated[str, Query(description="Section number, e.g. 'STCW Ch.II Reg.II/2'")],
+    _user: Annotated[CurrentUser, Depends(get_current_user)],
+    pool=Depends(get_pool),
+) -> RegulationDetail:
+    """Look up a regulation by (source, section_number) via query parameters.
+
+    Query params avoid the path-segment issue where section_numbers containing
+    forward slashes (e.g. ``STCW Ch.II Reg.II/2``) get decoded by the reverse
+    proxy and split into an extra path segment, causing a 404.
+    """
+    return await _load_regulation(pool, source, section_number)
+
+
+@router.get("/{source}/{section_number}", response_model=RegulationDetail)
+async def get_regulation(
+    source: Annotated[str, Path(description="Regulation source, e.g. cfr_46")],
+    section_number: Annotated[str, Path(description="CFR section number, e.g. 133.45")],
+    _user: Annotated[CurrentUser, Depends(get_current_user)],
+    pool=Depends(get_pool),
+) -> RegulationDetail:
+    return await _load_regulation(pool, source, section_number)
