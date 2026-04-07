@@ -1,10 +1,24 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 import redis.asyncio as aioredis
 
 from app.config import settings
 from app.db import get_pool
 
 router = APIRouter(tags=["health"])
+
+
+@router.get("/domain-check")
+async def domain_check(domain: str = ""):
+    """Caddy on-demand TLS validation hook.
+
+    Caddy calls this before issuing a certificate for an unknown hostname.
+    Returning 200 authorizes Caddy to obtain a cert; any other status blocks it.
+    This prevents abuse of on-demand TLS by random domains pointed at our IP.
+    """
+    domain = domain.strip().lower()
+    if domain == "regknots.com" or domain.endswith(".regknots.com"):
+        return {"ok": True}
+    raise HTTPException(status_code=403, detail="Domain not allowed")
 
 _SCHEMA_TABLES = [
     "users",

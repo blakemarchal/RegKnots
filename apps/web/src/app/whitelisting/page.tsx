@@ -204,6 +204,22 @@ export default function WhitelistingPage() {
             </p>
           </section>
 
+          {/* Fleet subdomain note */}
+          <section className="bg-[#111827] border border-white/8 rounded-xl p-5 md:p-6 mb-6 print-white">
+            <p className="font-display text-lg font-bold text-[#2dd4bf] print-teal tracking-wide mb-3">
+              Fleet Operators
+            </p>
+            <p className="font-mono text-sm text-[#f0ece4]/80 leading-relaxed">
+              Your company can request a custom subdomain (e.g.{' '}
+              <span className="text-[#f0ece4] font-bold">yourcompany.regknots.com</span>) for
+              easier fleet-wide whitelisting. Contact{' '}
+              <a href="mailto:support@regknots.com" className="text-[#2dd4bf] print-teal hover:underline">
+                support@regknots.com
+              </a>{' '}
+              to set up your subdomain.
+            </p>
+          </section>
+
           {/* Contact */}
           <section className="bg-[#111827] border border-white/8 rounded-xl p-5 md:p-6 mb-10 print-white">
             <p className="font-display text-lg font-bold text-[#2dd4bf] print-teal tracking-wide mb-3">
