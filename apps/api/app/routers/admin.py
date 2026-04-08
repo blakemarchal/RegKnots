@@ -5,6 +5,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Annotated, Any, Literal
 
+import asyncpg
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import JSONResponse
@@ -458,7 +459,18 @@ async def delete_user(
     if row["is_admin"]:
         raise HTTPException(status_code=403, detail="Cannot delete admin users")
 
-    await pool.execute("DELETE FROM users WHERE id = $1", uid)
+    try:
+        await pool.execute("DELETE FROM users WHERE id = $1", uid)
+    except asyncpg.exceptions.ForeignKeyViolationError as exc:
+        logger.exception("FK violation deleting user %s", user_id)
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Cannot delete user: foreign key constraint "
+                f"{exc.constraint_name or 'unknown'} blocks the cascade. "
+                "A referencing table is missing ON DELETE CASCADE."
+            ),
+        ) from exc
     logger.warning("Admin %s deleted user %s (%s)", admin.email, row["email"], user_id)
     return DeleteUserResult(deleted=True, email=row["email"])
 

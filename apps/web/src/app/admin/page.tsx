@@ -1023,14 +1023,14 @@ function AdminContent() {
                 <p className="font-mono text-sm text-[#2dd4bf]">No citation errors</p>
               </div>
             ) : (
-              <div className="rounded-xl border border-white/8 overflow-x-auto">
+              <div className="rounded-xl border border-white/8 overflow-auto max-h-[280px]">
                 <table className="w-full text-left font-mono text-xs" style={{ minWidth: '600px' }}>
-                  <thead>
-                    <tr className="bg-amber-500/10 text-amber-400">
-                      <th className="px-3 py-2.5 font-medium">Citation</th>
-                      <th className="px-3 py-2.5 font-medium">Model</th>
-                      <th className="px-3 py-2.5 font-medium">Preview</th>
-                      <th className="px-3 py-2.5 font-medium">Date</th>
+                  <thead className="sticky top-0 z-10">
+                    <tr className="bg-[#111827] text-amber-400">
+                      <th className="px-3 py-2.5 font-medium bg-amber-500/10">Citation</th>
+                      <th className="px-3 py-2.5 font-medium bg-amber-500/10">Model</th>
+                      <th className="px-3 py-2.5 font-medium bg-amber-500/10">Preview</th>
+                      <th className="px-3 py-2.5 font-medium bg-amber-500/10">Date</th>
                     </tr>
                   </thead>
                   <tbody>
