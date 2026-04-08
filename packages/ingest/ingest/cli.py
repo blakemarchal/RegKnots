@@ -21,6 +21,7 @@ from rich.table import Table
 
 from ingest.config import settings
 from ingest.models import IngestResult, PDF_SOURCES, SOURCE_TO_TITLE
+from ingest.notify import create_regulation_update_notification
 from ingest.pdf_pipeline import run_pdf_pipeline
 from ingest.pipeline import run_pipeline
 
@@ -249,6 +250,18 @@ async def _run(
                 )
             all_results.append(result)
 
+            # Auto-notification hook: fire a regulation_update notification
+            # when this source actually introduced new or modified content.
+            # No-op runs (0 changes) are intentionally silent.
+            if result.new_or_modified_chunks > 0:
+                notif_id = await create_regulation_update_notification(pool, result)
+                if notif_id:
+                    console.print(
+                        f"  [magenta]Notification created[/magenta] "
+                        f"[dim]({notif_id[:8]}…)[/dim] — "
+                        f"{result.new_or_modified_chunks} new/modified chunks"
+                    )
+
         # Rebuild the HNSW vector index after ingest to prevent stale results
         total_upserts = sum(r.upserts for r in all_results)
         if total_upserts > 0:
@@ -422,12 +435,14 @@ def _print_summary(results: list[IngestResult], console: Console) -> None:
     table.add_column("Skipped", justify="right")
     table.add_column("Embeddings", justify="right")
     table.add_column("Upserts", justify="right")
-    table.add_column("Changes", justify="right")
+    table.add_column("New/Mod", justify="right")
+    table.add_column("NetΔ", justify="right")
     table.add_column("Errors", justify="right")
 
     total_errors = 0
     for r in results:
         total_errors += r.errors
+        delta_str = f"{r.net_chunk_delta:+d}" if r.net_chunk_delta else "0"
         table.add_row(
             r.source,
             f"{r.sections_found:,}",
@@ -435,7 +450,8 @@ def _print_summary(results: list[IngestResult], console: Console) -> None:
             f"{r.chunks_skipped:,}",
             f"{r.embeddings_generated:,}",
             f"{r.upserts:,}",
-            str(r.version_changes),
+            f"{r.new_or_modified_chunks:,}",
+            delta_str,
             f"[red]{r.errors}[/red]" if r.errors else "0",
         )
 

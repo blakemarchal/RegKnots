@@ -13,6 +13,20 @@ logger = logging.getLogger(__name__)
 # packages/ingest/ relative to the repo root (apps/api/../../packages/ingest)
 _INGEST_DIR = Path(__file__).resolve().parents[3] / "packages" / "ingest"
 
+# Sources that can actually run unattended (fetch from public APIs / scrapers).
+# Sources NOT in this list (colregs, solas, solas_supplement, stcw,
+# stcw_supplement, ism) require local PDF / pre-extracted text files that
+# must be placed manually — they are MANUAL INGEST ONLY and intentionally
+# left out of the scheduled task. The SOLAS/STCW supplement DETECTION is
+# covered separately by `check_solas_supplements`, which emails an alert
+# when new MSC references appear so a human can review + ingest manually.
+_AUTOMATABLE_SOURCES: list[str] = [
+    "cfr_33",
+    "cfr_46",
+    "cfr_49",
+    "nvic",
+]
+
 
 def _run_async(coro):
     """Run an async function from a sync Celery task."""
@@ -25,26 +39,59 @@ def _run_async(coro):
 
 @celery.task(name="app.tasks.update_regulations", bind=True, max_retries=2)
 def update_regulations(self):
-    """Run the ingest CLI to refresh all CFR/COLREGS/NVIC sources."""
-    logger.info("Starting scheduled regulation update")
-    try:
-        result = subprocess.run(
-            ["uv", "run", "python", "-m", "ingest.cli", "--all", "--update"],
-            cwd=_INGEST_DIR,
-            capture_output=True,
-            text=True,
-            timeout=3600,  # 1 hour max
-        )
-        if result.returncode != 0:
-            logger.error("Ingest CLI failed (rc=%d): %s", result.returncode, result.stderr)
-            raise RuntimeError(f"ingest.cli exited {result.returncode}: {result.stderr[:500]}")
-        logger.info("Regulation update complete: %s", result.stdout[-500:] if result.stdout else "")
-    except subprocess.TimeoutExpired:
-        logger.error("Regulation update timed out after 1 hour")
-        raise
-    except Exception as exc:
-        logger.exception("Regulation update failed: %s", exc)
-        raise self.retry(exc=exc, countdown=3600)
+    """Refresh every source that can run unattended.
+
+    Runs each automatable source in its own CLI invocation so that:
+      - A failure in one source doesn't abort the others.
+      - The CLI's per-source auto-notification hook fires once per source
+        that actually changed (instead of a single lump-sum notification).
+
+    Sources that require local files (SOLAS, STCW, COLREGs, ISM, and the
+    two supplements) are intentionally NOT run here — they're manual ingest
+    only. See _AUTOMATABLE_SOURCES at module top.
+    """
+    logger.info(
+        "Starting scheduled regulation update for %d automatable sources: %s",
+        len(_AUTOMATABLE_SOURCES), ", ".join(_AUTOMATABLE_SOURCES),
+    )
+
+    failures: list[tuple[str, str]] = []
+    for source in _AUTOMATABLE_SOURCES:
+        logger.info("Running ingest for source=%s", source)
+        try:
+            result = subprocess.run(
+                ["uv", "run", "python", "-m", "ingest.cli", "--source", source, "--update"],
+                cwd=_INGEST_DIR,
+                capture_output=True,
+                text=True,
+                timeout=3600,  # 1 hour per source
+            )
+            if result.returncode != 0:
+                logger.error(
+                    "Ingest failed for %s (rc=%d): %s",
+                    source, result.returncode, result.stderr[-500:],
+                )
+                failures.append((source, f"rc={result.returncode}"))
+                continue
+            logger.info(
+                "Ingest complete for %s: %s",
+                source, result.stdout[-300:] if result.stdout else "(no output)",
+            )
+        except subprocess.TimeoutExpired:
+            logger.error("Ingest for %s timed out after 1 hour", source)
+            failures.append((source, "timeout"))
+        except Exception as exc:
+            logger.exception("Ingest for %s raised: %s", source, exc)
+            failures.append((source, str(exc)[:200]))
+
+    if failures:
+        # Retry the whole task if any source failed — the CLI is idempotent
+        # so sources that already succeeded will short-circuit on the retry.
+        msg = ", ".join(f"{s}: {e}" for s, e in failures)
+        logger.warning("Regulation update had %d failures: %s", len(failures), msg)
+        raise self.retry(exc=RuntimeError(msg), countdown=3600)
+
+    logger.info("Scheduled regulation update complete — all sources up to date")
 
 
 @celery.task(name="app.tasks.send_trial_expiring_reminders")

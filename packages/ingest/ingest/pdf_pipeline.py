@@ -152,9 +152,15 @@ async def run_pdf_pipeline(
                         result.error_details.append(msg)
                         return result
 
-            # ── 4. Dedup (update mode skips unchanged hashes) ────────────────
+            # ── 4. Dedup + change detection ──────────────────────────────────
+            # Always compute new_or_modified_chunks so the auto-notification
+            # hook has a mode-independent signal of real content changes.
+            existing_hashes = await store.get_existing_hashes(pool, source)
+            new_hashes = {c.content_hash for c in all_chunks}
+            result.new_or_modified_chunks = len(new_hashes - existing_hashes)
+            chunks_before_count = await store.get_existing_chunk_count(pool, source)
+
             if mode == "update":
-                existing_hashes = await store.get_existing_hashes(pool, source)
                 to_embed = [
                     c for c in all_chunks if c.content_hash not in existing_hashes
                 ]
@@ -180,6 +186,10 @@ async def run_pdf_pipeline(
             if embedded:
                 result.upserts = await store.upsert_chunks(pool, embedded)
             progress.update(store_task, completed=len(embedded))
+
+            # Capture net chunk delta (additions/removals at the row level)
+            chunks_after_count = await store.get_existing_chunk_count(pool, source)
+            result.net_chunk_delta = chunks_after_count - chunks_before_count
 
     finally:
         await embedder.close()

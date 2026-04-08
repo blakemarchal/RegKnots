@@ -78,6 +78,13 @@ class IngestResult:
     chunks_skipped: int = 0       # already in DB with matching hash
     embeddings_generated: int = 0
     upserts: int = 0
+    # Mode-independent count of chunks whose content_hash is not already in the
+    # DB for this source — i.e. rows that will be NEW or MODIFIED after upsert.
+    # Used to gate auto-notifications on real content changes.
+    new_or_modified_chunks: int = 0
+    # Net change in chunk count for this source (chunks_after - chunks_before).
+    # Positive = net adds, negative = net removals, 0 = pure updates or no-op.
+    net_chunk_delta: int = 0
     version_changes: int = 0
     errors: int = 0
     error_details: list[str] = field(default_factory=list)
