@@ -14,6 +14,24 @@ def _configure() -> None:
     stripe.api_key = settings.stripe_secret_key
 
 
+def _get_current_period_end_ts(subscription) -> int | None:
+    """Resolve current_period_end across Stripe API versions.
+
+    API <2025-03-31: present on the subscription object directly.
+    API ≥2025-03-31: moved onto each subscription item; we read the first item.
+    """
+    ts = getattr(subscription, "current_period_end", None)
+    if ts:
+        return ts
+    try:
+        items = getattr(subscription, "items", None)
+        if items and items.data:
+            return getattr(items.data[0], "current_period_end", None)
+    except Exception:
+        pass
+    return None
+
+
 async def create_checkout_session(
     user_id: str, email: str, pool, *, plan: str = "monthly",
 ) -> str:
@@ -186,8 +204,10 @@ async def _on_subscription_change(subscription, pool) -> None:
         }
         tier, sub_status = status_map.get(status, ("free", "inactive"))
 
-    # Extract billing details for DB persistence
-    current_period_end_ts = getattr(subscription, "current_period_end", None)
+    # Extract billing details for DB persistence.
+    # In Stripe API 2025-03-31+ current_period_end moved from the subscription
+    # onto individual subscription items. Fall back accordingly.
+    current_period_end_ts = _get_current_period_end_ts(subscription)
     current_period_end = (
         datetime.fromtimestamp(current_period_end_ts, tz=timezone.utc)
         if current_period_end_ts else None
@@ -336,7 +356,7 @@ async def _on_invoice_paid(invoice, pool) -> None:
 
         _configure()
         sub = stripe.Subscription.retrieve(subscription_id)
-        current_period_end_ts = sub.current_period_end
+        current_period_end_ts = _get_current_period_end_ts(sub)
         current_period_end = (
             datetime.fromtimestamp(current_period_end_ts, tz=timezone.utc)
             if current_period_end_ts else None
