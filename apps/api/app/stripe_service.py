@@ -161,13 +161,17 @@ async def _on_subscription_change(subscription, pool) -> None:
     customer_id = subscription.customer
     status = subscription.status  # active, past_due, canceled, unpaid, paused, etc.
     cancel_at_period_end = getattr(subscription, "cancel_at_period_end", False)
+    cancel_at = getattr(subscription, "cancel_at", None)
+
     logger.info(
-        "Subscription change: sub_id=%s customer_id=%s status=%s cancel_at_period_end=%s",
-        sub_id, customer_id, status, cancel_at_period_end,
+        "Subscription change: sub_id=%s customer_id=%s status=%s cancel_at_period_end=%s cancel_at=%s",
+        sub_id, customer_id, status, cancel_at_period_end, cancel_at,
     )
 
-    # Detect cancellation pending (user cancelled but still has access until period end)
-    if status == "active" and cancel_at_period_end:
+    # Detect cancellation pending — two Stripe patterns:
+    # 1. cancel_at_period_end=True (standard "cancel at end of billing cycle")
+    # 2. cancel_at is set (scheduled cancellation date, cancel_at_period_end may be False)
+    if status == "active" and (cancel_at_period_end or cancel_at):
         tier, sub_status = "pro", "canceling"
     else:
         status_map = {
@@ -258,6 +262,16 @@ async def _on_subscription_change(subscription, pool) -> None:
         "SELECT email, full_name FROM users WHERE stripe_subscription_id = $1",
         sub_id,
     )
+    if not row and customer_id:
+        row = await pool.fetchrow(
+            "SELECT email, full_name FROM users WHERE stripe_customer_id = $1",
+            customer_id,
+        )
+
+    logger.info(
+        "Cancel email check: sub_status=%s prev_status=%s row_found=%s",
+        sub_status, prev_status, bool(row),
+    )
 
     # Send cancellation email when transitioning to canceling
     if sub_status == "canceling" and prev_status != "canceling" and row:
@@ -297,13 +311,29 @@ async def _on_subscription_change(subscription, pool) -> None:
 
 
 async def _on_invoice_paid(invoice, pool) -> None:
-    """Handle invoice.paid — update current_period_end."""
-    customer_id = invoice.customer
-    subscription_id = invoice.subscription
-    if not customer_id or not subscription_id:
-        return
+    """Handle invoice.paid — update current_period_end.
 
+    This event can arrive BEFORE checkout.session.completed finishes,
+    so we try multiple lookup strategies and never return 400 to Stripe.
+    """
     try:
+        customer_id = getattr(invoice, "customer", None)
+        # Stripe API <2025-03-31 exposes invoice.subscription directly.
+        # Newer API versions move it under invoice.parent.subscription_details.subscription.
+        subscription_id = getattr(invoice, "subscription", None)
+        if not subscription_id:
+            parent = getattr(invoice, "parent", None)
+            if parent:
+                sub_details = getattr(parent, "subscription_details", None)
+                if sub_details:
+                    subscription_id = getattr(sub_details, "subscription", None)
+
+        logger.info("Invoice paid: customer_id=%s subscription_id=%s", customer_id, subscription_id)
+
+        if not subscription_id:
+            logger.info("Invoice paid without subscription_id, skipping (one-time payment?)")
+            return
+
         _configure()
         sub = stripe.Subscription.retrieve(subscription_id)
         current_period_end_ts = sub.current_period_end
@@ -312,19 +342,41 @@ async def _on_invoice_paid(invoice, pool) -> None:
             if current_period_end_ts else None
         )
 
-        await pool.execute(
+        # Try update by subscription_id first
+        result = await pool.execute(
             """
             UPDATE users
             SET current_period_end = $1,
                 subscription_status = 'active'
-            WHERE stripe_customer_id = $2
+            WHERE stripe_subscription_id = $2
             """,
             current_period_end,
-            customer_id,
+            subscription_id,
         )
-        logger.info("Invoice paid for customer %s, period end updated", customer_id)
+        logger.info("Invoice paid UPDATE by subscription_id: %s", result)
+
+        # Fallback: try by customer_id
+        if result == "UPDATE 0" and customer_id:
+            result = await pool.execute(
+                """
+                UPDATE users
+                SET current_period_end = $1,
+                    subscription_status = 'active'
+                WHERE stripe_customer_id = $2
+                """,
+                current_period_end,
+                customer_id,
+            )
+            logger.info("Invoice paid UPDATE by customer_id fallback: %s", result)
+
+        if result == "UPDATE 0":
+            logger.warning(
+                "Invoice paid matched no user: customer_id=%s subscription_id=%s (may arrive before checkout completes)",
+                customer_id, subscription_id,
+            )
     except Exception as exc:
-        logger.error("Failed to process invoice.paid for customer %s: %s", customer_id, exc)
+        # Log but don't raise — always return 200 to Stripe to prevent infinite retries
+        logger.error("Failed to process invoice.paid: %s", exc)
 
 
 async def _on_invoice_payment_failed(invoice, pool) -> None:

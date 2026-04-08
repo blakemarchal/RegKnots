@@ -497,6 +497,56 @@ async def revoke_pro(
     return AdminActionResult(ok=True)
 
 
+# ── Subscription audit ──────────────────────────────────────────────────────
+
+
+@router.get("/subscription-audit/{email}")
+async def subscription_audit(
+    email: str,
+    _admin: Annotated[CurrentUser, Depends(require_admin)],
+) -> dict[str, Any]:
+    """Check a user's subscription state in both our DB and Stripe."""
+    pool = await get_pool()
+
+    row = await pool.fetchrow(
+        """
+        SELECT id, email, full_name, subscription_tier, subscription_status,
+               stripe_customer_id, stripe_subscription_id, cancel_at_period_end,
+               current_period_end, billing_interval
+        FROM users WHERE email = $1
+        """,
+        email,
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    result: dict[str, Any] = {
+        "db": {
+            k: str(v) if isinstance(v, (datetime, uuid.UUID)) else v
+            for k, v in dict(row).items()
+        },
+        "stripe": None,
+    }
+
+    if row["stripe_subscription_id"]:
+        try:
+            import stripe as _stripe
+            _stripe.api_key = settings.stripe_secret_key
+            sub = _stripe.Subscription.retrieve(row["stripe_subscription_id"])
+            result["stripe"] = {
+                "id": sub.id,
+                "status": sub.status,
+                "cancel_at_period_end": sub.cancel_at_period_end,
+                "cancel_at": getattr(sub, "cancel_at", None),
+                "canceled_at": getattr(sub, "canceled_at", None),
+                "current_period_end": sub.current_period_end,
+            }
+        except Exception as exc:
+            result["stripe"] = {"error": str(exc)}
+
+    return result
+
+
 # ── Trial expiry simulator ────────────────────────────────────────────────────
 
 
