@@ -20,7 +20,7 @@ const CHARITIES = [
     name: 'Waves of Impact',
     tag: 'Community',
     description:
-      'Waves of Impact uses surf therapy and ocean-based programs to support veterans, first responders, and at-risk youth. Co-founder Karynn serves as an active volunteer \u2014 this is personal, not performative.',
+      'Waves of Impact brings the healing power of the ocean to children facing exceptional challenges \u2014 through surf therapy and ocean-based programs that build confidence, resilience, and joy. Co-founder Karynn serves as an active volunteer \u2014 this is personal, not performative.',
     url: 'https://www.wavesofimpact.com/',
     linkText: 'Visit wavesofimpact.com',
   },
