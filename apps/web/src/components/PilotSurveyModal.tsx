@@ -212,7 +212,7 @@ export function PilotSurveyModal({ billing, forceOpen, onClose, preview }: Props
         <div className="flex-shrink-0 flex items-center justify-between px-6 pt-5 pb-3 border-b border-white/8">
           <div className="flex items-center gap-3">
             <CompassRose className="w-7 h-7 text-[#2dd4bf]" />
-            <h2 className="font-display text-lg font-bold text-[#f0ece4]">Pilot Feedback</h2>
+            <h2 className="font-display text-lg font-bold text-[#f0ece4]">Product Feedback</h2>
           </div>
           <button
             onClick={dismiss}

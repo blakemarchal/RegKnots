@@ -67,7 +67,7 @@ export default function PricingPage() {
           <p className="font-mono text-sm text-amber-400 mb-6 text-center max-w-md">
             {billing.trial_active
               ? `You've used ${billing.message_count} of 50 free messages.`
-              : 'Your pilot trial has ended.'}
+              : 'Your free trial has ended.'}
             {' '}Subscribe to continue using RegKnot.
           </p>
         )}
@@ -111,7 +111,7 @@ export default function PricingPage() {
               {plan === 'monthly' ? 'per month' : 'per month, billed $348/year'}
             </p>
             <p className="font-mono text-xs text-[#2dd4bf]/80 mt-1.5 leading-snug">
-              Founding members lock in this price forever — even when we raise it.
+              14-day free trial · 50 messages · No credit card required
             </p>
 
             <ul className="flex flex-col gap-2 mt-6 mb-6">
@@ -154,7 +154,7 @@ export default function PricingPage() {
                   hover:brightness-110 transition-[filter] duration-150
                   disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {loading ? 'Redirecting...' : 'Subscribe Now'}
+                {loading ? 'Redirecting...' : 'Start Free Trial'}
               </button>
             )}
           </div>

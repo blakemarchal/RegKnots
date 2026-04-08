@@ -63,12 +63,12 @@ const FAQ_ITEMS: FaqItem[] = [
   {
     category: 'Account & Billing',
     q: 'What does the free trial include?',
-    a: 'The free pilot trial gives you 50 messages over 14 days to test RegKnot with your real compliance questions. All regulation sources and features are available during the trial.',
+    a: 'The 14-day free trial gives you 50 messages to test RegKnot with your real compliance questions. All regulation sources and features are available during the trial. No credit card required to start.',
   },
   {
     category: 'Account & Billing',
     q: 'How much does RegKnot Pro cost?',
-    a: 'RegKnot Pro is $39/month, or $29/month on the annual plan (billed $348/year \u2014 a 26% savings). Both plans include unlimited questions. Founding members lock in their rate permanently \u2014 even when we raise prices later.',
+    a: 'RegKnot Pro is $39/month, or $29/month on the annual plan (billed $348/year \u2014 a 26% savings). Both plans include unlimited questions and cancel anytime.',
   },
   {
     category: 'Account & Billing',

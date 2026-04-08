@@ -26,8 +26,9 @@ class Settings(BaseSettings):
     # Email — no REGKNOTS_ prefix in .env
     resend_api_key: str = Field(default="", validation_alias="RESEND_API_KEY")
 
-    # Pilot mode — extended trial for founding members
-    pilot_mode: bool = True
+    # Legacy pre-launch pilot gate. Keep False post-launch — the standard
+    # subscription gate in chat.py now handles trial expiry and limits.
+    pilot_mode: bool = False
 
     # Stripe — no REGKNOTS_ prefix in .env
     stripe_secret_key: str = Field(default="", validation_alias="STRIPE_SECRET_KEY")

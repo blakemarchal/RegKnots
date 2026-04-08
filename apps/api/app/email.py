@@ -236,9 +236,6 @@ async def send_trial_expiring_email(to_email: str, full_name: str, messages_used
         regulation source, subscribe to RegKnot Pro for <strong style="color:#f0ece4;">$39/month</strong>
         (or save 26% with the annual plan at <strong style="color:#f0ece4;">$29/month</strong>).
       </p>
-      <p style="font-size:13px; color:#2dd4bf;">
-        As a pilot member, this price is locked in forever — even when we raise it.
-      </p>
       <a href="{APP_URL}/pricing" class="cta">Subscribe Now</a>
     """)
     resend.Emails.send({
@@ -250,22 +247,19 @@ async def send_trial_expiring_email(to_email: str, full_name: str, messages_used
 
 
 async def send_pilot_ended_email(to_email: str, full_name: str) -> None:
+    """Trial-ended email. Function name preserved for admin/test-email compatibility."""
     raw_first = full_name.split()[0] if full_name.strip() else "Mariner"
     first_name = _html_lib.escape(raw_first)
     html = _html(f"""
-      <h1>Your pilot trial has ended</h1>
+      <h1>Your free trial has ended</h1>
       <p>
-        Hey {first_name} — your 14-day RegKnot pilot has expired. You've reached the end of your
-        complimentary access period.
+        Hey {first_name} — your 14-day RegKnot free trial has expired.
       </p>
       <p>
         To continue getting instant cited answers across CFR, COLREGs, NVICs, SOLAS, STCW, and
         the ISM Code — subscribe to RegKnot Pro for
         <strong style="color:#f0ece4;">$39/month</strong>
         (or save 26% with the annual plan at <strong style="color:#f0ece4;">$29/month</strong>).
-      </p>
-      <p style="font-size:13px; color:#2dd4bf;">
-        As a founding pilot member, this price is locked in forever — even when we raise it.
       </p>
       <a href="{APP_URL}/pricing" class="cta">Subscribe to Pro</a>
       <p style="font-size:12px; color:rgba(107,117,148,0.7); margin-top:8px;">
@@ -295,7 +289,7 @@ async def send_waitlist_confirmed_email(to_email: str, full_name: str) -> None:
         all tailored to your vessel profile.
       </p>
       <p style="font-size:13px; color:#2dd4bf;">
-        Waitlist members get priority access and founding member pricing when we open up.
+        Waitlist members get priority access when we open up.
       </p>
       <a href="{APP_URL}" class="cta">Learn More</a>
     """)
@@ -339,7 +333,7 @@ async def send_subscription_confirmed_email(to_email: str, full_name: str) -> No
     html = _html(f"""
       <h1>Welcome to RegKnot Pro</h1>
       <p>
-        Thanks for subscribing, {first_name}! Your Pro plan is now active.
+        Welcome aboard, {first_name} — your Pro plan is now active.
       </p>
       <p>
         Here's what you get:
@@ -350,9 +344,6 @@ async def send_subscription_confirmed_email(to_email: str, full_name: str) -> No
         <li style="color:#6b7594; font-size:14px; line-height:1.7;">Vessel-specific compliance answers</li>
         <li style="color:#6b7594; font-size:14px; line-height:1.7;">Audit-ready chat logs</li>
       </ul>
-      <p style="font-size:13px; color:#2dd4bf;">
-        Your founding member price is locked in forever — even when we raise it.
-      </p>
       <a href="{APP_URL}" class="cta">Start Asking Questions</a>
     """)
     resend.Emails.send({
@@ -448,9 +439,10 @@ async def send_charity_suggestion_email(
 
 
 def render_founding_member_email(full_name: str | None) -> tuple[str, str]:
-    """Return (subject, html) for the founding member announcement email.
+    """Return (subject, html) for the early-user thank-you announcement email.
 
-    Used by both the send function and the admin preview endpoint.
+    Function name preserved for admin dashboard compatibility; copy is now a
+    generic RegKnot Pro welcome email.
     """
     raw_first = (full_name or "").split()[0] if (full_name or "").strip() else ""
     first_name = _html_lib.escape(raw_first) if raw_first else "Captain"
@@ -458,18 +450,17 @@ def render_founding_member_email(full_name: str | None) -> tuple[str, str]:
     html = _html(f"""
       <h1>Hi {first_name},</h1>
       <p>
-        Thank you for being one of the first mariners to try RegKnot during our pilot.
-        Your questions, feedback, and patience while we tuned things have shaped this
-        product in ways we couldn&rsquo;t have done alone.
+        Thank you for being one of the first mariners to try RegKnot.
+        Your questions and feedback have shaped this product in ways we
+        couldn&rsquo;t have done alone.
       </p>
       <p>
-        RegKnot Pro is now live &mdash; and because you were here from the beginning,
-        you get to lock in the founding member rate:
+        RegKnot Pro is now live at
         <strong style="color:#f0ece4;">$39/month</strong>
         (or save 26% with the annual plan at
         <strong style="color:#f0ece4;">$29/month</strong>, billed
         <strong style="color:#f0ece4;">$348/year</strong>).
-        Even when we raise prices down the road, your rate stays the same.
+        Every subscription includes a 14-day free trial &mdash; no credit card required.
       </p>
       <p style="color:#f0ece4; font-weight:700; margin-top:24px; margin-bottom:8px;">
         What you get with Pro:

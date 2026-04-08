@@ -189,7 +189,7 @@ export default function LandingPage() {
               bg-[#2dd4bf] text-[#0a0e1a] rounded-xl px-6 py-3
               hover:brightness-110 transition-[filter] duration-150"
           >
-            Get Early Access
+            Start Free Trial
           </Link>
           <button
             onClick={() => document.getElementById('in-action')?.scrollIntoView({ behavior: 'smooth' })}
@@ -200,6 +200,13 @@ export default function LandingPage() {
             See It In Action
           </button>
         </div>
+        <p
+          className="font-mono text-[11px] text-[#6b7594] mt-4 tracking-wide
+            animate-[heroFadeUp_0.8s_ease-out_0.55s]"
+          style={{ animationFillMode: 'both' }}
+        >
+          14-day free trial · 50 messages · No credit card required
+        </p>
 
         {/* Scroll indicator */}
         <button
@@ -245,7 +252,7 @@ export default function LandingPage() {
               litigation.
             </p>
             <p className="font-mono text-[#6b7594] leading-relaxed text-sm md:text-base">
-              RegKnot was built by a licensed containership captain and her engineer brother.
+              RegKnot was built by an Unlimited Licensed Captain and her engineer brother.
               We know these regulations because we live them. This is the tool we wished existed.
             </p>
             <p className="font-mono text-[#6b7594] leading-relaxed text-sm md:text-base">
@@ -442,23 +449,21 @@ export default function LandingPage() {
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
             <PricingCard
-              name="Founding Pilot"
+              name="Free Trial"
               price="$0"
               priceSub="for 14 days"
               features={[
-                '14-day pilot access',
-                'No credit card required to start',
-                'Full Pro access during trial',
+                '14-day free trial',
+                '50 messages during trial',
+                'No credit card required',
               ]}
-              smallPrint={`One trial per account. Founding members lock in ${plan === 'monthly' ? '$39/month' : '$29/month ($348/year)'} forever.`}
-              cta="Join the Founding Pilot"
+              smallPrint="One trial per account. No credit card required to start."
+              cta="Start Free Trial"
             />
             <PricingCard
               name="Pro"
               price={plan === 'monthly' ? '$39' : '$29'}
               priceSub={plan === 'monthly' ? 'per month' : 'per month, billed $348/year'}
-              badge="FOUNDING MEMBER RATE"
-              subNote="Founding members lock in this price forever."
               features={[
                 'Unlimited questions',
                 'CFR Titles 33, 46 & 49 + COLREGs, NVICs, SOLAS 2024, STCW & ISM Code',
@@ -466,7 +471,7 @@ export default function LandingPage() {
                 'Priority regulation updates',
                 'Audit-ready chat logs',
               ]}
-              cta="Get Early Access"
+              cta="Start Free Trial"
               featured
             />
           </div>

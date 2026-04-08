@@ -497,6 +497,86 @@ async def revoke_pro(
     return AdminActionResult(ok=True)
 
 
+# ── Notifications (admin) ───────────────────────────────────────────────────
+
+
+class CreateNotificationRequest(BaseModel):
+    title: str
+    body: str
+    notification_type: str = "regulation_update"
+    source: str | None = None
+    link_url: str | None = None
+
+
+@router.get("/notifications")
+async def list_all_notifications(
+    _admin: Annotated[CurrentUser, Depends(require_admin)],
+) -> list[dict[str, Any]]:
+    pool = await get_pool()
+    rows = await pool.fetch(
+        """
+        SELECT id, title, body, notification_type, source, is_active, created_at
+        FROM notifications
+        ORDER BY created_at DESC
+        LIMIT 20
+        """
+    )
+    return [
+        {
+            "id": str(r["id"]),
+            "title": r["title"],
+            "body": r["body"],
+            "notification_type": r["notification_type"],
+            "source": r["source"],
+            "is_active": r["is_active"],
+            "created_at": r["created_at"].isoformat(),
+        }
+        for r in rows
+    ]
+
+
+@router.post("/notifications")
+async def create_notification(
+    body: CreateNotificationRequest,
+    admin: Annotated[CurrentUser, Depends(require_write_admin)],
+) -> dict[str, str]:
+    pool = await get_pool()
+    row = await pool.fetchrow(
+        """
+        INSERT INTO notifications (title, body, notification_type, source, link_url)
+        VALUES ($1, $2, $3, $4, $5)
+        RETURNING id, created_at
+        """,
+        body.title,
+        body.body,
+        body.notification_type,
+        body.source,
+        body.link_url,
+    )
+    logger.info("Admin %s created notification %s", admin.email, row["id"])
+    return {"id": str(row["id"]), "created_at": row["created_at"].isoformat()}
+
+
+@router.patch("/notifications/{notification_id}")
+async def toggle_notification(
+    notification_id: str,
+    admin: Annotated[CurrentUser, Depends(require_write_admin)],
+) -> dict[str, str]:
+    try:
+        nid = uuid.UUID(notification_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid notification id")
+    pool = await get_pool()
+    result = await pool.execute(
+        "UPDATE notifications SET is_active = NOT is_active WHERE id = $1",
+        nid,
+    )
+    if result == "UPDATE 0":
+        raise HTTPException(status_code=404, detail="Notification not found")
+    logger.info("Admin %s toggled notification %s", admin.email, notification_id)
+    return {"status": "toggled"}
+
+
 # ── Subscription audit ──────────────────────────────────────────────────────
 
 

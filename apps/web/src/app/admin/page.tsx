@@ -139,6 +139,16 @@ interface FoundingEmailPreview {
   sample_html: string
 }
 
+interface AdminNotification {
+  id: string
+  title: string
+  body: string
+  notification_type: string
+  source: string | null
+  is_active: boolean
+  created_at: string
+}
+
 type TicketFilter = 'all' | 'open' | 'replied' | 'closed'
 
 type UserFilter =
@@ -246,6 +256,15 @@ function AdminContent() {
   const [foundingLoading, setFoundingLoading] = useState(true)
   const [foundingAction, setFoundingAction] = useState<'test' | 'send' | null>(null)
   const [foundingResult, setFoundingResult] = useState<{ msg: string; ok: boolean } | null>(null)
+
+  // Notifications state
+  const [notifications, setNotifications] = useState<AdminNotification[]>([])
+  const [notifTitle, setNotifTitle] = useState('')
+  const [notifBody, setNotifBody] = useState('')
+  const [notifType, setNotifType] = useState<'regulation_update' | 'system' | 'announcement'>('regulation_update')
+  const [notifSource, setNotifSource] = useState('')
+  const [notifSending, setNotifSending] = useState(false)
+  const [notifToast, setNotifToast] = useState<{ msg: string; ok: boolean } | null>(null)
   const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({})
   const [ticketActionId, setTicketActionId] = useState<string | null>(null)
   const [ticketToast, setTicketToast] = useState<{ msg: string; ok: boolean } | null>(null)
@@ -352,6 +371,52 @@ function AdminContent() {
       .finally(() => setFoundingLoading(false))
   }, [])
 
+  const fetchNotifications = useCallback(() => {
+    apiRequest<AdminNotification[]>('/admin/notifications')
+      .then(setNotifications)
+      .catch(() => {})
+  }, [])
+
+  async function createNotification() {
+    if (!notifTitle.trim() || !notifBody.trim()) {
+      setNotifToast({ msg: 'Title and body are required', ok: false })
+      setTimeout(() => setNotifToast(null), 4000)
+      return
+    }
+    setNotifSending(true)
+    try {
+      await apiRequest('/admin/notifications', {
+        method: 'POST',
+        body: JSON.stringify({
+          title: notifTitle.trim(),
+          body: notifBody.trim(),
+          notification_type: notifType,
+          source: notifSource.trim() || null,
+        }),
+      })
+      setNotifTitle('')
+      setNotifBody('')
+      setNotifSource('')
+      setNotifToast({ msg: 'Notification published', ok: true })
+      fetchNotifications()
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to publish'
+      setNotifToast({ msg, ok: false })
+    }
+    setNotifSending(false)
+    setTimeout(() => setNotifToast(null), 4000)
+  }
+
+  async function toggleNotification(id: string) {
+    try {
+      await apiRequest(`/admin/notifications/${id}`, { method: 'PATCH' })
+      fetchNotifications()
+    } catch {
+      setNotifToast({ msg: 'Failed to toggle', ok: false })
+      setTimeout(() => setNotifToast(null), 4000)
+    }
+  }
+
   useEffect(() => {
     if (hydrated && !isAdmin) {
       router.replace('/')
@@ -368,10 +433,11 @@ function AdminContent() {
     fetchAnalytics()
     fetchTickets()
     fetchFoundingPreview()
+    fetchNotifications()
 
     const interval = setInterval(() => { fetchStats(); fetchSentry(); fetchCitations(); fetchSurvey(); fetchAnalytics(); fetchTickets() }, 60_000)
     return () => clearInterval(interval)
-  }, [hydrated, isAdmin, router, fetchStats, fetchUsers, fetchSentry, fetchCitations, fetchSurvey, fetchAnalytics, fetchTickets, fetchFoundingPreview])
+  }, [hydrated, isAdmin, router, fetchStats, fetchUsers, fetchSentry, fetchCitations, fetchSurvey, fetchAnalytics, fetchTickets, fetchFoundingPreview, fetchNotifications])
 
   function toggleExcludeInternal() {
     const next = !excludeInternal
@@ -537,7 +603,7 @@ function AdminContent() {
 
   async function sendFoundingToAll() {
     if (!foundingPreview || foundingPreview.total_count === 0) return
-    if (!confirm(`Send founding member email to ${foundingPreview.total_count} pilots?`)) return
+    if (!confirm(`Send early-user thank-you email to ${foundingPreview.total_count} users?`)) return
     setFoundingAction('send')
     setFoundingResult(null)
     try {
@@ -549,7 +615,7 @@ function AdminContent() {
         ? ` · ${res.failed.length} failed`
         : ''
       setFoundingResult({
-        msg: `Sent to ${res.sent_count} pilots${failedNote}`,
+        msg: `Sent to ${res.sent_count} users${failedNote}`,
         ok: res.failed.length === 0,
       })
       fetchFoundingPreview()
@@ -616,10 +682,10 @@ function AdminContent() {
             </div>
           </div>
 
-          {/* ── Founding Member Email ────────────────────────────────── */}
+          {/* ── Early-user thank-you email (legacy "founding member" flow) ── */}
           <div className="mb-8">
             <h2 className="font-display text-lg font-bold text-[#f0ece4] tracking-wide mb-3">
-              Founding Member Email
+              Early-User Thank-You Email
             </h2>
             {foundingLoading ? (
               <div className="bg-[#111827] rounded-xl border border-white/8 px-4 py-6 h-[88px] animate-pulse" />
@@ -631,7 +697,7 @@ function AdminContent() {
               <div className="bg-[#111827] rounded-xl border border-[#2dd4bf]/30 px-4 py-4 flex items-center gap-3">
                 <span className="text-[#2dd4bf] text-lg" aria-hidden="true">{'\u2713'}</span>
                 <p className="font-mono text-sm text-[#f0ece4]/85">
-                  All founding member emails have been sent.
+                  All early-user thank-you emails have been sent.
                 </p>
               </div>
             ) : (
@@ -670,7 +736,7 @@ function AdminContent() {
                       >
                         {foundingAction === 'send'
                           ? 'Sending…'
-                          : `Send to All Pilots (${foundingPreview.total_count})`}
+                          : `Send to All (${foundingPreview.total_count})`}
                       </button>
                     </div>
                   )}
@@ -683,6 +749,125 @@ function AdminContent() {
                     {foundingResult.msg}
                   </div>
                 )}
+              </div>
+            )}
+          </div>
+
+          {/* ── Notifications ────────────────────────────────────────── */}
+          <div className="mb-8">
+            <h2 className="font-display text-lg font-bold text-[#f0ece4] tracking-wide mb-3">
+              In-App Notifications
+            </h2>
+            {!isReadOnly && (
+              <div className="bg-[#111827] rounded-xl border border-white/8 px-5 py-4 mb-3">
+                <div className="flex flex-col gap-3">
+                  <input
+                    type="text"
+                    value={notifTitle}
+                    onChange={(e) => setNotifTitle(e.target.value)}
+                    placeholder="Title (e.g. 'SOLAS January 2026 Amendments Available')"
+                    className="w-full font-mono text-sm px-3 py-2 rounded-lg
+                      bg-[#0a0e1a] border border-white/10 text-[#f0ece4]
+                      placeholder:text-[#6b7594] focus:border-[#2dd4bf]/50 focus:outline-none"
+                  />
+                  <textarea
+                    value={notifBody}
+                    onChange={(e) => setNotifBody(e.target.value)}
+                    placeholder="Body — short summary of the update"
+                    rows={3}
+                    className="w-full font-mono text-xs px-3 py-2 rounded-lg resize-y
+                      bg-[#0a0e1a] border border-white/10 text-[#f0ece4]
+                      placeholder:text-[#6b7594] focus:border-[#2dd4bf]/50 focus:outline-none"
+                  />
+                  <div className="flex flex-col sm:flex-row gap-3">
+                    <select
+                      value={notifType}
+                      onChange={(e) => setNotifType(e.target.value as typeof notifType)}
+                      className="font-mono text-xs px-3 py-2 rounded-lg
+                        bg-[#0a0e1a] border border-white/10 text-[#f0ece4]
+                        focus:border-[#2dd4bf]/50 focus:outline-none"
+                    >
+                      <option value="regulation_update">Regulation Update</option>
+                      <option value="system">System</option>
+                      <option value="announcement">Announcement</option>
+                    </select>
+                    <input
+                      type="text"
+                      value={notifSource}
+                      onChange={(e) => setNotifSource(e.target.value)}
+                      placeholder="Source (optional, e.g. 'solas_supplement')"
+                      className="flex-1 font-mono text-xs px-3 py-2 rounded-lg
+                        bg-[#0a0e1a] border border-white/10 text-[#f0ece4]
+                        placeholder:text-[#6b7594] focus:border-[#2dd4bf]/50 focus:outline-none"
+                    />
+                    <button
+                      onClick={createNotification}
+                      disabled={notifSending}
+                      className="font-mono text-xs font-bold uppercase tracking-wider
+                        bg-[#2dd4bf] text-[#0a0e1a]
+                        hover:brightness-110 rounded-lg px-4 py-2
+                        transition-[filter] duration-150 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {notifSending ? 'Publishing…' : 'Send Notification'}
+                    </button>
+                  </div>
+                  {notifToast && (
+                    <div className={`font-mono text-xs px-3 py-2 rounded
+                      ${notifToast.ok
+                        ? 'bg-[#2dd4bf]/10 text-[#2dd4bf] border border-[#2dd4bf]/30'
+                        : 'bg-red-500/10 text-red-400 border border-red-500/30'}`}>
+                      {notifToast.msg}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+            {notifications.length === 0 ? (
+              <div className="bg-[#111827] rounded-xl border border-white/8 px-4 py-4 text-center">
+                <p className="font-mono text-xs text-[#6b7594]">No notifications yet.</p>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-2">
+                {notifications.map((n) => (
+                  <div
+                    key={n.id}
+                    className="bg-[#111827] rounded-lg border border-white/8 px-4 py-3
+                      flex items-start justify-between gap-3"
+                  >
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <p className="font-display font-bold text-sm text-[#f0ece4] uppercase tracking-wide">
+                          {n.title}
+                        </p>
+                        <span className={`inline-block text-[9px] font-bold px-1.5 py-0.5 rounded uppercase
+                          ${n.is_active
+                            ? 'bg-[#2dd4bf]/15 text-[#2dd4bf] border border-[#2dd4bf]/30'
+                            : 'bg-white/5 text-[#6b7594] border border-white/10'}`}>
+                          {n.is_active ? 'Active' : 'Inactive'}
+                        </span>
+                      </div>
+                      <p className="font-mono text-xs text-[#6b7594] mt-1 line-clamp-2">
+                        {n.body}
+                      </p>
+                      <p className="font-mono text-[10px] text-[#6b7594]/70 mt-1">
+                        {n.notification_type}
+                        {n.source ? ` · ${n.source}` : ''}
+                        {` · ${fmtDate(n.created_at)}`}
+                      </p>
+                    </div>
+                    {!isReadOnly && (
+                      <button
+                        onClick={() => toggleNotification(n.id)}
+                        className="font-mono text-[10px] font-bold uppercase tracking-wider
+                          border border-white/10 text-[#f0ece4]/80
+                          hover:bg-white/5 rounded-md px-2.5 py-1.5 whitespace-nowrap
+                          transition-colors"
+                      >
+                        {n.is_active ? 'Deactivate' : 'Activate'}
+                      </button>
+                    )}
+                  </div>
+                ))}
               </div>
             )}
           </div>

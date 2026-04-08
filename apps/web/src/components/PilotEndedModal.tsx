@@ -36,7 +36,7 @@ export function PilotEndedModal({ message, onClose }: Props) {
         <div className="flex flex-col items-center text-center mb-6">
           <CompassRose className="w-10 h-10 text-[#2dd4bf] mb-4" />
           <h2 className="font-display text-xl font-bold text-[#f0ece4] mb-3">
-            Pilot Program Ended
+            Trial Ended
           </h2>
           <p className="font-mono text-sm text-[#6b7594] leading-relaxed">
             {message}

@@ -17,6 +17,7 @@ import { InstallPrompt } from './InstallPrompt'
 import { PwaProvider, usePwa } from '@/lib/pwa'
 import { PilotEndedModal } from './PilotEndedModal'
 import { PilotSurveyModal } from './PilotSurveyModal'
+import { NotificationBanner } from './NotificationBanner'
 import { VerificationBanner } from './VerificationBanner'
 
 interface ConversationMessage {
@@ -166,9 +167,9 @@ function ChatInterfaceInner({ initialConversationId }: Props) {
         setMessages(prev => prev.slice(0, -1))
         return
       }
-      if (err instanceof Error && err.message.includes('403') && err.message.includes('pilot')) {
+      if (err instanceof Error && err.message.includes('403') && err.message.toLowerCase().includes('trial has ended')) {
         setPilotEndedMsg(
-          'The RegKnot pilot program has ended. Thank you for your feedback! Stay tuned for our official launch at regknots.com.'
+          'Your RegKnot free trial has ended. Subscribe to keep access to cited regulation answers.'
         )
         setMessages(prev => prev.slice(0, -1))
         return
@@ -321,6 +322,9 @@ function ChatInterfaceInner({ initialConversationId }: Props) {
 
       {/* ── Email verification banner ─────────────────────────────── */}
       <VerificationBanner />
+
+      {/* ── Regulation-update / system notification banners ────────── */}
+      <NotificationBanner />
 
       {/* ── Trial banner ─────────────────────────────────────────── */}
       {billing && billing.tier === 'free' && billing.trial_active && (
