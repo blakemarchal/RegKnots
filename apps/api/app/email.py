@@ -476,10 +476,10 @@ def render_founding_member_email(full_name: str | None) -> tuple[str, str]:
         What your subscription supports:
       </p>
       <p>
-        10% of every dollar goes directly to maritime charities &mdash; Mercy Ships,
+        10% of every dollar goes directly to charities &mdash; Mercy Ships,
         Waves of Impact, and Elijah Rising. When you subscribe, you&rsquo;re not just
-        getting a tool. You&rsquo;re supporting organizations that serve the maritime
-        community.
+        getting a tool. You&rsquo;re supporting organizations doing meaningful work
+        in the world.
         <a href="{APP_URL}/giving" style="color:#2dd4bf; text-decoration:none;">Learn more &rarr;</a>
       </p>
       <p>

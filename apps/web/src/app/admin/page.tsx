@@ -29,6 +29,9 @@ interface AdminStats {
   total_chunks: number
   chunks_by_source: Record<string, number>
   citation_errors_7d: number
+  subs_monthly: number
+  subs_annual: number
+  subs_paused: number
 }
 
 interface AdminUser {
@@ -38,9 +41,14 @@ interface AdminUser {
   role: string
   subscription_tier: string
   subscription_status: string
+  billing_interval: string | null
+  cancel_at_period_end: boolean
+  current_period_end: string | null
   message_count: number
+  vessel_count: number
   trial_ends_at: string | null
   created_at: string
+  last_active_at: string | null
   is_admin: boolean
 }
 
@@ -173,6 +181,8 @@ function AdminContent() {
   const [loading, setLoading] = useState(true)
   const [resetting, setResetting] = useState<string | null>(null)
   const [actionLoading, setActionLoading] = useState<string | null>(null)
+  const [expandedUser, setExpandedUser] = useState<string | null>(null)
+  const [deletingUser, setDeletingUser] = useState<string | null>(null)
   const [emailSending, setEmailSending] = useState<string | null>(null)
   const [emailToast, setEmailToast] = useState<{ msg: string; ok: boolean } | null>(null)
   const [sentryIssues, setSentryIssues] = useState<SentryIssue[]>([])
@@ -332,6 +342,27 @@ function AdminContent() {
       fetchStats()
     } catch { /* ignore */ }
     setResetting(null)
+  }
+
+  async function deleteUser(userId: string, email: string) {
+    if (!confirm(
+      `Permanently delete ${email}? This removes all their conversations, vessels, and account data. This cannot be undone.`
+    )) return
+    setDeletingUser(userId)
+    try {
+      await apiRequest<{ deleted: boolean; email: string }>(
+        `/admin/users/${userId}`,
+        { method: 'DELETE' },
+      )
+      setExpandedUser((prev) => (prev === userId ? null : prev))
+      fetchUsers(0, false)
+      setUsersOffset(0)
+      fetchStats()
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to delete user'
+      alert(msg)
+    }
+    setDeletingUser(null)
   }
 
   async function resetAllPilots() {
@@ -642,7 +673,28 @@ function AdminContent() {
               <StatCard label="Total Messages" value={stats.total_messages} />
               <StatCard label="Messages Today" value={stats.messages_today} />
               <StatCard label="Messages (7d)" value={stats.messages_7d} />
-              {/* Row 4 — wide card */}
+              {/* Row 4 — subscription breakdown */}
+              <div className="col-span-full bg-[#111827] rounded-xl border border-[#2dd4bf]/20 px-4 py-3">
+                <p className="font-mono text-[10px] text-[#6b7594] uppercase tracking-wider">
+                  Subscription Breakdown
+                </p>
+                <div className="flex flex-wrap gap-x-6 gap-y-1 mt-2">
+                  <span className="font-mono text-xs text-[#f0ece4]/80">
+                    <span className="text-[#2dd4bf]/70 uppercase tracking-wider text-[10px]">Monthly</span>{' '}
+                    <span className="font-bold text-[#2dd4bf] text-base ml-1">{stats.subs_monthly}</span>
+                  </span>
+                  <span className="font-mono text-xs text-[#f0ece4]/80">
+                    <span className="text-[#2dd4bf]/70 uppercase tracking-wider text-[10px]">Annual</span>{' '}
+                    <span className="font-bold text-[#2dd4bf] text-base ml-1">{stats.subs_annual}</span>
+                  </span>
+                  <span className="font-mono text-xs text-[#f0ece4]/80">
+                    <span className="text-amber-400/70 uppercase tracking-wider text-[10px]">Paused</span>{' '}
+                    <span className="font-bold text-amber-400 text-base ml-1">{stats.subs_paused}</span>
+                  </span>
+                </div>
+              </div>
+
+              {/* Row 5 — wide card */}
               <div className="col-span-full bg-[#111827] rounded-xl border border-white/8 px-4 py-3">
                 <p className="font-mono text-[10px] text-[#6b7594] uppercase tracking-wider">
                   Regulation Chunks
@@ -1213,115 +1265,223 @@ function AdminContent() {
             )}
           </div>
 
-          <div className="rounded-xl border border-white/8 overflow-x-auto">
-            <table className="w-full text-left font-mono text-xs" style={{ minWidth: '860px' }}>
-              <thead>
-                <tr className="bg-[#2dd4bf]/10 text-[#2dd4bf]">
-                  <th className="px-2 py-2 font-medium">Email</th>
-                  <th className="px-2 py-2 font-medium">Name</th>
-                  <th className="px-2 py-2 font-medium">Tier</th>
-                  <th className="px-2 py-2 font-medium">Status</th>
-                  <th className="px-2 py-2 font-medium text-right">Msgs</th>
-                  <th className="px-2 py-2 font-medium">Trial Ends</th>
-                  <th className="px-2 py-2 font-medium">Joined</th>
-                  <th className="px-2 py-2 font-medium"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {users.map((u, i) => (
-                  <tr key={u.id}
-                    className={`border-t border-white/5 ${i % 2 === 0 ? 'bg-[#111827]' : 'bg-[#0f1629]'}`}>
-                    <td className="px-2 py-1.5 text-[#f0ece4]/90" title={u.email}>
-                      <span className="block max-w-[180px] truncate">{u.email}</span>
-                      {u.is_admin && <span className="text-[#2dd4bf] text-[9px]">ADMIN</span>}
-                    </td>
-                    <td className="px-2 py-1.5 text-[#f0ece4]/60" title={u.full_name ?? ''}>
-                      <span className="block max-w-[110px] truncate">{u.full_name ?? '-'}</span>
-                    </td>
-                    <td className="px-2 py-1.5">
-                      <span className={u.subscription_tier === 'pro' ? 'text-[#2dd4bf]' : 'text-[#6b7594]'}>
-                        {u.subscription_tier}
-                      </span>
-                    </td>
-                    <td className="px-2 py-1.5 text-[#f0ece4]/60">{u.subscription_status}</td>
-                    <td className="px-2 py-1.5 text-right text-[#f0ece4]/80">{u.message_count}</td>
-                    <td className="px-2 py-1.5 text-[#6b7594] whitespace-nowrap">{fmtDate(u.trial_ends_at)}</td>
-                    <td className="px-2 py-1.5 text-[#6b7594] whitespace-nowrap">{fmtDate(u.created_at)}</td>
-                    <td className="px-2 py-1.5">
-                      <div className="flex items-center gap-1">
+          <div className="space-y-2">
+            {users.map((u) => {
+              const isExpanded = expandedUser === u.id
+              const displayName = u.full_name?.trim() || u.email
+              const now = Date.now()
+              const trialTs = u.trial_ends_at ? new Date(u.trial_ends_at).getTime() : null
+
+              // Derive status label
+              let statusLabel: string
+              let statusClass: string
+              if (u.subscription_tier === 'pro' && u.subscription_status === 'active') {
+                statusLabel = 'Pro'
+                statusClass = 'bg-[#2dd4bf]/15 text-[#2dd4bf] border-[#2dd4bf]/30'
+              } else if (u.subscription_status === 'paused') {
+                statusLabel = 'Paused'
+                statusClass = 'bg-amber-500/15 text-amber-400 border-amber-500/30'
+              } else if (u.subscription_status === 'canceled' || u.subscription_status === 'canceling') {
+                statusLabel = 'Canceled'
+                statusClass = 'bg-[#6b7594]/15 text-[#6b7594] border-[#6b7594]/30'
+              } else if (trialTs !== null && trialTs > now) {
+                statusLabel = 'Trial'
+                statusClass = 'bg-[#2dd4bf]/10 text-[#2dd4bf]/80 border-[#2dd4bf]/20'
+              } else {
+                statusLabel = 'Expired'
+                statusClass = 'bg-red-500/10 text-red-400/80 border-red-500/30'
+              }
+
+              // Billing interval badge (only for pro)
+              const intervalLabel =
+                u.subscription_tier === 'pro' && u.subscription_status === 'active'
+                  ? u.billing_interval === 'year'
+                    ? 'Annual'
+                    : u.billing_interval === 'month'
+                    ? 'Monthly'
+                    : null
+                  : null
+
+              return (
+                <div key={u.id} className="bg-[#111827] rounded-xl border border-white/8 overflow-hidden">
+                  <button
+                    onClick={() => setExpandedUser(isExpanded ? null : u.id)}
+                    className="w-full px-4 py-3 text-left hover:bg-white/[0.02] transition-colors"
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1 flex-wrap">
+                          <span className={`font-mono text-[9px] font-bold uppercase tracking-wider
+                            px-1.5 py-0.5 rounded border ${statusClass}`}>
+                            {statusLabel}
+                          </span>
+                          {intervalLabel && (
+                            <span className="font-mono text-[9px] font-bold uppercase tracking-wider
+                              px-1.5 py-0.5 rounded border border-[#2dd4bf]/30 text-[#2dd4bf]/80 bg-[#2dd4bf]/5">
+                              {intervalLabel}
+                            </span>
+                          )}
+                          {u.is_admin && (
+                            <span className="font-mono text-[9px] font-bold uppercase tracking-wider
+                              px-1.5 py-0.5 rounded border border-[#2dd4bf]/40 text-[#2dd4bf]">
+                              Admin
+                            </span>
+                          )}
+                          {u.cancel_at_period_end && (
+                            <span className="font-mono text-[9px] font-bold uppercase tracking-wider
+                              px-1.5 py-0.5 rounded border border-amber-500/30 text-amber-400/80">
+                              Cancels
+                            </span>
+                          )}
+                        </div>
+                        <p className="font-mono text-sm text-[#f0ece4]/90 truncate">{displayName}</p>
+                      </div>
+                      <div className="flex items-center gap-4 flex-shrink-0">
+                        <div className="text-right">
+                          <p className="font-mono text-[9px] text-[#6b7594] uppercase tracking-wider">Last Active</p>
+                          <p className="font-mono text-xs text-[#f0ece4]/70 whitespace-nowrap">
+                            {fmtDate(u.last_active_at)}
+                          </p>
+                        </div>
+                        <div className="text-right min-w-[44px]">
+                          <p className="font-mono text-[9px] text-[#6b7594] uppercase tracking-wider">Msgs</p>
+                          <p className="font-mono text-xs text-[#f0ece4]/80">{u.message_count}</p>
+                        </div>
+                      </div>
+                    </div>
+                  </button>
+
+                  {isExpanded && (
+                    <div className="border-t border-white/8 px-4 py-4 space-y-4">
+                      {/* Detail grid */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2">
+                        <div>
+                          <p className="font-mono text-[9px] text-[#6b7594] uppercase tracking-wider">Email</p>
+                          <p className="font-mono text-xs text-[#f0ece4]/85 break-all">{u.email}</p>
+                        </div>
+                        <div>
+                          <p className="font-mono text-[9px] text-[#6b7594] uppercase tracking-wider">Role</p>
+                          <p className="font-mono text-xs text-[#f0ece4]/85">{u.role}</p>
+                        </div>
+                        <div>
+                          <p className="font-mono text-[9px] text-[#6b7594] uppercase tracking-wider">Registered</p>
+                          <p className="font-mono text-xs text-[#f0ece4]/85">{fmtDate(u.created_at)}</p>
+                        </div>
+                        <div>
+                          <p className="font-mono text-[9px] text-[#6b7594] uppercase tracking-wider">Trial Ends</p>
+                          <p className="font-mono text-xs text-[#f0ece4]/85">{fmtDate(u.trial_ends_at)}</p>
+                        </div>
+                        <div>
+                          <p className="font-mono text-[9px] text-[#6b7594] uppercase tracking-wider">Subscription</p>
+                          <p className="font-mono text-xs text-[#f0ece4]/85">
+                            {u.subscription_tier} / {u.subscription_status}
+                            {intervalLabel ? ` · ${intervalLabel}` : ''}
+                          </p>
+                          {u.current_period_end && (
+                            <p className="font-mono text-[10px] text-[#6b7594] mt-0.5">
+                              Period ends {fmtDate(u.current_period_end)}
+                            </p>
+                          )}
+                        </div>
+                        <div>
+                          <p className="font-mono text-[9px] text-[#6b7594] uppercase tracking-wider">Last Active</p>
+                          <p className="font-mono text-xs text-[#f0ece4]/85">{fmtDate(u.last_active_at)}</p>
+                        </div>
+                        <div>
+                          <p className="font-mono text-[9px] text-[#6b7594] uppercase tracking-wider">Messages</p>
+                          <p className="font-mono text-xs text-[#f0ece4]/85">{u.message_count}</p>
+                        </div>
+                        <div>
+                          <p className="font-mono text-[9px] text-[#6b7594] uppercase tracking-wider">Vessels</p>
+                          <p className="font-mono text-xs text-[#f0ece4]/85">{u.vessel_count}</p>
+                        </div>
+                      </div>
+
+                      {/* Actions */}
+                      <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-white/5">
                         <button
                           onClick={() => exportChats(u.id, u.email)}
                           disabled={exporting === u.id}
-                          title="Export chat logs"
-                          className="font-mono text-[9px] px-1 py-px rounded border border-[#2dd4bf]/30
-                            text-[#2dd4bf]/70 hover:text-[#2dd4bf] hover:bg-[#2dd4bf]/10
+                          className="font-mono text-[10px] font-bold uppercase tracking-wider
+                            px-2.5 py-1.5 rounded border border-[#2dd4bf]/30
+                            text-[#2dd4bf]/80 hover:text-[#2dd4bf] hover:bg-[#2dd4bf]/10
                             disabled:opacity-50 transition-colors"
                         >
-                          {exporting === u.id ? '..' : 'Exp'}
+                          {exporting === u.id ? 'Exporting…' : 'Export Chats'}
                         </button>
                         {!isReadOnly && !u.is_admin && (
                           <>
                             <button
                               onClick={() => adminAction(u.id, 'extend-trial', 'Extend trial 14 days')}
                               disabled={actionLoading === `${u.id}-extend-trial`}
-                              title="Extend trial 14 days"
-                              className="font-mono text-[9px] px-1 py-px rounded border border-[#2dd4bf]/30
-                                text-[#2dd4bf]/70 hover:text-[#2dd4bf] hover:bg-[#2dd4bf]/10
+                              className="font-mono text-[10px] font-bold uppercase tracking-wider
+                                px-2.5 py-1.5 rounded border border-[#2dd4bf]/30
+                                text-[#2dd4bf]/80 hover:text-[#2dd4bf] hover:bg-[#2dd4bf]/10
                                 disabled:opacity-50 transition-colors"
                             >
-                              +T
-                            </button>
-                            <button
-                              onClick={() => simulateExpiry(u.id, u.email)}
-                              disabled={actionLoading === `${u.id}-simulate-expiry`}
-                              title="Simulate trial expiry"
-                              className="font-mono text-[9px] px-1 py-px rounded border border-amber-500/30
-                                text-amber-400/70 hover:text-amber-400 hover:bg-amber-500/10
-                                disabled:opacity-50 transition-colors"
-                            >
-                              Sim
+                              Extend Trial
                             </button>
                             {u.subscription_tier !== 'pro' ? (
                               <button
                                 onClick={() => adminAction(u.id, 'grant-pro', 'Grant Pro')}
                                 disabled={actionLoading === `${u.id}-grant-pro`}
-                                title="Grant Pro"
-                                className="font-mono text-[9px] px-1 py-px rounded border border-[#2dd4bf]/30
-                                  text-[#2dd4bf]/70 hover:text-[#2dd4bf] hover:bg-[#2dd4bf]/10
+                                className="font-mono text-[10px] font-bold uppercase tracking-wider
+                                  px-2.5 py-1.5 rounded border border-[#2dd4bf]/30
+                                  text-[#2dd4bf]/80 hover:text-[#2dd4bf] hover:bg-[#2dd4bf]/10
                                   disabled:opacity-50 transition-colors"
                               >
-                                +P
+                                Grant Pro
                               </button>
                             ) : (
                               <button
                                 onClick={() => adminAction(u.id, 'revoke-pro', 'Revoke Pro')}
                                 disabled={actionLoading === `${u.id}-revoke-pro`}
-                                title="Revoke Pro"
-                                className="font-mono text-[9px] px-1 py-px rounded border border-amber-500/30
-                                  text-amber-400/70 hover:text-amber-400 hover:bg-amber-500/10
+                                className="font-mono text-[10px] font-bold uppercase tracking-wider
+                                  px-2.5 py-1.5 rounded border border-amber-500/30
+                                  text-amber-400/80 hover:text-amber-400 hover:bg-amber-500/10
                                   disabled:opacity-50 transition-colors"
                               >
-                                -P
+                                Revoke Pro
                               </button>
                             )}
                             <button
-                              onClick={() => resetUser(u.id, u.email)}
-                              disabled={resetting === u.id}
-                              title="Reset pilot account"
-                              className="font-mono text-[9px] px-1 py-px rounded border border-red-500/30
-                                text-red-400/70 hover:text-red-400 hover:bg-red-500/10
+                              onClick={() => simulateExpiry(u.id, u.email)}
+                              disabled={actionLoading === `${u.id}-simulate-expiry`}
+                              className="font-mono text-[10px] font-bold uppercase tracking-wider
+                                px-2.5 py-1.5 rounded border border-amber-500/30
+                                text-amber-400/80 hover:text-amber-400 hover:bg-amber-500/10
                                 disabled:opacity-50 transition-colors"
                             >
-                              {resetting === u.id ? '..' : 'Rst'}
+                              Simulate Expiry
+                            </button>
+                            <button
+                              onClick={() => resetUser(u.id, u.email)}
+                              disabled={resetting === u.id}
+                              className="font-mono text-[10px] font-bold uppercase tracking-wider
+                                px-2.5 py-1.5 rounded border border-amber-500/30
+                                text-amber-400/80 hover:text-amber-400 hover:bg-amber-500/10
+                                disabled:opacity-50 transition-colors"
+                            >
+                              {resetting === u.id ? 'Resetting…' : 'Reset'}
+                            </button>
+                            <button
+                              onClick={() => deleteUser(u.id, u.email)}
+                              disabled={deletingUser === u.id}
+                              className="font-mono text-[10px] font-bold uppercase tracking-wider
+                                px-2.5 py-1.5 rounded border border-red-500/40
+                                text-red-400/80 hover:text-red-400 hover:bg-red-500/10
+                                disabled:opacity-50 transition-colors ml-auto"
+                            >
+                              {deletingUser === u.id ? 'Deleting…' : 'Delete'}
                             </button>
                           </>
                         )}
                       </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                    </div>
+                  )}
+                </div>
+              )
+            })}
           </div>
 
           {hasMore && users.length > 0 && (

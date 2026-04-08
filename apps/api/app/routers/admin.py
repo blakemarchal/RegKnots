@@ -56,6 +56,10 @@ class AdminStats(BaseModel):
     total_chunks: int
     chunks_by_source: dict[str, int]
     citation_errors_7d: int
+    # Subscription breakdown
+    subs_monthly: int
+    subs_annual: int
+    subs_paused: int
 
 
 @router.get("/stats", response_model=AdminStats)
@@ -137,6 +141,25 @@ async def get_stats(
             "SELECT COUNT(*) FROM citation_errors WHERE created_at > NOW() - INTERVAL '7 days'"
         )
 
+        sub_row = await conn.fetchrow(
+            f"""
+            SELECT
+              COUNT(*) FILTER (
+                WHERE subscription_tier = 'pro'
+                  AND subscription_status = 'active'
+                  AND billing_interval = 'month'
+              ) AS monthly,
+              COUNT(*) FILTER (
+                WHERE subscription_tier = 'pro'
+                  AND subscription_status = 'active'
+                  AND billing_interval = 'year'
+              ) AS annual,
+              COUNT(*) FILTER (WHERE subscription_status = 'paused') AS paused
+            FROM users u
+            WHERE is_admin = false{uf}
+            """
+        )
+
     return AdminStats(
         total_users=total_users,
         active_users_24h=active_users_24h,
@@ -152,6 +175,9 @@ async def get_stats(
         total_chunks=total_chunks,
         chunks_by_source=chunks_by_source,
         citation_errors_7d=citation_errors_7d,
+        subs_monthly=sub_row["monthly"] or 0,
+        subs_annual=sub_row["annual"] or 0,
+        subs_paused=sub_row["paused"] or 0,
     )
 
 
@@ -164,9 +190,14 @@ class AdminUser(BaseModel):
     role: str
     subscription_tier: str
     subscription_status: str
+    billing_interval: str | None
+    cancel_at_period_end: bool
+    current_period_end: str | None
     message_count: int
+    vessel_count: int
     trial_ends_at: str | None
     created_at: str
+    last_active_at: str | None
     is_admin: bool
 
 
@@ -178,14 +209,23 @@ async def list_users(
     exclude_internal: bool = Query(default=False),
 ) -> list[AdminUser]:
     pool = await get_pool()
-    where = "WHERE is_internal IS NOT TRUE" if exclude_internal else ""
+    where = "WHERE u.is_internal IS NOT TRUE" if exclude_internal else ""
     rows = await pool.fetch(
         f"""
-        SELECT id, email, full_name, role, subscription_tier,
-               subscription_status, message_count, trial_ends_at, created_at, is_admin
-        FROM users
+        SELECT u.id, u.email, u.full_name, u.role, u.subscription_tier,
+               u.subscription_status, u.billing_interval, u.cancel_at_period_end,
+               u.current_period_end, u.message_count, u.trial_ends_at,
+               u.created_at, u.is_admin,
+               (SELECT COUNT(*) FROM vessels v WHERE v.user_id = u.id) AS vessel_count,
+               (
+                 SELECT MAX(m.created_at)
+                 FROM messages m
+                 JOIN conversations c ON c.id = m.conversation_id
+                 WHERE c.user_id = u.id
+               ) AS last_active_at
+        FROM users u
         {where}
-        ORDER BY created_at DESC
+        ORDER BY u.created_at DESC
         LIMIT $1 OFFSET $2
         """,
         limit,
@@ -199,9 +239,14 @@ async def list_users(
             role=r["role"],
             subscription_tier=r["subscription_tier"],
             subscription_status=r["subscription_status"],
+            billing_interval=r["billing_interval"],
+            cancel_at_period_end=r["cancel_at_period_end"],
+            current_period_end=r["current_period_end"].isoformat() if r["current_period_end"] else None,
             message_count=r["message_count"],
+            vessel_count=r["vessel_count"] or 0,
             trial_ends_at=r["trial_ends_at"].isoformat() if r["trial_ends_at"] else None,
             created_at=r["created_at"].isoformat() if r["created_at"] else None,
+            last_active_at=r["last_active_at"].isoformat() if r["last_active_at"] else None,
             is_admin=r["is_admin"],
         )
         for r in rows
@@ -384,6 +429,38 @@ async def grant_pro(
         raise HTTPException(status_code=404, detail="User not found")
     logger.info("Admin %s granted pro to %s", admin.email, user_id)
     return AdminActionResult(ok=True)
+
+
+class DeleteUserResult(BaseModel):
+    deleted: bool
+    email: str
+
+
+@router.delete("/users/{user_id}", response_model=DeleteUserResult)
+async def delete_user(
+    user_id: str,
+    admin: Annotated[CurrentUser, Depends(require_write_admin)],
+) -> DeleteUserResult:
+    """Permanently delete a user and all cascading data (conversations, messages,
+    vessels, refresh_tokens, support_tickets, etc.). Admin users cannot be deleted."""
+    try:
+        uid = uuid.UUID(user_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid user id")
+
+    pool = await get_pool()
+    row = await pool.fetchrow(
+        "SELECT id, email, is_admin FROM users WHERE id = $1",
+        uid,
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="User not found")
+    if row["is_admin"]:
+        raise HTTPException(status_code=403, detail="Cannot delete admin users")
+
+    await pool.execute("DELETE FROM users WHERE id = $1", uid)
+    logger.warning("Admin %s deleted user %s (%s)", admin.email, row["email"], user_id)
+    return DeleteUserResult(deleted=True, email=row["email"])
 
 
 @router.post("/revoke-pro/{user_id}", response_model=AdminActionResult)
