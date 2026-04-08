@@ -52,17 +52,19 @@ def _html(body: str) -> str:
 
 
 async def send_welcome_email(to_email: str, full_name: str) -> None:
-    first_name = full_name.split()[0] if full_name.strip() else "Mariner"
+    raw_first = full_name.split()[0] if full_name.strip() else "Mariner"
+    first_name = _html_lib.escape(raw_first)
     html = _html(f"""
       <h1>Welcome aboard, {first_name}</h1>
       <p>
-        You're now registered with RegKnot — your AI-powered CFR co-pilot for U.S. maritime compliance.
-        Get instant cited answers to questions across Titles 33, 46 &amp; 49, COLREGs, and NVICs, tailored
-        to your vessel profile.
+        You're now registered with RegKnot — your AI-powered maritime compliance co-pilot.
+        Get instant cited answers to questions across CFR Titles 33, 46 &amp; 49, COLREGs, NVICs,
+        SOLAS 2024, STCW, and the ISM Code — all tailored to your vessel profile.
       </p>
       <p>
         Ask about inspection schedules, certificate requirements, carriage requirements, SOLAS
-        applicability, and more — all cited to the exact regulation you can verify on eCFR.
+        applicability, safety management systems, watchkeeping standards, and more — all cited
+        to the exact regulation you can verify at the source.
       </p>
       <a href="{APP_URL}" class="cta">Start Asking Questions</a>
       <p style="font-size:12px; color:rgba(107,117,148,0.7); margin-top:8px;">
@@ -72,13 +74,14 @@ async def send_welcome_email(to_email: str, full_name: str) -> None:
     resend.Emails.send({
         "from": FROM_EMAIL,
         "to": [to_email],
-        "subject": f"Welcome aboard, {first_name}",
+        "subject": f"Welcome aboard, {raw_first}",
         "html": html,
     })
 
 
 async def send_verification_email(to_email: str, full_name: str, token: str) -> None:
-    first_name = full_name.split()[0] if full_name and full_name.strip() else "Mariner"
+    raw_first = full_name.split()[0] if full_name and full_name.strip() else "Mariner"
+    first_name = _html_lib.escape(raw_first)
     verify_url = f"{APP_URL}/verify-email?token={token}"
     html = _html(f"""
       <h1>Verify your email, {first_name}</h1>
@@ -104,14 +107,16 @@ async def send_verification_email(to_email: str, full_name: str, token: str) -> 
 
 
 async def send_support_confirmation_email(to_email: str, full_name: str, subject: str) -> None:
-    first_name = full_name.split()[0] if full_name and full_name.strip() else "Mariner"
+    raw_first = full_name.split()[0] if full_name and full_name.strip() else "Mariner"
+    first_name = _html_lib.escape(raw_first)
+    safe_subject = _html_lib.escape(subject)
     html = _html(f"""
       <h1>We got your message, {first_name}</h1>
       <p>
         Your support request has been received:
       </p>
       <div class="token-box" style="color:#f0ece4; border-color:rgba(255,255,255,0.1);">
-        <strong>Subject:</strong> {subject}
+        <strong>Subject:</strong> {safe_subject}
       </div>
       <p>
         We typically respond within 24 hours. If your issue is urgent, you can also reply
@@ -166,12 +171,14 @@ async def send_support_reply_email(
 
 
 async def send_password_changed_email(to_email: str, full_name: str) -> None:
-    first_name = full_name.split()[0] if full_name and full_name.strip() else "Mariner"
+    raw_first = full_name.split()[0] if full_name and full_name.strip() else "Mariner"
+    first_name = _html_lib.escape(raw_first)
+    safe_email = _html_lib.escape(to_email)
     html = _html(f"""
       <h1>Password changed</h1>
       <p>
         Hey {first_name} — this is a confirmation that the password for your RegKnot account
-        (<strong style="color:#f0ece4;">{to_email}</strong>) was just changed.
+        (<strong style="color:#f0ece4;">{safe_email}</strong>) was just changed.
       </p>
       <p>
         If you made this change, no action is needed.
@@ -216,7 +223,8 @@ async def send_password_reset_email(to_email: str, reset_token: str) -> None:
 
 
 async def send_trial_expiring_email(to_email: str, full_name: str, messages_used: int) -> None:
-    first_name = full_name.split()[0] if full_name.strip() else "Mariner"
+    raw_first = full_name.split()[0] if full_name.strip() else "Mariner"
+    first_name = _html_lib.escape(raw_first)
     html = _html(f"""
       <h1>Your trial ends in 3 days</h1>
       <p>
@@ -224,8 +232,9 @@ async def send_trial_expiring_email(to_email: str, full_name: str, messages_used
         You've sent <strong style="color:#f0ece4;">{messages_used}</strong> messages so far.
       </p>
       <p>
-        To keep your access to unlimited CFR queries, vessel-specific answers, and all regulation
-        sources, subscribe to RegKnot Pro for <strong style="color:#f0ece4;">$39/month</strong>.
+        To keep your access to unlimited compliance questions, vessel-specific answers, and every
+        regulation source, subscribe to RegKnot Pro for <strong style="color:#f0ece4;">$39/month</strong>
+        (or save 26% with the annual plan at <strong style="color:#f0ece4;">$29/month</strong>).
       </p>
       <p style="font-size:13px; color:#2dd4bf;">
         As a pilot member, this price is locked in forever — even when we raise it.
@@ -241,7 +250,8 @@ async def send_trial_expiring_email(to_email: str, full_name: str, messages_used
 
 
 async def send_pilot_ended_email(to_email: str, full_name: str) -> None:
-    first_name = full_name.split()[0] if full_name.strip() else "Mariner"
+    raw_first = full_name.split()[0] if full_name.strip() else "Mariner"
+    first_name = _html_lib.escape(raw_first)
     html = _html(f"""
       <h1>Your pilot trial has ended</h1>
       <p>
@@ -249,8 +259,10 @@ async def send_pilot_ended_email(to_email: str, full_name: str) -> None:
         complimentary access period.
       </p>
       <p>
-        To continue getting instant cited answers to CFR, COLREGs, NVIC, and SOLAS questions —
-        subscribe to RegKnot Pro for <strong style="color:#f0ece4;">$39/month</strong>.
+        To continue getting instant cited answers across CFR, COLREGs, NVICs, SOLAS, STCW, and
+        the ISM Code — subscribe to RegKnot Pro for
+        <strong style="color:#f0ece4;">$39/month</strong>
+        (or save 26% with the annual plan at <strong style="color:#f0ece4;">$29/month</strong>).
       </p>
       <p style="font-size:13px; color:#2dd4bf;">
         As a founding pilot member, this price is locked in forever — even when we raise it.
@@ -263,13 +275,14 @@ async def send_pilot_ended_email(to_email: str, full_name: str) -> None:
     resend.Emails.send({
         "from": CAPTAIN_EMAIL,
         "to": [to_email],
-        "subject": f"Your RegKnot trial has ended, {first_name}",
+        "subject": f"Your RegKnot trial has ended, {raw_first}",
         "html": html,
     })
 
 
 async def send_waitlist_confirmed_email(to_email: str, full_name: str) -> None:
-    first_name = full_name.split()[0] if full_name.strip() else "Mariner"
+    raw_first = full_name.split()[0] if full_name.strip() else "Mariner"
+    first_name = _html_lib.escape(raw_first)
     html = _html(f"""
       <h1>You're on the list, {first_name}</h1>
       <p>
@@ -278,8 +291,8 @@ async def send_waitlist_confirmed_email(to_email: str, full_name: str) -> None:
       </p>
       <p>
         In the meantime, here's what you can look forward to: instant cited answers across
-        CFR Titles 33, 46 &amp; 49, COLREGs, NVICs, and SOLAS 2024 — all tailored to your
-        vessel profile.
+        CFR Titles 33, 46 &amp; 49, COLREGs, NVICs, SOLAS 2024, STCW, and the ISM Code —
+        all tailored to your vessel profile.
       </p>
       <p style="font-size:13px; color:#2dd4bf;">
         Waitlist members get priority access and founding member pricing when we open up.
@@ -289,13 +302,14 @@ async def send_waitlist_confirmed_email(to_email: str, full_name: str) -> None:
     resend.Emails.send({
         "from": FROM_EMAIL,
         "to": [to_email],
-        "subject": f"You're on the RegKnot waitlist, {first_name}",
+        "subject": f"You're on the RegKnot waitlist, {raw_first}",
         "html": html,
     })
 
 
 async def send_subscription_cancelled_email(to_email: str, full_name: str) -> None:
-    first_name = full_name.split()[0] if full_name.strip() else "Mariner"
+    raw_first = full_name.split()[0] if full_name.strip() else "Mariner"
+    first_name = _html_lib.escape(raw_first)
     html = _html(f"""
       <h1>Your subscription has been cancelled</h1>
       <p>
@@ -320,7 +334,8 @@ async def send_subscription_cancelled_email(to_email: str, full_name: str) -> No
 
 
 async def send_subscription_confirmed_email(to_email: str, full_name: str) -> None:
-    first_name = full_name.split()[0] if full_name.strip() else "Mariner"
+    raw_first = full_name.split()[0] if full_name.strip() else "Mariner"
+    first_name = _html_lib.escape(raw_first)
     html = _html(f"""
       <h1>Welcome to RegKnot Pro</h1>
       <p>
@@ -331,25 +346,26 @@ async def send_subscription_confirmed_email(to_email: str, full_name: str) -> No
       </p>
       <ul style="padding-left:20px; margin:0 0 16px;">
         <li style="color:#6b7594; font-size:14px; line-height:1.7;">Unlimited questions — no message caps</li>
-        <li style="color:#6b7594; font-size:14px; line-height:1.7;">CFR Titles 33, 46 &amp; 49 + COLREGs, NVICs &amp; SOLAS 2024</li>
+        <li style="color:#6b7594; font-size:14px; line-height:1.7;">CFR Titles 33, 46 &amp; 49 + COLREGs, NVICs, SOLAS 2024, STCW &amp; ISM Code</li>
         <li style="color:#6b7594; font-size:14px; line-height:1.7;">Vessel-specific compliance answers</li>
         <li style="color:#6b7594; font-size:14px; line-height:1.7;">Audit-ready chat logs</li>
       </ul>
       <p style="font-size:13px; color:#2dd4bf;">
-        Your $39/month founding member price is locked in forever — even when we raise it.
+        Your founding member price is locked in forever — even when we raise it.
       </p>
       <a href="{APP_URL}" class="cta">Start Asking Questions</a>
     """)
     resend.Emails.send({
         "from": CAPTAIN_EMAIL,
         "to": [to_email],
-        "subject": f"Welcome to RegKnot Pro, {first_name}",
+        "subject": f"Welcome to RegKnot Pro, {raw_first}",
         "html": html,
     })
 
 
 async def send_payment_failed_email(to_email: str, full_name: str) -> None:
-    first_name = full_name.split()[0] if full_name.strip() else "Mariner"
+    raw_first = full_name.split()[0] if full_name.strip() else "Mariner"
+    first_name = _html_lib.escape(raw_first)
     html = _html(f"""
       <h1>Action Required: Payment Failed</h1>
       <p>
@@ -374,7 +390,8 @@ async def send_payment_failed_email(to_email: str, full_name: str) -> None:
 
 
 async def send_subscription_paused_email(to_email: str, full_name: str) -> None:
-    first_name = full_name.split()[0] if full_name.strip() else "Mariner"
+    raw_first = full_name.split()[0] if full_name.strip() else "Mariner"
+    first_name = _html_lib.escape(raw_first)
     html = _html(f"""
       <h1>Your Subscription is Paused</h1>
       <p>
@@ -401,10 +418,18 @@ async def send_subscription_paused_email(to_email: str, full_name: str) -> None:
 async def send_charity_suggestion_email(
     user_email: str, org_name: str, website: str, reason: str
 ) -> None:
-    website_html = (
-        f'<p><strong>Website:</strong> <a href="{website}">{website}</a></p>'
-        if website else ""
-    )
+    safe_email = _html_lib.escape(user_email)
+    safe_org = _html_lib.escape(org_name)
+    safe_reason = _html_lib.escape(reason).replace("\n", "<br>")
+    # Only allow http(s) websites and escape them before rendering
+    if website and (website.startswith("http://") or website.startswith("https://")):
+        safe_website = _html_lib.escape(website, quote=True)
+        website_html = (
+            f'<p><strong>Website:</strong> '
+            f'<a href="{safe_website}" rel="noopener noreferrer">{safe_website}</a></p>'
+        )
+    else:
+        website_html = ""
     resend.Emails.send({
         "from": FROM_EMAIL,
         "to": ["hello@regknots.com"],
@@ -412,12 +437,12 @@ async def send_charity_suggestion_email(
         "subject": f"[Charity Suggestion] {org_name}",
         "html": (
             f"<h2>New Charity Partner Suggestion</h2>"
-            f"<p><strong>From:</strong> {user_email}</p>"
-            f"<p><strong>Organization:</strong> {org_name}</p>"
+            f"<p><strong>From:</strong> {safe_email}</p>"
+            f"<p><strong>Organization:</strong> {safe_org}</p>"
             f"{website_html}"
             f"<hr>"
             f"<p><strong>Why this organization:</strong></p>"
-            f"<p>{reason}</p>"
+            f"<p>{safe_reason}</p>"
         ),
     })
 
@@ -518,7 +543,8 @@ async def send_founding_member_email(to: str, name: str | None) -> None:
 
 
 async def send_subscription_resumed_email(to_email: str, full_name: str) -> None:
-    first_name = full_name.split()[0] if full_name.strip() else "Mariner"
+    raw_first = full_name.split()[0] if full_name.strip() else "Mariner"
+    first_name = _html_lib.escape(raw_first)
     html = _html(f"""
       <h1>Welcome Back, {first_name}!</h1>
       <p>

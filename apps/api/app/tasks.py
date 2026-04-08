@@ -179,7 +179,7 @@ async def _check_imo_amendments_async():
                 resp = requests.get(
                     source["url"],
                     timeout=30,
-                    headers={"User-Agent": "RegKnots IMO Monitor/1.0"},
+                    headers={"User-Agent": "RegKnot IMO Monitor/1.0"},
                 )
                 resp.raise_for_status()
                 text = resp.text

@@ -22,7 +22,7 @@ DOMAIN TO WHITELIST
 
 WHAT IS REGKNOT?
 
-RegKnot is a maritime regulatory compliance reference tool used by U.S. commercial vessel officers and engineers. It provides instant lookup of U.S. Code of Federal Regulations (Titles 33, 46, 49), COLREGs, SOLAS 2024 + amendments, and USCG NVICs.
+RegKnot is a maritime regulatory compliance reference tool used by U.S. commercial vessel officers and engineers. It provides instant lookup of U.S. Code of Federal Regulations (Titles 33, 46, 49), COLREGs, SOLAS 2024 + amendments, STCW 2017 + amendments, the ISM Code, and USCG NVICs.
 
 ──────────────────────────────────────
 
@@ -172,7 +172,7 @@ export default function WhitelistingPage() {
             <p className="font-mono text-sm text-[#f0ece4]/80 leading-relaxed">
               RegKnot is a maritime regulatory compliance reference tool used by U.S. commercial vessel officers
               and engineers. It provides instant lookup of U.S. Code of Federal Regulations (Titles 33, 46, 49),
-              COLREGs, SOLAS 2024 + amendments, and USCG NVICs.
+              COLREGs, SOLAS 2024 + amendments, STCW 2017 + amendments, the ISM Code, and USCG NVICs.
             </p>
           </section>
 

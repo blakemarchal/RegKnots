@@ -188,10 +188,21 @@ async def support_email(
             detail="Subject and message are required.",
         )
 
+    import html as _html_lib
+
     import resend
     from app.email import FROM_EMAIL, send_support_confirmation_email
 
     display_name = user.full_name or user.email
+
+    # Escape every user-controlled field before injecting into the admin HTML
+    # email so a malicious subject/message/name can't inject markup that gets
+    # rendered in our inbox.
+    safe_email = _html_lib.escape(user.email)
+    safe_name = _html_lib.escape(display_name)
+    safe_role = _html_lib.escape(user.role or "")
+    safe_tier = _html_lib.escape(user.tier or "")
+    safe_body = _html_lib.escape(body.message.strip()).replace("\n", "<br>")
 
     try:
         resend.Emails.send({
@@ -200,12 +211,12 @@ async def support_email(
             "reply_to": user.email,
             "subject": f"[Support] {body.subject.strip()}",
             "html": (
-                f"<p><strong>From:</strong> {user.email}</p>"
-                f"<p><strong>Name:</strong> {display_name}</p>"
-                f"<p><strong>Role:</strong> {user.role}</p>"
-                f"<p><strong>Tier:</strong> {user.tier}</p>"
+                f"<p><strong>From:</strong> {safe_email}</p>"
+                f"<p><strong>Name:</strong> {safe_name}</p>"
+                f"<p><strong>Role:</strong> {safe_role}</p>"
+                f"<p><strong>Tier:</strong> {safe_tier}</p>"
                 f"<hr>"
-                f"<p>{body.message.strip()}</p>"
+                f"<p>{safe_body}</p>"
             ),
         })
     except Exception as exc:

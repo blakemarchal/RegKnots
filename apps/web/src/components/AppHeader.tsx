@@ -12,7 +12,7 @@ interface Props {
 
 /**
  * Shared header for standalone pages.
- * Shows RegKnots logo, optional page title, and hamburger menu.
+ * Shows RegKnot logo, optional page title, and hamburger menu.
  */
 export function AppHeader({ title, trailing }: Props) {
   const [menuOpen, setMenuOpen] = useState(false)

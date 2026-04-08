@@ -42,12 +42,12 @@ const FAQ_ITEMS: FaqItem[] = [
   {
     category: 'Using RegKnot',
     q: 'What regulations does RegKnot cover?',
-    a: 'RegKnot covers U.S. Code of Federal Regulations Titles 33 (Navigation and Navigable Waters), 46 (Shipping), and 49 (Transportation) \u2014 plus the International Regulations for Preventing Collisions at Sea (COLREGs), U.S. Coast Guard Navigation and Vessel Inspection Circulars (NVICs), and the SOLAS 2024 Consolidated Edition with the January 2026 Supplement. We\u2019re actively adding MARPOL and STCW.',
+    a: 'RegKnot covers U.S. Code of Federal Regulations Titles 33 (Navigation and Navigable Waters), 46 (Shipping), and 49 (Transportation) \u2014 plus the International Regulations for Preventing Collisions at Sea (COLREGs), U.S. Coast Guard Navigation and Vessel Inspection Circulars (NVICs), the SOLAS 2024 Consolidated Edition with the January 2026 Supplement, the STCW 2017 Consolidated Edition with the January 2025 Supplement, and the ISM Code. MARPOL is on our roadmap next.',
   },
   {
     category: 'Using RegKnot',
     q: 'How do citations work?',
-    a: 'When RegKnot answers a question, it cites the specific regulation sections inline \u2014 like (46 CFR 133.45). Tap any teal citation chip to see more details about that regulation. For CFR regulations, you can view the full text. For SOLAS and COLREGs, we show a summary due to IMO copyright \u2014 you can access official text through IMO publications.',
+    a: 'When RegKnot answers a question, it cites the specific regulation sections inline \u2014 like (46 CFR 133.45), (SOLAS Ch. II-2, Reg. 10), (STCW Reg. II/1), or (ISM 1.2.3). Tap any teal citation chip to see more details about that regulation. For CFR regulations, you can view the full text. For SOLAS, STCW, COLREGs, and the ISM Code, we show a summary due to IMO copyright \u2014 you can access official text through IMO publications.',
   },
   {
     category: 'Using RegKnot',
@@ -57,7 +57,7 @@ const FAQ_ITEMS: FaqItem[] = [
   {
     category: 'Using RegKnot',
     q: 'How accurate are the answers?',
-    a: 'RegKnot pulls directly from official regulation databases \u2014 eCFR for CFR titles, official USCG publications for NVICs, and the SOLAS 2024 Consolidated Edition. Every answer cites its sources. However, RegKnot is a navigation aid, not legal advice. Always verify critical compliance decisions with your company\u2019s designated person ashore (DPA) or legal counsel.',
+    a: 'RegKnot pulls directly from official regulation sources \u2014 eCFR for CFR titles, official USCG publications for NVICs, and IMO-published editions of SOLAS 2024, STCW 2017 (with amendments), and the ISM Code. Every answer cites its sources. However, RegKnot is a navigation aid, not legal advice. Always verify critical compliance decisions with your company\u2019s designated person ashore (DPA) or legal counsel.',
   },
   // Account & billing
   {
@@ -68,12 +68,12 @@ const FAQ_ITEMS: FaqItem[] = [
   {
     category: 'Account & Billing',
     q: 'How much does RegKnot Pro cost?',
-    a: 'RegKnot Pro is $39/month with unlimited questions. Founding members who subscribe lock in this price permanently \u2014 even when we raise prices later.',
+    a: 'RegKnot Pro is $39/month, or $29/month on the annual plan (billed $348/year \u2014 a 26% savings). Both plans include unlimited questions. Founding members lock in their rate permanently \u2014 even when we raise prices later.',
   },
   {
     category: 'Account & Billing',
     q: 'How do I cancel my subscription?',
-    a: 'You can cancel anytime from your Stripe billing portal. Go to Account \u2192 Manage Subscription (we\u2019ll add this link once billing is fully live). Your access continues until the end of your current billing period.',
+    a: 'You can cancel anytime from your billing portal. Go to [Account \u2192 Manage Subscription](/account) to open the Stripe-hosted portal, where you can cancel, switch between monthly and annual, or update your payment method. Your access continues until the end of your current billing period.',
   },
   {
     category: 'Account & Billing',
