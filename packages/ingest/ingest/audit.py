@@ -71,7 +71,21 @@ _SHORT_SECTION_CHARS = 100
 
 @dataclass
 class SectionStatus:
-    """Audit result for one expected section in a manifest."""
+    """Audit result for one expected section in a manifest.
+
+    `match_type` captures how the section was resolved in the DB:
+      - "exact"        : a DB row with the exact section_number exists.
+      - "prefix"       : no exact row, but one or more child sections were
+                         found via hierarchical prefix matching (e.g. the
+                         expected "ISM 1" is satisfied by "ISM 1.1", "1.2", …).
+      - "exact+prefix" : both — the parent stub row exists AND the manifest
+                         also matched child subsections; stats are aggregated.
+      - "missing"      : neither an exact nor a prefix match was found.
+
+    When children are aggregated, `chunk_count` / `total_chars` sum across
+    the parent (if any) plus every matched child, and `all_embedded` is true
+    only when every contributing row has an embedding.
+    """
     section_number: str
     expected_title: str
     min_chars: int
@@ -80,6 +94,10 @@ class SectionStatus:
     total_chars: int = 0
     all_embedded: bool = False
     db_title: str | None = None
+    # Hierarchical match metadata (introduced for subsection aggregation)
+    match_type: str = "missing"     # "exact" | "exact+prefix" | "prefix" | "missing"
+    matched_children: list[str] = field(default_factory=list)
+    note: str | None = None         # e.g. "via 12 subsections"
 
 
 @dataclass
@@ -177,17 +195,58 @@ async def _fetch_source_totals(pool: asyncpg.Pool) -> dict[str, dict[str, int]]:
 
 # ── Audit logic ──────────────────────────────────────────────────────────────
 
+def _find_children(expected: str, db_keys: list[str]) -> list[str]:
+    """Return DB section_numbers that are hierarchical children of `expected`.
+
+    A DB section S is a child of expected E iff:
+      1. S != E (the exact match is handled separately).
+      2. S starts with E.
+      3. The character in S immediately following E is a non-alphanumeric
+         boundary (e.g. '.', ' ', '/', '-').
+
+    The boundary check prevents false positives like:
+      - "ISM 1" matching "ISM 10" / "ISM 11" (next char '0'/'1' is alnum)
+      - "STCW Article I" matching "STCW Article II" (next char 'I' is alnum)
+
+    While correctly accepting:
+      - "ISM 1" → "ISM 1.1", "ISM 1.2", "ISM 1.2.1", "ISM 1.1.10" (boundary '.')
+      - "STCW Ch.I" → "STCW Ch.I Reg.I/1", "STCW Ch.I Reg.I/2" (boundary ' ')
+      - "STCW Code A-II" → "STCW Code A-II/1", "STCW Code A-II/4" (boundary '/')
+    """
+    prefix_len = len(expected)
+    matches: list[str] = []
+    for key in db_keys:
+        if key == expected:
+            continue
+        if not key.startswith(expected):
+            continue
+        if len(key) == prefix_len:
+            continue  # can't happen with the == check above, but defensive
+        boundary = key[prefix_len]
+        if boundary.isalnum():
+            continue
+        matches.append(key)
+    return sorted(matches)
+
+
 def _audit_with_manifest(
     source: str,
     manifest: dict[str, Any],
     rows: list[dict[str, Any]],
 ) -> SourceAudit:
-    """Compare DB rows to a manifest and build a SourceAudit."""
+    """Compare DB rows to a manifest and build a SourceAudit.
+
+    For each expected section we look for BOTH an exact section_number match
+    and hierarchical prefix-matched children. When children are present, the
+    chunk count / total chars / embedding status are aggregated across the
+    parent stub plus every child row so that e.g. "ISM 1" counts as present
+    once its subsections (ISM 1.1, ISM 1.2.1, …) cover it.
+    """
     expected = manifest.get("expected_sections", []) or []
-    expected_keys = {e["section_number"] for e in expected}
 
     # Index DB rows by section_number for O(1) lookup
     db_by_number = {r["section_number"]: r for r in rows}
+    db_keys = list(db_by_number.keys())
 
     audit = SourceAudit(
         source=source,
@@ -199,27 +258,65 @@ def _audit_with_manifest(
         expected_count=len(expected),
     )
 
+    # Track every DB section_number that was "consumed" by an expected
+    # manifest entry (either exact or prefix match). What's left at the end
+    # is reported as unexpected extras.
+    consumed: set[str] = set()
+
     for entry in expected:
         sec_num = entry["section_number"]
         expected_title = entry.get("title", "")
         min_chars = int(entry.get("min_chars", 0))
 
-        db_row = db_by_number.get(sec_num)
-        if db_row is None:
+        exact_row = db_by_number.get(sec_num)
+        children_keys = _find_children(sec_num, db_keys)
+
+        # ── No match at all → missing ───────────────────────────────────────
+        if exact_row is None and not children_keys:
             audit.sections.append(SectionStatus(
                 section_number=sec_num,
                 expected_title=expected_title,
                 min_chars=min_chars,
                 status="missing",
+                match_type="missing",
             ))
             audit.missing_count += 1
             continue
 
-        chunk_count = int(db_row["chunk_count"])
-        total_chars = int(db_row["total_chars"])
-        all_embedded = bool(db_row["all_embedded"])
-        db_title = db_row["section_title"]
+        # ── Collect contributing rows (stub + children) ─────────────────────
+        matched_rows: list[dict[str, Any]] = []
+        if exact_row is not None:
+            matched_rows.append(exact_row)
+            consumed.add(sec_num)
+        for child_key in children_keys:
+            matched_rows.append(db_by_number[child_key])
+            consumed.add(child_key)
 
+        chunk_count = sum(int(r["chunk_count"]) for r in matched_rows)
+        total_chars = sum(int(r["total_chars"]) for r in matched_rows)
+        all_embedded = all(bool(r["all_embedded"]) for r in matched_rows)
+        db_title = (
+            exact_row["section_title"] if exact_row is not None
+            else matched_rows[0]["section_title"]
+        )
+
+        # ── Classify the match kind ─────────────────────────────────────────
+        if exact_row is not None and children_keys:
+            match_type = "exact+prefix"
+        elif children_keys:
+            match_type = "prefix"
+        else:
+            match_type = "exact"
+
+        if children_keys:
+            note = (
+                f"via {len(children_keys)} subsection"
+                + ("s" if len(children_keys) != 1 else "")
+            )
+        else:
+            note = None
+
+        # ── Status: unembedded > truncated > ok ─────────────────────────────
         if not all_embedded:
             status = "no_embedding"
             audit.unembedded_count += 1
@@ -239,11 +336,17 @@ def _audit_with_manifest(
             total_chars=total_chars,
             all_embedded=all_embedded,
             db_title=db_title,
+            match_type=match_type,
+            matched_children=children_keys,
+            note=note,
         ))
 
-    # Sections present in DB but NOT in manifest — surface as unexpected extras
+    # Sections present in DB but not consumed by any expected entry →
+    # surface as unexpected extras. Using `consumed` (rather than the raw
+    # manifest key set) ensures that hierarchically-matched children don't
+    # show up as extras just because they aren't named in the manifest.
     audit.unexpected_extras = sorted(
-        sec_num for sec_num in db_by_number if sec_num not in expected_keys
+        sec_num for sec_num in db_by_number if sec_num not in consumed
     )
 
     if audit.expected_count:
@@ -320,7 +423,11 @@ _STATUS_ICON = {
 }
 
 
-def _render_manifest_audit(console: Console, audit: SourceAudit) -> None:
+def _render_manifest_audit(
+    console: Console,
+    audit: SourceAudit,
+    verbose: bool = False,
+) -> None:
     # Header panel
     header_lines = [
         f"[bold cyan]{audit.source}[/bold cyan]  —  {audit.manifest_title or ''}",
@@ -378,6 +485,12 @@ def _render_manifest_audit(console: Console, audit: SourceAudit) -> None:
             "no_embedding": "[magenta]no embedding[/magenta]",
         }.get(sec.status, sec.status)
 
+        # Append the hierarchical-match note so the reader can see at a
+        # glance that a section is satisfied via its children, e.g.
+        # "ok (via 12 subsections)".
+        if sec.note:
+            status_colored += f" [dim]({sec.note})[/dim]"
+
         table.add_row(
             icon,
             sec.section_number,
@@ -390,6 +503,32 @@ def _render_manifest_audit(console: Console, audit: SourceAudit) -> None:
             else sec.expected_title,
         )
     console.print(table)
+
+    # Hierarchical match details (verbose only) — list the actual child
+    # section_numbers that satisfied each prefix match so the reader can
+    # verify the aggregation is picking up the right subsections.
+    if verbose:
+        prefix_entries = [s for s in audit.sections if s.matched_children]
+        if prefix_entries:
+            console.print()
+            console.print(
+                "[dim]Hierarchical matches "
+                f"({len(prefix_entries)} sections covered via subsections):[/dim]"
+            )
+            for sec in prefix_entries:
+                console.print(
+                    f"  [cyan]{sec.section_number}[/cyan] "
+                    f"[dim]→ {len(sec.matched_children)} children "
+                    f"({sec.total_chars:,} chars total)[/dim]"
+                )
+                preview = sec.matched_children[:10]
+                for child in preview:
+                    console.print(f"      [dim]· {child}[/dim]")
+                if len(sec.matched_children) > 10:
+                    console.print(
+                        f"      [dim]… and "
+                        f"{len(sec.matched_children) - 10} more[/dim]"
+                    )
 
     # Unexpected extras
     if audit.unexpected_extras:
@@ -455,14 +594,22 @@ def _render_error(console: Console, audit: SourceAudit) -> None:
     console.print()
 
 
-def render_reports(console: Console, audits: list[SourceAudit]) -> None:
-    """Print the full audit report to the console."""
+def render_reports(
+    console: Console,
+    audits: list[SourceAudit],
+    verbose: bool = False,
+) -> None:
+    """Print the full audit report to the console.
+
+    When `verbose` is true, manifest audits also list the individual
+    child section_numbers that satisfied each hierarchical prefix match.
+    """
     console.rule("[bold]Knowledge-Base Audit")
     console.print()
 
     for audit in audits:
         if audit.audit_type == "manifest":
-            _render_manifest_audit(console, audit)
+            _render_manifest_audit(console, audit, verbose=verbose)
         elif audit.audit_type == "db_only":
             _render_db_only_audit(console, audit)
         else:
@@ -593,11 +740,17 @@ def main() -> None:
 
     sources = _ALL_SOURCES if args.all else [args.source]
 
-    exit_code = asyncio.run(_run(sources, json_path=args.json))
+    exit_code = asyncio.run(_run(
+        sources, json_path=args.json, verbose=args.verbose,
+    ))
     sys.exit(exit_code)
 
 
-async def _run(sources: list[str], json_path: str | None) -> int:
+async def _run(
+    sources: list[str],
+    json_path: str | None,
+    verbose: bool = False,
+) -> int:
     console = Console()
 
     # asyncpg requires plain postgresql:// — strip the SQLAlchemy dialect prefix
@@ -616,7 +769,7 @@ async def _run(sources: list[str], json_path: str | None) -> int:
     finally:
         await pool.close()
 
-    render_reports(console, audits)
+    render_reports(console, audits, verbose=verbose)
 
     if json_path:
         report = build_json_report(audits)
