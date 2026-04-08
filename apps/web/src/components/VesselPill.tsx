@@ -1,9 +1,20 @@
 interface Props {
   vesselName: string | null
+  hasVessels: boolean
   onClick: () => void
 }
 
-export function VesselPill({ vesselName, onClick }: Props) {
+export function VesselPill({ vesselName, hasVessels, onClick }: Props) {
+  // Three states:
+  //   1. vesselName present → show vessel name in teal
+  //   2. No active vessel but user has vessels → "No vessel — tap to switch"
+  //   3. No vessels at all → "General mode — add a vessel"
+  const emptyLabel = hasVessels ? 'No vessel — tap to switch' : 'General mode — add a vessel'
+  const ariaLabel = vesselName
+    ? `Active vessel: ${vesselName}`
+    : hasVessels
+      ? 'Select a vessel'
+      : 'General mode — add a vessel'
   return (
     <div className="px-3 py-1.5 flex items-center">
       <button
@@ -11,7 +22,7 @@ export function VesselPill({ vesselName, onClick }: Props) {
         className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs
           border border-white/10 bg-white/5 hover:bg-white/10
           transition-colors duration-150"
-        aria-label={vesselName ? `Active vessel: ${vesselName}` : 'Select a vessel'}
+        aria-label={ariaLabel}
       >
         {/* Anchor icon */}
         <svg className="w-3 h-3 flex-shrink-0" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
@@ -22,7 +33,7 @@ export function VesselPill({ vesselName, onClick }: Props) {
         {vesselName ? (
           <span className="text-teal">{vesselName}</span>
         ) : (
-          <span className="text-[#6b7594]">No vessel — tap to add</span>
+          <span className="text-[#6b7594]">{emptyLabel}</span>
         )}
         <svg className="w-3 h-3 text-white/30" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
           <path d="M4.293 5.293a1 1 0 0 1 1.414 0L8 7.586l2.293-2.293a1 1 0 1 1 1.414 1.414l-3 3a1 1 0 0 1-1.414 0l-3-3a1 1 0 0 1 0-1.414z"/>

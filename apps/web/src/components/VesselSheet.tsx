@@ -72,6 +72,11 @@ export function VesselSheet({ onClose }: Props) {
     setTimeout(() => router.push('/onboarding'), 280)
   }
 
+  function goToOnboardingAdd() {
+    dismiss()
+    setTimeout(() => router.push('/onboarding?add=true'), 280)
+  }
+
   // Touch drag
   function onTouchStart(e: React.TouchEvent) {
     dragStartY.current = e.touches[0].clientY
@@ -147,8 +152,48 @@ export function VesselSheet({ onClose }: Props) {
             </div>
           )}
 
+          {/* Empty state */}
+          {!loading && detail.length === 0 && (
+            <div className="flex flex-col items-center text-center px-6 pt-6 pb-4 gap-4">
+              {/* Anchor icon */}
+              <div className="w-14 h-14 rounded-full bg-[#2dd4bf]/10 flex items-center justify-center">
+                <svg className="w-7 h-7 text-[#2dd4bf]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <circle cx="12" cy="5" r="3" />
+                  <line x1="12" y1="22" x2="12" y2="8" />
+                  <path d="M5 12H2a10 10 0 0 0 20 0h-3" />
+                </svg>
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <p className="font-display text-lg font-bold text-[#f0ece4] tracking-wide">
+                  No vessels yet
+                </p>
+                <p className="font-mono text-xs text-[#6b7594] leading-relaxed max-w-[260px]">
+                  Add a vessel to get compliance answers tailored to your specific ship.
+                </p>
+              </div>
+              <div className="flex flex-col gap-2 w-full max-w-xs mt-1">
+                <button
+                  onClick={goToOnboardingAdd}
+                  className="w-full bg-[#2dd4bf] hover:brightness-110 text-[#0a0e1a]
+                    font-mono font-bold text-sm uppercase tracking-wider
+                    rounded-lg py-2.5 transition-[filter] duration-150"
+                >
+                  Add a vessel
+                </button>
+                <button
+                  onClick={dismiss}
+                  className="w-full border border-white/10 hover:bg-white/5
+                    text-[#f0ece4]/80 font-mono text-sm rounded-lg py-2.5
+                    transition-colors duration-150"
+                >
+                  Continue without a vessel
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Vessel rows */}
-          {!loading && detail.map(v => {
+          {!loading && detail.length > 0 && detail.map(v => {
             const isActive = v.id === activeVesselId
             return (
               <button
@@ -174,10 +219,12 @@ export function VesselSheet({ onClose }: Props) {
           })}
 
           {/* Divider */}
-          {!loading && <div className="mx-5 border-t border-white/8 my-1" />}
+          {!loading && detail.length > 0 && (
+            <div className="mx-5 border-t border-white/8 my-1" />
+          )}
 
           {/* No vessel option */}
-          {!loading && (
+          {!loading && detail.length > 0 && (
             <button
               onClick={() => selectVessel(null)}
               className={`w-full flex items-center justify-between gap-3 px-5 py-3.5 text-left
@@ -194,7 +241,7 @@ export function VesselSheet({ onClose }: Props) {
           )}
 
           {/* Add another vessel */}
-          {!loading && (
+          {!loading && detail.length > 0 && (
             <button
               onClick={goToOnboarding}
               className="w-full flex items-center gap-2 px-5 py-3.5 text-left

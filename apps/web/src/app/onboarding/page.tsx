@@ -549,7 +549,7 @@ export default function OnboardingPage() {
           </p>
         )}
 
-        {/* Skip link */}
+        {/* Enter manually link */}
         <button
           onClick={() => {
             setDirection('forward')
@@ -557,8 +557,18 @@ export default function OnboardingPage() {
           }}
           className="font-mono text-sm text-[--color-muted] hover:text-[--color-off-white] transition-colors"
         >
-          Skip &mdash; I&apos;ll enter details manually
+          Enter details manually
         </button>
+
+        {/* Skip-for-now link (only on initial onboarding, not when adding a vessel) */}
+        {!isAddMode && (
+          <button
+            onClick={() => router.replace('/')}
+            className="font-mono text-sm text-[--color-muted] hover:text-[--color-teal] transition-colors"
+          >
+            Skip for now &mdash; I don&apos;t have a specific vessel
+          </button>
+        )}
       </div>
     )
   }

@@ -52,6 +52,7 @@ function ChatInterfaceInner({ initialConversationId }: Props) {
   const [pilotEndedMsg, setPilotEndedMsg] = useState<string | null>(null)
   const [verifyRequiredMsg, setVerifyRequiredMsg] = useState<string | null>(null)
   const [resendStatus, setResendStatus] = useState<string | null>(null)
+  const [vesselNudgeDismissed, setVesselNudgeDismissed] = useState(false)
 
   const router = useRouter()
   const { canInstall, install } = usePwa()
@@ -369,7 +370,40 @@ function ChatInterfaceInner({ initialConversationId }: Props) {
       {/* ── Bottom bar ───────────────────────────────────────────── */}
       <div className="flex-shrink-0 bg-[#111827] border-t border-white/8">
         <InstallPrompt />
-        <VesselPill vesselName={activeVessel?.name ?? null} onClick={openVesselSheet} />
+
+        {/* Vessel-less onboarding nudge — shown only when the user has no
+            vessels and hasn't sent a message in this conversation yet. */}
+        {vessels.length === 0 && messages.length === 0 && !vesselNudgeDismissed && (
+          <div className="flex items-start justify-between gap-3 px-4 py-2
+            bg-[#2dd4bf]/6 border-t border-[#2dd4bf]/15">
+            <p className="font-mono text-[11px] text-[#6b7594] leading-snug">
+              Tip: Add a vessel profile for answers tailored to your specific ship.{' '}
+              <button
+                onClick={() => router.push('/onboarding')}
+                className="text-[#2dd4bf] hover:underline font-bold"
+              >
+                Add vessel →
+              </button>
+            </p>
+            <button
+              onClick={() => setVesselNudgeDismissed(true)}
+              aria-label="Dismiss tip"
+              className="flex-shrink-0 w-5 h-5 flex items-center justify-center rounded
+                text-[#6b7594] hover:text-[#f0ece4] hover:bg-white/5 transition-colors"
+            >
+              <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="18" y1="6" x2="6" y2="18" />
+                <line x1="6" y1="6" x2="18" y2="18" />
+              </svg>
+            </button>
+          </div>
+        )}
+
+        <VesselPill
+          vesselName={activeVessel?.name ?? null}
+          hasVessels={vessels.length > 0}
+          onClick={openVesselSheet}
+        />
         <InputBar
           value={input}
           onChange={setInput}

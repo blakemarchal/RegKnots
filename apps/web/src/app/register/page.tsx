@@ -35,7 +35,9 @@ export default function RegisterPage() {
     setLoading(true)
     try {
       await register(email, password, fullName, role)
-      router.replace('/onboarding')
+      // Vessel onboarding is optional — shore-side users can skip it and
+      // add a vessel later from the vessel sheet. Go straight to chat.
+      router.replace('/')
     } catch (err) {
       if (err instanceof TypeError) {
         const diag = await diagnoseNetworkError()
