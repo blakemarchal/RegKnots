@@ -174,7 +174,7 @@ export default function LandingPage() {
           style={{ animationFillMode: 'both' }}
         >
           Instant answers to U.S. maritime compliance questions.
-          Titles 33, 46 &amp; 49 + COLREGs, NVICs &amp; SOLAS 2024 — cited, current, and plain English.
+          Titles 33, 46 &amp; 49 + COLREGs, NVICs, SOLAS 2024, STCW &amp; ISM Code — cited, current, and plain English.
         </p>
 
         {/* CTAs */}
@@ -238,7 +238,7 @@ export default function LandingPage() {
           {/* Body */}
           <div className="flex flex-col gap-5">
             <p className="font-mono text-[#6b7594] leading-relaxed text-sm md:text-base">
-              U.S. commercial mariners navigate an overlapping web of Titles 33, 46, and 49 — plus COLREGs, NVICs, and SOLAS —
+              U.S. commercial mariners navigate an overlapping web of Titles 33, 46, and 49 — plus COLREGs, NVICs, SOLAS, STCW, and the ISM Code —
               thousands of sections that cross-reference each other, change without warning,
               and vary by vessel type, tonnage, route, and cargo. One missed detail during a
               Coast Guard inspection means deficiency citations, vessel detention, or costly
@@ -264,7 +264,7 @@ export default function LandingPage() {
               See It In Action
             </h2>
             <p className="font-mono text-[#6b7594] mt-3 text-sm md:text-base">
-              Ask a real compliance question — CFR, COLREGs, or NVICs. Get a real cited answer.
+              Ask a real compliance question — CFR, COLREGs, NVICs, STCW, or ISM. Get a real cited answer.
             </p>
           </div>
 
@@ -383,7 +383,7 @@ export default function LandingPage() {
             <StepCard
               n="03"
               title="Ask anything"
-              desc="Get instant cited answers, 24/7. Every response references exact CFR sections, NVICs, and SOLAS regulations you can verify."
+              desc="Get instant cited answers, 24/7. Every response references exact CFR sections, NVICs, SOLAS, STCW, and ISM Code regulations you can verify."
             />
           </div>
         </div>
@@ -455,7 +455,7 @@ export default function LandingPage() {
               subNote="Founding members lock in this price forever."
               features={[
                 'Unlimited questions',
-                'CFR Titles 33, 46 & 49 + COLREGs, NVICs & SOLAS 2024',
+                'CFR Titles 33, 46 & 49 + COLREGs, NVICs, SOLAS 2024, STCW & ISM Code',
                 'Vessel profile + history',
                 'Priority regulation updates',
                 'Audit-ready chat logs',

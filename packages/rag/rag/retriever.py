@@ -44,6 +44,7 @@ SOURCE_GROUPS: dict[str, tuple[str, ...]] = {
     "solas": ("solas", "solas_supplement"),
     "nvic": ("nvic",),
     "stcw": ("stcw", "stcw_supplement"),
+    "ism": ("ism",),
     # Future:
     # "marpol": ("marpol", "marpol_supplement"),
 }
@@ -128,6 +129,21 @@ _NVIC_TERMS: tuple[str, ...] = (
     "uscg policy", "coast guard guidance", "coast guard policy",
 )
 
+# ISM Code keywords. Unambiguous full-phrase terms go in the tuple. The
+# abbreviation regex uses word boundaries so "ism" doesn't match "prism" or
+# "tourism", and "dpa"/"smc"/"doc 88" only match as standalone tokens.
+_ISM_TERMS: tuple[str, ...] = (
+    "ism code", "international safety management",
+    "safety management system",
+    "designated person ashore", "designated person",
+    "document of compliance",
+    "safety management certificate",
+)
+_ISM_ABBR_RE = re.compile(
+    r"\b(?:ism|dpa|smc|doc\s*88)\b",
+    re.IGNORECASE,
+)
+
 
 def _source_affinity(query: str) -> dict[str, float]:
     """Return a boost value per source group based on query keywords.
@@ -153,6 +169,9 @@ def _source_affinity(query: str) -> dict[str, float]:
 
     if any(t in q for t in _NVIC_TERMS):
         boosts["nvic"] = 0.20
+
+    if any(t in q for t in _ISM_TERMS) or _ISM_ABBR_RE.search(q):
+        boosts["ism"] = 0.20
 
     if "cfr" in q or "code of federal" in q:
         boosts["cfr"] = 0.15

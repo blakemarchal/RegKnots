@@ -437,6 +437,16 @@ def _describe_sources(query: str) -> str:
         sources.append("NVICs")
     if "stcw" in q:
         sources.append("STCW")
+    if (
+        "ism code" in q
+        or "international safety management" in q
+        or "safety management system" in q
+        or "designated person" in q
+        or "document of compliance" in q
+        or "safety management certificate" in q
+        or re.search(r"\b(?:ism|dpa|smc)\b", q)
+    ):
+        sources.append("ISM Code")
 
     # Topical fallback
     if not sources:
@@ -470,6 +480,7 @@ def _summarize_found_sources(chunks: list[dict]) -> str:
         "nvic": "NVICs",
         "stcw": "STCW",
         "stcw_supplement": "STCW",
+        "ism": "ISM Code",
     }
     found: list[str] = []
     seen: set[str] = set()

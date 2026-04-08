@@ -21,7 +21,7 @@ TITLE_NAMES: dict[int, str] = {
 }
 
 # Sources ingested from text/PDF files (not eCFR API). title_number=0 for all.
-PDF_SOURCES: list[str] = ["colregs", "nvic", "solas", "solas_supplement", "stcw", "stcw_supplement"]
+PDF_SOURCES: list[str] = ["colregs", "ism", "nvic", "solas", "solas_supplement", "stcw", "stcw_supplement"]
 
 
 # ── Data models ─────────────────────────────────────────────────────────────

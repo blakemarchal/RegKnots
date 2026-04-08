@@ -117,7 +117,7 @@ export default function PricingPage() {
             <ul className="flex flex-col gap-2 mt-6 mb-6">
               {[
                 'Unlimited questions',
-                'CFR Titles 33, 46 & 49 + COLREGs, NVICs & SOLAS 2024',
+                'CFR Titles 33, 46 & 49 + COLREGs, NVICs, SOLAS 2024, STCW & ISM Code',
                 'Vessel profile + history',
                 'Priority regulation updates',
                 'Audit-ready chat logs',
