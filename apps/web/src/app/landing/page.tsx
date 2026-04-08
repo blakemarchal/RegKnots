@@ -173,8 +173,8 @@ export default function LandingPage() {
             animate-[heroFadeUp_0.8s_ease-out_0.3s]"
           style={{ animationFillMode: 'both' }}
         >
-          Instant answers to U.S. maritime compliance questions.
-          Titles 33, 46 &amp; 49 + COLREGs, NVICs, SOLAS 2024, STCW &amp; ISM Code — cited, current, and plain English.
+          Cited answers from the actual regulation texts — not AI guesswork.
+          Titles 33, 46 &amp; 49 + COLREGs, NVICs, SOLAS 2024, STCW &amp; ISM Code — current, vessel-specific, and plain English.
         </p>
 
         {/* CTAs */}
@@ -247,6 +247,12 @@ export default function LandingPage() {
             <p className="font-mono text-[#6b7594] leading-relaxed text-sm md:text-base">
               RegKnot was built by a licensed containership captain and her engineer brother.
               We know these regulations because we live them. This is the tool we wished existed.
+            </p>
+            <p className="font-mono text-[#6b7594] leading-relaxed text-sm md:text-base">
+              General-purpose AI doesn&apos;t have access to the SOLAS Consolidated Edition, the STCW Convention,
+              or the ISM Code — and it can&apos;t tell the difference between what applies to your towing vessel
+              versus a containership. RegKnot is built on the purchased source texts and your vessel profile,
+              so every answer is specific to your ship and cites the exact section you can verify.
             </p>
           </div>
         </div>

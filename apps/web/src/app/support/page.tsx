@@ -42,7 +42,7 @@ const FAQ_ITEMS: FaqItem[] = [
   {
     category: 'Using RegKnot',
     q: 'What regulations does RegKnot cover?',
-    a: 'RegKnot covers U.S. Code of Federal Regulations Titles 33 (Navigation and Navigable Waters), 46 (Shipping), and 49 (Transportation) \u2014 plus the International Regulations for Preventing Collisions at Sea (COLREGs), U.S. Coast Guard Navigation and Vessel Inspection Circulars (NVICs), the SOLAS 2024 Consolidated Edition with the January 2026 Supplement, the STCW 2017 Consolidated Edition with the January 2025 Supplement, and the ISM Code. MARPOL is on our roadmap next.',
+    a: 'RegKnot covers U.S. Code of Federal Regulations Titles 33 (Navigation and Navigable Waters), 46 (Shipping), and 49 (Transportation) \u2014 plus the International Regulations for Preventing Collisions at Sea (COLREGs), U.S. Coast Guard Navigation and Vessel Inspection Circulars (NVICs), the SOLAS 2024 Consolidated Edition with the January 2026 Supplement, the STCW 2017 Consolidated Edition with the January 2025 Supplement, and the ISM Code (International Safety Management Code). We\u2019re actively expanding our knowledge base \u2014 MARPOL is next on the roadmap.',
   },
   {
     category: 'Using RegKnot',
