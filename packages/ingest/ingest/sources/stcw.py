@@ -86,11 +86,17 @@ _CHAPTER_RE = re.compile(
     re.MULTILINE,
 )
 _REGULATION_RE = re.compile(
-    r"^(Regulation\s+[IVXLC]+(?:-\d)?/\d+(?:\.\d+)?)\s*\n(.+)",
+    # Accepts the Manila-amendment split forms like "Regulation V/1-1" and
+    # "Regulation V/1-2" in addition to classic "V/1" / "V/1.1" patterns.
+    # The `(?:-\d+)?` after the regulation number handles the post-amendment
+    # suffix where a regulation was split into -1 / -2 sub-forms.
+    r"^(Regulation\s+[IVXLC]+(?:-\d)?/\d+(?:-\d+)?(?:\.\d+)?)\s*\n(.+)",
     re.MULTILINE,
 )
 _CODE_SECTION_RE = re.compile(
-    r"^(Section\s+[AB]-[IVXLC]+(?:-\d)?/\d+(?:\.\d+)?)\s*\n(.+)",
+    # Same treatment for STCW Code sections: "Section A-V/1-1" (oil/chemical
+    # tanker training) and "Section A-V/1-2" (liquefied gas tanker training).
+    r"^(Section\s+[AB]-[IVXLC]+(?:-\d)?/\d+(?:-\d+)?(?:\.\d+)?)\s*\n(.+)",
     re.MULTILINE,
 )
 _RESOLUTION_RE = re.compile(
@@ -101,6 +107,36 @@ _PART_RE = re.compile(
     r"^(Part\s+[A-Z](?:-[IVXLC]+)?)\s*\n(.+)",
     re.MULTILINE,
 )
+
+
+# ── Heading normalisation ────────────────────────────────────────────────────
+
+def _normalize_headings(text: str) -> str:
+    """Correct systematic OCR typos in STCW section headings.
+
+    Vision extraction of scanned IMO pages occasionally loses the slash
+    character in dense, table-heavy layouts, turning "Section A-V/1-1"
+    (oil/chemical tanker code section) into the look-alike "Section A-VI-1".
+    This function patches the known typo when the context around the
+    heading makes the correct interpretation unambiguous (tanker / oil /
+    chemical keywords appear within a few lines).
+
+    Safe to run multiple times — the replacement is a no-op once the
+    heading is already in canonical form.
+    """
+    lines = text.split("\n")
+    patched = False
+    for i, line in enumerate(lines):
+        if line.strip() != "Section A-VI-1":
+            continue
+        # Look at the next 10 non-empty lines for tanker/oil/chemical context
+        context = "\n".join(lines[i + 1 : i + 11]).lower()
+        if "tanker" in context or ("oil" in context and "chemical" in context):
+            lines[i] = "Section A-V/1-1"
+            patched = True
+    if patched:
+        logger.info("stcw: normalised 'Section A-VI-1' OCR typo → 'Section A-V/1-1'")
+    return "\n".join(lines)
 
 
 # ── Text cleaning ────────────────────────────────────────────────────────────
@@ -280,6 +316,11 @@ def parse_source(raw_dir: Path) -> list[Section]:
     for txt_path in txt_files:
         page_text = txt_path.read_text(encoding="utf-8", errors="replace")
         full_text += page_text + "\n\n"
+
+    # Correct known Vision-OCR heading typos before boundary detection
+    # (e.g. "Section A-VI-1" → "Section A-V/1-1" where the slash was
+    # dropped by the OCR model on tanker-training pages).
+    full_text = _normalize_headings(full_text)
 
     # Detect and skip table of contents pages
     full_text = _skip_toc(full_text)
