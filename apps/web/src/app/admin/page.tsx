@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import AuthGuard from '@/components/AuthGuard'
 import { AppHeader } from '@/components/AppHeader'
@@ -141,6 +141,29 @@ interface FoundingEmailPreview {
 
 type TicketFilter = 'all' | 'open' | 'replied' | 'closed'
 
+type UserFilter =
+  | 'all'
+  | 'pro'
+  | 'trial'
+  | 'expired'
+  | 'paused'
+  | 'canceled'
+  | 'monthly'
+  | 'annual'
+  | 'admin'
+
+const USER_FILTERS: { value: UserFilter; label: string }[] = [
+  { value: 'all', label: 'All' },
+  { value: 'pro', label: 'Pro' },
+  { value: 'trial', label: 'Trial' },
+  { value: 'expired', label: 'Expired' },
+  { value: 'monthly', label: 'Monthly' },
+  { value: 'annual', label: 'Annual' },
+  { value: 'paused', label: 'Paused' },
+  { value: 'canceled', label: 'Canceled' },
+  { value: 'admin', label: 'Admin' },
+]
+
 // Chart color ramp
 const CHART_COLORS = ['#2dd4bf', '#1d9e75', '#0f6e56', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899']
 
@@ -178,6 +201,8 @@ function AdminContent() {
   const [users, setUsers] = useState<AdminUser[]>([])
   const [usersOffset, setUsersOffset] = useState(0)
   const [hasMore, setHasMore] = useState(true)
+  const [userSearch, setUserSearch] = useState('')
+  const [userFilter, setUserFilter] = useState<UserFilter>('all')
   const [loading, setLoading] = useState(true)
   const [resetting, setResetting] = useState<string | null>(null)
   const [actionLoading, setActionLoading] = useState<string | null>(null)
@@ -226,6 +251,35 @@ function AdminContent() {
   const [ticketToast, setTicketToast] = useState<{ msg: string; ok: boolean } | null>(null)
 
   const ei = excludeInternal ? 'true' : 'false'
+
+  const filteredUsers = useMemo(() => {
+    const q = userSearch.trim().toLowerCase()
+    const now = Date.now()
+    return users.filter((u) => {
+      if (q) {
+        const hay = `${u.email} ${u.full_name ?? ''}`.toLowerCase()
+        if (!hay.includes(q)) return false
+      }
+      if (userFilter === 'all') return true
+      const trialTs = u.trial_ends_at ? new Date(u.trial_ends_at).getTime() : null
+      const isPro = u.subscription_tier === 'pro' && u.subscription_status === 'active'
+      const isPaused = u.subscription_status === 'paused'
+      const isCanceled = u.subscription_status === 'canceled' || u.subscription_status === 'canceling'
+      const isTrial = !isPro && !isPaused && !isCanceled && trialTs !== null && trialTs > now
+      const isExpired = !isPro && !isPaused && !isCanceled && (trialTs === null || trialTs <= now)
+      switch (userFilter) {
+        case 'pro': return isPro
+        case 'trial': return isTrial
+        case 'expired': return isExpired
+        case 'paused': return isPaused
+        case 'canceled': return isCanceled
+        case 'monthly': return isPro && u.billing_interval === 'month'
+        case 'annual': return isPro && u.billing_interval === 'year'
+        case 'admin': return u.is_admin
+        default: return true
+      }
+    })
+  }, [users, userSearch, userFilter])
 
   const [statsError, setStatsError] = useState(false)
 
@@ -1252,7 +1306,14 @@ function AdminContent() {
 
           {/* ── Users table ──────────────────────────────────────────── */}
           <div className="flex items-center justify-between mb-3">
-            <h2 className="font-display text-lg font-bold text-[#f0ece4] tracking-wide">Users</h2>
+            <h2 className="font-display text-lg font-bold text-[#f0ece4] tracking-wide">
+              Users
+              <span className="ml-2 font-mono text-xs font-normal text-[#6b7594]">
+                {filteredUsers.length === users.length
+                  ? `(${users.length})`
+                  : `(${filteredUsers.length} / ${users.length})`}
+              </span>
+            </h2>
             {!isReadOnly && (
             <button
               onClick={resetAllPilots}
@@ -1265,8 +1326,62 @@ function AdminContent() {
             )}
           </div>
 
-          <div className="space-y-2">
-            {users.map((u) => {
+          {/* Search + filter bar */}
+          <div className="mb-3 space-y-2">
+            <div className="relative">
+              <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#6b7594] pointer-events-none"
+                viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <circle cx="7" cy="7" r="5" />
+                <path d="M11 11l3 3" strokeLinecap="round" />
+              </svg>
+              <input
+                type="text"
+                value={userSearch}
+                onChange={(e) => setUserSearch(e.target.value)}
+                placeholder="Search by email or name…"
+                className="w-full bg-[#111827] border border-white/8 rounded-lg
+                  pl-9 pr-9 py-2 font-mono text-sm text-[#f0ece4]
+                  placeholder:text-[#6b7594] focus:outline-none focus:border-[#2dd4bf]/40
+                  transition-colors"
+              />
+              {userSearch && (
+                <button
+                  onClick={() => setUserSearch('')}
+                  aria-label="Clear search"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 w-5 h-5 flex items-center
+                    justify-center rounded text-[#6b7594] hover:text-[#f0ece4] hover:bg-white/5"
+                >
+                  ×
+                </button>
+              )}
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {USER_FILTERS.map((f) => {
+                const active = userFilter === f.value
+                return (
+                  <button
+                    key={f.value}
+                    onClick={() => setUserFilter(f.value)}
+                    className={`font-mono text-[10px] font-bold uppercase tracking-wider
+                      px-2.5 py-1 rounded border transition-colors
+                      ${active
+                        ? 'bg-[#2dd4bf]/15 border-[#2dd4bf]/40 text-[#2dd4bf]'
+                        : 'border-white/10 text-[#6b7594] hover:text-[#f0ece4] hover:border-white/20'
+                      }`}
+                  >
+                    {f.label}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+
+          <div className={`space-y-2 ${filteredUsers.length > 10 ? 'max-h-[720px] overflow-y-auto pr-1' : ''}`}>
+            {filteredUsers.length === 0 ? (
+              <div className="bg-[#111827] rounded-xl border border-white/8 px-4 py-6 text-center">
+                <p className="font-mono text-sm text-[#6b7594]">No users match your search</p>
+              </div>
+            ) : filteredUsers.map((u) => {
               const isExpanded = expandedUser === u.id
               const displayName = u.full_name?.trim() || u.email
               const now = Date.now()
