@@ -1,0 +1,61 @@
+source: ism
+title: "ISM Code"
+description: "International Safety Management Code for the Safe Operation of Ships and for Pollution Prevention"
+expected_sections:
+  - section_number: "ISM Preamble"
+    title: "Preamble"
+    min_chars: 200
+  - section_number: "ISM Part A"
+    title: "Part A — Implementation"
+    min_chars: 100
+  - section_number: "ISM Part B"
+    title: "Part B — Certification and Verification"
+    min_chars: 100
+  - section_number: "ISM 1"
+    title: "General"
+    min_chars: 1000
+  - section_number: "ISM 2"
+    title: "Safety and Environmental Protection Policy"
+    min_chars: 300
+  - section_number: "ISM 3"
+    title: "Company Responsibilities and Authority"
+    min_chars: 300
+  - section_number: "ISM 4"
+    title: "Designated Person(s)"
+    min_chars: 200
+  - section_number: "ISM 5"
+    title: "Master's Responsibility and Authority"
+    min_chars: 300
+  - section_number: "ISM 6"
+    title: "Resources and Personnel"
+    min_chars: 500
+  - section_number: "ISM 7"
+    title: "Shipboard Operations"
+    min_chars: 300
+  - section_number: "ISM 8"
+    title: "Emergency Preparedness"
+    min_chars: 300
+  - section_number: "ISM 9"
+    title: "Reports and Analysis of Non-Conformities, Accidents and Hazardous Occurrences"
+    min_chars: 300
+  - section_number: "ISM 10"
+    title: "Maintenance of the Ship and Equipment"
+    min_chars: 300
+  - section_number: "ISM 11"
+    title: "Documentation"
+    min_chars: 300
+  - section_number: "ISM 12"
+    title: "Company Verification, Review and Evaluation"
+    min_chars: 300
+  - section_number: "ISM 13"
+    title: "Certification and Periodical Verification"
+    min_chars: 500
+  - section_number: "ISM 14"
+    title: "Interim Certification"
+    min_chars: 300
+  - section_number: "ISM 15"
+    title: "Verification"
+    min_chars: 200
+  - section_number: "ISM 16"
+    title: "Forms of Certificates"
+    min_chars: 200

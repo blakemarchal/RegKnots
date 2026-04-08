@@ -1,0 +1,136 @@
+source: colregs
+title: "COLREGs"
+description: "International/Inland Navigation Rules (72 COLREGS, as amended)"
+# Note: the COLREGs adapter merges adjacent short rules within a Part to fit
+# a ~450 token budget. Known merges: Rules 4-5, Rules 15-16, Rules 28-29.
+# The section_number entries below match the canonical names used by the
+# ingest pipeline so the audit lines up with what's actually stored.
+expected_sections:
+  # Part A — General
+  - section_number: "COLREGS Rule 1"
+    title: "Application"
+    min_chars: 300
+  - section_number: "COLREGS Rule 2"
+    title: "Responsibility"
+    min_chars: 200
+  - section_number: "COLREGS Rule 3"
+    title: "General Definitions"
+    min_chars: 500
+
+  # Part B — Steering and Sailing Rules
+  - section_number: "COLREGS Rules 4-5"
+    title: "Application / Look-out"
+    min_chars: 200
+  - section_number: "COLREGS Rule 6"
+    title: "Safe Speed"
+    min_chars: 300
+  - section_number: "COLREGS Rule 7"
+    title: "Risk of Collision"
+    min_chars: 300
+  - section_number: "COLREGS Rule 8"
+    title: "Action to Avoid Collision"
+    min_chars: 400
+  - section_number: "COLREGS Rule 9"
+    title: "Narrow Channels"
+    min_chars: 400
+  - section_number: "COLREGS Rule 10"
+    title: "Traffic Separation Schemes"
+    min_chars: 600
+  - section_number: "COLREGS Rule 11"
+    title: "Application (Sight of One Another)"
+    min_chars: 100
+  - section_number: "COLREGS Rule 12"
+    title: "Sailing Vessels"
+    min_chars: 300
+  - section_number: "COLREGS Rule 13"
+    title: "Overtaking"
+    min_chars: 300
+  - section_number: "COLREGS Rule 14"
+    title: "Head-on Situation"
+    min_chars: 300
+  - section_number: "COLREGS Rules 15-16"
+    title: "Crossing Situation / Action by Give-way Vessel"
+    min_chars: 200
+  - section_number: "COLREGS Rule 17"
+    title: "Action by Stand-on Vessel"
+    min_chars: 300
+  - section_number: "COLREGS Rule 18"
+    title: "Responsibilities Between Vessels"
+    min_chars: 400
+  - section_number: "COLREGS Rule 19"
+    title: "Conduct of Vessels in Restricted Visibility"
+    min_chars: 400
+
+  # Part C — Lights and Shapes
+  - section_number: "COLREGS Rule 20"
+    title: "Application"
+    min_chars: 200
+  - section_number: "COLREGS Rule 21"
+    title: "Definitions"
+    min_chars: 300
+  - section_number: "COLREGS Rule 22"
+    title: "Visibility of Lights"
+    min_chars: 300
+  - section_number: "COLREGS Rule 23"
+    title: "Power-driven Vessels Underway"
+    min_chars: 400
+  - section_number: "COLREGS Rule 24"
+    title: "Towing and Pushing"
+    min_chars: 600
+  - section_number: "COLREGS Rule 25"
+    title: "Sailing Vessels Underway and Vessels Under Oars"
+    min_chars: 300
+  - section_number: "COLREGS Rule 26"
+    title: "Fishing Vessels"
+    min_chars: 400
+  - section_number: "COLREGS Rule 27"
+    title: "Vessels Not Under Command or Restricted in their Ability to Maneuver"
+    min_chars: 600
+  - section_number: "COLREGS Rules 28-29"
+    title: "Vessels Constrained by Draft / Pilot Vessels"
+    min_chars: 200
+  - section_number: "COLREGS Rule 30"
+    title: "Anchored Vessels and Vessels Aground"
+    min_chars: 400
+  - section_number: "COLREGS Rule 31"
+    title: "Seaplanes"
+    min_chars: 100
+
+  # Part D — Sound and Light Signals
+  - section_number: "COLREGS Rule 32"
+    title: "Definitions"
+    min_chars: 200
+  - section_number: "COLREGS Rule 33"
+    title: "Equipment for Sound Signals"
+    min_chars: 200
+  - section_number: "COLREGS Rule 34"
+    title: "Maneuvering and Warning Signals"
+    min_chars: 500
+  - section_number: "COLREGS Rule 35"
+    title: "Sound Signals in Restricted Visibility"
+    min_chars: 500
+  - section_number: "COLREGS Rule 36"
+    title: "Signals to Attract Attention"
+    min_chars: 100
+  - section_number: "COLREGS Rule 37"
+    title: "Distress Signals"
+    min_chars: 100
+
+  # Part E — Exemptions
+  - section_number: "COLREGS Rule 38"
+    title: "Exemptions"
+    min_chars: 300
+
+  # Annexes
+  - section_number: "COLREGS Annex I"
+    title: "Positioning and Technical Details of Lights and Shapes"
+    min_chars: 500
+  - section_number: "COLREGS Annex II"
+    title: "Additional Signals for Fishing Vessels Fishing in Close Proximity"
+    min_chars: 300
+  - section_number: "COLREGS Annex III"
+    title: "Technical Details of Sound Signal Appliances"
+    min_chars: 400
+  - section_number: "COLREGS Annex IV"
+    title: "Distress Signals"
+    min_chars: 300

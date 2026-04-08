@@ -1,0 +1,177 @@
+source: solas
+title: "SOLAS Consolidated Edition"
+description: "International Convention for the Safety of Life at Sea, 1974, as amended"
+# Section numbers match the canonical names emitted by ingest/sources/solas.py.
+# Chapters with multiple Parts are listed per-Part; chapters without Parts are
+# listed as a single entry.
+expected_sections:
+  - section_number: "SOLAS Articles"
+    title: "Articles of the Convention and 1988 Protocol"
+    min_chars: 1000
+
+  # Chapter I — General Provisions
+  - section_number: "SOLAS Ch.I Part A"
+    title: "Chapter I Part A — Application, definitions, etc."
+    min_chars: 500
+  - section_number: "SOLAS Ch.I Part B"
+    title: "Chapter I Part B — Surveys and certificates"
+    min_chars: 1000
+  - section_number: "SOLAS Ch.I Part C"
+    title: "Chapter I Part C — Casualties"
+    min_chars: 200
+
+  # Chapter II-1 — Construction (Structure, subdivision, machinery, electrical)
+  - section_number: "SOLAS Ch.II-1 Part A"
+    title: "Chapter II-1 Part A — General"
+    min_chars: 500
+  - section_number: "SOLAS Ch.II-1 Part A-1"
+    title: "Chapter II-1 Part A-1 — Structure of ships"
+    min_chars: 500
+  - section_number: "SOLAS Ch.II-1 Part B"
+    title: "Chapter II-1 Part B — Subdivision and stability"
+    min_chars: 500
+  - section_number: "SOLAS Ch.II-1 Part B-1"
+    title: "Chapter II-1 Part B-1 — Stability"
+    min_chars: 1000
+  - section_number: "SOLAS Ch.II-1 Part B-2"
+    title: "Chapter II-1 Part B-2 — Subdivision, watertight and weathertight integrity"
+    min_chars: 1000
+  - section_number: "SOLAS Ch.II-1 Part B-3"
+    title: "Chapter II-1 Part B-3 — Subdivision load line assignment for passenger ships"
+    min_chars: 200
+  - section_number: "SOLAS Ch.II-1 Part B-4"
+    title: "Chapter II-1 Part B-4 — Stability management"
+    min_chars: 500
+  - section_number: "SOLAS Ch.II-1 Part C"
+    title: "Chapter II-1 Part C — Machinery installations"
+    min_chars: 1000
+  - section_number: "SOLAS Ch.II-1 Part D"
+    title: "Chapter II-1 Part D — Electrical installations"
+    min_chars: 1000
+  - section_number: "SOLAS Ch.II-1 Part E"
+    title: "Chapter II-1 Part E — Additional requirements for periodically unattended machinery spaces"
+    min_chars: 500
+  - section_number: "SOLAS Ch.II-1 Part F"
+    title: "Chapter II-1 Part F — Alternative design and arrangements"
+    min_chars: 200
+  - section_number: "SOLAS Ch.II-1 Part G"
+    title: "Chapter II-1 Part G — Ships using low-flashpoint fuels"
+    min_chars: 200
+
+  # Chapter II-2 — Fire protection, detection, extinction
+  - section_number: "SOLAS Ch.II-2 Part A"
+    title: "Chapter II-2 Part A — General"
+    min_chars: 1000
+  - section_number: "SOLAS Ch.II-2 Part B"
+    title: "Chapter II-2 Part B — Prevention of fire and explosion"
+    min_chars: 1000
+  - section_number: "SOLAS Ch.II-2 Part C"
+    title: "Chapter II-2 Part C — Suppression of fire"
+    min_chars: 2000
+  - section_number: "SOLAS Ch.II-2 Part D"
+    title: "Chapter II-2 Part D — Escape"
+    min_chars: 1000
+  - section_number: "SOLAS Ch.II-2 Part E"
+    title: "Chapter II-2 Part E — Operational requirements"
+    min_chars: 500
+  - section_number: "SOLAS Ch.II-2 Part F"
+    title: "Chapter II-2 Part F — Alternative design and arrangements"
+    min_chars: 200
+  - section_number: "SOLAS Ch.II-2 Part G"
+    title: "Chapter II-2 Part G — Special requirements"
+    min_chars: 1000
+
+  # Chapter III — Life-saving appliances and arrangements
+  - section_number: "SOLAS Ch.III Part A"
+    title: "Chapter III Part A — General"
+    min_chars: 500
+  - section_number: "SOLAS Ch.III Part B"
+    title: "Chapter III Part B — Requirements for ships and life-saving appliances"
+    min_chars: 2000
+  - section_number: "SOLAS Ch.III Part C"
+    title: "Chapter III Part C — Alternative design and arrangements"
+    min_chars: 200
+
+  # Chapter IV — Radiocommunications
+  - section_number: "SOLAS Ch.IV Part A"
+    title: "Chapter IV Part A — General"
+    min_chars: 500
+  - section_number: "SOLAS Ch.IV Part B"
+    title: "Chapter IV Part B — Undertakings by Contracting Governments"
+    min_chars: 200
+  - section_number: "SOLAS Ch.IV Part C"
+    title: "Chapter IV Part C — Ship requirements"
+    min_chars: 1000
+
+  # Chapter V — Safety of Navigation
+  - section_number: "SOLAS Ch.V"
+    title: "Chapter V — Safety of Navigation"
+    min_chars: 2000
+
+  # Chapter VI — Carriage of Cargoes and Oil Fuels
+  - section_number: "SOLAS Ch.VI Part A"
+    title: "Chapter VI Part A — General provisions"
+    min_chars: 500
+  - section_number: "SOLAS Ch.VI Part B"
+    title: "Chapter VI Part B — Special provisions for bulk cargoes other than grain"
+    min_chars: 500
+  - section_number: "SOLAS Ch.VI Part C"
+    title: "Chapter VI Part C — Carriage of grain"
+    min_chars: 200
+
+  # Chapter VII — Carriage of Dangerous Goods
+  - section_number: "SOLAS Ch.VII Part A"
+    title: "Chapter VII Part A — Carriage of dangerous goods in packaged form"
+    min_chars: 500
+  - section_number: "SOLAS Ch.VII Part A-1"
+    title: "Chapter VII Part A-1 — Carriage of dangerous goods in solid form in bulk"
+    min_chars: 200
+  - section_number: "SOLAS Ch.VII Part B"
+    title: "Chapter VII Part B — Construction and equipment of ships carrying dangerous liquid chemicals in bulk"
+    min_chars: 300
+  - section_number: "SOLAS Ch.VII Part C"
+    title: "Chapter VII Part C — Construction and equipment of ships carrying liquefied gases in bulk"
+    min_chars: 300
+  - section_number: "SOLAS Ch.VII Part D"
+    title: "Chapter VII Part D — Special requirements for the carriage of packaged irradiated nuclear fuel, plutonium and high-level radioactive wastes on board ships"
+    min_chars: 200
+
+  # Chapter VIII — Nuclear Ships
+  - section_number: "SOLAS Ch.VIII"
+    title: "Chapter VIII — Nuclear Ships"
+    min_chars: 500
+
+  # Chapter IX — Management for the Safe Operation of Ships
+  - section_number: "SOLAS Ch.IX"
+    title: "Chapter IX — Management for the Safe Operation of Ships"
+    min_chars: 500
+
+  # Chapter X — Safety Measures for High-Speed Craft
+  - section_number: "SOLAS Ch.X"
+    title: "Chapter X — Safety Measures for High-Speed Craft"
+    min_chars: 300
+
+  # Chapter XI-1 — Special Measures to Enhance Maritime Safety
+  - section_number: "SOLAS Ch.XI-1"
+    title: "Chapter XI-1 — Special Measures to Enhance Maritime Safety"
+    min_chars: 500
+
+  # Chapter XI-2 — Special Measures to Enhance Maritime Security
+  - section_number: "SOLAS Ch.XI-2"
+    title: "Chapter XI-2 — Special Measures to Enhance Maritime Security"
+    min_chars: 1000
+
+  # Chapter XII — Additional Safety Measures for Bulk Carriers
+  - section_number: "SOLAS Ch.XII"
+    title: "Chapter XII — Additional Safety Measures for Bulk Carriers"
+    min_chars: 1000
+
+  # Chapter XIII — Verification of Compliance
+  - section_number: "SOLAS Ch.XIII"
+    title: "Chapter XIII — Verification of Compliance"
+    min_chars: 300
+
+  # Chapter XIV — Safety Measures for Ships Operating in Polar Waters
+  - section_number: "SOLAS Ch.XIV"
+    title: "Chapter XIV — Safety Measures for Ships Operating in Polar Waters"
+    min_chars: 300

@@ -1,0 +1,15 @@
+source: stcw_supplement
+title: "STCW Consolidated Edition 2017 — January 2025 Supplement"
+description: "IMO Maritime Safety Committee amendments adopted after the STCW 2017 consolidated edition"
+# Section numbers match the canonical names emitted by
+# ingest/sources/stcw_supplement.py: "STCW Supplement Jan2025 {MSC ref}".
+expected_sections:
+  - section_number: "STCW Supplement Jan2025 Preamble"
+    title: "Supplement Preamble"
+    min_chars: 100
+  - section_number: "STCW Supplement Jan2025 MSC.540(107)"
+    title: "MSC.540(107) — Convention Chapter I: Electronic Certificates"
+    min_chars: 500
+  - section_number: "STCW Supplement Jan2025 MSC.541(107)"
+    title: "MSC.541(107) — STCW Code Part A: Certificates and Endorsements"
+    min_chars: 500

@@ -24,6 +24,8 @@ dependencies = [
     "anthropic>=0.40.0",
     # HTML parsing (NVIC index scraper)
     "beautifulsoup4>=4.12.0",
+    # YAML manifests for the knowledge-base audit tool
+    "pyyaml>=6.0.0",
 ]
 
 [project.optional-dependencies]

@@ -1,0 +1,416 @@
+source: stcw
+title: "STCW Convention + Code"
+description: "International Convention on Standards of Training, Certification and Watchkeeping for Seafarers, 1978, as amended — 2017 Consolidated Edition"
+# Section numbers match the canonical names emitted by ingest/sources/stcw.py.
+# Covers: Preamble, Articles I–XVII, Chapters I–VIII, Regulations by chapter,
+# STCW Code Parts A and B with their main sections, Resolutions 1–19.
+expected_sections:
+  - section_number: "STCW Preamble"
+    title: "Preamble"
+    min_chars: 200
+
+  # ── Convention Articles ─────────────────────────────────────────────────────
+  - section_number: "STCW Article I"
+    title: "Article I — General obligations under the Convention"
+    min_chars: 200
+  - section_number: "STCW Article II"
+    title: "Article II — Definitions"
+    min_chars: 200
+  - section_number: "STCW Article III"
+    title: "Article III — Application"
+    min_chars: 100
+  - section_number: "STCW Article IV"
+    title: "Article IV — Communication of information"
+    min_chars: 100
+  - section_number: "STCW Article V"
+    title: "Article V — Other treaties and interpretation"
+    min_chars: 100
+  - section_number: "STCW Article VI"
+    title: "Article VI — Certificates"
+    min_chars: 100
+  - section_number: "STCW Article VII"
+    title: "Article VII — Transitional provisions"
+    min_chars: 100
+  - section_number: "STCW Article VIII"
+    title: "Article VIII — Dispensation"
+    min_chars: 100
+  - section_number: "STCW Article IX"
+    title: "Article IX — Equivalents"
+    min_chars: 100
+  - section_number: "STCW Article X"
+    title: "Article X — Control"
+    min_chars: 200
+  - section_number: "STCW Article XI"
+    title: "Article XI — Promotion of technical co-operation"
+    min_chars: 100
+  - section_number: "STCW Article XII"
+    title: "Article XII — Amendments"
+    min_chars: 200
+  - section_number: "STCW Article XIII"
+    title: "Article XIII — Signature, ratification, acceptance, approval and accession"
+    min_chars: 100
+  - section_number: "STCW Article XIV"
+    title: "Article XIV — Entry into force"
+    min_chars: 100
+  - section_number: "STCW Article XV"
+    title: "Article XV — Denunciation"
+    min_chars: 100
+  - section_number: "STCW Article XVI"
+    title: "Article XVI — Depositary"
+    min_chars: 100
+  - section_number: "STCW Article XVII"
+    title: "Article XVII — Languages"
+    min_chars: 100
+
+  # ── Convention Chapters (container headings) ────────────────────────────────
+  - section_number: "STCW Ch.I"
+    title: "Chapter I — General provisions"
+    min_chars: 200
+  - section_number: "STCW Ch.II"
+    title: "Chapter II — Master and deck department"
+    min_chars: 200
+  - section_number: "STCW Ch.III"
+    title: "Chapter III — Engine department"
+    min_chars: 200
+  - section_number: "STCW Ch.IV"
+    title: "Chapter IV — Radiocommunication and radio personnel"
+    min_chars: 200
+  - section_number: "STCW Ch.V"
+    title: "Chapter V — Special training requirements for personnel on certain types of ships"
+    min_chars: 200
+  - section_number: "STCW Ch.VI"
+    title: "Chapter VI — Emergency, occupational safety, medical care and survival functions"
+    min_chars: 200
+  - section_number: "STCW Ch.VII"
+    title: "Chapter VII — Alternative certification"
+    min_chars: 200
+  - section_number: "STCW Ch.VIII"
+    title: "Chapter VIII — Watchkeeping"
+    min_chars: 200
+
+  # ── Chapter I Regulations ───────────────────────────────────────────────────
+  - section_number: "STCW Ch.I Reg.I/1"
+    title: "Regulation I/1 — Definitions and clarifications"
+    min_chars: 500
+  - section_number: "STCW Ch.I Reg.I/2"
+    title: "Regulation I/2 — Certificates and endorsements"
+    min_chars: 500
+  - section_number: "STCW Ch.I Reg.I/3"
+    title: "Regulation I/3 — Principles governing near-coastal voyages"
+    min_chars: 200
+  - section_number: "STCW Ch.I Reg.I/4"
+    title: "Regulation I/4 — Control procedures"
+    min_chars: 300
+  - section_number: "STCW Ch.I Reg.I/5"
+    title: "Regulation I/5 — National provisions"
+    min_chars: 100
+  - section_number: "STCW Ch.I Reg.I/6"
+    title: "Regulation I/6 — Training and assessment"
+    min_chars: 100
+  - section_number: "STCW Ch.I Reg.I/7"
+    title: "Regulation I/7 — Communication of information"
+    min_chars: 300
+  - section_number: "STCW Ch.I Reg.I/8"
+    title: "Regulation I/8 — Quality standards"
+    min_chars: 200
+  - section_number: "STCW Ch.I Reg.I/9"
+    title: "Regulation I/9 — Medical standards"
+    min_chars: 200
+  - section_number: "STCW Ch.I Reg.I/10"
+    title: "Regulation I/10 — Recognition of certificates"
+    min_chars: 300
+  - section_number: "STCW Ch.I Reg.I/11"
+    title: "Regulation I/11 — Revalidation of certificates"
+    min_chars: 300
+  - section_number: "STCW Ch.I Reg.I/12"
+    title: "Regulation I/12 — Use of simulators"
+    min_chars: 200
+  - section_number: "STCW Ch.I Reg.I/13"
+    title: "Regulation I/13 — Conduct of trials"
+    min_chars: 100
+  - section_number: "STCW Ch.I Reg.I/14"
+    title: "Regulation I/14 — Responsibilities of companies"
+    min_chars: 300
+  - section_number: "STCW Ch.I Reg.I/15"
+    title: "Regulation I/15 — Transitional provisions"
+    min_chars: 100
+  - section_number: "STCW Ch.I Reg.I/16"
+    title: "Regulation I/16 — Verification of compliance"
+    min_chars: 100
+
+  # ── Chapter II Regulations ──────────────────────────────────────────────────
+  - section_number: "STCW Ch.II Reg.II/1"
+    title: "Regulation II/1 — Mandatory minimum requirements for certification of officers in charge of a navigational watch on ships of 500 GT or more"
+    min_chars: 500
+  - section_number: "STCW Ch.II Reg.II/2"
+    title: "Regulation II/2 — Mandatory minimum requirements for certification of masters and chief mates on ships of 500 GT or more"
+    min_chars: 500
+  - section_number: "STCW Ch.II Reg.II/3"
+    title: "Regulation II/3 — Near-coastal voyages (Deck)"
+    min_chars: 300
+  - section_number: "STCW Ch.II Reg.II/4"
+    title: "Regulation II/4 — Mandatory minimum requirements for certification of ratings forming part of a navigational watch"
+    min_chars: 200
+  - section_number: "STCW Ch.II Reg.II/5"
+    title: "Regulation II/5 — Mandatory minimum requirements for certification of ratings as able seafarer deck"
+    min_chars: 200
+
+  # ── Chapter III Regulations ─────────────────────────────────────────────────
+  - section_number: "STCW Ch.III Reg.III/1"
+    title: "Regulation III/1 — Mandatory minimum requirements for certification of officers in charge of an engineering watch"
+    min_chars: 500
+  - section_number: "STCW Ch.III Reg.III/2"
+    title: "Regulation III/2 — Mandatory minimum requirements for certification of chief engineer officers and second engineer officers"
+    min_chars: 500
+  - section_number: "STCW Ch.III Reg.III/3"
+    title: "Regulation III/3 — Mandatory minimum requirements for certification of chief engineer officers and second engineer officers on ships powered by main propulsion machinery of between 750 kW and 3,000 kW"
+    min_chars: 300
+  - section_number: "STCW Ch.III Reg.III/4"
+    title: "Regulation III/4 — Mandatory minimum requirements for certification of ratings forming part of a watch in a manned engine-room"
+    min_chars: 200
+  - section_number: "STCW Ch.III Reg.III/5"
+    title: "Regulation III/5 — Mandatory minimum requirements for certification of ratings as able seafarer engine"
+    min_chars: 200
+  - section_number: "STCW Ch.III Reg.III/6"
+    title: "Regulation III/6 — Mandatory minimum requirements for certification of electro-technical officers"
+    min_chars: 300
+  - section_number: "STCW Ch.III Reg.III/7"
+    title: "Regulation III/7 — Mandatory minimum requirements for certification of electro-technical ratings"
+    min_chars: 200
+
+  # ── Chapter IV Regulations ──────────────────────────────────────────────────
+  - section_number: "STCW Ch.IV Reg.IV/1"
+    title: "Regulation IV/1 — Application"
+    min_chars: 100
+  - section_number: "STCW Ch.IV Reg.IV/2"
+    title: "Regulation IV/2 — Mandatory minimum requirements for certification of GMDSS radio operators"
+    min_chars: 300
+
+  # ── Chapter V Regulations ───────────────────────────────────────────────────
+  - section_number: "STCW Ch.V Reg.V/1"
+    title: "Regulation V/1 — Mandatory minimum requirements for the training and qualifications of masters, officers and ratings on tankers"
+    min_chars: 500
+  - section_number: "STCW Ch.V Reg.V/2"
+    title: "Regulation V/2 — Mandatory minimum requirements for the training and qualifications of masters, officers, ratings and other personnel on passenger ships"
+    min_chars: 500
+  - section_number: "STCW Ch.V Reg.V/3"
+    title: "Regulation V/3 — Mandatory minimum requirements for the training and qualifications of masters, officers, ratings and other personnel on ships subject to the IGF Code"
+    min_chars: 500
+  - section_number: "STCW Ch.V Reg.V/4"
+    title: "Regulation V/4 — Mandatory minimum requirements for the training and qualifications of masters and deck officers on ships operating in polar waters"
+    min_chars: 300
+
+  # ── Chapter VI Regulations ──────────────────────────────────────────────────
+  - section_number: "STCW Ch.VI Reg.VI/1"
+    title: "Regulation VI/1 — Mandatory minimum requirements for safety familiarization, basic training and instruction for all seafarers"
+    min_chars: 200
+  - section_number: "STCW Ch.VI Reg.VI/2"
+    title: "Regulation VI/2 — Mandatory minimum requirements for the issue of certificates of proficiency in survival craft, rescue boats and fast rescue boats"
+    min_chars: 200
+  - section_number: "STCW Ch.VI Reg.VI/3"
+    title: "Regulation VI/3 — Mandatory minimum requirements for training in advanced fire fighting"
+    min_chars: 200
+  - section_number: "STCW Ch.VI Reg.VI/4"
+    title: "Regulation VI/4 — Mandatory minimum requirements relating to medical first aid and medical care"
+    min_chars: 200
+  - section_number: "STCW Ch.VI Reg.VI/5"
+    title: "Regulation VI/5 — Mandatory minimum requirements for the issue of certificates of proficiency for ship security officers"
+    min_chars: 200
+  - section_number: "STCW Ch.VI Reg.VI/6"
+    title: "Regulation VI/6 — Mandatory minimum requirements for security-related training and instruction for all seafarers"
+    min_chars: 200
+
+  # ── Chapter VII Regulations ─────────────────────────────────────────────────
+  - section_number: "STCW Ch.VII Reg.VII/1"
+    title: "Regulation VII/1 — Issue of alternative certificates"
+    min_chars: 300
+  - section_number: "STCW Ch.VII Reg.VII/2"
+    title: "Regulation VII/2 — Certification of seafarers"
+    min_chars: 200
+  - section_number: "STCW Ch.VII Reg.VII/3"
+    title: "Regulation VII/3 — Principles governing the issue of alternative certificates"
+    min_chars: 200
+
+  # ── Chapter VIII Regulations ────────────────────────────────────────────────
+  - section_number: "STCW Ch.VIII Reg.VIII/1"
+    title: "Regulation VIII/1 — Fitness for duty"
+    min_chars: 200
+  - section_number: "STCW Ch.VIII Reg.VIII/2"
+    title: "Regulation VIII/2 — Watchkeeping arrangements and principles to be observed"
+    min_chars: 500
+
+  # ── STCW Code Parts ─────────────────────────────────────────────────────────
+  - section_number: "STCW Code Part A"
+    title: "STCW Code Part A — Mandatory standards regarding provisions of the annex to the STCW Convention"
+    min_chars: 200
+  - section_number: "STCW Code Part B"
+    title: "STCW Code Part B — Recommended guidance regarding provisions of the STCW Convention and its annex"
+    min_chars: 200
+
+  # ── STCW Code Part A — Chapter I sections (sampled key entries) ─────────────
+  - section_number: "STCW Code A-I/1"
+    title: "Section A-I/1 — Definitions and clarifications"
+    min_chars: 200
+  - section_number: "STCW Code A-I/2"
+    title: "Section A-I/2 — Certificates and endorsements"
+    min_chars: 300
+  - section_number: "STCW Code A-I/4"
+    title: "Section A-I/4 — Control procedures"
+    min_chars: 200
+  - section_number: "STCW Code A-I/6"
+    title: "Section A-I/6 — Training and assessment"
+    min_chars: 200
+  - section_number: "STCW Code A-I/7"
+    title: "Section A-I/7 — Communication of information"
+    min_chars: 300
+  - section_number: "STCW Code A-I/8"
+    title: "Section A-I/8 — Quality standards"
+    min_chars: 300
+  - section_number: "STCW Code A-I/9"
+    title: "Section A-I/9 — Medical standards"
+    min_chars: 500
+  - section_number: "STCW Code A-I/10"
+    title: "Section A-I/10 — Recognition of certificates"
+    min_chars: 200
+  - section_number: "STCW Code A-I/11"
+    title: "Section A-I/11 — Revalidation of certificates"
+    min_chars: 200
+  - section_number: "STCW Code A-I/12"
+    title: "Section A-I/12 — Standards governing the use of simulators"
+    min_chars: 500
+  - section_number: "STCW Code A-I/14"
+    title: "Section A-I/14 — Responsibilities of companies"
+    min_chars: 200
+
+  # ── Code A — Chapter II sections ────────────────────────────────────────────
+  - section_number: "STCW Code A-II/1"
+    title: "Section A-II/1 — Officer in charge of a navigational watch on ships of 500 GT or more"
+    min_chars: 1000
+  - section_number: "STCW Code A-II/2"
+    title: "Section A-II/2 — Masters and chief mates on ships of 500 GT or more"
+    min_chars: 1000
+  - section_number: "STCW Code A-II/3"
+    title: "Section A-II/3 — Officer in charge of a navigational watch and masters on ships of less than 500 GT engaged on near-coastal voyages"
+    min_chars: 500
+  - section_number: "STCW Code A-II/4"
+    title: "Section A-II/4 — Ratings forming part of a navigational watch"
+    min_chars: 300
+  - section_number: "STCW Code A-II/5"
+    title: "Section A-II/5 — Ratings as able seafarer deck"
+    min_chars: 300
+
+  # ── Code A — Chapter III sections ───────────────────────────────────────────
+  - section_number: "STCW Code A-III/1"
+    title: "Section A-III/1 — Officer in charge of an engineering watch"
+    min_chars: 1000
+  - section_number: "STCW Code A-III/2"
+    title: "Section A-III/2 — Chief engineer officers and second engineer officers on ships powered by main propulsion machinery of 3,000 kW or more"
+    min_chars: 1000
+  - section_number: "STCW Code A-III/3"
+    title: "Section A-III/3 — Chief engineer officers and second engineer officers on ships powered by main propulsion machinery of 750–3,000 kW"
+    min_chars: 500
+  - section_number: "STCW Code A-III/4"
+    title: "Section A-III/4 — Ratings forming part of a watch in a manned engine-room"
+    min_chars: 300
+  - section_number: "STCW Code A-III/5"
+    title: "Section A-III/5 — Ratings as able seafarer engine"
+    min_chars: 300
+  - section_number: "STCW Code A-III/6"
+    title: "Section A-III/6 — Electro-technical officers"
+    min_chars: 500
+  - section_number: "STCW Code A-III/7"
+    title: "Section A-III/7 — Electro-technical ratings"
+    min_chars: 300
+
+  # ── Code A — Chapter IV sections ────────────────────────────────────────────
+  - section_number: "STCW Code A-IV/1"
+    title: "Section A-IV/1 — Application"
+    min_chars: 100
+  - section_number: "STCW Code A-IV/2"
+    title: "Section A-IV/2 — GMDSS radio operators"
+    min_chars: 500
+
+  # ── Code A — Chapter V sections ─────────────────────────────────────────────
+  - section_number: "STCW Code A-V/1"
+    title: "Section A-V/1 — Training and qualifications of masters, officers and ratings on tankers"
+    min_chars: 500
+  - section_number: "STCW Code A-V/2"
+    title: "Section A-V/2 — Passenger ships"
+    min_chars: 500
+  - section_number: "STCW Code A-V/3"
+    title: "Section A-V/3 — IGF Code ships"
+    min_chars: 500
+  - section_number: "STCW Code A-V/4"
+    title: "Section A-V/4 — Masters and deck officers on ships operating in polar waters"
+    min_chars: 300
+
+  # ── Code A — Chapter VI sections ────────────────────────────────────────────
+  - section_number: "STCW Code A-VI/1"
+    title: "Section A-VI/1 — Safety familiarization, basic training and instruction"
+    min_chars: 500
+  - section_number: "STCW Code A-VI/2"
+    title: "Section A-VI/2 — Survival craft, rescue boats and fast rescue boats"
+    min_chars: 500
+  - section_number: "STCW Code A-VI/3"
+    title: "Section A-VI/3 — Advanced fire fighting"
+    min_chars: 300
+  - section_number: "STCW Code A-VI/4"
+    title: "Section A-VI/4 — Medical first aid and medical care"
+    min_chars: 300
+  - section_number: "STCW Code A-VI/5"
+    title: "Section A-VI/5 — Ship security officers"
+    min_chars: 300
+  - section_number: "STCW Code A-VI/6"
+    title: "Section A-VI/6 — Security-related training for all seafarers"
+    min_chars: 300
+
+  # ── Code A — Chapter VII sections ───────────────────────────────────────────
+  - section_number: "STCW Code A-VII/1"
+    title: "Section A-VII/1 — Alternative certification"
+    min_chars: 200
+
+  # ── Code B — selected guidance sections ─────────────────────────────────────
+  - section_number: "STCW Code B-I/2"
+    title: "Section B-I/2 — Certificates and endorsements (guidance)"
+    min_chars: 100
+  - section_number: "STCW Code B-I/7"
+    title: "Section B-I/7 — Communication of information (guidance)"
+    min_chars: 100
+  - section_number: "STCW Code B-I/8"
+    title: "Section B-I/8 — Quality standards (guidance)"
+    min_chars: 100
+  - section_number: "STCW Code B-VIII/2"
+    title: "Section B-VIII/2 — Watchkeeping arrangements (guidance)"
+    min_chars: 500
+
+  # ── Resolutions ─────────────────────────────────────────────────────────────
+  - section_number: "STCW Resolution 1"
+    title: "Resolution 1 — Adoption of amendments"
+    min_chars: 100
+  - section_number: "STCW Resolution 2"
+    title: "Resolution 2"
+    min_chars: 100
+  - section_number: "STCW Resolution 3"
+    title: "Resolution 3"
+    min_chars: 100
+  - section_number: "STCW Resolution 4"
+    title: "Resolution 4"
+    min_chars: 100
+  - section_number: "STCW Resolution 5"
+    title: "Resolution 5"
+    min_chars: 100
+  - section_number: "STCW Resolution 6"
+    title: "Resolution 6"
+    min_chars: 100
+  - section_number: "STCW Resolution 7"
+    title: "Resolution 7"
+    min_chars: 100
+  - section_number: "STCW Resolution 8"
+    title: "Resolution 8"
+    min_chars: 100
+  - section_number: "STCW Resolution 9"
+    title: "Resolution 9"
+    min_chars: 100
+  - section_number: "STCW Resolution 10"
+    title: "Resolution 10"
+    min_chars: 100

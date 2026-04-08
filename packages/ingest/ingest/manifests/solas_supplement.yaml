@@ -1,0 +1,27 @@
+source: solas_supplement
+title: "SOLAS Consolidated Edition 2024 — January 2026 Supplement"
+description: "IMO Maritime Safety Committee amendments adopted after the 2024 consolidated edition"
+# Section numbers match the canonical names emitted by
+# ingest/sources/solas_supplement.py: "SOLAS Supplement Jan2026 {MSC ref}".
+expected_sections:
+  - section_number: "SOLAS Supplement Jan2026 Preamble"
+    title: "Supplement Preamble"
+    min_chars: 100
+  - section_number: "SOLAS Supplement Jan2026 MSC.520(106)"
+    title: "MSC.520(106) — Chapter II-2 Fire Protection amendments"
+    min_chars: 500
+  - section_number: "SOLAS Supplement Jan2026 MSC.522(106)"
+    title: "MSC.522(106) — Chapter II-1 Construction amendments"
+    min_chars: 500
+  - section_number: "SOLAS Supplement Jan2026 MSC.532(107)"
+    title: "MSC.532(107) — Chapter V Navigation Safety amendments"
+    min_chars: 300
+  - section_number: "SOLAS Supplement Jan2026 MSC.533(107)"
+    title: "MSC.533(107) — Chapter XIV Polar Code amendments"
+    min_chars: 300
+  - section_number: "SOLAS Supplement Jan2026 MSC.534(107)"
+    title: "MSC.534(107) — Chapter II-1 Construction amendments"
+    min_chars: 300
+  - section_number: "SOLAS Supplement Jan2026 MSC.550(108)"
+    title: "MSC.550(108) — Appendix Certificates amendments"
+    min_chars: 300
