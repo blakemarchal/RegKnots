@@ -43,6 +43,7 @@ public/swe-worker-*.js
 apps/web/public/sw.js
 apps/web/public/workbox-*.js
 apps/web/public/fallback-*.js
+apps/web/public/swe-worker-*.js
 
 # Build
 *.tsbuildinfo

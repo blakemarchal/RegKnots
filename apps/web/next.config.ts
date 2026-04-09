@@ -8,118 +8,104 @@ const pwaConfig = withPWA({
   dest: "public",
   disable: process.env.NODE_ENV === "development",
   register: true,
-  cacheOnFrontEndNav: false,
-  aggressiveFrontEndNavCaching: false,
+  // Aggressively cache every page the user visits on client-side nav. This
+  // is what makes offline navigation *actually* work after a first visit —
+  // without it, route transitions that rely on RSC data fetches won't warm
+  // the cache.
+  cacheOnFrontEndNav: true,
+  aggressiveFrontEndNavCaching: true,
   cacheStartUrl: false,
   dynamicStartUrl: false,
-  extendDefaultRuntimeCaching: true,
-  // Navigation fallback — when a navigation request fails and no cache
-  // entry is available (e.g. fresh offline visit), serve /offline.html
-  // instead of the browser's default ERR_INTERNET_DISCONNECTED page.
-  // `fallbacks` is a top-level next-pwa option, not a Workbox GenerateSW one.
-  fallbacks: {
-    document: "/offline.html",
-  },
+  extendDefaultRuntimeCaching: false,
   workboxOptions: {
-    cacheId: "regknots-v7",
+    cacheId: "regknots-v8",
     disableDevLogs: true,
-    // Eliminate the precache manifest entirely for Next build assets. Hashed
-    // chunk URLs in a stale precache list caused bad-precaching-response 404s
-    // after every redeploy; we precache only the explicit entries below and
-    // rely on runtime caching (defined below) to populate chunks on visit.
-    exclude: [/.*/],
-    // Explicit precache entries. /offline.html is always available as the
-    // navigation fallback. /reference is the offline safety net so mariners
-    // can pull up rules even without a prior visit. Bump the revision string
-    // when the page content changes to force re-precache.
+    // Targeted exclude — only block the manifests and server bundles that
+    // would otherwise bloat the precache with 404-prone entries. CRITICALLY
+    // this does NOT exclude `/_next/static/chunks/**`, so page-specific JS
+    // chunks (app/reference/page-*.js, app/login/page-*.js, etc.) ARE
+    // auto-precached, fixing the offline nav bug where chunks errored with
+    // net::ERR_INTERNET_DISCONNECTED on first offline visit.
+    exclude: [
+      /middleware-manifest\.json$/,
+      /build-manifest\.json$/,
+      /react-loadable-manifest\.json$/,
+      /server\//,
+      /api\//,
+    ],
+    // Additional static routes we want guaranteed-cached on SW install.
     additionalManifestEntries: [
-      { url: "/offline.html", revision: "offline-v1" },
-      { url: "/reference", revision: "reference-v1" },
+      { url: "/offline.html", revision: "offline-v2" },
+      { url: "/reference", revision: "reference-v2" },
     ],
     runtimeCaching: [
-      // ── NetworkOnly: auth + mutating API routes ────────────────────────
-      // These MUST always hit the network — no cached auth, no cached chat.
+      // ── 1. Never cache /api/* — always hit the network ────────────────
+      // Covers /api/auth, /api/chat, /api/vessels, /api/billing, /api/admin,
+      // and every other route. Auth and mutating writes must be authoritative.
       {
-        urlPattern: /\/api\/auth\/.*/,
-        handler: "NetworkOnly",
-      },
-      {
-        urlPattern: /\/api\/billing\/.*/,
-        handler: "NetworkOnly",
-      },
-      {
-        urlPattern: /\/api\/admin\/.*/,
-        handler: "NetworkOnly",
-      },
-      {
-        urlPattern: /\/api\/chat(\/.*)?$/,
-        handler: "NetworkOnly",
-      },
-      {
-        urlPattern: /\/api\/vessels(\/.*)?$/,
-        handler: "NetworkOnly",
-      },
-      {
-        // Catch-all for every other /api/* route — must stay NetworkOnly
-        // so the default next-pwa `apis` NetworkFirst rule never catches
-        // them and accidentally serves stale API responses offline.
-        urlPattern: ({ url, sameOrigin }: { url: URL; sameOrigin: boolean }) =>
-          sameOrigin && url.pathname.startsWith("/api/"),
+        urlPattern: /\/api\//i,
         handler: "NetworkOnly",
       },
 
-      // ── CacheFirst: immutable Next.js static assets ────────────────────
-      // Hashed chunks/css/media never change for a given build. CacheFirst
-      // gives instant offline loads once the user has been online at least
-      // once. The default next-pwa `next-static-js-assets` rule only covers
-      // .js — this covers the full /_next/static/** tree.
+      // ── 2. CacheFirst for every hashed Next.js static asset ──────────
+      // Chunks/css/media are content-hashed so they're safe to keep forever.
+      // This rule is the runtime fallback for any chunk that slipped past
+      // the build-time precache (e.g. lazy-loaded code splits).
       {
-        urlPattern: /\/_next\/static\/.+/i,
+        urlPattern: /\/_next\/static\/.*/i,
         handler: "CacheFirst",
         options: {
-          cacheName: "next-static",
+          cacheName: "next-static-assets",
           expiration: {
-            maxEntries: 256,
+            maxEntries: 512,
             maxAgeSeconds: 30 * 24 * 60 * 60, // 30 days
+          },
+          cacheableResponse: {
+            statuses: [0, 200],
           },
         },
       },
 
-      // ── StaleWhileRevalidate: app shell navigation requests ────────────
-      // Serves the cached HTML shell instantly offline and updates in the
-      // background when online. Placed BEFORE the next-pwa default `pages`
-      // NetworkFirst rule so cached routes load immediately without the
-      // NetworkFirst timeout when the network is slow or unavailable.
+      // ── 3. SWR for Next.js RSC data requests ──────────────────────────
       {
-        urlPattern: ({ url, request, sameOrigin }: {
-          url: URL
-          request: Request
-          sameOrigin: boolean
-        }) => {
-          if (!sameOrigin) return false
-          if (request.mode !== "navigate") return false
-          if (url.pathname.startsWith("/api/")) return false
-          return true
+        urlPattern: /\/_next\/data\/.*/i,
+        handler: "StaleWhileRevalidate",
+        options: {
+          cacheName: "next-data",
+          expiration: {
+            maxEntries: 64,
+            maxAgeSeconds: 24 * 60 * 60, // 24h
+          },
         },
+      },
+
+      // ── 4. SWR for in-app page routes ─────────────────────────────────
+      // Matches the authenticated app shell pages. Cached HTML shells load
+      // instantly offline; background revalidation keeps them fresh.
+      {
+        urlPattern: /^https:\/\/regknots\.com\/(chat|history|account|reference|certificates|admin|onboarding).*/i,
         handler: "StaleWhileRevalidate",
         options: {
           cacheName: "app-pages",
           expiration: {
             maxEntries: 32,
-            maxAgeSeconds: 7 * 24 * 60 * 60, // 7 days
+            maxAgeSeconds: 24 * 60 * 60,
           },
         },
       },
 
-      // ── StaleWhileRevalidate: Next.js data fetching ────────────────────
+      // ── 5. Catch-all: other same-origin GETs (fonts, images, root /) ──
+      // Keeps the offline safety net wide without resorting to NetworkFirst,
+      // which would timeout and fail on truly offline navigations.
       {
-        urlPattern: /\/_next\/data\/.+/i,
+        urlPattern: ({ url, sameOrigin }: { url: URL; sameOrigin: boolean }) =>
+          sameOrigin && !url.pathname.startsWith("/api/"),
         handler: "StaleWhileRevalidate",
         options: {
-          cacheName: "next-data",
+          cacheName: "app-shell",
           expiration: {
-            maxEntries: 32,
-            maxAgeSeconds: 24 * 60 * 60, // 24h
+            maxEntries: 64,
+            maxAgeSeconds: 7 * 24 * 60 * 60,
           },
         },
       },
