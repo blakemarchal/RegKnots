@@ -774,6 +774,17 @@ async def _finalize_answer(
     if not all_unverified:
         return answer, verified_cited, [], vessel_update, 0, 0, False
 
+    # DEFENSIVE LOG — WARNING level so it survives any future INFO-level
+    # filtering and is unmissable in production when regeneration kicks in.
+    # If this line isn't in the logs for a citation-error conversation,
+    # either the code isn't actually deployed or control flow never reached
+    # here. Either way it's the first thing to check next time.
+    logger.warning(
+        "REGEN: Entering regeneration — %d unverified citation(s): %s",
+        len(all_unverified),
+        all_unverified,
+    )
+
     # Log the ORIGINAL answer's bad citations for forensics, regardless of
     # whether regeneration ultimately succeeds. message_content is truncated
     # inside _log_citation_errors.
