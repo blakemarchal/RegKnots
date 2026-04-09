@@ -4,6 +4,12 @@ import withPWA from "@ducanh2912/next-pwa";
 
 const nextConfig: NextConfig = {};
 
+// Build-time-unique revision so every deploy re-fetches the precached HTML
+// shells (which reference freshly-hashed chunk URLs). Combined with
+// cleanupOutdatedCaches() this means a new SW install always pulls a
+// consistent set of HTML + chunks.
+const APP_SHELL_REVISION = `shell-${Date.now()}`;
+
 const pwaConfig = withPWA({
   dest: "public",
   disable: process.env.NODE_ENV === "development",
@@ -18,7 +24,7 @@ const pwaConfig = withPWA({
   dynamicStartUrl: false,
   extendDefaultRuntimeCaching: false,
   workboxOptions: {
-    cacheId: "regknots-v8",
+    cacheId: "regknots-v9",
     disableDevLogs: true,
     // Targeted exclude — only block the manifests and server bundles that
     // would otherwise bloat the precache with 404-prone entries. CRITICALLY
@@ -33,10 +39,22 @@ const pwaConfig = withPWA({
       /server\//,
       /api\//,
     ],
-    // Additional static routes we want guaranteed-cached on SW install.
+    // Precache the full authenticated app shell. Every route here is
+    // fetched during SW install, so even a user who lands directly on
+    // /reference and then hits the Back button (→ /) gets a cache hit
+    // instead of a `no-response` error. The HTML for /, /history, etc.
+    // references hashed chunks which are auto-precached under _next/static.
+    // /offline.html is the ultimate fallback when a navigation misses
+    // both precache and network (served via setCatchHandler injected by
+    // scripts/patch-sw.mjs — see postbuild script).
     additionalManifestEntries: [
-      { url: "/offline.html", revision: "offline-v2" },
-      { url: "/reference", revision: "reference-v2" },
+      { url: "/offline.html", revision: "offline-v3" },
+      { url: "/", revision: APP_SHELL_REVISION },
+      { url: "/history", revision: APP_SHELL_REVISION },
+      { url: "/account", revision: APP_SHELL_REVISION },
+      { url: "/certificates", revision: APP_SHELL_REVISION },
+      { url: "/onboarding", revision: APP_SHELL_REVISION },
+      { url: "/reference", revision: APP_SHELL_REVISION },
     ],
     runtimeCaching: [
       // ── 1. Never cache /api/* — always hit the network ────────────────
