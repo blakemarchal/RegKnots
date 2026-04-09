@@ -776,8 +776,13 @@ class FoundingEmailPreview(BaseModel):
 
 
 class FoundingEmailSendResult(BaseModel):
+    # Spec: {"sent": 12, "failed": 2, "failed_emails": ["x@y.com", ...]}
+    sent: int
+    failed: int
+    failed_emails: list[str]
+    # Back-compat alias preserved so any older frontend build that reads
+    # `sent_count` still works until its next deploy.
     sent_count: int
-    failed: list[str]
 
 
 class FoundingEmailTestResult(BaseModel):
@@ -841,7 +846,12 @@ async def founding_email_send(
     Guard: if any sends have already happened (any user has founding_email_sent=true)
     require ?force=true to send again to the remaining users.
     """
-    from app.email import send_founding_member_email
+    import asyncio as _asyncio
+    from app.email import (
+        RESEND_THROTTLE_SECONDS,
+        send_founding_member_email,
+        send_with_throttle,
+    )
 
     pool = await get_pool()
 
@@ -868,13 +878,22 @@ async def founding_email_send(
     )
 
     sent_count = 0
-    failed: list[str] = []
-    for row in rows:
+    failed_emails: list[str] = []
+    total = len(rows)
+    for idx, row in enumerate(rows):
+        email = row["email"]
         try:
-            await send_founding_member_email(row["email"], row["full_name"])
+            await send_with_throttle(
+                lambda email=email, name=row["full_name"]: send_founding_member_email(email, name),
+                label=email,
+            )
         except Exception as exc:
-            logger.error("Founding email send failed for %s: %s", row["email"], exc)
-            failed.append(row["email"])
+            logger.error("Founding email send failed for %s: %s", email, exc)
+            failed_emails.append(email)
+            # Still sleep between sends — a failure doesn't earn us a free
+            # send slot from Resend, and back-off helps the retry storm.
+            if idx < total - 1:
+                await _asyncio.sleep(RESEND_THROTTLE_SECONDS)
             continue
 
         try:
@@ -884,19 +903,42 @@ async def founding_email_send(
             )
             sent_count += 1
         except Exception as exc:
-            logger.error("Failed to mark founding_email_sent for %s: %s", row["email"], exc)
-            failed.append(row["email"])
+            logger.error("Failed to mark founding_email_sent for %s: %s", email, exc)
+            failed_emails.append(email)
+
+        # Space out successive sends under Resend's 5 req/s ceiling.
+        if idx < total - 1:
+            await _asyncio.sleep(RESEND_THROTTLE_SECONDS)
 
     logger.info(
         "Admin %s ran founding-email/send: sent=%d failed=%d force=%s",
-        admin.email, sent_count, len(failed), force,
+        admin.email, sent_count, len(failed_emails), force,
     )
-    return FoundingEmailSendResult(sent_count=sent_count, failed=failed)
+    return FoundingEmailSendResult(
+        sent=sent_count,
+        failed=len(failed_emails),
+        failed_emails=failed_emails,
+        sent_count=sent_count,
+    )
 
 
 # ── Sentry issues ────────────────────────────────────────────────────────────
 
-SENTRY_PROJECTS = ["regknots-api", "regknots-web"]
+# Default scope: queried when SENTRY_PROJECT env var is unset.
+DEFAULT_SENTRY_PROJECTS = ["regknots-api", "regknots-web"]
+
+
+def _resolve_sentry_projects() -> list[str]:
+    """Return the project slug list to query based on SENTRY_PROJECT env var.
+
+    - Unset → DEFAULT_SENTRY_PROJECTS (both frontend and backend)
+    - "foo" → ["foo"]
+    - "foo,bar" → ["foo", "bar"]
+    """
+    raw = (settings.sentry_project or "").strip()
+    if not raw:
+        return DEFAULT_SENTRY_PROJECTS
+    return [p.strip() for p in raw.split(",") if p.strip()]
 
 
 class SentryIssue(BaseModel):
@@ -904,48 +946,61 @@ class SentryIssue(BaseModel):
     title: str
     level: str
     count: int
+    first_seen: str | None = None
     last_seen: str
-    link: str
+    permalink: str
     project: str
+    # Legacy alias kept for any cached frontend bundle still reading `link`.
+    link: str
 
 
 @router.get("/sentry-issues", response_model=list[SentryIssue])
 async def sentry_issues(
     _admin: Annotated[CurrentUser, Depends(require_admin)],
 ) -> list[SentryIssue]:
-    """Fetch the 10 most recent unresolved issues from Sentry."""
+    """Fetch the 20 most recent unresolved issues from Sentry.
+
+    Graceful degradation: if SENTRY_AUTH_TOKEN / SENTRY_ORG aren't set,
+    returns an empty list with HTTP 200 so the frontend can show
+    "No recent issues" instead of an error.
+    """
     if not settings.sentry_auth_token or not settings.sentry_org:
+        logger.debug("Sentry not configured (no token or org) — returning []")
         return []
 
     org = settings.sentry_org
+    projects = _resolve_sentry_projects()
     headers = {"Authorization": f"Bearer {settings.sentry_auth_token}"}
     all_issues: list[SentryIssue] = []
 
     async with httpx.AsyncClient(timeout=10) as client:
-        for project in SENTRY_PROJECTS:
+        for project in projects:
             url = f"https://sentry.io/api/0/projects/{org}/{project}/issues/"
             try:
                 resp = await client.get(
                     url,
                     headers=headers,
-                    params={"query": "is:unresolved", "sort": "date", "limit": 10},
+                    params={"query": "is:unresolved", "sort": "date", "limit": 20},
                 )
                 resp.raise_for_status()
                 for issue in resp.json():
+                    permalink = issue.get("permalink", "")
                     all_issues.append(SentryIssue(
                         id=issue["id"],
                         title=issue["title"],
                         level=issue["level"],
                         count=int(issue["count"]),
+                        first_seen=issue.get("firstSeen"),
                         last_seen=issue["lastSeen"],
-                        link=issue["permalink"],
+                        permalink=permalink,
+                        link=permalink,
                         project=project,
                     ))
             except Exception as exc:
                 logger.warning("Sentry fetch failed for %s: %s", project, exc)
 
     all_issues.sort(key=lambda i: i.last_seen, reverse=True)
-    return all_issues[:10]
+    return all_issues[:20]
 
 
 # ── Chat export ──────────────────────────────────────────────────────────────

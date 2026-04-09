@@ -1,7 +1,75 @@
+import asyncio
 import html as _html_lib
+import logging
+from typing import Awaitable, Callable
 
 import resend
 from app.config import settings
+
+logger = logging.getLogger(__name__)
+
+# Resend enforces 5 requests/sec on the default plan. Sleeping 0.25s between
+# sends gives us ~4/sec — a safe margin under that ceiling. All batch send
+# loops (admin/founding-email/send, trial reminders, etc.) MUST go through
+# send_with_throttle() to stay under the limit.
+RESEND_THROTTLE_SECONDS: float = 0.25
+
+
+def _is_rate_limit_error(exc: Exception) -> bool:
+    """Heuristic: does this exception look like a Resend 429?"""
+    msg = str(exc).lower()
+    return (
+        "429" in msg
+        or "too many requests" in msg
+        or "rate limit" in msg
+        or "rate_limit" in msg
+    )
+
+
+async def send_with_throttle(
+    coro_factory: Callable[[], Awaitable[None]],
+    label: str,
+) -> None:
+    """Invoke one email send with a 1-retry on rate-limit errors.
+
+    Does NOT sleep AFTER the send — callers are responsible for spacing
+    successive sends by RESEND_THROTTLE_SECONDS so a 1-off send doesn't
+    pay a needless delay.
+
+    Args:
+        coro_factory: a zero-arg callable returning an awaitable that
+            performs exactly one Resend send. Passed as a factory (not a
+            raw coroutine) so we can re-invoke it cleanly on retry.
+        label: human-readable identifier for logs (usually the recipient
+            email), used to differentiate entries in Sentry/journald.
+
+    Raises:
+        Whatever the underlying send raises (after the retry, on the
+        second failure). Callers are expected to wrap this in their own
+        try/except + collect failures into a list.
+    """
+    try:
+        await coro_factory()
+        logger.info("Email sent: %s", label)
+        return
+    except Exception as exc:
+        if _is_rate_limit_error(exc):
+            logger.warning(
+                "Email rate-limited on first attempt (%s): %s — retrying in 1s",
+                label, exc,
+            )
+            await asyncio.sleep(1.0)
+            try:
+                await coro_factory()
+                logger.info("Email sent on retry: %s", label)
+                return
+            except Exception as retry_exc:
+                logger.error(
+                    "Email failed after retry (%s): %s", label, retry_exc,
+                )
+                raise
+        logger.error("Email failed (%s): %s", label, exc)
+        raise
 
 resend.api_key = settings.resend_api_key
 

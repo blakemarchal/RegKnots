@@ -44,6 +44,11 @@ class Settings(BaseSettings):
     sentry_dsn: str = Field(default="", validation_alias="SENTRY_DSN")
     sentry_auth_token: str = Field(default="", validation_alias="SENTRY_AUTH_TOKEN")
     sentry_org: str = Field(default="", validation_alias="SENTRY_ORG")
+    # Optional override for the /admin/sentry-issues project scope.
+    # If unset, the endpoint queries the default list hardcoded in admin.py
+    # (regknots-api + regknots-web). If set to a single slug, only that
+    # project is queried. Comma-separated values are also accepted.
+    sentry_project: str = Field(default="", validation_alias="SENTRY_PROJECT")
 
     @property
     def is_dev(self) -> bool:

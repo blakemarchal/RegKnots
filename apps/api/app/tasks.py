@@ -103,7 +103,11 @@ def send_trial_expiring_reminders():
 async def _send_trial_reminders_async():
     import asyncpg
     from app.config import settings
-    from app.email import send_trial_expiring_email
+    from app.email import (
+        RESEND_THROTTLE_SECONDS,
+        send_trial_expiring_email,
+        send_with_throttle,
+    )
 
     dsn = settings.database_url.replace("postgresql+asyncpg://", "postgresql://")
     conn = await asyncpg.connect(dsn)
@@ -117,16 +121,25 @@ async def _send_trial_reminders_async():
               AND trial_ends_at BETWEEN NOW() + INTERVAL '2 days' AND NOW() + INTERVAL '4 days'
             """
         )
-        for row in rows:
+        total = len(rows)
+        for idx, row in enumerate(rows):
+            email = row["email"]
             try:
-                await send_trial_expiring_email(row["email"], row["full_name"] or "", row["message_count"])
+                await send_with_throttle(
+                    lambda email=email, name=(row["full_name"] or ""), count=row["message_count"]:
+                        send_trial_expiring_email(email, name, count),
+                    label=email,
+                )
                 await conn.execute(
                     "UPDATE users SET trial_reminder_sent = TRUE WHERE id = $1",
                     row["id"],
                 )
-                logger.info("Sent trial expiring reminder to %s", row["email"])
+                logger.info("Sent trial expiring reminder to %s", email)
             except Exception as exc:
-                logger.error("Failed to send trial reminder to %s: %s", row["email"], exc)
+                logger.error("Failed to send trial reminder to %s: %s", email, exc)
+            # Stay under Resend's 5 req/s limit even on failure.
+            if idx < total - 1:
+                await asyncio.sleep(RESEND_THROTTLE_SECONDS)
     finally:
         await conn.close()
 

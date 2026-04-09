@@ -57,8 +57,10 @@ interface SentryIssue {
   title: string
   level: string
   count: number
+  first_seen: string | null
   last_seen: string
-  link: string
+  permalink: string
+  link: string  // legacy alias, same value as permalink
   project: string
 }
 
@@ -195,6 +197,21 @@ function StatCard({ label, value, wide }: { label: string; value: string | numbe
 
 function fmtDate(iso: string | null): string {
   if (!iso) return '-'
+  return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' })
+}
+
+function fmtRelative(iso: string | null): string {
+  if (!iso) return '-'
+  const then = new Date(iso).getTime()
+  const diffSec = Math.max(0, Math.round((Date.now() - then) / 1000))
+  if (diffSec < 60) return `${diffSec}s ago`
+  const diffMin = Math.round(diffSec / 60)
+  if (diffMin < 60) return `${diffMin} min ago`
+  const diffHr = Math.round(diffMin / 60)
+  if (diffHr < 24) return `${diffHr}h ago`
+  const diffDay = Math.round(diffHr / 24)
+  if (diffDay < 30) return `${diffDay}d ago`
+  // Fall back to absolute for older items
   return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' })
 }
 
@@ -607,16 +624,20 @@ function AdminContent() {
     setFoundingAction('send')
     setFoundingResult(null)
     try {
-      const res = await apiRequest<{ sent_count: number; failed: string[] }>(
+      const res = await apiRequest<{
+        sent: number
+        failed: number
+        failed_emails: string[]
+      }>(
         '/admin/founding-email/send',
         { method: 'POST' },
       )
-      const failedNote = res.failed.length > 0
-        ? ` · ${res.failed.length} failed`
+      const failedNote = res.failed > 0
+        ? ` · ${res.failed} failed${res.failed_emails.length > 0 ? ` (${res.failed_emails.slice(0, 3).join(', ')}${res.failed_emails.length > 3 ? '…' : ''})` : ''}`
         : ''
       setFoundingResult({
-        msg: `Sent to ${res.sent_count} users${failedNote}`,
-        ok: res.failed.length === 0,
+        msg: `Sent to ${res.sent} users${failedNote}`,
+        ok: res.failed === 0,
       })
       fetchFoundingPreview()
     } catch (err) {
@@ -624,7 +645,7 @@ function AdminContent() {
       setFoundingResult({ msg, ok: false })
     }
     setFoundingAction(null)
-    setTimeout(() => setFoundingResult(null), 8000)
+    setTimeout(() => setFoundingResult(null), 10000)
   }
 
   async function closeTicket(ticketId: string) {
@@ -997,7 +1018,9 @@ function AdminContent() {
                             </a>
                           </td>
                           <td className="px-3 py-2 text-right text-[#f0ece4]/80">{issue.count.toLocaleString()}</td>
-                          <td className="px-3 py-2 text-[#6b7594]">{fmtDate(issue.last_seen)}</td>
+                          <td className="px-3 py-2 text-[#6b7594]" title={new Date(issue.last_seen).toLocaleString()}>
+                            {fmtRelative(issue.last_seen)}
+                          </td>
                         </tr>
                       )
                     })}
