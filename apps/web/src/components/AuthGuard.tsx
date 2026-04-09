@@ -25,7 +25,7 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
 
   // When offline with no auth hint, render children anyway — the cached
   // data paths (IndexedDB conversations, vessel cache) will still work,
-  // and the OfflineBanner makes the state visible to the user.
+  // and the OfflineIndicator in each header makes the state visible.
   if (!isAuthenticated && !isOffline) {
     return null
   }

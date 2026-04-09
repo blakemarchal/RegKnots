@@ -25,6 +25,7 @@ import { PilotEndedModal } from './PilotEndedModal'
 import { PilotSurveyModal } from './PilotSurveyModal'
 import { NotificationBanner } from './NotificationBanner'
 import { VerificationBanner } from './VerificationBanner'
+import { OfflineIndicator } from './OfflineIndicator'
 
 interface ConversationMessage {
   role: string
@@ -342,9 +343,12 @@ function ChatInterfaceInner({ initialConversationId }: Props) {
             <path d="M12 8l1.5 3.5L12 16l-1.5-4.5L12 8z" fill="currentColor" stroke="none" />
           </svg>
           <div>
-            <h1 className="font-display text-xl font-bold text-[#f0ece4] tracking-wide leading-none">
-              RegKnot
-            </h1>
+            <div className="flex items-center gap-2">
+              <h1 className="font-display text-xl font-bold text-[#f0ece4] tracking-wide leading-none">
+                RegKnot
+              </h1>
+              <OfflineIndicator />
+            </div>
             <p className="text-[9px] text-[#6b7594] tracking-[0.2em] uppercase leading-tight mt-0.5">
               Maritime Compliance Co-Pilot
             </p>
