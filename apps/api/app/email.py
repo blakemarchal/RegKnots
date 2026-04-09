@@ -601,6 +601,51 @@ async def send_founding_member_email(to: str, name: str | None) -> None:
     })
 
 
+async def send_contact_inquiry_email(
+    from_name: str,
+    from_email: str,
+    company: str | None,
+    message: str,
+) -> None:
+    """Forward a public contact-form submission to hello@regknots.com.
+
+    `reply_to` is set to the inquirer's email so replying from the inbox
+    goes straight to them, not back to the RegKnot sending domain.
+    """
+    safe_name = _html_lib.escape(from_name)
+    safe_email = _html_lib.escape(from_email)
+    safe_company = _html_lib.escape(company) if company else None
+    safe_message = _html_lib.escape(message).replace("\n", "<br>")
+
+    company_line = (
+        f"<p><strong>Company:</strong> {safe_company}</p>"
+        if safe_company
+        else '<p><strong>Company:</strong> <span style="color:rgba(107,117,148,0.7);">not provided</span></p>'
+    )
+    subject = (
+        f"RegKnots Contact: {from_name} ({company})"
+        if company
+        else f"RegKnots Contact: {from_name}"
+    )
+
+    html = _html(f"""
+      <h1>New Contact Inquiry</h1>
+      <p><strong>Name:</strong> {safe_name}</p>
+      <p><strong>Email:</strong> <a href="mailto:{safe_email}" style="color:#2dd4bf; text-decoration:none;">{safe_email}</a></p>
+      {company_line}
+      <hr class="divider">
+      <p style="white-space: pre-wrap; color:#f0ece4;">{safe_message}</p>
+    """)
+
+    resend.Emails.send({
+        "from": FROM_EMAIL,
+        "to": ["hello@regknots.com"],
+        "reply_to": from_email,
+        "subject": subject,
+        "html": html,
+    })
+
+
 async def send_subscription_resumed_email(to_email: str, full_name: str) -> None:
     raw_first = full_name.split()[0] if full_name.strip() else "Mariner"
     first_name = _html_lib.escape(raw_first)

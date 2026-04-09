@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { CompassRose } from '@/components/CompassRose'
+import { ContactModal } from '@/components/ContactModal'
 
 // ── Static citation chip (non-interactive, landing page only) ─────────────────
 function StaticChip({ label }: { label: string }) {
@@ -97,6 +98,7 @@ function PricingCard({
 // ── Page ──────────────────────────────────────────────────────────────────────
 export default function LandingPage() {
   const [plan, setPlan] = useState<'monthly' | 'annual'>('monthly')
+  const [contactOpen, setContactOpen] = useState(false)
 
   return (
     <div className="min-h-screen bg-[#0a0e1a] overflow-x-hidden">
@@ -477,7 +479,15 @@ export default function LandingPage() {
           </div>
 
           <p className="font-mono text-xs text-[#6b7594] text-center mt-6">
-            Fleet pricing available. Contact us at{' '}
+            Fleet pricing available.{' '}
+            <button
+              type="button"
+              onClick={() => setContactOpen(true)}
+              className="text-[#2dd4bf] hover:underline font-mono"
+            >
+              Contact us
+            </button>
+            {' '}or email{' '}
             <a href="mailto:hello@regknots.com" className="text-[#2dd4bf] hover:underline">
               hello@regknots.com
             </a>
@@ -529,7 +539,14 @@ export default function LandingPage() {
           <p className="font-mono text-xs text-[#6b7594]">
             Navigation aid only — not legal advice
           </p>
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-4 flex-wrap justify-center">
+            <button
+              type="button"
+              onClick={() => setContactOpen(true)}
+              className="font-mono text-xs text-[#6b7594] hover:text-[#f0ece4]/80 transition-colors"
+            >
+              Contact Us
+            </button>
             <a href="/terms" className="font-mono text-xs text-[#6b7594] hover:text-[#f0ece4]/80 transition-colors">
               Terms
             </a>
@@ -549,6 +566,7 @@ export default function LandingPage() {
         </div>
       </footer>
 
+      <ContactModal open={contactOpen} onClose={() => setContactOpen(false)} />
     </div>
   )
 }
