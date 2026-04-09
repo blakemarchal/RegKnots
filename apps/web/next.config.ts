@@ -14,7 +14,7 @@ const pwaConfig = withPWA({
   dynamicStartUrl: false,
   extendDefaultRuntimeCaching: true,
   workboxOptions: {
-    cacheId: "regknots-v4",
+    cacheId: "regknots-v5",
     disableDevLogs: true,
     // Eliminate the precache manifest entirely. Hashed chunk URLs in a stale
     // precache list cause bad-precaching-response 404s after every redeploy.
@@ -31,6 +31,17 @@ const pwaConfig = withPWA({
       },
       {
         urlPattern: /\/api\/admin\/.*/,
+        handler: "NetworkOnly",
+      },
+      {
+        // Chat messages and streaming must always hit the network — serving
+        // stale regulation answers from cache would be dangerous.
+        urlPattern: /\/api\/chat(\/.*)?$/,
+        handler: "NetworkOnly",
+      },
+      {
+        // Vessel profile CRUD — must be authoritative.
+        urlPattern: /\/api\/vessels(\/.*)?$/,
         handler: "NetworkOnly",
       },
     ],

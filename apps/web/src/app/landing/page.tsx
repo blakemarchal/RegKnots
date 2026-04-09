@@ -482,7 +482,7 @@ export default function LandingPage() {
               hello@regknots.com
             </a>
           </p>
-          <p className="font-mono text-xs text-[#6b7594] text-center mt-2">
+          <p className="font-mono text-xs text-[#6b7594] text-center mt-2 text-balance break-words">
             Fleet operators: request a custom subdomain (
             <span className="text-[#f0ece4]/80">yourcompany.regknots.com</span>) for simplified
             fleet-wide deployment and firewall whitelisting.

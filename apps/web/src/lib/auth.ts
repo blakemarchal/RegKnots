@@ -1,6 +1,7 @@
 'use client'
 
 import { create } from 'zustand'
+import { cacheVessels } from './offlineCache'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'
 
@@ -93,8 +94,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       activeVesselId: s.activeVesselId === id ? null : s.activeVesselId,
     })),
 
-  setVessels: (vessels: VesselSummary[]) =>
-    set({ vessels }),
+  setVessels: (vessels: VesselSummary[]) => {
+    set({ vessels })
+    // Best-effort offline cache — never block or fail the main flow.
+    cacheVessels(vessels).catch(() => {})
+  },
 
   setActiveVessel: (id: string | null) =>
     set({ activeVesselId: id }),

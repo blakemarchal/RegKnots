@@ -7,6 +7,12 @@ import { sendMessageStream } from '@/lib/mockApi'
 import { apiRequest } from '@/lib/api'
 import { useAuthStore } from '@/lib/auth'
 import type { BillingStatus } from '@/lib/auth'
+import {
+  cacheConversations,
+  getCachedConversations,
+  type CachedConversation,
+} from '@/lib/offlineCache'
+import { useOfflineDetection } from '@/hooks/useOfflineDetection'
 import { ChatThread } from './ChatThread'
 import { InputBar } from './InputBar'
 import { VesselPill } from './VesselPill'
@@ -57,6 +63,7 @@ function ChatInterfaceInner({ initialConversationId }: Props) {
   const router = useRouter()
   const { canInstall, install } = usePwa()
   const { vessels, activeVesselId, billing, setBilling } = useAuthStore()
+  const { isOffline } = useOfflineDetection()
 
   // Fetch billing status on mount
   useEffect(() => {
@@ -97,12 +104,43 @@ function ChatInterfaceInner({ initialConversationId }: Props) {
     []
   )
 
-  // Restore existing conversation on mount
+  // Upsert a single conversation's messages into the offline cache. Reads the
+  // existing cached list, replaces (or inserts) the entry by id, and writes
+  // back. Best-effort — never throws into the caller.
+  const upsertCachedConversation = useCallback(
+    async (id: string, msgs: Message[]) => {
+      try {
+        const existing = await getCachedConversations()
+        const nowIso = new Date().toISOString()
+        const entry: CachedConversation = {
+          id,
+          title: existing.find(c => c.id === id)?.title ?? null,
+          updated_at: nowIso,
+          messages: msgs.map(m => ({
+            id: m.id,
+            role: m.role as 'user' | 'assistant',
+            content: m.content,
+            created_at: nowIso,
+          })),
+        }
+        const next = [entry, ...existing.filter(c => c.id !== id)]
+        await cacheConversations(next)
+      } catch {
+        // Cache failures must never break the main app flow.
+      }
+    },
+    [],
+  )
+
+  // Restore existing conversation on mount — falls back to cache when offline
+  // or when the network request fails.
   useEffect(() => {
     if (!initialConversationId) return
 
+    let cancelled = false
     apiRequest<ConversationMessage[]>(`/conversations/${initialConversationId}/messages`)
       .then(rows => {
+        if (cancelled) return
         const restored: Message[] = rows.map(r => ({
           id: crypto.randomUUID(),
           role: r.role as 'user' | 'assistant',
@@ -110,14 +148,32 @@ function ChatInterfaceInner({ initialConversationId }: Props) {
           citations: r.cited_regulations,
         }))
         setMessages(restored)
+        upsertCachedConversation(initialConversationId, restored).catch(() => {})
       })
-      .catch(() => {
-        // If load fails, start fresh — don't block the UI
+      .catch(async () => {
+        // If load fails, try the offline cache before giving up.
+        try {
+          const cached = await getCachedConversations()
+          const hit = cached.find(c => c.id === initialConversationId)
+          if (hit && !cancelled) {
+            const restored: Message[] = hit.messages.map(m => ({
+              id: m.id,
+              role: m.role,
+              content: m.content,
+              citations: [],
+            }))
+            setMessages(restored)
+          }
+        } catch {
+          // Cache failure — start fresh, don't block the UI.
+        }
       })
       .finally(() => {
-        setRestoring(false)
+        if (!cancelled) setRestoring(false)
       })
-  }, [initialConversationId]) // eslint-disable-line react-hooks/exhaustive-deps
+
+    return () => { cancelled = true }
+  }, [initialConversationId, upsertCachedConversation])
 
   const handleSend = useCallback(async () => {
     const query = input.trim()
@@ -143,15 +199,18 @@ function ChatInterfaceInner({ initialConversationId }: Props) {
         (status) => setProgressMsg(status),
         (data) => {
           setConversationId(data.conversation_id)
-          setMessages(prev => [
-            ...prev,
-            {
-              id: crypto.randomUUID(),
-              role: 'assistant',
-              content: data.answer,
-              citations: data.cited_regulations,
-            },
-          ])
+          const assistantMsg: Message = {
+            id: crypto.randomUUID(),
+            role: 'assistant',
+            content: data.answer,
+            citations: data.cited_regulations,
+          }
+          setMessages(prev => {
+            const next = [...prev, assistantMsg]
+            // Upsert updated conversation into the offline cache (best-effort).
+            upsertCachedConversation(data.conversation_id, next).catch(() => {})
+            return next
+          })
           // Refresh billing status in background after each message
           apiRequest<BillingStatus>('/billing/status').then(setBilling).catch(() => {})
         },
@@ -195,7 +254,7 @@ function ChatInterfaceInner({ initialConversationId }: Props) {
       setProgressMsg(null)
       setLoading(false)
     }
-  }, [input, loading, conversationId, router, setBilling])
+  }, [input, loading, conversationId, router, setBilling, upsertCachedConversation])
 
   function handlePrompt(text: string) {
     setInput(text)
@@ -217,15 +276,17 @@ function ChatInterfaceInner({ initialConversationId }: Props) {
         (status) => setProgressMsg(status),
         (data) => {
           setConversationId(data.conversation_id)
-          setMessages(prev => [
-            ...prev,
-            {
-              id: crypto.randomUUID(),
-              role: 'assistant',
-              content: data.answer,
-              citations: data.cited_regulations,
-            },
-          ])
+          const assistantMsg: Message = {
+            id: crypto.randomUUID(),
+            role: 'assistant',
+            content: data.answer,
+            citations: data.cited_regulations,
+          }
+          setMessages(prev => {
+            const next = [...prev, assistantMsg]
+            upsertCachedConversation(data.conversation_id, next).catch(() => {})
+            return next
+          })
           // Refresh billing status in background
           apiRequest<BillingStatus>('/billing/status').then(setBilling).catch(() => {})
         },
@@ -409,6 +470,7 @@ function ChatInterfaceInner({ initialConversationId }: Props) {
           onChange={setInput}
           onSend={handleSend}
           loading={loading || restoring}
+          offline={isOffline}
         />
         {rateLimitMsg && (
           <p className="px-4 py-2 font-mono text-xs text-amber-400 bg-amber-950/30 border-t border-amber-800/20">
