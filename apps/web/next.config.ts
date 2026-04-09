@@ -14,12 +14,19 @@ const pwaConfig = withPWA({
   dynamicStartUrl: false,
   extendDefaultRuntimeCaching: true,
   workboxOptions: {
-    cacheId: "regknots-v5",
+    cacheId: "regknots-v6",
     disableDevLogs: true,
     // Eliminate the precache manifest entirely. Hashed chunk URLs in a stale
     // precache list cause bad-precaching-response 404s after every redeploy.
     // We rely solely on runtime caching (defaults extended below).
     exclude: [/.*/],
+    // Explicit precache entries. The /reference quick-reference page is the
+    // only HTML route precached on SW install — it's the offline safety net
+    // so mariners can pull up rules even without a prior visit. Bump the
+    // revision string when the page content changes to force re-precache.
+    additionalManifestEntries: [
+      { url: "/reference", revision: "reference-v1" },
+    ],
     runtimeCaching: [
       {
         urlPattern: /\/api\/auth\/.*/,
@@ -43,6 +50,16 @@ const pwaConfig = withPWA({
         // Vessel profile CRUD — must be authoritative.
         urlPattern: /\/api\/vessels(\/.*)?$/,
         handler: "NetworkOnly",
+      },
+      {
+        // Runtime backstop for /reference in case the precache install is
+        // skipped. First visit caches it; offline visits are served from
+        // cache while the background fetch revalidates.
+        urlPattern: ({ url }: { url: URL }) => url.pathname === "/reference",
+        handler: "StaleWhileRevalidate",
+        options: {
+          cacheName: "regknots-reference",
+        },
       },
     ],
   },

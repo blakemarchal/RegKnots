@@ -5,23 +5,46 @@ import { usePathname } from 'next/navigation'
 import { useAuthStore } from '@/lib/auth'
 import { CompassRose } from './CompassRose'
 
-// Pages that don't require auth — never block them with a loading screen
-const GUEST_PAGES = ['/landing', '/login', '/register', '/forgot-password', '/reset-password', '/terms', '/privacy', '/whitelisting']
+// Fully public routes that never need an auth refresh. `/` is intentionally
+// NOT included — it renders the authenticated chat via AuthGuard and must
+// still hydrate. When adding a new public marketing/legal page, add it here
+// so anonymous visitors don't trigger a spurious POST /auth/refresh 401.
+const PUBLIC_ROUTES = [
+  '/landing',
+  '/login',
+  '/register',
+  '/forgot-password',
+  '/reset-password',
+  '/terms',
+  '/privacy',
+  '/giving',
+  '/pricing',
+  '/support',
+  '/whitelisting',
+  '/brand',
+  '/reference',
+]
+
+function isPublicRoute(pathname: string): boolean {
+  return PUBLIC_ROUTES.some(p => pathname === p || pathname.startsWith(p + '/'))
+}
 
 export function HydrationGate({ children }: { children: React.ReactNode }) {
   const { hydrated, hydrateAuth } = useAuthStore()
   const pathname = usePathname()
 
-  const isGuestPage = GUEST_PAGES.some(p => pathname.startsWith(p))
+  const isPublic = isPublicRoute(pathname)
 
   useEffect(() => {
-    if (!hydrated) {
-      hydrateAuth()
-    }
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+    if (hydrated) return
+    // Public routes do not need auth state — skip the refresh call entirely
+    // so unauthenticated visitors don't spam POST /auth/refresh with 401s.
+    if (isPublic) return
+    hydrateAuth()
+  }, [hydrated, isPublic, hydrateAuth])
 
-  // Guest pages render immediately — no auth gate
-  if (isGuestPage) {
+  // Guest / public pages render immediately — no auth gate, no spinner.
+  if (isPublic) {
     return <>{children}</>
   }
 

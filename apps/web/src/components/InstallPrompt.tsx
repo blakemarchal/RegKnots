@@ -1,11 +1,22 @@
 'use client'
 
+import { usePathname } from 'next/navigation'
 import { usePwa } from '@/lib/pwa'
+
+// Only show the install prompt inside the authenticated app shell. Marketing
+// and auth-flow routes (/landing, /login, /register, etc.) never see it.
+const IN_APP_ROUTES = ['/', '/history', '/account', '/reference', '/certificates', '/admin']
+
+function isInAppRoute(pathname: string): boolean {
+  return IN_APP_ROUTES.some(p => pathname === p || pathname.startsWith(p + '/'))
+}
 
 export function InstallPrompt() {
   const { bannerVisible, install, dismissBanner } = usePwa()
+  const pathname = usePathname()
 
   if (!bannerVisible) return null
+  if (!isInAppRoute(pathname)) return null
 
   return (
     <div className="flex items-center justify-between gap-3 px-4 py-2.5
@@ -24,10 +35,10 @@ export function InstallPrompt() {
         <button
           onClick={dismissBanner}
           className="font-mono text-xs text-[#6b7594] hover:text-[#f0ece4]
-            transition-colors duration-150"
-          aria-label="Dismiss"
+            transition-colors duration-150 px-1"
+          aria-label="Dismiss for 7 days"
         >
-          ✕
+          Not now
         </button>
       </div>
     </div>
