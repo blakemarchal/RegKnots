@@ -703,77 +703,6 @@ function AdminContent() {
             </div>
           </div>
 
-          {/* ── Early-user thank-you email (legacy "founding member" flow) ── */}
-          <div className="mb-8">
-            <h2 className="font-display text-lg font-bold text-[#f0ece4] tracking-wide mb-3">
-              Early-User Thank-You Email
-            </h2>
-            {foundingLoading ? (
-              <div className="bg-[#111827] rounded-xl border border-white/8 px-4 py-6 h-[88px] animate-pulse" />
-            ) : !foundingPreview ? (
-              <div className="bg-[#111827] rounded-xl border border-red-500/30 px-4 py-3">
-                <p className="font-mono text-xs text-red-400">Failed to load preview</p>
-              </div>
-            ) : foundingPreview.total_count === 0 ? (
-              <div className="bg-[#111827] rounded-xl border border-[#2dd4bf]/30 px-4 py-4 flex items-center gap-3">
-                <span className="text-[#2dd4bf] text-lg" aria-hidden="true">{'\u2713'}</span>
-                <p className="font-mono text-sm text-[#f0ece4]/85">
-                  All early-user thank-you emails have been sent.
-                </p>
-              </div>
-            ) : (
-              <div className="bg-[#111827] rounded-xl border border-[#2dd4bf]/20 px-5 py-4">
-                <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-                  <div>
-                    <p className="font-mono text-[10px] text-[#6b7594] uppercase tracking-wider">
-                      Pending Recipients
-                    </p>
-                    <p className="font-mono text-3xl font-bold text-[#2dd4bf] mt-1">
-                      {foundingPreview.total_count.toLocaleString()}
-                    </p>
-                    <p className="font-mono text-[11px] text-[#6b7594] mt-1">
-                      Subject: <span className="text-[#f0ece4]/80">{foundingPreview.subject}</span>
-                    </p>
-                  </div>
-                  {!isReadOnly && (
-                    <div className="flex flex-col sm:flex-row gap-2">
-                      <button
-                        onClick={sendFoundingTest}
-                        disabled={foundingAction !== null}
-                        className="font-mono text-xs font-bold uppercase tracking-wider
-                          border border-[#2dd4bf]/40 text-[#2dd4bf]
-                          hover:bg-[#2dd4bf]/10 rounded-lg px-4 py-2.5
-                          transition-colors duration-150 disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        {foundingAction === 'test' ? 'Sending…' : 'Send Test to Me'}
-                      </button>
-                      <button
-                        onClick={sendFoundingToAll}
-                        disabled={foundingAction !== null}
-                        className="font-mono text-xs font-bold uppercase tracking-wider
-                          bg-[#2dd4bf] text-[#0a0e1a]
-                          hover:brightness-110 rounded-lg px-4 py-2.5
-                          transition-[filter] duration-150 disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        {foundingAction === 'send'
-                          ? 'Sending…'
-                          : `Send to All (${foundingPreview.total_count})`}
-                      </button>
-                    </div>
-                  )}
-                </div>
-                {foundingResult && (
-                  <div className={`mt-3 font-mono text-xs px-3 py-2 rounded
-                    ${foundingResult.ok
-                      ? 'bg-[#2dd4bf]/10 text-[#2dd4bf] border border-[#2dd4bf]/30'
-                      : 'bg-red-500/10 text-red-400 border border-red-500/30'}`}>
-                    {foundingResult.msg}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-
           {/* ── Notifications ────────────────────────────────────────── */}
           <div className="mb-8">
             <h2 className="font-display text-lg font-bold text-[#f0ece4] tracking-wide mb-3">
@@ -983,7 +912,7 @@ function AdminContent() {
                 <p className="font-mono text-sm text-[#2dd4bf]">No recent issues</p>
               </div>
             ) : (
-              <div className="rounded-xl border border-white/8">
+              <div className="rounded-xl border border-white/8 max-h-64 overflow-y-auto scrollbar-thin scrollbar-track-transparent scrollbar-thumb-[#2dd4bf]/30">
                 <table className="w-full table-fixed text-left font-mono text-xs">
                   <thead>
                     <tr className="bg-red-500/10 text-red-400">
@@ -1480,25 +1409,27 @@ function AdminContent() {
           <div className="mb-8">
             <h2 className="font-display text-lg font-bold text-[#f0ece4] tracking-wide mb-3">Email Testing</h2>
             <p className="font-mono text-xs text-[#6b7594] mb-3">Send test emails to your admin address.</p>
-            <div className="flex flex-wrap gap-2">
-              {([
-                ['welcome', 'Welcome Email'],
-                ['password_reset', 'Password Reset'],
-                ['trial_expiry', 'Trial Expiry'],
-                ['pilot_ended', 'Pilot Ended'],
-                ['waitlist_confirmed', 'Waitlist Confirmed'],
-              ] as const).map(([type, label]) => (
-                <button
-                  key={type}
-                  onClick={() => sendTestEmail(type)}
-                  disabled={emailSending === type}
-                  className="font-mono text-xs font-bold px-4 py-2 rounded-lg border border-[#2dd4bf]/30
-                    text-[#2dd4bf] hover:bg-[#2dd4bf]/10 disabled:opacity-50
-                    disabled:cursor-not-allowed transition-colors"
-                >
-                  {emailSending === type ? 'Sending...' : label}
-                </button>
-              ))}
+            <div className="max-h-48 overflow-y-auto scrollbar-thin scrollbar-track-transparent scrollbar-thumb-[#2dd4bf]/30">
+              <div className="flex flex-wrap gap-2">
+                {([
+                  ['welcome', 'Welcome Email'],
+                  ['password_reset', 'Password Reset'],
+                  ['trial_expiry', 'Trial Expiry'],
+                  ['pilot_ended', 'Pilot Ended'],
+                  ['waitlist_confirmed', 'Waitlist Confirmed'],
+                ] as const).map(([type, label]) => (
+                  <button
+                    key={type}
+                    onClick={() => sendTestEmail(type)}
+                    disabled={emailSending === type}
+                    className="font-mono text-xs font-bold px-4 py-2 rounded-lg border border-[#2dd4bf]/30
+                      text-[#2dd4bf] hover:bg-[#2dd4bf]/10 disabled:opacity-50
+                      disabled:cursor-not-allowed transition-colors"
+                  >
+                    {emailSending === type ? 'Sending...' : label}
+                  </button>
+                ))}
+              </div>
             </div>
             {emailToast && (
               <div className={`mt-3 font-mono text-xs px-3 py-2 rounded-lg border ${
