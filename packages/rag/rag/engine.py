@@ -28,7 +28,7 @@ from anthropic import (
 )
 
 from rag.context import build_context
-from rag.fallback import fallback_chat
+from rag.fallback import FALLBACK_MODEL_ID, fallback_chat
 from rag.models import ChatMessage, ChatResponse, CitedRegulation
 from rag.prompts import NAVIGATION_AID_REMINDER, SYSTEM_PROMPT
 from rag.retriever import retrieve
@@ -93,8 +93,83 @@ def _trim_history_by_tokens(
     )
     return trimmed
 
+# ── Citation extraction regexes (one per knowledge-base source) ─────────────
+#
+# These patterns extract citations Claude inserted into answer text so each
+# reference can be verified against the regulations table. The canonical DB
+# formats they map to (see packages/ingest/ingest/sources/*) are:
+#
+#   cfr_{N}            "46 CFR 199.261"
+#   solas              "SOLAS Ch.II-2", "SOLAS Ch.II-2 Part A", "SOLAS Annex I"
+#   solas_supplement   "SOLAS Supplement Jan2026 MSC.520(106)"
+#   colregs            "COLREGS Rule 5" or merged "COLREGS Rules 4-10"
+#   stcw               "STCW Ch.II Reg.II/1", "STCW Code A-II/1", "STCW Ch.II"
+#   stcw_supplement    "STCW Supplement Jan2025 MSC.540(107)"
+#   nvic               "NVIC 01-23" or "NVIC 01-23 §3"
+#   ism                "ISM 1.2.3", "ISM Part A", "ISM Code"
+#
+# For sources whose DB granularity is coarser than Claude's citation (SOLAS
+# stores at chapter/part level; COLREGs may store ranges), verification uses
+# LIKE patterns or range checks — see _verify_text_citations.
+
 # Matches both "(46 CFR 199.261)" and bare "46 CFR 199.261" — same as parseMessage.ts
 _CFR_RE = re.compile(r"\(?(\d+)\s+CFR\s+([\d]+(?:\.[\d]+(?:-[\d]+)?)?)\)?")
+
+# SOLAS chapter: "SOLAS Ch. II-2 Reg. 10", "SOLAS Chapter V, Regulation 19"
+# Groups: (1) chapter (Roman, optional -N), (2) part letter (optional),
+# (3) regulation number (optional — informational only, not verified against DB)
+_SOLAS_CH_RE = re.compile(
+    r"SOLAS\s+Ch(?:apter)?\.?\s*([IVX]+(?:-\d+)?)"
+    r"(?:\s+Part\.?\s*([A-Z](?:-\d+)?))?"
+    r"(?:[,\s]*Reg(?:ulation)?\.?\s*(\d+(?:\.\d+)*))?",
+    re.IGNORECASE,
+)
+
+# SOLAS Annex: "SOLAS Annex I", "SOLAS Annex V"
+_SOLAS_ANNEX_RE = re.compile(r"SOLAS\s+Annex\s+([IVX]+|\d+)", re.IGNORECASE)
+
+# MSC resolution — applies to both SOLAS and STCW supplements.
+# Format: "MSC.520(106)" — captured wherever it appears (inside parens or bare).
+_MSC_RE = re.compile(r"MSC\.(\d+)\((\d+)\)")
+
+# COLREGs rule — only match inside parens or with an explicit "COLREG(S)"
+# prefix to avoid false positives on generic "Rule N" prose elsewhere.
+_COLREGS_RE = re.compile(
+    r"\(\s*(?:COLREGS?\s+)?Rule\s+(\d+)\s*\)"
+    r"|COLREGS?\s+Rule\s+(\d+)",
+    re.IGNORECASE,
+)
+
+# NVIC: "NVIC 01-20", optionally with "§3" section suffix.
+_NVIC_RE = re.compile(
+    r"NVIC\s+(\d{1,2}-\d{2})(?:\s*(?:§|Sec(?:tion)?\.?\s*)(\d+))?",
+    re.IGNORECASE,
+)
+
+# STCW Regulation: "STCW Reg. II/1", "STCW Regulation II-1/1", "STCW II/1"
+# Groups: (1) chapter (Roman, optional -N), (2) number
+_STCW_REG_RE = re.compile(
+    r"STCW\s+(?:Reg(?:ulation)?\.?\s*)?([IVX]+(?:-\d+)?)/(\d+(?:\.\d+)*)",
+    re.IGNORECASE,
+)
+
+# STCW Code: "STCW Code A-II/1", "STCW Code B-I/2"
+_STCW_CODE_RE = re.compile(
+    r"STCW\s+Code\s+([AB])-([IVX]+(?:-\d+)?)/(\d+(?:\.\d+)*)",
+    re.IGNORECASE,
+)
+
+# STCW Chapter standalone: "STCW Ch. II" (when there's no regulation suffix)
+_STCW_CH_RE = re.compile(
+    r"STCW\s+Ch(?:apter)?\.?\s*([IVX]+(?:-\d+)?)(?!\s*(?:Reg|/|Code))",
+    re.IGNORECASE,
+)
+
+# ISM Code: "(ISM Code 1.2.3)", "(ISM 10.1)", "ISM Code Section 12"
+_ISM_RE = re.compile(
+    r"ISM(?:\s+Code)?\s+(?:Section\s+)?(\d+(?:\.\d+)*)",
+    re.IGNORECASE,
+)
 
 _VESSEL_UPDATE_RE = re.compile(
     r"\[VESSEL_UPDATE\]\s*\n(.*?)\n\[/VESSEL_UPDATE\]",
@@ -152,6 +227,8 @@ async def verify_citations(
 ) -> tuple[list[CitedRegulation], list[str]]:
     """Verify each cited regulation actually exists in the regulations table.
 
+    Uses a single batched query via unnest() instead of N sequential fetches.
+
     Args:
         cited_regulations: List of CitedRegulation objects to check.
         pool:              asyncpg connection pool.
@@ -160,20 +237,29 @@ async def verify_citations(
         (verified, unverified) where verified is the subset found in the DB
         and unverified is a list of section_number strings not found.
     """
+    if not cited_regulations:
+        return [], []
+
+    sources = [r.source for r in cited_regulations]
+    section_numbers = [r.section_number for r in cited_regulations]
+
+    rows = await pool.fetch(
+        """
+        SELECT DISTINCT r.source, r.section_number
+        FROM regulations r
+        WHERE (r.source, r.section_number) IN (
+            SELECT a, b FROM unnest($1::text[], $2::text[]) AS t(a, b)
+        )
+        """,
+        sources,
+        section_numbers,
+    )
+    found: set[tuple[str, str]] = {(r["source"], r["section_number"]) for r in rows}
+
     verified: list[CitedRegulation] = []
     unverified: list[str] = []
-
     for reg in cited_regulations:
-        exists = await pool.fetchval(
-            """
-            SELECT 1 FROM regulations
-            WHERE source = $1 AND section_number = $2
-            LIMIT 1
-            """,
-            reg.source,
-            reg.section_number,
-        )
-        if exists:
+        if (reg.source, reg.section_number) in found:
             verified.append(reg)
         else:
             logger.warning(
@@ -186,32 +272,237 @@ async def verify_citations(
     return verified, unverified
 
 
-def _extract_text_citations(answer: str) -> list[CitedRegulation]:
-    """Extract CFR citations mentioned in answer text that aren't already in the
-    cited_regulations list from context retrieval.
+class _TextCitation:
+    """Represents a citation reference extracted from answer text.
 
-    Returns CitedRegulation stubs (section_title left blank) for DB lookup.
+    `display` is exactly what Claude wrote (used for logging, stripping, and
+    reporting in ChatResponse.unverified_citations). The `candidates` list is a
+    set of (source, LIKE_pattern) pairs; verification succeeds if ANY of them
+    matches a row in regulations. `colregs_rule` is set for COLREGs citations
+    that also need range-membership checking (e.g. Rule 5 matching a merged
+    "COLREGS Rules 4-10" row).
     """
-    stubs: list[CitedRegulation] = []
-    seen: set[str] = set()
 
+    __slots__ = ("display", "candidates", "colregs_rule")
+
+    def __init__(
+        self,
+        display: str,
+        candidates: list[tuple[str, str]],
+        colregs_rule: int | None = None,
+    ) -> None:
+        self.display = display
+        self.candidates = candidates
+        self.colregs_rule = colregs_rule
+
+
+def _extract_all_text_citations(answer: str) -> list[_TextCitation]:
+    """Extract citation references from answer text across ALL source types.
+
+    Returns one _TextCitation per unique display string. Each entry carries
+    the candidate (source, LIKE pattern) pairs used by _verify_text_citations
+    to check the regulations table.
+    """
+    found: dict[str, _TextCitation] = {}
+
+    # ── CFR ─────────────────────────────────────────────────────────────────
     for m in _CFR_RE.finditer(answer):
         title = m.group(1)
         section = m.group(2)
-        section_number = f"{title} CFR {section}"
-        source = f"cfr_{title}"
-
-        if section_number not in seen:
-            seen.add(section_number)
-            stubs.append(
-                CitedRegulation(
-                    source=source,
-                    section_number=section_number,
-                    section_title="",
-                )
+        display = f"{title} CFR {section}"
+        if display not in found:
+            found[display] = _TextCitation(
+                display=display,
+                candidates=[(f"cfr_{title}", display)],
             )
 
-    return stubs
+    # ── SOLAS chapter/part (regulation number is informational) ─────────────
+    for m in _SOLAS_CH_RE.finditer(answer):
+        chapter = m.group(1).upper()
+        part = m.group(2)
+        reg = m.group(3)
+        chapter_key = f"SOLAS Ch.{chapter}"
+        if part:
+            chapter_key += f" Part {part.upper()}"
+        display = chapter_key
+        if reg:
+            display += f" Reg.{reg}"
+        if display not in found:
+            found[display] = _TextCitation(
+                display=display,
+                candidates=[("solas", f"{chapter_key}%")],
+            )
+
+    # ── SOLAS Annex ─────────────────────────────────────────────────────────
+    for m in _SOLAS_ANNEX_RE.finditer(answer):
+        annex = m.group(1).upper()
+        display = f"SOLAS Annex {annex}"
+        if display not in found:
+            found[display] = _TextCitation(
+                display=display,
+                candidates=[("solas", f"SOLAS Annex {annex}%")],
+            )
+
+    # ── MSC resolutions (ambiguous between SOLAS and STCW supplements) ─────
+    for m in _MSC_RE.finditer(answer):
+        msc_key = f"MSC.{m.group(1)}({m.group(2)})"
+        if msc_key not in found:
+            found[msc_key] = _TextCitation(
+                display=msc_key,
+                candidates=[
+                    ("solas_supplement", f"%{msc_key}"),
+                    ("stcw_supplement", f"%{msc_key}"),
+                ],
+            )
+
+    # ── COLREGs (rules + merged-range verification) ────────────────────────
+    for m in _COLREGS_RE.finditer(answer):
+        rule_str = m.group(1) or m.group(2)
+        rule_num = int(rule_str)
+        display = f"Rule {rule_str}"
+        if display not in found:
+            found[display] = _TextCitation(
+                display=display,
+                candidates=[("colregs", f"COLREGS Rule {rule_str}")],
+                colregs_rule=rule_num,
+            )
+
+    # ── NVIC ───────────────────────────────────────────────────────────────
+    for m in _NVIC_RE.finditer(answer):
+        num = m.group(1)
+        sec = m.group(2)
+        display = f"NVIC {num}"
+        if sec:
+            display += f" §{sec}"
+        if display not in found:
+            found[display] = _TextCitation(
+                display=display,
+                candidates=[("nvic", f"NVIC {num}%")],
+            )
+
+    # ── STCW Regulation ────────────────────────────────────────────────────
+    for m in _STCW_REG_RE.finditer(answer):
+        ch = m.group(1).upper()
+        n = m.group(2)
+        display = f"STCW Reg.{ch}/{n}"
+        if display not in found:
+            found[display] = _TextCitation(
+                display=display,
+                candidates=[("stcw", f"STCW Ch.{ch} Reg.{ch}/{n}%")],
+            )
+
+    # ── STCW Code (part A or B) ─────────────────────────────────────────────
+    for m in _STCW_CODE_RE.finditer(answer):
+        part = m.group(1).upper()
+        ch = m.group(2).upper()
+        n = m.group(3)
+        display = f"STCW Code {part}-{ch}/{n}"
+        if display not in found:
+            found[display] = _TextCitation(
+                display=display,
+                candidates=[("stcw", f"STCW Code {part}-{ch}/{n}%")],
+            )
+
+    # ── STCW Chapter standalone ────────────────────────────────────────────
+    for m in _STCW_CH_RE.finditer(answer):
+        ch = m.group(1).upper()
+        display = f"STCW Ch.{ch}"
+        if display not in found:
+            found[display] = _TextCitation(
+                display=display,
+                candidates=[("stcw", f"STCW Ch.{ch}%")],
+            )
+
+    # ── ISM Code ───────────────────────────────────────────────────────────
+    for m in _ISM_RE.finditer(answer):
+        num = m.group(1)
+        display = f"ISM {num}"
+        if display not in found:
+            found[display] = _TextCitation(
+                display=display,
+                candidates=[("ism", f"ISM {num}%")],
+            )
+
+    return list(found.values())
+
+
+async def _verify_text_citations(
+    citations: list[_TextCitation],
+    pool: asyncpg.Pool,
+) -> list[str]:
+    """Verify each extracted text citation against the regulations table.
+
+    Returns the list of display strings that FAILED verification. Uses one DB
+    roundtrip for all LIKE candidates, plus one extra query for COLREGs range
+    resolution if any COLREGs rules were extracted.
+    """
+    if not citations:
+        return []
+
+    # Flatten all (source, pattern) candidates into two parallel arrays and
+    # remember which indices belong to which citation.
+    sources: list[str] = []
+    patterns: list[str] = []
+    owners: list[int] = []  # parallel to sources/patterns: which citation index
+    for i, cit in enumerate(citations):
+        for src, pat in cit.candidates:
+            sources.append(src)
+            patterns.append(pat)
+            owners.append(i)
+
+    # Single batched query: each (source, pattern) row marked if ANY matching
+    # regulation exists. Indices line up with the input arrays.
+    rows = await pool.fetch(
+        """
+        SELECT t.idx
+        FROM unnest($1::int[], $2::text[], $3::text[]) AS t(idx, src, pat)
+        WHERE EXISTS (
+            SELECT 1 FROM regulations r
+            WHERE r.source = t.src AND r.section_number LIKE t.pat
+            LIMIT 1
+        )
+        """,
+        list(range(len(sources))),
+        sources,
+        patterns,
+    )
+    verified_owners: set[int] = {owners[r["idx"]] for r in rows}
+
+    # COLREGs range check — any rule that didn't verify via LIKE might be
+    # covered by a merged "COLREGS Rules A-B" row. Do one extra query to pull
+    # all COLREGs section_numbers, then range-check in Python.
+    colregs_pending = [
+        i for i, cit in enumerate(citations)
+        if cit.colregs_rule is not None and i not in verified_owners
+    ]
+    if colregs_pending:
+        colregs_rows = await pool.fetch(
+            "SELECT section_number FROM regulations WHERE source = 'colregs'"
+        )
+        range_re = re.compile(r"^COLREGS Rules (\d+)-(\d+)$", re.IGNORECASE)
+        single_re = re.compile(r"^COLREGS Rule (\d+)$", re.IGNORECASE)
+        covered: set[int] = set()
+        for row in colregs_rows:
+            sec = row["section_number"] or ""
+            rm = range_re.match(sec)
+            if rm:
+                start, end = int(rm.group(1)), int(rm.group(2))
+                covered.update(range(start, end + 1))
+                continue
+            sm = single_re.match(sec)
+            if sm:
+                covered.add(int(sm.group(1)))
+        for i in colregs_pending:
+            if citations[i].colregs_rule in covered:
+                verified_owners.add(i)
+
+    unverified_displays: list[str] = []
+    for i, cit in enumerate(citations):
+        if i not in verified_owners:
+            logger.warning("Text citation not found in DB — display=%r", cit.display)
+            unverified_displays.append(cit.display)
+
+    return unverified_displays
 
 
 async def _log_citation_errors(
@@ -247,22 +538,27 @@ async def _log_citation_errors(
 def _strip_unverified_citations(answer: str, unverified: list[str]) -> str:
     """Remove inline references to unverified citations from the answer text.
 
-    Handles both parenthesized "(46 CFR 131)" and bare "46 CFR 131" formats.
-    Uses word-boundary guards so "46 CFR 131" doesn't match "46 CFR 131.45".
+    `unverified` may contain any supported citation format (CFR, SOLAS, COLREGs,
+    STCW, NVIC, ISM, MSC resolutions). For each display string we remove both
+    the parenthesized and bare forms. For CFR displays we keep the original
+    `(?!\\.\\d)` guard so "46 CFR 131" doesn't eat "46 CFR 131.45".
     """
-    for section_number in unverified:
-        escaped = re.escape(section_number)
-        # Remove parenthesized format: "(46 CFR 131)" with optional leading space
+    for display in unverified:
+        escaped = re.escape(display)
+        # Parenthesized form: "(SOLAS Ch. II-2 Reg. 10)"
         answer = re.sub(r"\s*\(" + escaped + r"\)", "", answer)
-        # Remove bare format only when NOT followed by a dot+digit (sub-section)
-        answer = re.sub(r"\b" + escaped + r"\b(?!\.\d)", "", answer)
+        # Bare form. CFR needs sub-section protection; everything else is safe.
+        if re.match(r"^\d+\s+CFR\s", display):
+            answer = re.sub(r"\b" + escaped + r"\b(?!\.\d)", "", answer)
+        else:
+            answer = re.sub(escaped, "", answer)
 
-    # Clean up artifacts: double spaces, orphaned punctuation patterns
-    answer = re.sub(r"  +", " ", answer)                      # collapse double spaces
-    answer = re.sub(r"\s+([,;.])", r"\1", answer)             # " ," → ","
+    # Clean up artifacts: double spaces, orphaned punctuation patterns.
+    answer = re.sub(r"  +", " ", answer)                                 # collapse double spaces
+    answer = re.sub(r"\s+([,;.])", r"\1", answer)                        # " ," → ","
     answer = re.sub(r"(per|under|in|by|see|of)\s*[,;.]", r"\1", answer)  # "per ," → "per"
-    answer = re.sub(r"\(\s*\)", "", answer)                    # empty parens "()"
-    answer = re.sub(r"  +", " ", answer)                      # final collapse
+    answer = re.sub(r"\(\s*\)", "", answer)                              # empty parens "()"
+    answer = re.sub(r"  +", " ", answer)                                 # final collapse
 
     return answer.strip()
 
@@ -362,56 +658,189 @@ def _build_chat_messages(
     return messages
 
 
+async def _collect_unverified(
+    answer: str,
+    cited: list[CitedRegulation],
+    pool: asyncpg.Pool,
+) -> tuple[list[CitedRegulation], list[str], list[str]]:
+    """Run both citation checks against a given answer.
+
+    Returns (verified_from_context, unverified_from_context, unverified_from_text).
+    """
+    verified_cited, unverified_from_context = await verify_citations(cited, pool)
+
+    text_citations = _extract_all_text_citations(answer)
+    unverified_from_text = await _verify_text_citations(text_citations, pool)
+
+    return verified_cited, unverified_from_context, unverified_from_text
+
+
+async def _regenerate_answer(
+    query: str,
+    context_str: str,
+    unverified: list[str],
+    model_used: str,
+    anthropic_client: AsyncAnthropic,
+    openai_api_key: str,
+) -> tuple[str, int, int] | None:
+    """Call Claude (or the GPT-4o fallback) again with a corrective instruction.
+
+    Returns (answer, input_tokens, output_tokens) or None if regeneration fails.
+    Routes to whichever backend produced the original answer — if the first
+    response came from the GPT-4o fallback, the regeneration goes there too.
+    """
+    corrective_instruction = (
+        "Your previous answer referenced the following regulation sections that do not exist "
+        "in our verified database:\n"
+        + "\n".join(f"- {s}" for s in unverified)
+        + "\n\nRewrite your answer using ONLY the regulation context provided below. "
+        "Do not reference any regulations that are not explicitly present in the provided context. "
+        "If you cannot fully answer the question with the verified context alone, say so honestly.\n\n"
+        f"Verified regulation context:\n{context_str}\n\n"
+        f"Original question: {query}"
+    )
+    messages = [{"role": "user", "content": corrective_instruction}]
+
+    # If the original call used the GPT-4o fallback, regenerate via the same path.
+    if model_used == FALLBACK_MODEL_ID:
+        try:
+            result = await fallback_chat(
+                system_prompt=SYSTEM_PROMPT,
+                messages=messages,
+                max_tokens=_MAX_TOKENS,
+                openai_api_key=openai_api_key,
+            )
+            return result["answer"], result["input_tokens"], result["output_tokens"]
+        except Exception as exc:  # noqa: BLE001 — surface as regen failure
+            logger.warning("Regeneration via GPT-4o failed: %s", exc)
+            return None
+
+    try:
+        response = await anthropic_client.messages.create(
+            model=model_used,
+            max_tokens=_MAX_TOKENS,
+            system=SYSTEM_PROMPT,
+            messages=messages,
+        )
+        return (
+            response.content[0].text,
+            response.usage.input_tokens,
+            response.usage.output_tokens,
+        )
+    except _CLAUDE_FAILURE_EXCEPTIONS as exc:
+        logger.warning(
+            "Regeneration via Claude failed (%s: %s)",
+            type(exc).__name__,
+            str(exc)[:200],
+        )
+        return None
+
+
 async def _finalize_answer(
+    *,
     answer: str,
     cited: list[CitedRegulation],
     conversation_id: UUID,
     model_used: str,
     pool: asyncpg.Pool,
-) -> tuple[str, list[CitedRegulation], list[str], dict | None]:
-    """Run vessel-update extraction, citation verification, and unverified-citation cleanup.
+    query: str,
+    context_str: str,
+    anthropic_client: AsyncAnthropic,
+    openai_api_key: str,
+) -> tuple[str, list[CitedRegulation], list[str], dict | None, int, int, bool]:
+    """Vessel-update extraction, citation verification, regeneration, cleanup.
+
+    When the first pass finds unverified citations, log them, then attempt ONE
+    regeneration call with a corrective instruction. The regenerated answer is
+    re-verified; if it still has unverified citations, fall back to
+    strip + disclaim on that second answer. If regeneration fails outright,
+    strip + disclaim on the original.
 
     Returns:
-        (cleaned_answer, verified_cited, all_unverified, vessel_update)
+        (cleaned_answer, verified_cited, unverified_displays, vessel_update,
+         regen_input_tokens, regen_output_tokens, regenerated)
     """
     # Extract vessel update block (before citation verification)
     answer, vessel_update = _extract_vessel_update(answer)
 
-    # Verify the cited_regulations list from context retrieval.
-    verified_cited, unverified_from_context = await verify_citations(cited, pool)
-
-    # Extract additional CFR references Claude added in answer text and verify those.
-    context_section_numbers = {r.section_number for r in cited}
-    text_stubs = [
-        stub
-        for stub in _extract_text_citations(answer)
-        if stub.section_number not in context_section_numbers
-    ]
-
-    if text_stubs:
-        _, unverified_from_text = await verify_citations(text_stubs, pool)
-    else:
-        unverified_from_text = []
-
-    # Deduplicated combined list
+    # First pass: verify context citations + text citations in the original answer
+    verified_cited, unverified_from_context, unverified_from_text = await _collect_unverified(
+        answer, cited, pool,
+    )
     all_unverified = list(
         dict.fromkeys(unverified_from_context + unverified_from_text)
     )
 
-    # Handle unverified citations
-    if all_unverified:
-        # Log BEFORE stripping (so admin can see original text)
-        await _log_citation_errors(
-            unverified=all_unverified,
-            conversation_id=conversation_id,
-            answer=answer,
-            model_used=model_used,
-            pool=pool,
-        )
-        answer = _strip_unverified_citations(answer, all_unverified)
-        answer = answer + _UNVERIFIED_DISCLAIMER
+    if not all_unverified:
+        return answer, verified_cited, [], vessel_update, 0, 0, False
 
-    return answer, verified_cited, all_unverified, vessel_update
+    # Log the ORIGINAL answer's bad citations for forensics, regardless of
+    # whether regeneration ultimately succeeds. message_content is truncated
+    # inside _log_citation_errors.
+    await _log_citation_errors(
+        unverified=all_unverified,
+        conversation_id=conversation_id,
+        answer=answer,
+        model_used=model_used,
+        pool=pool,
+    )
+
+    logger.info(
+        "Regenerating answer due to %d unverified citation(s): %s",
+        len(all_unverified),
+        all_unverified,
+    )
+    regen = await _regenerate_answer(
+        query=query,
+        context_str=context_str,
+        unverified=all_unverified,
+        model_used=model_used,
+        anthropic_client=anthropic_client,
+        openai_api_key=openai_api_key,
+    )
+
+    if regen is None:
+        # Regeneration unavailable — fall back to the legacy strip + disclaim path.
+        logger.warning("Regeneration failed; falling back to strip + disclaim")
+        answer = _strip_unverified_citations(answer, all_unverified) + _UNVERIFIED_DISCLAIMER
+        return answer, verified_cited, all_unverified, vessel_update, 0, 0, False
+
+    new_answer, regen_in, regen_out = regen
+    # Pull any (unlikely) VESSEL_UPDATE block from the regenerated answer; only
+    # adopt it if the original turn didn't already produce one.
+    new_answer, new_vessel_update = _extract_vessel_update(new_answer)
+    if new_vessel_update and not vessel_update:
+        vessel_update = new_vessel_update
+
+    # Second pass: re-verify on the regenerated answer. Context cited list is
+    # unchanged so its verification status carries over.
+    new_text_citations = _extract_all_text_citations(new_answer)
+    unverified_from_text_2 = await _verify_text_citations(new_text_citations, pool)
+    all_unverified_2 = list(
+        dict.fromkeys(unverified_from_context + unverified_from_text_2)
+    )
+
+    if not all_unverified_2:
+        logger.info("Regeneration complete — clean on second pass")
+        return new_answer, verified_cited, [], vessel_update, regen_in, regen_out, True
+
+    # Second attempt still has hallucinated citations. Strip + disclaim here
+    # and bail — no recursive regeneration.
+    logger.warning(
+        "Regeneration complete — %d unverified citation(s) remain on second pass: %s",
+        len(all_unverified_2),
+        all_unverified_2,
+    )
+    new_answer = _strip_unverified_citations(new_answer, all_unverified_2) + _UNVERIFIED_DISCLAIMER
+    return (
+        new_answer,
+        verified_cited,
+        all_unverified_2,
+        vessel_update,
+        regen_in,
+        regen_out,
+        True,
+    )
 
 
 def _describe_sources(query: str) -> str:
@@ -574,14 +1003,29 @@ async def chat(
             output_tokens,
         )
 
-    # 6. Post-process: vessel update extraction, citation verification, cleanup
-    cleaned_answer, verified_cited, all_unverified, vessel_update = await _finalize_answer(
+    # 6. Post-process: vessel update extraction, citation verification,
+    #    optional regeneration on citation failure, cleanup.
+    (
+        cleaned_answer,
+        verified_cited,
+        all_unverified,
+        vessel_update,
+        regen_in,
+        regen_out,
+        regenerated,
+    ) = await _finalize_answer(
         answer=answer,
         cited=cited,
         conversation_id=conversation_id,
         model_used=model_used,
         pool=pool,
+        query=query,
+        context_str=context_str,
+        anthropic_client=anthropic_client,
+        openai_api_key=openai_api_key,
     )
+    input_tokens += regen_in
+    output_tokens += regen_out
 
     return ChatResponse(
         answer=cleaned_answer,
@@ -592,6 +1036,7 @@ async def chat(
         output_tokens=output_tokens,
         unverified_citations=all_unverified,
         vessel_update=vessel_update,
+        regenerated=regenerated,
     )
 
 
@@ -686,13 +1131,27 @@ async def chat_with_progress(
 
     # Stage 5: Post-processing
     yield {"event": "status", "data": "Verifying citations…"}
-    cleaned_answer, verified_cited, all_unverified, vessel_update = await _finalize_answer(
+    (
+        cleaned_answer,
+        verified_cited,
+        all_unverified,
+        vessel_update,
+        regen_in,
+        regen_out,
+        regenerated,
+    ) = await _finalize_answer(
         answer=answer,
         cited=cited,
         conversation_id=conversation_id,
         model_used=model_used,
         pool=pool,
+        query=query,
+        context_str=context_str,
+        anthropic_client=anthropic_client,
+        openai_api_key=openai_api_key,
     )
+    input_tokens += regen_in
+    output_tokens += regen_out
 
     # Stage 6: Final event with the complete response
     yield {
@@ -713,5 +1172,6 @@ async def chat_with_progress(
             "output_tokens": output_tokens,
             "unverified_citations": all_unverified,
             "vessel_update": vessel_update,
+            "regenerated": regenerated,
         },
     }

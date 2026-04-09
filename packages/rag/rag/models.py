@@ -36,3 +36,4 @@ class ChatResponse(BaseModel):
     output_tokens: int
     unverified_citations: list[str] = []
     vessel_update: dict | None = None
+    regenerated: bool = False
