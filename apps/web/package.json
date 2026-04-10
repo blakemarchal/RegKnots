@@ -6,7 +6,6 @@
     "dev": "next dev --turbopack",
     "prebuild": "node -e \"if(!process.env.NEXT_PUBLIC_API_URL){console.error('\\n\\u274c NEXT_PUBLIC_API_URL is not set. Build aborted.\\nRun: NEXT_PUBLIC_API_URL=https://regknots.com/api pnpm build\\n');process.exit(1)}\"",
     "build": "next build",
-    "postbuild": "node scripts/patch-sw.mjs",
     "start": "next start",
     "lint": "next lint"
   },
