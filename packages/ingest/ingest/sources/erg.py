@@ -25,7 +25,7 @@ pdfplumber output format (from actual VPS extraction):
 import hashlib
 import logging
 import re
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
+import signal
 from datetime import date
 from pathlib import Path
 
@@ -160,54 +160,72 @@ def parse_source(pdf_path: Path) -> list[Section]:
 
 # ── PDF text extraction ──────────────────────────────────────────────────────
 
-def _extract_one_page(page) -> str:
-    """Extract text from a single pdfplumber page (runs in thread pool)."""
-    return page.extract_text() or ""
+class _PageExtractionTimeout(Exception):
+    """Raised by SIGALRM when a page takes too long to extract."""
+
+
+def _alarm_handler(signum, frame):
+    raise _PageExtractionTimeout()
 
 
 def _extract_pages(pdf_path: Path) -> list[str]:
     """Extract text from every page using pdfplumber.
 
-    Uses a per-page timeout to handle complex graphical pages that cause
-    pdfplumber to hang (e.g., placard tables, rail car diagrams).
+    Uses SIGALRM (Unix) to enforce a per-page timeout.  Complex graphical
+    pages (placard tables, rail car diagrams) can cause pdfplumber to hang
+    indefinitely; SIGALRM cleanly interrupts the C-level extraction code
+    so the process can move on to the next page.
     """
     pages: list[str] = []
     timeouts = 0
     errors = 0
+    use_alarm = hasattr(signal, "SIGALRM")
 
     with pdfplumber.open(pdf_path) as pdf:
         total = len(pdf.pages)
-        logger.warning("ERG: extracting %d pages (timeout=%ds/page)...", total, _PAGE_TIMEOUT)
+        logger.warning(
+            "ERG: extracting %d pages (timeout=%ds/page, alarm=%s)...",
+            total, _PAGE_TIMEOUT, use_alarm,
+        )
 
-        with ThreadPoolExecutor(max_workers=1) as executor:
-            for i, page in enumerate(pdf.pages):
-                try:
-                    future = executor.submit(_extract_one_page, page)
-                    text = future.result(timeout=_PAGE_TIMEOUT)
-                except FuturesTimeout:
-                    text = ""
-                    timeouts += 1
-                    if timeouts <= 10:
-                        logger.warning(
-                            "ERG: page %d timed out after %ds (likely complex graphics)",
-                            i, _PAGE_TIMEOUT,
-                        )
-                    # Cancel the hung future — the worker thread may still be
-                    # running but we move on.  Create a fresh executor to avoid
-                    # blocking on the stuck thread.
-                    future.cancel()
-                    executor.shutdown(wait=False, cancel_futures=True)
-                    executor = ThreadPoolExecutor(max_workers=1)
-                except Exception as exc:
-                    text = ""
-                    errors += 1
-                    if errors <= 5:
-                        logger.warning("ERG: page %d extraction error: %s", i, exc)
-                pages.append(text)
+        for i, page in enumerate(pdf.pages):
+            old_handler = None
+            try:
+                if use_alarm:
+                    old_handler = signal.signal(signal.SIGALRM, _alarm_handler)
+                    signal.alarm(_PAGE_TIMEOUT)
 
-                # Progress logging every 50 pages
-                if (i + 1) % 50 == 0:
-                    logger.warning("ERG: extracted %d/%d pages...", i + 1, total)
+                text = page.extract_text() or ""
+
+                if use_alarm:
+                    signal.alarm(0)
+                    signal.signal(signal.SIGALRM, old_handler)
+
+            except _PageExtractionTimeout:
+                text = ""
+                timeouts += 1
+                if use_alarm:
+                    signal.alarm(0)
+                    signal.signal(signal.SIGALRM, old_handler)
+                if timeouts <= 10:
+                    logger.warning(
+                        "ERG: page %d timed out after %ds (complex graphics)",
+                        i, _PAGE_TIMEOUT,
+                    )
+
+            except Exception as exc:
+                text = ""
+                errors += 1
+                if use_alarm and old_handler is not None:
+                    signal.alarm(0)
+                    signal.signal(signal.SIGALRM, old_handler)
+                if errors <= 5:
+                    logger.warning("ERG: page %d extraction error: %s", i, exc)
+
+            pages.append(text)
+
+            if (i + 1) % 50 == 0:
+                logger.warning("ERG: extracted %d/%d pages...", i + 1, total)
 
     if timeouts:
         logger.warning(
