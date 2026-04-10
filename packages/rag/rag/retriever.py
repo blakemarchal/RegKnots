@@ -593,7 +593,7 @@ async def retrieve(
         if id_results:
             id_added = _merge_chunks(id_results, max_sim - 0.05, "identifier")
         if kw_results:
-            kw_added = _merge_chunks(kw_results, max_sim - 0.12, "keyword")
+            kw_added = _merge_chunks(kw_results, max_sim - 0.03, "keyword")
 
         logger.info(
             "Hybrid merge: %d identifier matches for %s, "
