@@ -52,6 +52,8 @@ SOURCE_GROUPS: dict[str, tuple[str, ...]] = {
 # sub-titles (~33K total chunks) and needs room for intra-CFR diversity.
 _CANDIDATES_PER_GROUP: dict[str, int] = {
     "cfr": 12,
+    "erg": 8,  # ERG needs more candidates: its lookup-table + response-card
+               # structure means Table chunks can crowd out Orange Guides at top-6.
 }
 _DEFAULT_CANDIDATES_PER_GROUP = 6
 
@@ -320,16 +322,26 @@ async def retrieve(
     if candidates:
         candidates = _rerank(candidates, query, vessel_profile)
 
+    final = candidates[:limit]
+
     elapsed_ms = (time.perf_counter() - t0) * 1000
     logger.info(
         "Retrieval: %d candidates from %d group(s) → top %d in %.1fms",
         len(candidates),
         len(active_groups) if not sources else 1,
-        min(limit, len(candidates)),
+        len(final),
         elapsed_ms,
     )
 
-    return candidates[:limit]
+    # Log each selected chunk for retrieval debugging
+    if final:
+        chunk_summaries = ", ".join(
+            f"{c.get('source', '?')}/{c.get('section_number', '?')} ({c.get('_score', c.get('similarity', 0)):.3f})"
+            for c in final
+        )
+        logger.info("Selected chunks: %s", chunk_summaries)
+
+    return final
 
 
 # ── Soft re-ranking ──────────────────────────────────────────────────────────
@@ -340,7 +352,7 @@ def _rerank(
     query: str,
     vessel_profile: dict | None,
 ) -> list[dict]:
-    """Apply vessel-profile + source-affinity boosts and sort in place."""
+    """Apply vessel-profile + source-affinity + ERG-specific boosts and sort."""
     source_boosts = _source_affinity(query)
 
     profile_terms: list[str] = []
@@ -355,15 +367,54 @@ def _rerank(
     if source_boosts:
         logger.info("Source affinity boosts: %s", source_boosts)
 
+    # ERG-specific boosts: detect UN/NA numbers in query for cross-reference
+    erg_active = "erg" in source_boosts
+    query_un_numbers: list[str] = []
+    if erg_active:
+        query_un_numbers = [
+            m.group().replace(" ", "").upper()
+            for m in re.finditer(r"\b(?:UN|NA)\s*(\d{4})\b", query, re.IGNORECASE)
+        ]
+        # Also match bare 4-digit numbers that look like UN IDs (1000-9999)
+        # only when ERG context is clear
+        if not query_un_numbers:
+            bare = re.findall(r"\b([1-9]\d{3})\b", query)
+            query_un_numbers = [f"UN{n}" for n in bare if 1000 <= int(n) <= 3600]
+        if query_un_numbers:
+            logger.info("ERG UN/NA numbers in query: %s", query_un_numbers)
+
     for result in results:
         text_lower = (result.get("full_text") or "").lower()
+        section = result.get("section_number", "")
         boost = 0.0
+
+        # Vessel profile boost
         if profile_terms:
             boost += sum(0.05 for term in profile_terms if term in text_lower)
+
+        # Source affinity boost
         if source_boosts:
             group = _SOURCE_TO_GROUP.get(result.get("source", ""), "")
             if group in source_boosts:
                 boost += source_boosts[group]
+
+        # ERG-specific: Orange Guide preference over Table chunks
+        if erg_active and result.get("source") == "erg":
+            if re.match(r"ERG Guide \d+", section):
+                boost += 0.06
+            elif re.match(r"ERG Table \d+", section):
+                boost -= 0.03
+
+        # ERG-specific: UN number cross-reference boost
+        if query_un_numbers and result.get("source") == "erg":
+            full_text = result.get("full_text") or ""
+            for un in query_un_numbers:
+                # Match both "UN1219" and bare "1219" in text
+                bare_num = un.replace("UN", "").replace("NA", "")
+                if un in full_text.upper() or bare_num in full_text:
+                    boost += 0.12
+                    break  # one match is enough
+
         result["_score"] = float(result["similarity"]) + boost
 
     results.sort(key=lambda x: x["_score"], reverse=True)
