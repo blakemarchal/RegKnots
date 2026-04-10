@@ -304,6 +304,7 @@ _STOPWORDS: frozenset[str] = frozenset(
 
 _MAX_KEYWORD_TERMS = 4
 _MIN_KEYWORD_LEN = 4
+_MAX_KEYWORD_FREQ = 30  # Skip keywords appearing in > this many chunks
 
 
 def _extract_keywords(query: str) -> list[str]:
@@ -386,10 +387,34 @@ async def _broad_keyword_search(
 
     Uses the GIN trigram index for fast ILIKE lookups. Returns up to
     `limit` results per keyword, ordered by trigram similarity.
+
+    Keywords appearing in more than _MAX_KEYWORD_FREQ chunks are skipped
+    as too common to be useful (e.g., "fire" appears in hundreds of
+    chunks across sources). The LIMIT inside the count subquery lets
+    PostgreSQL short-circuit after finding enough matches.
     """
     results: list[dict] = []
     seen_ids: set = set()
     for kw in keywords:
+        # Fast specificity check: skip overly common terms.
+        freq = await pool.fetchval(
+            """
+            SELECT count(*) FROM (
+                SELECT 1 FROM regulations
+                WHERE full_text ILIKE '%' || $1 || '%'
+                LIMIT $2
+            ) sub
+            """,
+            kw,
+            _MAX_KEYWORD_FREQ + 1,
+        )
+        if freq > _MAX_KEYWORD_FREQ:
+            logger.info(
+                "Keyword '%s' matches > %d chunks — too common, skipping",
+                kw, _MAX_KEYWORD_FREQ,
+            )
+            continue
+
         rows = await pool.fetch(
             """
             SELECT id, source, section_number, section_title, full_text,
@@ -546,6 +571,9 @@ async def retrieve(
     #   Synthetic score = max_sim + 0.02 (literal text match = strong signal).
     #
     # Both tiers dedup by section_number against vector results.
+    # When a keyword-matched chunk is already in the pool (same
+    # section_number), we BOOST the existing chunk's similarity to the
+    # keyword synthetic score instead of silently discarding the signal.
     identifiers = _extract_identifiers(query)
     keywords = _extract_keywords(query)
 
@@ -571,38 +599,49 @@ async def retrieve(
 
         id_added = 0
         kw_added = 0
+        id_boosted = 0
+        kw_boosted = 0
 
         def _merge_chunks(
             chunks: list[dict], synthetic_sim: float, counter_name: str,
-        ) -> int:
+        ) -> tuple[int, int]:
             added = 0
+            boosted = 0
             for chunk in chunks:
                 sec = chunk.get("section_number", "")
                 if chunk["id"] in existing_ids:
                     continue
                 if sec and sec in existing_sections:
+                    # Score override: boost existing chunk if keyword
+                    # score is higher than its vector similarity.
+                    idx = seen_sections.get(sec)
+                    if idx is not None and synthetic_sim > float(candidates[idx]["similarity"]):
+                        candidates[idx]["similarity"] = synthetic_sim
+                        boosted += 1
                     continue
                 chunk["similarity"] = synthetic_sim
                 candidates.append(chunk)
                 if sec:
                     existing_sections.add(sec)
+                    seen_sections[sec] = len(candidates) - 1
                 existing_ids.add(chunk["id"])
                 added += 1
-            return added
+            return added, boosted
 
         if id_results:
-            id_added = _merge_chunks(id_results, max_sim + 0.05, "identifier")
+            id_added, id_boosted = _merge_chunks(id_results, max_sim + 0.05, "identifier")
         if kw_results:
-            kw_added = _merge_chunks(kw_results, max_sim + 0.02, "keyword")
+            kw_added, kw_boosted = _merge_chunks(kw_results, max_sim + 0.02, "keyword")
 
         logger.info(
             "Hybrid merge: %d identifier matches for %s, "
-            "%d keyword matches for %s, %d new chunks added",
+            "%d keyword matches for %s, %d added / %d boosted",
             len(id_results),
             [i["value"] for i in identifiers] if identifiers else "[]",
             len(kw_results),
             keywords or "[]",
             id_added + kw_added,
+            id_boosted + kw_boosted,
         )
 
     if candidates:
