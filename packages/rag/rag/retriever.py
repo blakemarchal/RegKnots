@@ -381,20 +381,28 @@ async def _identifier_search(
 async def _broad_keyword_search(
     keywords: list[str],
     pool: asyncpg.Pool,
-    limit: int = 3,
-) -> list[dict]:
+    limit: int = 5,
+) -> tuple[list[dict], list[str]]:
     """Search regulations by text for broad keywords (lower confidence).
 
     Uses the GIN trigram index for fast ILIKE lookups. Returns up to
-    `limit` results per keyword, ordered by trigram similarity.
+    `limit` source-diversified results per keyword (at most one per
+    source via DISTINCT ON), plus the list of keywords that passed the
+    frequency cap (used by the caller for in-memory candidate boosting).
 
     Keywords appearing in more than _MAX_KEYWORD_FREQ chunks are skipped
     as too common to be useful (e.g., "fire" appears in hundreds of
-    chunks across sources). The LIMIT inside the count subquery lets
-    PostgreSQL short-circuit after finding enough matches.
+    chunks across sources).
+
+    Source diversity: uses DISTINCT ON (source) so each source contributes
+    at most one result per keyword — the chunk with the most keyword
+    occurrences. This mirrors the diversified vector search architecture
+    and prevents any single large source (e.g., CFR with 33K chunks) from
+    monopolizing keyword results.
     """
     results: list[dict] = []
     seen_ids: set = set()
+    passed_keywords: list[str] = []
     for kw in keywords:
         # Fast specificity check: skip overly common terms.
         freq = await pool.fetchval(
@@ -415,13 +423,25 @@ async def _broad_keyword_search(
             )
             continue
 
+        passed_keywords.append(kw)
+
         rows = await pool.fetch(
             """
             SELECT id, source, section_number, section_title, full_text,
                    0.0 AS similarity
-            FROM regulations
-            WHERE full_text ILIKE '%' || $1 || '%'
-            ORDER BY similarity(full_text, $1) DESC
+            FROM (
+                SELECT DISTINCT ON (source)
+                    id, source, section_number, section_title, full_text
+                FROM regulations
+                WHERE full_text ILIKE '%' || $1 || '%'
+                ORDER BY source,
+                         (length(full_text)
+                          - length(replace(lower(full_text), lower($1), ''))
+                         ) DESC
+            ) sub
+            ORDER BY (length(full_text)
+                      - length(replace(lower(full_text), lower($1), ''))
+                     ) DESC
             LIMIT $2
             """,
             kw,
@@ -431,7 +451,7 @@ async def _broad_keyword_search(
             if r["id"] not in seen_ids:
                 seen_ids.add(r["id"])
                 results.append(dict(r))
-    return results
+    return results, passed_keywords
 
 
 # ── Per-group SQL fetch ──────────────────────────────────────────────────────
@@ -570,6 +590,13 @@ async def retrieve(
     # Tier 2 (broad keywords): substantive terms like "chlorine", "ammonia".
     #   Synthetic score = max_sim + 0.02 (literal text match = strong signal).
     #
+    # In-memory keyword boost: vector search may have found the right
+    # chunk (e.g., ERG Guide 124) but ranked it low.  The ILIKE query
+    # may not return it either (source-diversified results pick the best
+    # chunk per source, which might be an index chunk rather than a guide).
+    # So we also scan existing vector candidates for keyword text matches
+    # and boost their scores directly — zero DB cost.
+    #
     # Both tiers dedup by section_number against vector results.
     # When a keyword-matched chunk is already in the pool (same
     # section_number), we BOOST the existing chunk's similarity to the
@@ -579,16 +606,39 @@ async def retrieve(
 
     id_results: list[dict] = []
     kw_results: list[dict] = []
+    specific_keywords: list[str] = []
     if identifiers:
         id_results = await _identifier_search(identifiers, pool)
     if keywords:
-        kw_results = await _broad_keyword_search(keywords, pool)
+        kw_results, specific_keywords = await _broad_keyword_search(keywords, pool)
+
+    max_sim = max(
+        (float(c["similarity"]) for c in candidates),
+        default=0.0,
+    ) if candidates else 0.0
+
+    # ── In-memory keyword boost ────────────────────────────────────────
+    #
+    # Scan vector candidates for keyword text matches and boost scores.
+    # Only uses keywords that passed the frequency cap (specific_keywords),
+    # so common words like "fire" (3453 matches) don't trigger boosting.
+    if specific_keywords:
+        kw_boost_sim = max_sim + 0.02
+        kw_mem_boosted = 0
+        for c in candidates:
+            if float(c["similarity"]) >= kw_boost_sim:
+                continue
+            text_lower = (c.get("full_text") or "").lower()
+            if any(kw in text_lower for kw in specific_keywords):
+                c["similarity"] = kw_boost_sim
+                kw_mem_boosted += 1
+        if kw_mem_boosted:
+            logger.info(
+                "In-memory keyword boost: %d candidates boosted for %s",
+                kw_mem_boosted, specific_keywords,
+            )
 
     if id_results or kw_results:
-        max_sim = max(
-            (float(c["similarity"]) for c in candidates),
-            default=0.0,
-        )
 
         existing_sections = {
             c.get("section_number", "")
