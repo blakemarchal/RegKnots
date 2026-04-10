@@ -96,9 +96,10 @@ _BLUE_MARKERS = [
 ]
 
 _GREEN_MARKERS = [
-    re.compile(r"TABLE\s+1\b.*INITIAL\s+ISOLATION", re.IGNORECASE),
-    re.compile(r"ISOLATION\s+AND\s+PROTECTIVE\s+ACTION\s+DISTANCES", re.IGNORECASE),
-    re.compile(r"INITIAL\s+ISOLATION\s+AND\s+PROTECTIVE", re.IGNORECASE),
+    # Primary: the actual green section intro page
+    re.compile(r"INTRODUCTION\s+TO\s+GREEN\s+TABLES", re.IGNORECASE),
+    # Fallbacks: section headers (not guide body text references)
+    re.compile(r"^TABLE\s+1\s*[-\u2013]\s*INITIAL\s+ISOLATION", re.IGNORECASE | re.MULTILINE),
 ]
 
 _BACK_MARKERS = [
@@ -339,146 +340,144 @@ def _page_range(pages: list[str], start: int, end: int) -> str:
 
 # -- Orange Guide parsing (highest priority) -----------------------------------
 
+def _extract_guide_number_from_header(header: str) -> int | None:
+    """Find the 3-digit guide number (111-175) in a guide header.
+
+    The header is the text between "GUIDE\\n" and the first occurrence
+    of POTENTIAL HAZARDS, EMERGENCY RESPONSE, or "Intentionally".
+
+    pdfplumber produces many layout variants:
+      "GUIDE\\n{title}\\n{number}\\n..."              -- number on own line
+      "GUIDE\\n{title}\\n{number} ({note})\\n..."      -- number + parenthetical
+      "GUIDE\\n{title}\\n({note}) {number}\\n..."      -- parenthetical + number
+      "GUIDE\\n{title part1}\\n{number} {part2}\\n..."  -- number mid-line
+      "GUIDE\\n{title part1}\\n{part2} {number}\\n..."  -- number end-of-line
+      "GUIDE\\n{number}\\nIntentionally left blank"     -- blank guides
+    """
+    for m in re.finditer(r"\b(\d{3})\b", header):
+        n = int(m.group(1))
+        if 111 <= n <= 175:
+            return n
+    return None
+
+
 def _parse_orange_guides(
     pages: list[str], boundaries: dict[str, int],
 ) -> list[Section]:
     """Parse the 62 Emergency Response Guide cards (Guides 111-175).
 
-    pdfplumber format per page:
-      "GUIDE\\n{title}\\n{number}\\nPOTENTIAL HAZARDS\\n..."
-    or on the response side:
-      "GUIDE\\n{title}\\n{number}\\nEMERGENCY RESPONSE\\n..."
+    Processes page-by-page to handle all pdfplumber header variants,
+    then merges the 2-page spreads (POTENTIAL HAZARDS + EMERGENCY
+    RESPONSE) into one chunk per guide number.
+
+    Scans from the orange boundary through the entire document rather
+    than stopping at the green boundary, because many guide pages
+    reference "Table 1 - Initial Isolation..." which false-triggers
+    the green boundary detection too early.
     """
     start = boundaries["orange"]
-    end = boundaries["green"]
 
-    orange_text = _page_range(pages, start, end)
-    if not orange_text.strip():
-        logger.warning("ERG: orange section empty (pages %d-%d)", start, end)
-        return []
+    # Collect pages grouped by guide number
+    guide_pages: dict[str, list[str]] = {}
+    unmatched = 0
 
-    # Strategy 1: Split by "GUIDE\n" (GUIDE on its own line, newline after).
-    # Each guide card has this on both pages of the 2-page spread.
-    splits = list(_GUIDE_CARD_START_RE.finditer(orange_text))
-    logger.warning(
-        "ERG orange: %d 'GUIDE\\n' splits in %d chars of pages %d-%d",
-        len(splits), len(orange_text), start, end,
-    )
+    for i in range(start, len(pages)):
+        text = pages[i].strip()
+        if not text:
+            continue
 
-    if splits:
-        # Extract guide number from each split region, then merge the two
-        # pages of each guide (POTENTIAL HAZARDS + EMERGENCY RESPONSE).
-        guide_regions: dict[str, list[str]] = {}
+        # Guide pages have "GUIDE" on its own line
+        if not re.search(r"^GUIDE$", text, re.MULTILINE):
+            continue
 
-        for idx, match in enumerate(splits):
-            region_start = match.start()
-            region_end = (
-                splits[idx + 1].start()
-                if idx + 1 < len(splits)
-                else len(orange_text)
-            )
-            region_text = orange_text[region_start:region_end].strip()
-            if not region_text:
-                continue
-
-            # Look for the guide number on its own line before POTENTIAL/EMERGENCY
-            num_match = _GUIDE_NUM_LINE_RE.search(region_text)
-            if num_match:
-                gn = int(num_match.group(1))
-                if 111 <= gn <= 175:
-                    guide_regions.setdefault(str(gn), []).append(region_text)
-                    continue
-
-            # Fallback: any 3-digit number on its own line
-            line_num = re.search(r"^(\d{3})$", region_text, re.MULTILINE)
-            if line_num:
-                gn = int(line_num.group(1))
-                if 111 <= gn <= 175:
-                    guide_regions.setdefault(str(gn), []).append(region_text)
-                    continue
-
-        # Merge the (typically 2) pages per guide into one section
-        sections: list[Section] = []
-        for guide_num in sorted(guide_regions.keys(), key=int):
-            parts = guide_regions[guide_num]
-            merged_text = "\n\n".join(parts)
-            title = _extract_guide_title(merged_text, guide_num)
-
-            sections.append(_make_section(
-                section_number=f"ERG Guide {guide_num}",
-                section_title=title,
-                full_text=merged_text,
-                parent="ERG Orange Section",
-            ))
-
-        if sections:
-            logger.warning("ERG: parsed %d Orange Guide cards", len(sections))
-            return sections
-
-    # Strategy 2: Split by "POTENTIAL HAZARDS" markers
-    hazard_re = re.compile(r"POTENTIAL\s+HAZARDS", re.IGNORECASE)
-    hazard_matches = list(hazard_re.finditer(orange_text))
-    if hazard_matches:
-        logger.warning(
-            "ERG: guide splitting failed, using %d POTENTIAL HAZARDS markers",
-            len(hazard_matches),
+        # Extract header: text between "GUIDE" and the body marker
+        body_match = re.search(
+            r"POTENTIAL\s+HAZARDS|EMERGENCY\s+RESPONSE|Intentionally\s+left\s+blank",
+            text,
         )
-        sections = []
-        for idx, match in enumerate(hazard_matches):
-            chunk_start = match.start()
-            chunk_end = (
-                hazard_matches[idx + 1].start()
-                if idx + 1 < len(hazard_matches)
-                else len(orange_text)
-            )
-            chunk_text = orange_text[chunk_start:chunk_end].strip()
-            if chunk_text:
-                num_m = re.search(r"^(\d{3})$", chunk_text, re.MULTILINE)
-                gn = num_m.group(1) if num_m else str(111 + idx)
-                sections.append(_make_section(
-                    section_number=f"ERG Guide {gn}",
-                    section_title=f"Emergency Response Guide {gn}",
-                    full_text=chunk_text,
-                    parent="ERG Orange Section",
-                ))
-        if sections:
-            return sections
+        header = text[:body_match.start()] if body_match else text[:300]
 
-    # Strategy 3: Chunk as text blocks
-    logger.warning("ERG: no guide markers found -- chunking orange as blocks")
-    return _chunk_text_blocks(
-        orange_text, "Orange", "Emergency Response Guides", chunk_lines=60,
+        guide_num = _extract_guide_number_from_header(header)
+        if guide_num is not None:
+            guide_pages.setdefault(str(guide_num), []).append(text)
+        else:
+            unmatched += 1
+            if unmatched <= 5:
+                logger.warning(
+                    "ERG: page %d has GUIDE but no number in header: %s",
+                    i, header[:100].replace("\n", "\\n"),
+                )
+
+    logger.warning(
+        "ERG orange: %d unique guides from %d pages (from page %d, %d unmatched)",
+        len(guide_pages),
+        sum(len(v) for v in guide_pages.values()),
+        start, unmatched,
     )
+
+    if not guide_pages:
+        logger.warning("ERG: no guide pages found -- chunking orange as blocks")
+        end = boundaries["green"]
+        orange_text = _page_range(pages, start, end)
+        return _chunk_text_blocks(
+            orange_text, "Orange", "Emergency Response Guides", chunk_lines=60,
+        )
+
+    # Merge the (typically 2) pages per guide into one section
+    sections: list[Section] = []
+    for guide_num in sorted(guide_pages.keys(), key=int):
+        parts = guide_pages[guide_num]
+        merged_text = "\n\n".join(parts)
+        title = _extract_guide_title(merged_text, guide_num)
+
+        sections.append(_make_section(
+            section_number=f"ERG Guide {guide_num}",
+            section_title=title,
+            full_text=merged_text,
+            parent="ERG Orange Section",
+        ))
+
+    logger.warning("ERG: parsed %d Orange Guide cards", len(sections))
+    return sections
 
 
 def _extract_guide_title(text: str, guide_num: str) -> str:
     """Extract the hazard class title from a guide card's text.
 
-    pdfplumber format: "GUIDE\\n{title}\\n{number}\\nPOTENTIAL HAZARDS"
+    Handles all pdfplumber layout variants by grabbing text between
+    "GUIDE\\n" and the body marker, then stripping out the guide number,
+    parenthetical noise, and page footers.
     """
-    # Pattern: title is between "GUIDE\n" and "\n{number}\n"
-    m = _GUIDE_TITLE_EXTRACT_RE.search(text)
-    if m:
-        title = m.group(1).strip()
-        title = re.sub(r"\s*\n\s*", " ", title)
-        if len(title) > 120:
-            title = title[:117] + "..."
-        return title
-
-    # Fallback: grab text between GUIDE and POTENTIAL/EMERGENCY
+    # Grab everything between first GUIDE and first body marker
     m = re.search(
-        r"GUIDE\n(.+?)(?:\nPOTENTIAL|\nEMERGENCY)", text, re.DOTALL,
+        r"GUIDE\n(.+?)(?:\nPOTENTIAL\s+HAZARDS|\nEMERGENCY\s+RESPONSE"
+        r"|Intentionally\s+left\s+blank)",
+        text, re.DOTALL,
     )
-    if m:
-        title = m.group(1).strip()
-        # Remove the guide number if present
-        title = re.sub(r"\n?\d{3}\s*$", "", title).strip()
-        title = re.sub(r"\s*\n\s*", " ", title)
-        if len(title) > 120:
-            title = title[:117] + "..."
-        return title
+    if not m:
+        return f"Guide {guide_num}"
 
-    return f"Guide {guide_num}"
+    title = m.group(1).strip()
+
+    # Remove the 3-digit guide number (may appear anywhere in the header)
+    title = re.sub(r"\b" + guide_num + r"\b", "", title)
+    # Collapse newlines to spaces
+    title = re.sub(r"\s*\n\s*", " ", title)
+    # Remove dangling parenthetical separators and clean up
+    title = re.sub(r"\s*-\s*$", "", title)       # trailing dash
+    title = re.sub(r"^\s*-\s*", "", title)        # leading dash
+    title = re.sub(r"\s{2,}", " ", title).strip()
+    # Remove page footer artifacts
+    title = re.sub(r"\s*Page\s+\d+\s+ERG\s+\d+.*", "", title).strip()
+    title = re.sub(r"\s*ERG\s+\d+\s+Page\s+\d+.*", "", title).strip()
+    # Remove "GUIDE" if it leaked in (from blank guide's second page)
+    title = re.sub(r"\s*GUIDE\s*$", "", title).strip()
+
+    if not title:
+        return f"Guide {guide_num}"
+    if len(title) > 120:
+        title = title[:117] + "..."
+    return title
 
 
 # -- Yellow Section (ID Number -> Guide lookup) --------------------------------
