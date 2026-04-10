@@ -304,7 +304,7 @@ _STOPWORDS: frozenset[str] = frozenset(
 
 _MAX_KEYWORD_TERMS = 4
 _MIN_KEYWORD_LEN = 4
-_MAX_KEYWORD_FREQ = 30  # Skip keywords appearing in > this many chunks
+_MAX_KEYWORD_FREQ = 200  # Skip keywords appearing in > this many chunks
 
 
 def _extract_keywords(query: str) -> list[str]:
