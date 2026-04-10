@@ -13,12 +13,6 @@ import {
   triggerDownload,
   type ExportConversation,
 } from '@/lib/export'
-import {
-  cacheConversations,
-  getCachedConversations,
-  type CachedConversation,
-} from '@/lib/offlineCache'
-import { useOfflineDetection } from '@/hooks/useOfflineDetection'
 
 interface ConversationSummary {
   id: string
@@ -167,11 +161,9 @@ function VesselGroupSection({
 function HistoryContent() {
   const router = useRouter()
   const vessels = useAuthStore((s) => s.vessels)
-  const { isOffline } = useOfflineDetection()
   const [conversations, setConversations] = useState<ConversationSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(false)
-  const [fromCache, setFromCache] = useState(false)
   const [filter, setFilter] = useState<string>('all')
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set())
   const [exportingId, setExportingId] = useState<string | null>(null)
@@ -179,61 +171,19 @@ function HistoryContent() {
   useEffect(() => {
     let cancelled = false
 
-    async function loadFromCache(): Promise<boolean> {
-      try {
-        const cached = await getCachedConversations()
-        if (cancelled || cached.length === 0) return false
-        const summaries: ConversationSummary[] = cached.map(c => ({
-          id: c.id,
-          title: c.title ?? 'Untitled conversation',
-          updated_at: c.updated_at,
-          vessel_name: null,
-        }))
-        setConversations(summaries)
-        const names = new Set<string>()
-        summaries.forEach(s => names.add(s.vessel_name ?? '__general__'))
-        setExpandedGroups(names)
-        setFromCache(true)
-        return true
-      } catch {
-        return false
-      }
-    }
-
     apiRequest<ConversationSummary[]>('/conversations')
-      .then(async data => {
+      .then(data => {
         if (cancelled) return
         setConversations(data)
-        setFromCache(false)
-        // Auto-expand all groups on first load
         const names = new Set<string>()
         data.forEach(c => names.add(c.vessel_name ?? '__general__'))
         setExpandedGroups(names)
         setLoading(false)
-
-        // Best-effort cache write — preserve existing cached messages for
-        // each conversation so we don't clobber message history when refreshing
-        // the list.
-        try {
-          const existing = await getCachedConversations()
-          const msgMap = new Map(existing.map(c => [c.id, c.messages]))
-          const toCache: CachedConversation[] = data.map(c => ({
-            id: c.id,
-            title: c.title,
-            updated_at: c.updated_at,
-            messages: msgMap.get(c.id) ?? [],
-          }))
-          await cacheConversations(toCache)
-        } catch {
-          // Cache write failures must never break the page.
-        }
       })
-      .catch(async () => {
+      .catch(() => {
         if (cancelled) return
-        // Network failure — try the offline cache before surfacing an error.
-        const gotCache = await loadFromCache()
-        if (!gotCache && !cancelled) setError(true)
-        if (!cancelled) setLoading(false)
+        setError(true)
+        setLoading(false)
       })
 
     return () => { cancelled = true }
@@ -316,13 +266,6 @@ function HistoryContent() {
       {/* Content */}
       <main className="chat-thread flex-1 overflow-y-auto">
         <div className="px-4 py-4 flex flex-col gap-2">
-
-          {/* Cached-data indicator — shown only when falling back to offline cache */}
-          {fromCache && (
-            <p className="font-mono text-[10px] text-amber-400/80 uppercase tracking-wider pl-1">
-              {isOffline ? 'Offline — ' : ''}(cached)
-            </p>
-          )}
 
           {/* Filter bar */}
           {!loading && !error && conversations.length > 0 && (

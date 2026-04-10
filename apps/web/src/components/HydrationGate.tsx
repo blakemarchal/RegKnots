@@ -3,7 +3,6 @@
 import { useEffect } from 'react'
 import { usePathname } from 'next/navigation'
 import { useAuthStore } from '@/lib/auth'
-import { useOfflineDetection } from '@/hooks/useOfflineDetection'
 import { CompassRose } from './CompassRose'
 
 // Fully public routes that never need an auth refresh. `/` is intentionally
@@ -33,27 +32,16 @@ function isPublicRoute(pathname: string): boolean {
 export function HydrationGate({ children }: { children: React.ReactNode }) {
   const { hydrated, hydrateAuth } = useAuthStore()
   const pathname = usePathname()
-  const { isOffline } = useOfflineDetection()
 
   const isPublic = isPublicRoute(pathname)
 
   useEffect(() => {
     if (hydrated) return
-    // Public routes do not need auth state — skip the refresh call entirely
-    // so unauthenticated visitors don't spam POST /auth/refresh with 401s.
     if (isPublic) return
     hydrateAuth()
   }, [hydrated, isPublic, hydrateAuth])
 
-  // Guest / public pages render immediately — no auth gate, no spinner.
   if (isPublic) {
-    return <>{children}</>
-  }
-
-  // Offline users with cached data should see the app, not a spinner that
-  // spins forever. hydrateAuth() has its own offline shortcut that restores
-  // the persisted user hint; even before it runs we can safely render.
-  if (!hydrated && isOffline) {
     return <>{children}</>
   }
 

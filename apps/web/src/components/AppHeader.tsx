@@ -3,7 +3,6 @@
 import { useState } from 'react'
 import { HamburgerMenu } from './HamburgerMenu'
 import { PilotSurveyModal } from './PilotSurveyModal'
-import { OfflineIndicator } from './OfflineIndicator'
 
 interface Props {
   title?: string
@@ -34,7 +33,6 @@ export function AppHeader({ title, trailing }: Props) {
             <h1 className="font-display text-xl font-bold text-[#f0ece4] tracking-wide leading-none">
               {title ?? 'RegKnot'}
             </h1>
-            <OfflineIndicator />
             {trailing}
           </div>
         </div>

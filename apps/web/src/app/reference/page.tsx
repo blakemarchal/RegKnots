@@ -5,7 +5,7 @@ import { ReferenceAccordion } from './ReferenceAccordion'
 export const metadata: Metadata = {
   title: 'Quick Reference — RegKnot',
   description:
-    'Offline-available paraphrased summaries of COLREGs rules and key CFR maritime definitions.',
+    'Paraphrased summaries of COLREGs rules and key CFR maritime definitions.',
 }
 
 // ── Content ────────────────────────────────────────────────────────────────────
@@ -206,7 +206,7 @@ export default function ReferencePage() {
             Quick <span className="text-[#2dd4bf]">Reference</span>
           </h1>
           <p className="font-mono text-xs text-[#6b7594] mt-2 leading-relaxed">
-            Key rules available offline. Always current as of last app update.
+            Key rules for quick reference. Always current as of last app update.
           </p>
         </div>
 
@@ -259,7 +259,7 @@ export default function ReferencePage() {
         </div>
 
         <p className="font-mono text-[10px] text-[#6b7594]/70 text-center mt-10 leading-relaxed">
-          Navigation aid only &mdash; not legal advice. Cached locally for offline use.
+          Navigation aid only &mdash; not legal advice.
         </p>
       </main>
     </div>

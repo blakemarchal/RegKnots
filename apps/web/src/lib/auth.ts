@@ -1,7 +1,6 @@
 'use client'
 
 import { create } from 'zustand'
-import { cacheVessels } from './offlineCache'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'
 
@@ -75,42 +74,6 @@ interface AuthState {
 // Mutex: only one refresh call in flight at a time
 let refreshPromise: Promise<boolean> | null = null
 
-// Persisted auth hint — lets offline users hydrate the UI with their last
-// known user info without hitting /auth/refresh. NOT a secret: just the
-// decoded JWT payload (id/email/role), which is already sent to the client
-// on every login. The actual refresh token stays in an HttpOnly cookie.
-const AUTH_HINT_KEY = 'regknots_auth_hint'
-
-function persistAuthHint(user: AuthUser): void {
-  if (typeof window === 'undefined') return
-  try {
-    localStorage.setItem(AUTH_HINT_KEY, JSON.stringify(user))
-  } catch {
-    // ignore private-mode / quota errors
-  }
-}
-
-function clearAuthHint(): void {
-  if (typeof window === 'undefined') return
-  try {
-    localStorage.removeItem(AUTH_HINT_KEY)
-  } catch {
-    // ignore
-  }
-}
-
-function readAuthHint(): AuthUser | null {
-  if (typeof window === 'undefined') return null
-  try {
-    const raw = localStorage.getItem(AUTH_HINT_KEY)
-    if (!raw) return null
-    const parsed = JSON.parse(raw) as AuthUser
-    if (!parsed || typeof parsed.id !== 'string') return null
-    return parsed
-  } catch {
-    return null
-  }
-}
 
 export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
@@ -133,8 +96,6 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   setVessels: (vessels: VesselSummary[]) => {
     set({ vessels })
-    // Best-effort offline cache — never block or fail the main flow.
-    cacheVessels(vessels).catch(() => {})
   },
 
   setActiveVessel: (id: string | null) =>
@@ -145,7 +106,6 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   setToken: (token: string, user: AuthUser) => {
     set({ accessToken: token, user, isAuthenticated: true })
-    persistAuthHint(user)
   },
 
   updateUserFromToken: (token: string) => {
@@ -173,7 +133,6 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       user,
       isAuthenticated: true,
     })
-    if (user) persistAuthHint(user)
   },
 
   register: async (email: string, password: string, fullName: string, role: string) => {
@@ -196,7 +155,6 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       user,
       isAuthenticated: true,
     })
-    if (user) persistAuthHint(user)
   },
 
   logout: async () => {
@@ -210,26 +168,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     } catch {
       // Ignore network errors on logout
     }
-    clearAuthHint()
     set({ accessToken: null, user: null, isAuthenticated: false, vessels: [], activeVesselId: null, billing: null })
   },
 
   hydrateAuth: async () => {
     if (get().hydrated) return // Already hydrated, never re-run
-
-    // Offline shortcut: don't even attempt /auth/refresh — it's guaranteed
-    // to fail and would leave us with no auth state. Instead, restore the
-    // last known user from the persisted auth hint so the cached UI can
-    // render (API calls will fail gracefully, cached data fills the gap).
-    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
-      const hint = readAuthHint()
-      if (hint) {
-        set({ user: hint, isAuthenticated: true })
-      }
-      set({ hydrated: true })
-      return
-    }
-
     await get().refreshAuth()
     set({ hydrated: true })
   },
@@ -255,7 +198,6 @@ export const useAuthStore = create<AuthState>((set, get) => ({
               credentials: 'include',
             })
           } catch {}
-          clearAuthHint()
           set({ accessToken: null, user: null, isAuthenticated: false })
           return false
         }
@@ -267,22 +209,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           user,
           isAuthenticated: true,
         })
-        if (user) persistAuthHint(user)
         return true
       } catch {
-        // Network error (offline, DNS fail, CORS, etc.) — distinguish from a
-        // real auth failure. If the user is offline, DO NOT clear auth state
-        // or log them out; they may still have a valid session we just can't
-        // verify right now. Restore the persisted hint so the UI renders
-        // with the last-known user, and let the offline-cache fallbacks
-        // supply the data.
-        if (typeof navigator !== 'undefined' && navigator.onLine === false) {
-          const hint = readAuthHint()
-          if (hint) {
-            set({ user: hint, isAuthenticated: true })
-          }
-          return false
-        }
         set({ accessToken: null, user: null, isAuthenticated: false })
         return false
       } finally {

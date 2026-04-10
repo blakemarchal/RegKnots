@@ -7,10 +7,9 @@ interface Props {
   onChange: (v: string) => void
   onSend: () => void
   loading: boolean
-  offline?: boolean
 }
 
-export function InputBar({ value, onChange, onSend, loading, offline = false }: Props) {
+export function InputBar({ value, onChange, onSend, loading }: Props) {
   const ref = useRef<HTMLTextAreaElement>(null)
 
   // Auto-resize textarea
@@ -24,12 +23,11 @@ export function InputBar({ value, onChange, onSend, loading, offline = false }: 
   function onKey(e: KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
-      if (!loading && !offline && value.trim()) onSend()
+      if (!loading && value.trim()) onSend()
     }
   }
 
-  const disabled = loading || offline
-  const canSend = !disabled && value.trim().length > 0
+  const canSend = !loading && value.trim().length > 0
 
   return (
     <div className="px-3 pb-3 pt-1">
@@ -42,9 +40,9 @@ export function InputBar({ value, onChange, onSend, loading, offline = false }: 
           value={value}
           onChange={(e: ChangeEvent<HTMLTextAreaElement>) => onChange(e.target.value)}
           onKeyDown={onKey}
-          disabled={disabled}
+          disabled={loading}
           rows={1}
-          placeholder={offline ? 'Offline — new queries unavailable' : 'Ask a regulation question…'}
+          placeholder="Ask a regulation question…"
           className="flex-1 bg-transparent text-sm text-[#f0ece4] placeholder:text-[#6b7594]/60
             resize-none outline-none leading-relaxed py-1
             disabled:opacity-50"
@@ -75,15 +73,9 @@ export function InputBar({ value, onChange, onSend, loading, offline = false }: 
         </button>
       </div>
 
-      {offline ? (
-        <p className="text-center text-[10px] text-amber-400/80 mt-1.5 leading-none">
-          Offline — cached conversations available above
-        </p>
-      ) : (
-        <p className="text-center text-[10px] text-[#6b7594]/50 mt-1.5 leading-none">
-          Navigation aid only — not legal advice
-        </p>
-      )}
+      <p className="text-center text-[10px] text-[#6b7594]/50 mt-1.5 leading-none">
+        Navigation aid only — not legal advice
+      </p>
     </div>
   )
 }
