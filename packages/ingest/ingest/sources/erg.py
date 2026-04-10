@@ -143,12 +143,24 @@ def parse_source(pdf_path: Path) -> list[Section]:
 # ── PDF text extraction ──────────────────────────────────────────────────────
 
 def _extract_pages(pdf_path: Path) -> list[str]:
-    """Extract text from every page using pdfplumber."""
+    """Extract text from every page using pdfplumber.
+
+    Per-page errors are caught so one bad page doesn't crash the whole run.
+    """
     pages: list[str] = []
+    errors = 0
     with pdfplumber.open(pdf_path) as pdf:
-        for page in pdf.pages:
-            text = page.extract_text() or ""
+        for i, page in enumerate(pdf.pages):
+            try:
+                text = page.extract_text() or ""
+            except Exception as exc:
+                text = ""
+                errors += 1
+                if errors <= 5:
+                    logger.warning("ERG: page %d extraction failed: %s", i, exc)
             pages.append(text)
+    if errors:
+        logger.warning("ERG: %d/%d pages had extraction errors", errors, len(pages))
     return pages
 
 

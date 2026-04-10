@@ -87,7 +87,15 @@ async def run_pdf_pipeline(
 
             # ── 2. Parse sections ────────────────────────────────────────────
             parse_task = progress.add_task(f"Parsing {source}…", total=1)
-            sections = section_loader()
+            try:
+                sections = section_loader()
+            except Exception:
+                # Stop progress display BEFORE printing the traceback so it
+                # doesn't get overwritten by Rich's cursor cleanup.
+                progress.stop()
+                console.print(f"[bold red]ERROR parsing {source}:[/bold red]")
+                console.print_exception()
+                raise
             result.sections_found = len(sections)
             progress.update(
                 parse_task,
