@@ -6,9 +6,13 @@ const nextConfig: NextConfig = {};
 
 const pwaConfig = withPWA({
   dest: "public",
-  register: true,
+  // Register SW manually after hydration to avoid MessagePort
+  // interference during React hydration (React error #418).
+  register: false,
+  cacheStartUrl: false,
+  reloadOnOnline: false,
   workboxOptions: {
-    cacheId: "regknots-v11",
+    cacheId: "regknots-v12",
     skipWaiting: true,
     cleanupOutdatedCaches: true,
     // Exclude everything from precache — SW does zero caching

@@ -248,12 +248,12 @@ function AdminContent() {
   const [surveyPreview, setSurveyPreview] = useState(false)
 
   // Internal filtering toggle
-  const [excludeInternal, setExcludeInternal] = useState(() => {
-    if (typeof window !== 'undefined') {
-      return localStorage.getItem('admin_exclude_internal') !== 'false'
-    }
-    return true
-  })
+  const [excludeInternal, setExcludeInternal] = useState(true)
+
+  useEffect(() => {
+    const stored = localStorage.getItem('admin_exclude_internal')
+    if (stored === 'false') setExcludeInternal(false)
+  }, [])
 
   // Analytics state
   const [messagesPerDay, setMessagesPerDay] = useState<DayMessageCount[]>([])
