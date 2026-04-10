@@ -278,6 +278,59 @@ def _extract_identifiers(query: str) -> list[dict]:
     return identifiers
 
 
+# ── Broad keyword extraction ───────────────────────────────────────────────
+#
+# Extracts substantive search terms from ANY query by stripping stopwords.
+# These keywords are searched with lower confidence than identifiers, but
+# they close the gap for queries like "chlorine gas" or "ammonia leak"
+# where no formal identifier is present.
+
+_STOPWORDS: frozenset[str] = frozenset(
+    # articles / prepositions
+    "the a an for of on in to from with by at about"
+    # question / auxiliary words
+    " what which how where when who does do is are was were can could"
+    " should would will may might shall"
+    # common verbs
+    " require explain describe tell show give need help find handle"
+    " apply cover covers mean uses using used have been"
+    # domain-generic words (appear in nearly every chunk)
+    " requirements regulations rules procedures vessel vessels ship ships"
+    " aboard maritime marine must compliance section chapter part"
+    " regulation rule code standard safety international"
+    # source names (already handled by source affinity)
+    " solas colregs stcw nvic guide emergency response".split()
+)
+
+_MAX_KEYWORD_TERMS = 4
+_MIN_KEYWORD_LEN = 4
+
+
+def _extract_keywords(query: str) -> list[str]:
+    """Extract substantive search terms from query after stripping stopwords.
+
+    Returns up to _MAX_KEYWORD_TERMS keywords, longest first (longer words
+    are more specific). Only words with _MIN_KEYWORD_LEN+ characters are
+    kept.
+    """
+    # Tokenize: keep only alphabetic words (drop numbers, punctuation)
+    words = re.findall(r"[a-zA-Z]+", query.lower())
+    keywords = [
+        w for w in words
+        if len(w) >= _MIN_KEYWORD_LEN and w not in _STOPWORDS
+    ]
+    # Deduplicate preserving order
+    seen: set[str] = set()
+    unique: list[str] = []
+    for w in keywords:
+        if w not in seen:
+            seen.add(w)
+            unique.append(w)
+    # Take longest first — more specific, fewer false positives
+    unique.sort(key=len, reverse=True)
+    return unique[:_MAX_KEYWORD_TERMS]
+
+
 # ── Query embedding ──────────────────────────────────────────────────────────
 
 
@@ -291,19 +344,17 @@ async def _embed_query(openai_api_key: str, query: str) -> str:
     return "[" + ",".join(f"{x:.8f}" for x in embedding) + "]"
 
 
-# ── Keyword search (identifier-based) ────────────────────────────────────────
+# ── Keyword search (identifier + broad keyword) ─────────────────────────────
 
 
-async def _keyword_search(
+async def _identifier_search(
     identifiers: list[dict],
     pool: asyncpg.Pool,
     limit: int = 5,
 ) -> list[dict]:
-    """Search the regulations table by text for detected identifiers.
+    """Search regulations by text for structured identifiers (high confidence).
 
-    Returns results in the same dict format as vector search (id, source,
-    section_number, section_title, full_text, similarity).  Similarity is
-    set to 0.0 — real scoring happens during the merge step.
+    Returns results in the same dict format as vector search.
     """
     results: list[dict] = []
     seen_ids: set = set()
@@ -317,6 +368,38 @@ async def _keyword_search(
             LIMIT $2
             """,
             ident["pattern"],
+            limit,
+        )
+        for r in rows:
+            if r["id"] not in seen_ids:
+                seen_ids.add(r["id"])
+                results.append(dict(r))
+    return results
+
+
+async def _broad_keyword_search(
+    keywords: list[str],
+    pool: asyncpg.Pool,
+    limit: int = 3,
+) -> list[dict]:
+    """Search regulations by text for broad keywords (lower confidence).
+
+    Uses the GIN trigram index for fast ILIKE lookups. Returns up to
+    `limit` results per keyword, ordered by trigram similarity.
+    """
+    results: list[dict] = []
+    seen_ids: set = set()
+    for kw in keywords:
+        rows = await pool.fetch(
+            """
+            SELECT id, source, section_number, section_title, full_text,
+                   0.0 AS similarity
+            FROM regulations
+            WHERE full_text ILIKE '%' || $1 || '%'
+            ORDER BY similarity(full_text, $1) DESC
+            LIMIT $2
+            """,
+            kw,
             limit,
         )
         for r in rows:
@@ -455,49 +538,72 @@ async def retrieve(
                     seen_sections[sec] = len(candidates)
                 candidates.append(chunk)
 
-    # ── Hybrid merge: keyword search for identifier-based queries ────────
+    # ── Hybrid merge: two-tier keyword search ────────────────────────────
+    #
+    # Tier 1 (identifiers): structured patterns like UN1219, Rule 14.
+    #   Synthetic score = max_sim - 0.05 (high confidence).
+    # Tier 2 (broad keywords): substantive terms like "chlorine", "ammonia".
+    #   Synthetic score = max_sim - 0.12 (lower confidence).
+    #
+    # Both tiers dedup by section_number against vector results.
     identifiers = _extract_identifiers(query)
+    keywords = _extract_keywords(query)
+
+    id_results: list[dict] = []
+    kw_results: list[dict] = []
     if identifiers:
-        kw_results = await _keyword_search(identifiers, pool)
-        if kw_results:
-            # Compute synthetic similarity for keyword-only chunks: just
-            # below the best vector match so they survive re-ranking but
-            # don't artificially dominate.
-            max_sim = max(
-                (float(c["similarity"]) for c in candidates),
-                default=0.0,
-            )
-            synthetic_sim = max_sim - 0.05
+        id_results = await _identifier_search(identifiers, pool)
+    if keywords:
+        kw_results = await _broad_keyword_search(keywords, pool)
 
-            # Build set of section_numbers already in the vector results.
-            existing_sections = {
-                c.get("section_number", "")
-                for c in candidates
-                if c.get("section_number")
-            }
-            existing_ids = {c["id"] for c in candidates}
+    if id_results or kw_results:
+        max_sim = max(
+            (float(c["similarity"]) for c in candidates),
+            default=0.0,
+        )
 
+        existing_sections = {
+            c.get("section_number", "")
+            for c in candidates
+            if c.get("section_number")
+        }
+        existing_ids = {c["id"] for c in candidates}
+
+        id_added = 0
+        kw_added = 0
+
+        def _merge_chunks(
+            chunks: list[dict], synthetic_sim: float, counter_name: str,
+        ) -> int:
             added = 0
-            for kw_chunk in kw_results:
-                sec = kw_chunk.get("section_number", "")
-                if kw_chunk["id"] in existing_ids:
+            for chunk in chunks:
+                sec = chunk.get("section_number", "")
+                if chunk["id"] in existing_ids:
                     continue
                 if sec and sec in existing_sections:
-                    continue  # dedup by section_number — keep vector version
-                kw_chunk["similarity"] = synthetic_sim
-                candidates.append(kw_chunk)
+                    continue
+                chunk["similarity"] = synthetic_sim
+                candidates.append(chunk)
                 if sec:
                     existing_sections.add(sec)
-                existing_ids.add(kw_chunk["id"])
+                existing_ids.add(chunk["id"])
                 added += 1
+            return added
 
-            logger.info(
-                "Hybrid merge: %d keyword matches for identifiers %s, "
-                "%d new chunks added",
-                len(kw_results),
-                [i["value"] for i in identifiers],
-                added,
-            )
+        if id_results:
+            id_added = _merge_chunks(id_results, max_sim - 0.05, "identifier")
+        if kw_results:
+            kw_added = _merge_chunks(kw_results, max_sim - 0.12, "keyword")
+
+        logger.info(
+            "Hybrid merge: %d identifier matches for %s, "
+            "%d keyword matches for %s, %d new chunks added",
+            len(id_results),
+            [i["value"] for i in identifiers] if identifiers else "[]",
+            len(kw_results),
+            keywords or "[]",
+            id_added + kw_added,
+        )
 
     if candidates:
         candidates = _rerank(candidates, query, vessel_profile)

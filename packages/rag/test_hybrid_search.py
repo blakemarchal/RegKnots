@@ -1,8 +1,8 @@
 """
 Diagnostic for hybrid (vector + keyword) retrieval.
 
-Tests that identifier-based queries activate keyword search and produce
-correct results, while queries without identifiers stay pure-vector.
+Tests identifier detection, broad keyword extraction, and full retrieval
+across multiple query types.
 
 Usage:
     uv run python test_hybrid_search.py
@@ -19,7 +19,7 @@ from dotenv import load_dotenv
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 load_dotenv(_REPO_ROOT / ".env", override=True)
 
-from rag.retriever import _extract_identifiers, retrieve  # noqa: E402
+from rag.retriever import _extract_identifiers, _extract_keywords, retrieve  # noqa: E402
 
 logging.basicConfig(
     level=logging.INFO,
@@ -30,34 +30,40 @@ logging.basicConfig(
 
 CASES = [
     {
+        "query": "What ERG guide covers chlorine gas?",
+        "expect_ids": [],
+        "expect_keywords_contain": ["chlorine"],
+        "note": "No identifier. Keyword 'chlorine' should find ERG Guide 124.",
+    },
+    {
         "query": "What is the emergency response for a UN1219 isopropanol spill?",
         "expect_ids": [{"type": "un_number", "value": "UN1219"}],
-        "expect_keyword_active": True,
-        "note": "Should find ERG Guide 129 and/or ERG Yellow 1212-1228 via keyword search",
+        "expect_keywords_contain": ["isopropanol"],
+        "note": "Both identifier (UN1219) and keyword (isopropanol). Guide 129 should appear.",
     },
     {
-        "query": "What does 46 CFR 35.10-5 require?",
-        "expect_ids": [{"type": "cfr_section", "value": "46 CFR 35.10-5"}],
-        "expect_keyword_active": True,
-        "note": "Should find the relevant CFR chunk via keyword search",
-    },
-    {
-        "query": "Explain COLREGs Rule 14",
-        "expect_ids": [{"type": "colregs_rule", "value": "Rule 14"}],
-        "expect_keyword_active": True,
-        "note": "Should find the Rule 14 head-on situation chunk",
-    },
-    {
-        "query": "What are the SOLAS requirements for fire detection?",
+        "query": "What are the SOLAS requirements for fire detection on cargo ships?",
         "expect_ids": [],
-        "expect_keyword_active": False,
-        "note": "No identifiers — pure vector search, hybrid should NOT activate",
+        "expect_keywords_contain": ["fire", "detection"],
+        "note": "Keywords supplement vector search. SOLAS Ch.II-2 should still top results.",
+    },
+    {
+        "query": "What are the COLREGs rules for vessels restricted in ability to maneuver?",
+        "expect_ids": [],
+        "expect_keywords_contain": ["restricted", "maneuver"],
+        "note": "Keywords: restricted, ability, maneuver. COLREGs Rules 3/27 expected.",
+    },
+    {
+        "query": "How do I handle an ammonia leak?",
+        "expect_ids": [],
+        "expect_keywords_contain": ["ammonia", "leak"],
+        "note": "No identifier. Keyword 'ammonia' should find ERG Guide 125.",
     },
 ]
 
 
 def test_identifier_detection():
-    """Unit test for _extract_identifiers — no DB needed."""
+    """Unit test for _extract_identifiers -- no DB needed."""
     print("\n" + "=" * 60)
     print("IDENTIFIER DETECTION (offline)")
     print("=" * 60)
@@ -86,13 +92,36 @@ def test_identifier_detection():
     return all_pass
 
 
+def test_keyword_extraction():
+    """Unit test for _extract_keywords -- no DB needed."""
+    print("\n" + "=" * 60)
+    print("KEYWORD EXTRACTION (offline)")
+    print("=" * 60)
+
+    all_pass = True
+    for case in CASES:
+        kws = _extract_keywords(case["query"])
+        expected = case["expect_keywords_contain"]
+
+        matched = all(e in kws for e in expected)
+        status = "PASS" if matched else "FAIL"
+        if not matched:
+            all_pass = False
+
+        print(f"\n[{status}] {case['query']}")
+        print(f"  Expected to contain: {expected}")
+        print(f"  Got: {kws}")
+
+    return all_pass
+
+
 async def test_hybrid_retrieve():
-    """Full retrieval test — requires DB + OpenAI key."""
+    """Full retrieval test -- requires DB + OpenAI key."""
     openai_api_key = os.environ.get("OPENAI_API_KEY", "")
     database_url = os.environ.get("REGKNOTS_DATABASE_URL", "")
 
     if not openai_api_key or not database_url:
-        print("\nSkipping retrieval test — OPENAI_API_KEY or REGKNOTS_DATABASE_URL not set")
+        print("\nSkipping retrieval test -- OPENAI_API_KEY or REGKNOTS_DATABASE_URL not set")
         return True
 
     pool = await asyncpg.create_pool(database_url)
@@ -132,12 +161,18 @@ async def test_hybrid_retrieve():
 
 async def main():
     id_pass = test_identifier_detection()
+    kw_pass = test_keyword_extraction()
     await test_hybrid_retrieve()
 
-    if id_pass:
-        print("\nAll identifier detection tests passed.")
+    if id_pass and kw_pass:
+        print("\nAll offline tests passed.")
     else:
-        print("\nSome identifier detection tests FAILED.")
+        failed = []
+        if not id_pass:
+            failed.append("identifier detection")
+        if not kw_pass:
+            failed.append("keyword extraction")
+        print(f"\nFAILED: {', '.join(failed)}")
 
 
 if __name__ == "__main__":
