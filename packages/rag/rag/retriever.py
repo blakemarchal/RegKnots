@@ -541,9 +541,9 @@ async def retrieve(
     # ── Hybrid merge: two-tier keyword search ────────────────────────────
     #
     # Tier 1 (identifiers): structured patterns like UN1219, Rule 14.
-    #   Synthetic score = max_sim - 0.05 (high confidence).
+    #   Synthetic score = max_sim + 0.05 (highest confidence).
     # Tier 2 (broad keywords): substantive terms like "chlorine", "ammonia".
-    #   Synthetic score = max_sim - 0.12 (lower confidence).
+    #   Synthetic score = max_sim + 0.02 (literal text match = strong signal).
     #
     # Both tiers dedup by section_number against vector results.
     identifiers = _extract_identifiers(query)
@@ -591,9 +591,9 @@ async def retrieve(
             return added
 
         if id_results:
-            id_added = _merge_chunks(id_results, max_sim - 0.05, "identifier")
+            id_added = _merge_chunks(id_results, max_sim + 0.05, "identifier")
         if kw_results:
-            kw_added = _merge_chunks(kw_results, max_sim - 0.03, "keyword")
+            kw_added = _merge_chunks(kw_results, max_sim + 0.02, "keyword")
 
         logger.info(
             "Hybrid merge: %d identifier matches for %s, "
