@@ -10,7 +10,9 @@ import { useEffect, useState } from 'react'
  * subscribes to the window `online`/`offline` events.
  */
 export function useOfflineDetection(): { isOffline: boolean } {
-  const [isOffline, setIsOffline] = useState(false)
+  const [isOffline, setIsOffline] = useState(() =>
+    typeof navigator !== 'undefined' ? !navigator.onLine : false
+  )
 
   useEffect(() => {
     if (typeof window === 'undefined') return
