@@ -230,13 +230,12 @@ def _extract_identifiers(query: str) -> list[dict]:
     for id_type, regex in _IDENTIFIER_PATTERNS:
         for m in regex.finditer(query):
             if id_type == "un_number":
-                # value: "UN1219", pattern: "1219" (bare number for ILIKE)
                 prefix = m.group(1).upper()
                 number = m.group(2)
                 identifiers.append({
                     "type": id_type,
                     "value": f"{prefix}{number}",
-                    "pattern": number,
+                    "pattern": f"{prefix}{number}",
                 })
             elif id_type == "erg_guide":
                 identifiers.append({
