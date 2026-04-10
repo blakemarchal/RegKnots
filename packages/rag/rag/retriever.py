@@ -1,21 +1,23 @@
 """
-pgvector semantic search with source-diversified fetch and soft re-ranking.
+Hybrid semantic + keyword retriever with source-diversified fetch.
 
 Retrieval strategy:
 
 1. Embed the query once.
-2. Run one vector search per configured source group, CONCURRENTLY. Each
+2. Detect regulation identifiers in the query (UN numbers, CFR sections,
+   COLREGs rules, etc.) and run keyword search for matching chunks.
+3. Run one vector search per configured source group, CONCURRENTLY. Each
    group gets its own top-N candidate pool, so small sources (COLREGs: 102,
    SOLAS: 742) aren't outranked by large ones (CFR: ~33K chunks) just
    because the large sources have more chunks to draw from.
-3. Merge and deduplicate by chunk id.
-4. Apply two soft boosts:
+4. Merge keyword results into vector results, deduplicate by section_number.
+5. Apply two soft boosts:
      - Source affinity: when the query unambiguously targets a source
        (e.g., mentions COLREGs, 46 CFR, SOLAS chapter, STCW), boost chunks
        from that source's group.
      - Vessel profile: when a vessel_profile is provided, boost chunks
        whose full_text mentions the vessel's type / route / cargo.
-5. Sort by similarity + boosts, return top `limit`.
+6. Sort by similarity + boosts, return top `limit`.
 
 Adding a new source (e.g., MARPOL) is just a one-line edit to SOURCE_GROUPS
 and an entry in _source_affinity if it has distinctive keywords. No other
@@ -52,8 +54,6 @@ SOURCE_GROUPS: dict[str, tuple[str, ...]] = {
 # sub-titles (~33K total chunks) and needs room for intra-CFR diversity.
 _CANDIDATES_PER_GROUP: dict[str, int] = {
     "cfr": 12,
-    "erg": 8,  # ERG needs more candidates: its lookup-table + response-card
-               # structure means Table chunks can crowd out Orange Guides at top-6.
 }
 _DEFAULT_CANDIDATES_PER_GROUP = 6
 
@@ -158,8 +158,6 @@ _ERG_TERMS: tuple[str, ...] = (
     "guide number", "guide 1",
 )
 _ERG_ABBR_RE = re.compile(r"\berg\b", re.IGNORECASE)
-_ERG_GUIDE_RE = re.compile(r"\bguide\s*(\d{3})\b", re.IGNORECASE)
-_ERG_UN_RE = re.compile(r"\b(?:UN|NA)\s*\d{4}\b", re.IGNORECASE)
 
 
 def _source_affinity(query: str) -> dict[str, float]:
@@ -190,12 +188,7 @@ def _source_affinity(query: str) -> dict[str, float]:
     if any(t in q for t in _ISM_TERMS) or _ISM_ABBR_RE.search(q):
         boosts["ism"] = 0.20
 
-    if (
-        any(t in q for t in _ERG_TERMS)
-        or _ERG_ABBR_RE.search(q)
-        or _ERG_GUIDE_RE.search(q)
-        or _ERG_UN_RE.search(q)
-    ):
+    if any(t in q for t in _ERG_TERMS) or _ERG_ABBR_RE.search(q):
         boosts["erg"] = 0.20
 
     if "cfr" in q or "code of federal" in q:
@@ -209,6 +202,83 @@ def _source_affinity(query: str) -> dict[str, float]:
     return boosts
 
 
+# ── Identifier detection (source-agnostic) ────────────────────────────────
+#
+# Scans the query for known regulation identifier patterns. These are
+# arbitrary strings (UN1219, 46 CFR 35.10-5, Rule 14) with no semantic
+# meaning — vector search cannot match them, so we fall back to keyword
+# search when they are detected.
+
+_IDENTIFIER_PATTERNS: list[tuple[str, re.Pattern]] = [
+    ("un_number",    re.compile(r"\b(UN|NA)(\d{4})\b", re.IGNORECASE)),
+    ("erg_guide",    re.compile(r"\b(?:ERG\s+)?Guide\s+(\d{3})\b", re.IGNORECASE)),
+    ("cfr_section",  re.compile(r"\b(\d{1,2})\s*CFR\s*([\d.]+(?:-[\d]+)?)\b", re.IGNORECASE)),
+    ("colregs_rule", re.compile(r"\b(?:COLREGs?\s+)?Rule\s+(\d{1,2})\b", re.IGNORECASE)),
+    ("solas_reg",    re.compile(r"\bSOLAS\s+(Ch\.?)?([IVX]+-\d+)(?:\s*(?:Reg\.?\s*|/)(\d+))?\b", re.IGNORECASE)),
+    ("nvic_number",  re.compile(r"\bNVIC\s+(\d{2}-\d{2})\b", re.IGNORECASE)),
+    ("ism_section",  re.compile(r"\bISM\s+(?:Code\s+)?(\d+(?:\.\d+)?)\b", re.IGNORECASE)),
+]
+
+
+def _extract_identifiers(query: str) -> list[dict]:
+    """Scan query for known regulation identifier patterns.
+
+    Returns a list of dicts with keys: type, value, pattern.
+    The 'pattern' field is the substring used for database text search.
+    """
+    identifiers: list[dict] = []
+    for id_type, regex in _IDENTIFIER_PATTERNS:
+        for m in regex.finditer(query):
+            if id_type == "un_number":
+                # value: "UN1219", pattern: "1219" (bare number for ILIKE)
+                prefix = m.group(1).upper()
+                number = m.group(2)
+                identifiers.append({
+                    "type": id_type,
+                    "value": f"{prefix}{number}",
+                    "pattern": number,
+                })
+            elif id_type == "erg_guide":
+                identifiers.append({
+                    "type": id_type,
+                    "value": f"Guide {m.group(1)}",
+                    "pattern": f"Guide {m.group(1)}",
+                })
+            elif id_type == "cfr_section":
+                title = m.group(1)
+                section = m.group(2)
+                identifiers.append({
+                    "type": id_type,
+                    "value": f"{title} CFR {section}",
+                    "pattern": section,
+                })
+            elif id_type == "colregs_rule":
+                identifiers.append({
+                    "type": id_type,
+                    "value": f"Rule {m.group(1)}",
+                    "pattern": f"Rule {m.group(1)}",
+                })
+            elif id_type == "solas_reg":
+                identifiers.append({
+                    "type": id_type,
+                    "value": m.group(0),
+                    "pattern": m.group(2),  # e.g. "II-2"
+                })
+            elif id_type == "nvic_number":
+                identifiers.append({
+                    "type": id_type,
+                    "value": f"NVIC {m.group(1)}",
+                    "pattern": m.group(1),
+                })
+            elif id_type == "ism_section":
+                identifiers.append({
+                    "type": id_type,
+                    "value": f"ISM {m.group(1)}",
+                    "pattern": m.group(1),
+                })
+    return identifiers
+
+
 # ── Query embedding ──────────────────────────────────────────────────────────
 
 
@@ -220,6 +290,41 @@ async def _embed_query(openai_api_key: str, query: str) -> str:
         await oai.close()
     embedding = resp.data[0].embedding
     return "[" + ",".join(f"{x:.8f}" for x in embedding) + "]"
+
+
+# ── Keyword search (identifier-based) ────────────────────────────────────────
+
+
+async def _keyword_search(
+    identifiers: list[dict],
+    pool: asyncpg.Pool,
+    limit: int = 5,
+) -> list[dict]:
+    """Search the regulations table by text for detected identifiers.
+
+    Returns results in the same dict format as vector search (id, source,
+    section_number, section_title, full_text, similarity).  Similarity is
+    set to 0.0 — real scoring happens during the merge step.
+    """
+    results: list[dict] = []
+    seen_ids: set = set()
+    for ident in identifiers:
+        rows = await pool.fetch(
+            """
+            SELECT id, source, section_number, section_title, full_text,
+                   0.0 AS similarity
+            FROM regulations
+            WHERE full_text ILIKE '%' || $1 || '%'
+            LIMIT $2
+            """,
+            ident["pattern"],
+            limit,
+        )
+        for r in rows:
+            if r["id"] not in seen_ids:
+                seen_ids.add(r["id"])
+                results.append(dict(r))
+    return results
 
 
 # ── Per-group SQL fetch ──────────────────────────────────────────────────────
@@ -351,6 +456,50 @@ async def retrieve(
                     seen_sections[sec] = len(candidates)
                 candidates.append(chunk)
 
+    # ── Hybrid merge: keyword search for identifier-based queries ────────
+    identifiers = _extract_identifiers(query)
+    if identifiers:
+        kw_results = await _keyword_search(identifiers, pool)
+        if kw_results:
+            # Compute synthetic similarity for keyword-only chunks: just
+            # below the best vector match so they survive re-ranking but
+            # don't artificially dominate.
+            max_sim = max(
+                (float(c["similarity"]) for c in candidates),
+                default=0.0,
+            )
+            synthetic_sim = max_sim - 0.05
+
+            # Build set of section_numbers already in the vector results.
+            existing_sections = {
+                c.get("section_number", "")
+                for c in candidates
+                if c.get("section_number")
+            }
+            existing_ids = {c["id"] for c in candidates}
+
+            added = 0
+            for kw_chunk in kw_results:
+                sec = kw_chunk.get("section_number", "")
+                if kw_chunk["id"] in existing_ids:
+                    continue
+                if sec and sec in existing_sections:
+                    continue  # dedup by section_number — keep vector version
+                kw_chunk["similarity"] = synthetic_sim
+                candidates.append(kw_chunk)
+                if sec:
+                    existing_sections.add(sec)
+                existing_ids.add(kw_chunk["id"])
+                added += 1
+
+            logger.info(
+                "Hybrid merge: %d keyword matches for identifiers %s, "
+                "%d new chunks added",
+                len(kw_results),
+                [i["value"] for i in identifiers],
+                added,
+            )
+
     if candidates:
         candidates = _rerank(candidates, query, vessel_profile)
 
@@ -384,7 +533,7 @@ def _rerank(
     query: str,
     vessel_profile: dict | None,
 ) -> list[dict]:
-    """Apply vessel-profile + source-affinity + ERG-specific boosts and sort."""
+    """Apply vessel-profile + source-affinity boosts and sort."""
     source_boosts = _source_affinity(query)
 
     profile_terms: list[str] = []
@@ -401,25 +550,8 @@ def _rerank(
         len(results), source_boosts or "{}", profile_terms or "[]",
     )
 
-    # ERG-specific boosts: detect UN/NA numbers in query for cross-reference
-    erg_active = "erg" in source_boosts
-    query_un_numbers: list[str] = []
-    if erg_active:
-        query_un_numbers = [
-            m.group().replace(" ", "").upper()
-            for m in re.finditer(r"\b(?:UN|NA)\s*(\d{4})\b", query, re.IGNORECASE)
-        ]
-        # Also match bare 4-digit numbers that look like UN IDs (1000-9999)
-        # only when ERG context is clear
-        if not query_un_numbers:
-            bare = re.findall(r"\b([1-9]\d{3})\b", query)
-            query_un_numbers = [f"UN{n}" for n in bare if 1000 <= int(n) <= 3600]
-        if query_un_numbers:
-            logger.info("ERG UN/NA numbers in query: %s", query_un_numbers)
-
     for result in results:
         text_lower = (result.get("full_text") or "").lower()
-        section = result.get("section_number", "")
         boost = 0.0
 
         # Vessel profile boost
@@ -432,29 +564,15 @@ def _rerank(
             if group in source_boosts:
                 boost += source_boosts[group]
 
-        # ERG-specific: Orange Guide preference over Table chunks
-        if erg_active and result.get("source") == "erg":
-            if re.match(r"ERG Guide \d+", section):
-                boost += 0.06
-            elif re.match(r"ERG Table \d+", section):
-                boost -= 0.03
-
-        # ERG-specific: UN number cross-reference boost
-        if query_un_numbers and result.get("source") == "erg":
-            full_text = result.get("full_text") or ""
-            for un in query_un_numbers:
-                # Match both "UN1219" and bare "1219" in text
-                bare_num = un.replace("UN", "").replace("NA", "")
-                if un in full_text.upper() or bare_num in full_text:
-                    boost += 0.12
-                    break  # one match is enough
-
         result["_score"] = float(result["similarity"]) + boost
 
         if boost > 0:
             logger.debug(
                 "Boost %s: sim=%.3f +%.3f → %.3f",
-                section, float(result["similarity"]), boost, result["_score"],
+                result.get("section_number", ""),
+                float(result["similarity"]),
+                boost,
+                result["_score"],
             )
 
     results.sort(key=lambda x: x["_score"], reverse=True)
