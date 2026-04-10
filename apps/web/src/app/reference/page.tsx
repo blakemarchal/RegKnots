@@ -1,6 +1,5 @@
 import type { Metadata } from 'next'
-import Link from 'next/link'
-import { OfflineIndicator } from '@/components/OfflineIndicator'
+import { AppHeader } from '@/components/AppHeader'
 import { ReferenceAccordion } from './ReferenceAccordion'
 
 export const metadata: Metadata = {
@@ -198,42 +197,10 @@ const CFR_ITEMS: CfrItem[] = [
 
 export default function ReferencePage() {
   return (
-    <div className="min-h-screen bg-[#0a0e1a] text-[#f0ece4]">
-      {/* Simple top bar — avoids pulling in the auth-dependent AppHeader so
-          this page stays fully static and available offline. */}
-      <header className="border-b border-white/8 bg-[#111827]/95 backdrop-blur-md">
-        <div className="max-w-3xl mx-auto flex items-center justify-between px-5 py-4">
-          <div className="flex items-center gap-2">
-            <Link href="/" className="flex items-center gap-2.5 group">
-              <svg
-                className="w-6 h-6 text-[#2dd4bf] flex-shrink-0"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                aria-hidden="true"
-              >
-                <circle cx="12" cy="12" r="10" />
-                <path d="M12 2v4M12 18v4M2 12h4M18 12h4" strokeLinecap="round" />
-                <path d="M12 8l1.5 3.5L12 16l-1.5-4.5L12 8z" fill="currentColor" stroke="none" />
-              </svg>
-              <span className="font-display text-xl font-bold tracking-wide leading-none
-                group-hover:text-[#2dd4bf] transition-colors duration-150">
-                RegKnot
-              </span>
-            </Link>
-            <OfflineIndicator />
-          </div>
-          <Link
-            href="/"
-            className="font-mono text-xs text-[#6b7594] hover:text-[#f0ece4]/80 transition-colors"
-          >
-            &larr; Back
-          </Link>
-        </div>
-      </header>
+    <div className="flex flex-col min-h-screen bg-[#0a0e1a] text-[#f0ece4]">
+      <AppHeader title="Quick Reference" />
 
-      <main className="max-w-3xl mx-auto px-5 py-10 md:py-14">
+      <main className="flex-1 max-w-3xl mx-auto w-full px-5 py-10 md:py-14">
         <div className="mb-8">
           <h1 className="font-display text-3xl md:text-4xl font-black tracking-tight">
             Quick <span className="text-[#2dd4bf]">Reference</span>
