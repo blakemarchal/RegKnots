@@ -887,6 +887,17 @@ def _describe_sources(query: str) -> str:
         or re.search(r"\b(?:ism|dpa|smc)\b", q)
     ):
         sources.append("ISM Code")
+    if (
+        "erg" in q
+        or "emergency response guidebook" in q
+        or "emergency response guide" in q
+        or "hazmat" in q
+        or "hazardous material" in q
+        or "dangerous goods" in q
+        or re.search(r"\b(?:UN|NA)\s*\d{4}\b", q, re.IGNORECASE)
+        or re.search(r"\bguide\s*\d{3}\b", q, re.IGNORECASE)
+    ):
+        sources.append("ERG")
 
     # Topical fallback
     if not sources:
@@ -921,6 +932,7 @@ def _summarize_found_sources(chunks: list[dict]) -> str:
         "stcw": "STCW",
         "stcw_supplement": "STCW",
         "ism": "ISM Code",
+        "erg": "ERG",
     }
     found: list[str] = []
     seen: set[str] = set()

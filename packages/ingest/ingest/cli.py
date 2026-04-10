@@ -45,6 +45,10 @@ _PDF_SOURCE_CONFIG: dict[str, dict] = {
         "pdf":     _DATA_RAW / "colregs_2024.pdf",
         "adapter": "ingest.sources.colregs",
     },
+    "erg": {
+        "pdf":     _DATA_RAW / "erg" / "ERG2024-Eng-Web-a.pdf",
+        "adapter": "ingest.sources.erg",
+    },
     "ism": {
         "text_dir": _DATA_RAW / "ism" / "extracted",
         "adapter":  "ingest.sources.ism",

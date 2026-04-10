@@ -45,8 +45,7 @@ SOURCE_GROUPS: dict[str, tuple[str, ...]] = {
     "nvic": ("nvic",),
     "stcw": ("stcw", "stcw_supplement"),
     "ism": ("ism",),
-    # Future:
-    # "marpol": ("marpol", "marpol_supplement"),
+    "erg": ("erg",),
 }
 
 # Per-group candidate pool sizes. CFR is larger because it covers three
@@ -144,6 +143,17 @@ _ISM_ABBR_RE = re.compile(
     re.IGNORECASE,
 )
 
+_ERG_TERMS: tuple[str, ...] = (
+    "erg", "emergency response guidebook", "emergency response guide",
+    "hazmat", "hazardous material", "dangerous goods",
+    "un number", "na number", "placard",
+    "isolation distance", "protective action",
+    "spill", "chemical spill", "toxic inhalation",
+    "guide number", "guide 1",
+)
+_ERG_GUIDE_RE = re.compile(r"\bguide\s*(\d{3})\b", re.IGNORECASE)
+_ERG_UN_RE = re.compile(r"\b(?:UN|NA)\s*\d{4}\b", re.IGNORECASE)
+
 
 def _source_affinity(query: str) -> dict[str, float]:
     """Return a boost value per source group based on query keywords.
@@ -172,6 +182,13 @@ def _source_affinity(query: str) -> dict[str, float]:
 
     if any(t in q for t in _ISM_TERMS) or _ISM_ABBR_RE.search(q):
         boosts["ism"] = 0.20
+
+    if (
+        any(t in q for t in _ERG_TERMS)
+        or _ERG_GUIDE_RE.search(q)
+        or _ERG_UN_RE.search(q)
+    ):
+        boosts["erg"] = 0.20
 
     if "cfr" in q or "code of federal" in q:
         boosts["cfr"] = 0.15
