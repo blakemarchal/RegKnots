@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { Suspense, useState, useEffect, useRef } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { apiRequest, apiUpload } from '@/lib/api'
 import { useAuthStore } from '@/lib/auth'
@@ -230,7 +230,7 @@ function ReviewRow({
 
 // ── Main page ──────────────────────────────────────────────────────────────────
 
-export default function OnboardingPage() {
+function OnboardingContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const isAddMode = searchParams.get('add') === 'true'
@@ -869,5 +869,13 @@ export default function OnboardingPage() {
         </footer>
       )}
     </main>
+  )
+}
+
+export default function OnboardingPage() {
+  return (
+    <Suspense>
+      <OnboardingContent />
+    </Suspense>
   )
 }
