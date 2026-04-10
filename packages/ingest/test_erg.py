@@ -55,23 +55,25 @@ try:
             except Exception as exc:
                 print(f"  Page {pg_num:>3}: EXTRACTION ERROR: {exc}")
 
-        # Full extraction with per-page error tracking
-        print(f"\nExtracting all {total_pages} pages...")
-        pages: list[str] = []
-        errors = 0
-        for i, page in enumerate(pdf.pages):
-            try:
-                text = page.extract_text() or ""
-                pages.append(text)
-            except Exception as exc:
-                pages.append("")
-                errors += 1
-                if errors <= 5:
-                    print(f"  Page {i} extraction error: {exc}")
+    print(f"\nFull extraction uses per-page timeout — calling _extract_pages()...")
 
+except Exception as exc:
+    print(f"FATAL: pdfplumber sample failed: {exc}")
+    traceback.print_exc()
+    sys.exit(1)
+
+
+# Full extraction using the module's timeout-protected _extract_pages
+print("--- Step 1b: Full page extraction (with timeout) ---")
+try:
+    import logging
+    logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
+
+    from ingest.sources.erg import _extract_pages
+    pages = _extract_pages(pdf_path)
     non_empty = sum(1 for p in pages if p.strip())
     total_chars = sum(len(p) for p in pages)
-    print(f"Extracted: {len(pages)} pages, {non_empty} non-empty, {total_chars:,} total chars, {errors} errors")
+    print(f"Extracted: {len(pages)} pages, {non_empty} non-empty, {total_chars:,} total chars")
     print()
 
 except Exception as exc:

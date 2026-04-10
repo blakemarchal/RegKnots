@@ -16,11 +16,16 @@ Sections
 
 Chunking priority: Orange Guide cards are kept intact (one chunk per guide)
 since they are self-contained emergency response cards.
+
+pdfplumber output format (from actual VPS extraction):
+  Page 170: "GUIDE  Gases - Toxic - Flammable  119  EMERGENCY RESPONSE  FIRE..."
+  i.e., format is  GUIDE  {title}  {number}  — the number comes AFTER the title.
 """
 
 import hashlib
 import logging
 import re
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
 from datetime import date
 from pathlib import Path
 
@@ -34,33 +39,44 @@ SOURCE = "erg"
 TITLE_NUMBER = 0
 SOURCE_DATE = date(2024, 10, 1)  # ERG 2024 publication date
 
-# ── Orange Guide detection ───────────────────────────────────────────────────
+# Per-page extraction timeout in seconds.  Most pages extract in <0.5s but
+# complex graphical pages (placard tables, rail car diagrams) can hang
+# pdfplumber indefinitely.
+_PAGE_TIMEOUT = 10
 
-# Flexible pattern: "GUIDE" followed by a 3-digit number (111-175).
-# Does NOT require start/end of line — handles pdfplumber putting the title
-# on the same line (e.g. "GUIDE 111 MIXED LOAD/UNIDENTIFIED CARGO") as well
-# as separate lines ("GUIDE\n111").
-_GUIDE_HEADER_RE = re.compile(
-    r"GUIDE\s+(\d{3})\b",
+# ── Orange Guide detection ───────────────────────────────────────────────────
+#
+# pdfplumber output for guide pages is:
+#   "GUIDE  {hazard class title}  {3-digit number}  POTENTIAL HAZARDS ..."
+# or on the response page:
+#   "GUIDE  {hazard class title}  {3-digit number}  EMERGENCY RESPONSE ..."
+#
+# The guide number comes AFTER the title, NOT right after "GUIDE".
+
+# Finds a 3-digit guide number (111-175) followed by POTENTIAL HAZARDS or
+# EMERGENCY RESPONSE — the definitive marker of a guide card page.
+_GUIDE_NUM_AFTER_TITLE_RE = re.compile(
+    r"\b(\d{3})\s{2,}(?:POTENTIAL\s+HAZARDS|EMERGENCY\s+RESPONSE)",
 )
 
-# Stricter variant for splitting: GUIDE + number near the start of a line.
-# Allows optional leading whitespace or "ERG2024" header text.
-_GUIDE_SPLIT_RE = re.compile(
-    r"(?:^|\n)[^\n]{0,30}?GUIDE\s+(\d{3})\b",
+# Broader: find "GUIDE" followed by title text then a 3-digit number
+_GUIDE_WITH_TITLE_RE = re.compile(
+    r"GUIDE\s{2,}(.{3,80}?)\s{2,}(\d{3})\b",
+)
+
+# For splitting: each guide card starts with "GUIDE" followed by an uppercase
+# title.  We split on this pattern to separate individual guides.
+_GUIDE_CARD_START_RE = re.compile(
+    r"(?:^|\n\n?)GUIDE\s{2,}[A-Z]",
 )
 
 # ── Section boundary markers ────────────────────────────────────────────────
-# Multiple alternative patterns per section to handle pdfplumber output
-# variations (different spacing, column ordering, header formatting).
 
 _YELLOW_MARKERS = [
     re.compile(r"ID\s*No\.?\s+Guide\s*No\.?\s+Name\s+of\s+Material", re.IGNORECASE),
     re.compile(r"UN/NA\s+ID\s+NUMBER\s+INDEX", re.IGNORECASE),
     re.compile(r"ID\s+No\.\s+Guide", re.IGNORECASE),
-    # pdfplumber may mangle column headers — fall back to detecting the
-    # first line of actual yellow-section data (ID + Guide + Name)
-    re.compile(r"^(?:UN|NA)\d{4}\s+\d{3}\s+.{5,}", re.MULTILINE),
+    re.compile(r"(?:UN|NA)\d{4}\s+\d{3}\s+.{5,}"),
 ]
 
 _BLUE_MARKERS = [
@@ -84,41 +100,42 @@ _BACK_MARKERS = [
     re.compile(r"EMERGENCY\s+RESPONSE\s+TELEPHONE\s+NUMBERS", re.IGNORECASE),
 ]
 
+# ── Orange-section page detector (for boundary detection) ───────────────────
+
+def _is_guide_page(text: str) -> bool:
+    """Return True if a page looks like an Orange Guide card."""
+    has_guide = bool(re.search(r"\bGUIDE\b", text))
+    has_hazards = bool(re.search(
+        r"POTENTIAL\s+HAZARDS|EMERGENCY\s+RESPONSE", text,
+    ))
+    has_number = bool(re.search(r"\b1[1-7]\d\b", text))
+    return has_guide and has_hazards and has_number
+
 
 # ── Public API ───────────────────────────────────────────────────────────────
 
 def parse_source(pdf_path: Path) -> list[Section]:
-    """Parse the ERG 2024 PDF and return Section objects.
-
-    Args:
-        pdf_path: Path to 'ERG2024-Eng-Web-a.pdf'.
-
-    Returns:
-        List of Section objects covering all six ERG sections.
-    """
+    """Parse the ERG 2024 PDF and return Section objects."""
     pages = _extract_pages(pdf_path)
     if not pages:
         raise ValueError(f"No text extracted from {pdf_path}")
 
     total_chars = sum(len(p) for p in pages)
     non_empty = sum(1 for p in pages if p.strip())
-    logger.info(
+    logger.warning(
         "ERG: extracted %d pages (%d non-empty, %d total chars)",
         len(pages), non_empty, total_chars,
     )
 
-    # Log a sample of page content for diagnostics
+    # Log samples at WARNING level so they're always visible
     for sample_page in (0, 30, 100, 170, 290):
         if sample_page < len(pages):
-            snippet = pages[sample_page][:200].replace("\n", "\\n")
-            logger.debug("ERG page %d preview: %s", sample_page, snippet)
+            snippet = pages[sample_page][:120].replace("\n", "\\n")
+            logger.warning("ERG page %d: %s", sample_page, snippet)
 
-    # Detect section boundaries by scanning for known header patterns.
     boundaries = _detect_boundaries(pages)
 
     sections: list[Section] = []
-
-    # Parse each section in priority order
     sections.extend(_parse_orange_guides(pages, boundaries))
     sections.extend(_parse_yellow_section(pages, boundaries))
     sections.extend(_parse_blue_section(pages, boundaries))
@@ -126,57 +143,91 @@ def parse_source(pdf_path: Path) -> list[Section]:
     sections.extend(_parse_white_section(pages, boundaries))
     sections.extend(_parse_back_matter(pages, boundaries))
 
-    # Safety net: if section-specific parsing produced nothing, fall back to
-    # chunking the entire document in fixed-size blocks so we never return 0.
+    # Safety net: never return 0 sections
     if not sections:
         logger.warning(
-            "ERG: all section parsers returned 0 sections — "
+            "ERG: all section parsers returned 0 — "
             "falling back to whole-document chunking"
         )
         full_text = _page_range(pages, 0, len(pages))
-        sections = _chunk_text_blocks(full_text, "Full", "ERG 2024", chunk_lines=60)
+        sections = _chunk_text_blocks(
+            full_text, "Full", "ERG 2024", chunk_lines=60,
+        )
 
-    logger.info("ERG: %d total sections produced", len(sections))
+    logger.warning("ERG: %d total sections produced", len(sections))
     return sections
 
 
 # ── PDF text extraction ──────────────────────────────────────────────────────
 
+def _extract_one_page(page) -> str:
+    """Extract text from a single pdfplumber page (runs in thread pool)."""
+    return page.extract_text() or ""
+
+
 def _extract_pages(pdf_path: Path) -> list[str]:
     """Extract text from every page using pdfplumber.
 
-    Per-page errors are caught so one bad page doesn't crash the whole run.
+    Uses a per-page timeout to handle complex graphical pages that cause
+    pdfplumber to hang (e.g., placard tables, rail car diagrams).
     """
     pages: list[str] = []
+    timeouts = 0
     errors = 0
+
     with pdfplumber.open(pdf_path) as pdf:
-        for i, page in enumerate(pdf.pages):
-            try:
-                text = page.extract_text() or ""
-            except Exception as exc:
-                text = ""
-                errors += 1
-                if errors <= 5:
-                    logger.warning("ERG: page %d extraction failed: %s", i, exc)
-            pages.append(text)
+        total = len(pdf.pages)
+        logger.warning("ERG: extracting %d pages (timeout=%ds/page)...", total, _PAGE_TIMEOUT)
+
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            for i, page in enumerate(pdf.pages):
+                try:
+                    future = executor.submit(_extract_one_page, page)
+                    text = future.result(timeout=_PAGE_TIMEOUT)
+                except FuturesTimeout:
+                    text = ""
+                    timeouts += 1
+                    if timeouts <= 10:
+                        logger.warning(
+                            "ERG: page %d timed out after %ds (likely complex graphics)",
+                            i, _PAGE_TIMEOUT,
+                        )
+                    # Cancel the hung future — the worker thread may still be
+                    # running but we move on.  Create a fresh executor to avoid
+                    # blocking on the stuck thread.
+                    future.cancel()
+                    executor.shutdown(wait=False, cancel_futures=True)
+                    executor = ThreadPoolExecutor(max_workers=1)
+                except Exception as exc:
+                    text = ""
+                    errors += 1
+                    if errors <= 5:
+                        logger.warning("ERG: page %d extraction error: %s", i, exc)
+                pages.append(text)
+
+                # Progress logging every 50 pages
+                if (i + 1) % 50 == 0:
+                    logger.warning("ERG: extracted %d/%d pages...", i + 1, total)
+
+    if timeouts:
+        logger.warning(
+            "ERG: %d/%d pages timed out (skipped — graphical pages)",
+            timeouts, len(pages),
+        )
     if errors:
         logger.warning("ERG: %d/%d pages had extraction errors", errors, len(pages))
+
     return pages
 
 
 # ── Section boundary detection ───────────────────────────────────────────────
 
 def _any_marker_match(markers: list[re.Pattern], text: str) -> bool:
-    """Return True if any marker regex matches the text."""
     return any(m.search(text) for m in markers)
 
 
 def _detect_boundaries(pages: list[str]) -> dict[str, int]:
-    """Scan pages for section-start markers.  Returns page indices.
-
-    Uses multi-pattern matching with fallback to hardcoded page-fraction
-    estimates if regex detection fails.
-    """
+    """Scan pages for section-start markers.  Returns page indices."""
     boundaries: dict[str, int] = {
         "yellow": -1,
         "blue": -1,
@@ -188,23 +239,20 @@ def _detect_boundaries(pages: list[str]) -> dict[str, int]:
     n = len(pages)
 
     for i, text in enumerate(pages):
+        if not text.strip():
+            continue
+
         if boundaries["yellow"] < 0 and _any_marker_match(_YELLOW_MARKERS, text):
             boundaries["yellow"] = i
 
         if boundaries["blue"] < 0 and _any_marker_match(_BLUE_MARKERS, text):
-            # Only accept blue if it comes after yellow
             if boundaries["yellow"] >= 0 and i > boundaries["yellow"]:
                 boundaries["blue"] = i
 
-        if boundaries["orange"] < 0 and _GUIDE_HEADER_RE.search(text):
-            guide_match = _GUIDE_HEADER_RE.search(text)
-            guide_num = int(guide_match.group(1))
-            # Validate it's an actual guide number (111-175) and not a
-            # reference in the yellow/blue index
-            if 111 <= guide_num <= 175:
-                # Must be past the index sections (typically page 140+)
-                if i > n * 0.3:
-                    boundaries["orange"] = i
+        # Orange: look for actual guide card pages (GUIDE + number + HAZARDS)
+        if boundaries["orange"] < 0 and _is_guide_page(text):
+            if i > n * 0.3:
+                boundaries["orange"] = i
 
         if boundaries["green"] < 0 and _any_marker_match(_GREEN_MARKERS, text):
             if i > n * 0.6:
@@ -214,36 +262,32 @@ def _detect_boundaries(pages: list[str]) -> dict[str, int]:
             if i > n * 0.8:
                 boundaries["back"] = i
 
-    # ── Fallback: hardcoded page-fraction estimates ─────────────────────────
-    # The ERG 2024 has ~392 pages with well-known proportions.  If regex
-    # detection failed for a boundary, use these as a last resort.
+    # Fallback: hardcoded page-fraction estimates for ERG 2024 (392 pages)
     fallback_fractions = {
-        "yellow": 0.07,   # ~page 28 of 392
-        "blue":   0.33,   # ~page 131
-        "orange": 0.42,   # ~page 166
-        "green":  0.73,   # ~page 286
-        "back":   0.92,   # ~page 360
+        "yellow": 0.07,
+        "blue":   0.33,
+        "orange": 0.42,
+        "green":  0.73,
+        "back":   0.92,
     }
 
     for key, frac in fallback_fractions.items():
         if boundaries[key] < 0:
             fallback_page = int(n * frac)
             logger.warning(
-                "ERG: regex detection failed for '%s' boundary — "
-                "using fallback page %d (%.0f%% of %d pages)",
+                "ERG: regex detection failed for '%s' — "
+                "using fallback page %d (%.0f%% of %d)",
                 key, fallback_page, frac * 100, n,
             )
             boundaries[key] = fallback_page
 
-    # Enforce monotonic ordering: each boundary must be > previous
-    ordered_keys = ["yellow", "blue", "orange", "green", "back"]
-    for i_key in range(1, len(ordered_keys)):
-        prev = ordered_keys[i_key - 1]
-        curr = ordered_keys[i_key]
-        if boundaries[curr] <= boundaries[prev]:
-            boundaries[curr] = boundaries[prev] + 1
+    # Enforce monotonic ordering
+    ordered = ["yellow", "blue", "orange", "green", "back"]
+    for j in range(1, len(ordered)):
+        if boundaries[ordered[j]] <= boundaries[ordered[j - 1]]:
+            boundaries[ordered[j]] = boundaries[ordered[j - 1]] + 1
 
-    logger.info("ERG section boundaries (final): %s", boundaries)
+    logger.warning("ERG boundaries: %s", boundaries)
     return boundaries
 
 
@@ -271,160 +315,173 @@ def _make_section(
 
 
 def _page_range(pages: list[str], start: int, end: int) -> str:
-    """Join page texts for a range [start, end)."""
     return "\n\n".join(pages[start:end])
 
 
 # ── Orange Guide parsing (highest priority) ─────────────────────────────────
 
-def _parse_orange_guides(pages: list[str], boundaries: dict[str, int]) -> list[Section]:
+def _parse_orange_guides(
+    pages: list[str], boundaries: dict[str, int],
+) -> list[Section]:
     """Parse the 62 Emergency Response Guide cards (Guides 111-175).
 
-    Each guide is a 2-page spread.  We keep each guide as one chunk.
+    pdfplumber format per page:
+      "GUIDE  {title}  {number}  POTENTIAL HAZARDS ..."
+    or on the response side:
+      "GUIDE  {title}  {number}  EMERGENCY RESPONSE ..."
     """
     start = boundaries["orange"]
     end = boundaries["green"]
 
-    # Collect all text from the orange section
     orange_text = _page_range(pages, start, end)
-
     if not orange_text.strip():
         logger.warning("ERG: orange section text is empty (pages %d-%d)", start, end)
         return []
 
-    # Find all guide headers in the orange text.  Use the flexible regex and
-    # validate the guide number is in the expected range (111-175).
-    raw_matches = list(_GUIDE_SPLIT_RE.finditer(orange_text))
-    guide_matches = [
-        m for m in raw_matches
-        if 111 <= int(m.group(1)) <= 175
-    ]
+    # Strategy 1: Split by "GUIDE  {uppercase title}" pattern.  Each guide
+    # card (2-page spread) starts with this.  Both pages of the spread have
+    # it, so we'll see ~124 splits for 62 guides.
+    splits = list(_GUIDE_CARD_START_RE.finditer(orange_text))
+    logger.warning(
+        "ERG orange: found %d 'GUIDE  [A-Z]' splits in %d chars",
+        len(splits), len(orange_text),
+    )
 
-    if not guide_matches:
-        # Second attempt: even more relaxed — just look for "GUIDE" near a number
-        relaxed_re = re.compile(r"GUIDE\s*[:\-]?\s*(\d{3})\b", re.IGNORECASE)
-        raw_matches = list(relaxed_re.finditer(orange_text))
-        guide_matches = [m for m in raw_matches if 111 <= int(m.group(1)) <= 175]
+    if splits:
+        # Extract guide number from each split region, then merge the two
+        # pages of each guide into a single section.
+        guide_regions: dict[str, list[str]] = {}  # guide_num → [text, ...]
 
-    if not guide_matches:
-        # Third attempt: look for "POTENTIAL HAZARDS" as guide boundaries
-        # (every guide card contains this heading)
-        hazard_re = re.compile(r"(?:^|\n)\s*POTENTIAL\s+HAZARDS?\b", re.IGNORECASE)
-        hazard_matches = list(hazard_re.finditer(orange_text))
-        if hazard_matches:
-            logger.warning(
-                "ERG: found %d 'POTENTIAL HAZARDS' markers but no guide headers — "
-                "chunking orange section by hazard markers",
-                len(hazard_matches),
+        for idx, match in enumerate(splits):
+            region_start = match.start()
+            region_end = (
+                splits[idx + 1].start()
+                if idx + 1 < len(splits)
+                else len(orange_text)
             )
-            return _chunk_by_markers(
-                orange_text, hazard_matches,
-                section_prefix="ERG Guide",
-                parent="ERG Orange Section — Emergency Response Guides",
-            )
+            region_text = orange_text[region_start:region_end].strip()
+            if not region_text:
+                continue
 
-        logger.warning("ERG: no guide headers found in orange section — chunking as blocks")
-        return _chunk_text_blocks(
-            orange_text, "Orange", "Emergency Response Guides", chunk_lines=60,
-        )
+            # Extract the guide number: look for 3-digit number in range
+            num_match = _GUIDE_NUM_AFTER_TITLE_RE.search(region_text)
+            if not num_match:
+                # Fallback: find any 3-digit number after "GUIDE"
+                num_match = _GUIDE_WITH_TITLE_RE.search(region_text)
 
-    # Deduplicate: if the same guide number appears multiple times (e.g. on
-    # facing pages), keep only the first occurrence.
-    seen_guides: set[str] = set()
-    deduped: list[re.Match] = []
-    for m in guide_matches:
-        gn = m.group(1)
-        if gn not in seen_guides:
-            seen_guides.add(gn)
-            deduped.append(m)
-    guide_matches = deduped
+            if num_match:
+                # _GUIDE_NUM_AFTER_TITLE_RE has number in group 1
+                # _GUIDE_WITH_TITLE_RE has number in group 2
+                raw_num = num_match.group(num_match.lastindex)
+                try:
+                    gn = int(raw_num)
+                except ValueError:
+                    continue
+                if 111 <= gn <= 175:
+                    guide_num = str(gn)
+                    guide_regions.setdefault(guide_num, []).append(region_text)
+                    continue
 
-    sections: list[Section] = []
-    for idx, match in enumerate(guide_matches):
-        guide_num = match.group(1)
-        chunk_start = match.start()
-        chunk_end = (
-            guide_matches[idx + 1].start()
-            if idx + 1 < len(guide_matches)
-            else len(orange_text)
-        )
+            # Couldn't extract a guide number — try brute force
+            for m in re.finditer(r"\b(1[1-7]\d)\b", region_text):
+                gn = int(m.group(1))
+                if 111 <= gn <= 175:
+                    guide_regions.setdefault(str(gn), []).append(region_text)
+                    break
 
-        guide_text = orange_text[chunk_start:chunk_end].strip()
-        if not guide_text:
-            continue
+        # Merge the (typically 2) pages per guide into one section
+        sections: list[Section] = []
+        for guide_num in sorted(guide_regions.keys(), key=int):
+            parts = guide_regions[guide_num]
+            merged_text = "\n\n".join(parts)
 
-        # Extract the hazard class title from text after the guide number
-        title = _extract_guide_title(guide_text, guide_num)
+            # Extract title from the GUIDE header
+            title = _extract_guide_title(merged_text, guide_num)
 
-        sections.append(_make_section(
-            section_number=f"ERG Guide {guide_num}",
-            section_title=title,
-            full_text=guide_text,
-            parent="ERG Orange Section — Emergency Response Guides",
-        ))
-
-    logger.info("ERG: parsed %d Orange Guide cards", len(sections))
-    return sections
-
-
-def _extract_guide_title(guide_text: str, guide_num: str) -> str:
-    """Extract the hazard class title from a guide card's text."""
-    # Try multiple patterns for the title line(s) after the guide number
-    patterns = [
-        # "GUIDE 111\nMIXED LOAD...\nPOTENTIAL HAZARDS"
-        re.compile(
-            r"GUIDE\s+" + re.escape(guide_num) + r"\b[^\n]*\n\s*(.+?)(?:\n\n|\nPOTENTIAL)",
-            re.DOTALL | re.IGNORECASE,
-        ),
-        # "GUIDE 111 - MIXED LOAD..." (title on same line)
-        re.compile(
-            r"GUIDE\s+" + re.escape(guide_num) + r"\s*[-–—]\s*(.+?)(?:\n|$)",
-            re.IGNORECASE,
-        ),
-        # "GUIDE 111\nMIXED LOAD" (just grab the next non-empty line)
-        re.compile(
-            r"GUIDE\s+" + re.escape(guide_num) + r"\b[^\n]*\n\s*([A-Z][^\n]{5,})",
-            re.IGNORECASE,
-        ),
-    ]
-    for pattern in patterns:
-        m = pattern.search(guide_text)
-        if m:
-            title = m.group(1).strip()
-            # Clean up multi-line titles
-            title = re.sub(r"\s*\n\s*", " ", title)
-            # Truncate overly long titles
-            if len(title) > 120:
-                title = title[:117] + "..."
-            return title
-    return f"Guide {guide_num}"
-
-
-def _chunk_by_markers(
-    text: str,
-    markers: list[re.Match],
-    section_prefix: str,
-    parent: str,
-) -> list[Section]:
-    """Chunk text by regex match positions as generic boundaries."""
-    sections: list[Section] = []
-    for idx, match in enumerate(markers):
-        chunk_start = match.start()
-        chunk_end = markers[idx + 1].start() if idx + 1 < len(markers) else len(text)
-        chunk_text = text[chunk_start:chunk_end].strip()
-        if chunk_text:
             sections.append(_make_section(
-                section_number=f"{section_prefix} {idx + 111}",
-                section_title=f"Emergency Response Guide (Card {idx + 1})",
-                full_text=chunk_text,
-                parent=parent,
+                section_number=f"ERG Guide {guide_num}",
+                section_title=title,
+                full_text=merged_text,
+                parent="ERG Orange Section — Emergency Response Guides",
             ))
-    return sections
+
+        if sections:
+            logger.warning("ERG: parsed %d Orange Guide cards", len(sections))
+            return sections
+
+    # Strategy 2: Split by "POTENTIAL HAZARDS" markers
+    hazard_re = re.compile(r"POTENTIAL\s+HAZARDS", re.IGNORECASE)
+    hazard_matches = list(hazard_re.finditer(orange_text))
+    if hazard_matches:
+        logger.warning(
+            "ERG: guide-card splitting failed, using %d POTENTIAL HAZARDS markers",
+            len(hazard_matches),
+        )
+        sections = []
+        for idx, match in enumerate(hazard_matches):
+            chunk_start = match.start()
+            chunk_end = (
+                hazard_matches[idx + 1].start()
+                if idx + 1 < len(hazard_matches)
+                else len(orange_text)
+            )
+            chunk_text = orange_text[chunk_start:chunk_end].strip()
+            if chunk_text:
+                # Try to find guide number in this chunk
+                num_m = re.search(r"\b(1[1-7]\d)\b", chunk_text)
+                guide_num = num_m.group(1) if num_m else str(111 + idx)
+                sections.append(_make_section(
+                    section_number=f"ERG Guide {guide_num}",
+                    section_title=f"Emergency Response Guide {guide_num}",
+                    full_text=chunk_text,
+                    parent="ERG Orange Section — Emergency Response Guides",
+                ))
+        if sections:
+            return sections
+
+    # Strategy 3: Chunk as text blocks
+    logger.warning("ERG: no guide markers found — chunking orange as blocks")
+    return _chunk_text_blocks(
+        orange_text, "Orange", "Emergency Response Guides", chunk_lines=60,
+    )
+
+
+def _extract_guide_title(text: str, guide_num: str) -> str:
+    """Extract the hazard class title from a guide card's text.
+
+    pdfplumber format: "GUIDE  {title}  {number}  POTENTIAL HAZARDS"
+    """
+    # Pattern 1: "GUIDE  Title Text  NNN" — title is between GUIDE and number
+    m = _GUIDE_WITH_TITLE_RE.search(text)
+    if m:
+        title = m.group(1).strip()
+        title = re.sub(r"\s{2,}", " ", title)
+        if len(title) > 120:
+            title = title[:117] + "..."
+        return title
+
+    # Pattern 2: grab text between "GUIDE" and "POTENTIAL HAZARDS"
+    m = re.search(
+        r"GUIDE\s{2,}(.+?)\s{2,}(?:POTENTIAL\s+HAZARDS|EMERGENCY\s+RESPONSE)",
+        text, re.DOTALL,
+    )
+    if m:
+        title = m.group(1).strip()
+        # Remove the guide number if it's at the end
+        title = re.sub(r"\s+\d{3}\s*$", "", title)
+        title = re.sub(r"\s{2,}", " ", title)
+        if len(title) > 120:
+            title = title[:117] + "..."
+        return title
+
+    return f"Guide {guide_num}"
 
 
 # ── Yellow Section (ID Number → Guide lookup) ───────────────────────────────
 
-def _parse_yellow_section(pages: list[str], boundaries: dict[str, int]) -> list[Section]:
+def _parse_yellow_section(
+    pages: list[str], boundaries: dict[str, int],
+) -> list[Section]:
     start = boundaries["yellow"]
     end = boundaries["blue"]
 
@@ -435,47 +492,41 @@ def _parse_yellow_section(pages: list[str], boundaries: dict[str, int]) -> list[
     return _chunk_tabular_by_id(yellow_text, "Yellow", "ID Number Index")
 
 
-def _chunk_tabular_by_id(full_text: str, color: str, index_label: str) -> list[Section]:
-    """Chunk tabular ID/Guide/Name data in groups of ~25-30 entries."""
-    # Match lines with UN/NA IDs — try multiple spacing patterns
+def _chunk_tabular_by_id(
+    full_text: str, color: str, index_label: str,
+) -> list[Section]:
+    """Chunk tabular ID/Guide/Name data in groups of ~28 entries."""
     entry_patterns = [
         re.compile(r"^((?:UN|NA)\d{4})\s+(\d{3})\s+(.+)$", re.MULTILINE),
-        # pdfplumber may use wider spacing or tabs
         re.compile(r"((?:UN|NA)\d{4})\s{2,}(\d{3})\s{2,}(.+?)$", re.MULTILINE),
-        # Minimal: just find the ID numbers to anchor chunks
         re.compile(r"((?:UN|NA)\d{4})", re.MULTILINE),
     ]
 
     entries = None
     for pattern in entry_patterns:
         matches = list(pattern.finditer(full_text))
-        if len(matches) >= 10:  # need a reasonable number of entries
+        if len(matches) >= 10:
             entries = matches
-            logger.debug("ERG %s: matched %d entries with pattern %s", color, len(matches), pattern.pattern[:40])
             break
 
     if not entries:
-        # Fallback: chunk by page-sized blocks
-        logger.warning("ERG: no tabular entries found in %s section — using text blocks", color)
+        logger.warning("ERG: no tabular entries in %s section — using blocks", color)
         return _chunk_text_blocks(full_text, color, index_label, chunk_lines=60)
 
     sections: list[Section] = []
     group_size = 28
-
-    # For the minimal pattern (only group 1 = ID), handle differently
-    has_guide_col = entries[0].lastindex and entries[0].lastindex >= 2
 
     for i in range(0, len(entries), group_size):
         batch = entries[i : i + group_size]
         first_id = batch[0].group(1)
         last_id = batch[-1].group(1)
 
-        # Extract text span for this batch
         text_start = batch[0].start()
-        if i + group_size < len(entries):
-            text_end = entries[i + group_size].start()
-        else:
-            text_end = len(full_text)
+        text_end = (
+            entries[i + group_size].start()
+            if i + group_size < len(entries)
+            else len(full_text)
+        )
         chunk_text = full_text[text_start:text_end].strip()
 
         if chunk_text:
@@ -486,13 +537,15 @@ def _chunk_tabular_by_id(full_text: str, color: str, index_label: str) -> list[S
                 parent=f"ERG {color} Section",
             ))
 
-    logger.info("ERG: parsed %d %s section chunks", len(sections), color)
+    logger.warning("ERG: parsed %d %s section chunks", len(sections), color)
     return sections
 
 
 # ── Blue Section (Name → Guide lookup) ───────────────────────────────────────
 
-def _parse_blue_section(pages: list[str], boundaries: dict[str, int]) -> list[Section]:
+def _parse_blue_section(
+    pages: list[str], boundaries: dict[str, int],
+) -> list[Section]:
     start = boundaries["blue"]
     end = boundaries["orange"]
 
@@ -501,12 +554,9 @@ def _parse_blue_section(pages: list[str], boundaries: dict[str, int]) -> list[Se
         logger.warning("ERG: blue section text is empty")
         return []
 
-    # Blue section: Name of Material | Guide No. | ID No.
-    # Try multiple patterns for different pdfplumber layouts
     entry_patterns = [
         re.compile(r"^(.{10,60}?)\s{2,}(\d{3})\s+((?:UN|NA)\d{4})\s*$", re.MULTILINE),
         re.compile(r"(.{10,60}?)\s{2,}(\d{3})\s{2,}((?:UN|NA)\d{4})", re.MULTILINE),
-        # Fall back to finding ID numbers anywhere (anchoring by UN/NA IDs)
         re.compile(r"((?:UN|NA)\d{4})", re.MULTILINE),
     ]
 
@@ -518,47 +568,33 @@ def _parse_blue_section(pages: list[str], boundaries: dict[str, int]) -> list[Se
             break
 
     if not entries:
-        logger.warning("ERG: no entries found in Blue section — using text blocks")
+        logger.warning("ERG: no entries in Blue section — using blocks")
         return _chunk_text_blocks(blue_text, "Blue", "Material Name Index", chunk_lines=60)
 
     sections: list[Section] = []
     group_size = 28
     for i in range(0, len(entries), group_size):
         batch = entries[i : i + group_size]
-
-        # Use ID numbers for section_number if available; otherwise use index
-        first_match = batch[0]
-        last_match = batch[-1]
-
-        # Try to get an ID-based section name
-        if first_match.lastindex and first_match.lastindex >= 3:
-            # Full pattern with name + guide + ID
-            first_name = first_match.group(1).strip()[:20]
-            last_name = last_match.group(1).strip()[:20]
-            sec_num = f"ERG Blue {first_name}-{last_name}"
-            sec_title = f"Material Name Index: {first_match.group(1).strip()} to {last_match.group(1).strip()}"
-        else:
-            first_id = first_match.group(1)
-            last_id = last_match.group(1)
-            sec_num = f"ERG Blue {first_id}-{last_id}"
-            sec_title = f"Material Name Index: {first_id} to {last_id}"
+        first_id = batch[0].group(1)
+        last_id = batch[-1].group(1)
 
         text_start = batch[0].start()
-        if i + group_size < len(entries):
-            text_end = entries[i + group_size].start()
-        else:
-            text_end = len(blue_text)
+        text_end = (
+            entries[i + group_size].start()
+            if i + group_size < len(entries)
+            else len(blue_text)
+        )
         chunk_text = blue_text[text_start:text_end].strip()
 
         if chunk_text:
             sections.append(_make_section(
-                section_number=sec_num,
-                section_title=sec_title,
+                section_number=f"ERG Blue {first_id}-{last_id}",
+                section_title=f"Material Name Index: {first_id} to {last_id}",
                 full_text=chunk_text,
                 parent="ERG Blue Section",
             ))
 
-    logger.info("ERG: parsed %d Blue section chunks", len(sections))
+    logger.warning("ERG: parsed %d Blue section chunks", len(sections))
     return sections
 
 
@@ -566,7 +602,10 @@ def _parse_blue_section(pages: list[str], boundaries: dict[str, int]) -> list[Se
 
 _TABLE_NUM_RE = re.compile(r"TABLE\s+(\d)", re.IGNORECASE)
 
-def _parse_green_section(pages: list[str], boundaries: dict[str, int]) -> list[Section]:
+
+def _parse_green_section(
+    pages: list[str], boundaries: dict[str, int],
+) -> list[Section]:
     start = boundaries["green"]
     end = boundaries["back"]
 
@@ -575,19 +614,15 @@ def _parse_green_section(pages: list[str], boundaries: dict[str, int]) -> list[S
         logger.warning("ERG: green section text is empty")
         return []
 
-    # Try to split into Table 1, Table 2, Table 3
     table_splits = list(_TABLE_NUM_RE.finditer(green_text))
 
     if len(table_splits) < 2:
-        # Couldn't split by table headers — chunk as generic blocks
         return _chunk_text_blocks(
-            green_text, "Green", "Isolation & Protective Action Distances",
-            chunk_lines=50,
+            green_text, "Green",
+            "Isolation & Protective Action Distances", chunk_lines=50,
         )
 
     sections: list[Section] = []
-
-    # Process each table region
     for idx, match in enumerate(table_splits):
         table_num = match.group(1)
         region_start = match.start()
@@ -604,7 +639,6 @@ def _parse_green_section(pages: list[str], boundaries: dict[str, int]) -> list[S
                 "Initial Isolation and Protective Action Distances",
             ))
         elif table_num == "2":
-            # Table 2 is typically short — one or two chunks
             sections.append(_make_section(
                 section_number="ERG Table 2",
                 section_title="Water-Reactive Materials which Produce Toxic Gases",
@@ -617,14 +651,13 @@ def _parse_green_section(pages: list[str], boundaries: dict[str, int]) -> list[S
                 "Large Spill Protective Action Distances",
             ))
 
-    logger.info("ERG: parsed %d Green section chunks", len(sections))
+    logger.warning("ERG: parsed %d Green section chunks", len(sections))
     return sections
 
 
 def _chunk_green_table_by_id(
     text: str, table_num: str, title_prefix: str,
 ) -> list[Section]:
-    """Chunk a green table by UN/NA ID entries."""
     entry_re = re.compile(r"((?:UN|NA)\d{4})", re.MULTILINE)
     entries = list(entry_re.finditer(text))
 
@@ -644,10 +677,11 @@ def _chunk_green_table_by_id(
         last_id = batch[-1].group(1)
 
         text_start = batch[0].start()
-        if i + group_size < len(entries):
-            text_end = entries[i + group_size].start()
-        else:
-            text_end = len(text)
+        text_end = (
+            entries[i + group_size].start()
+            if i + group_size < len(entries)
+            else len(text)
+        )
         chunk_text = text[text_start:text_end].strip()
 
         if chunk_text:
@@ -663,7 +697,6 @@ def _chunk_green_table_by_id(
 
 # ── White Section (Front Matter) ─────────────────────────────────────────────
 
-# Known front-matter topics and their detection patterns
 _WHITE_TOPICS = [
     ("Safety Precautions", re.compile(r"SAFETY\s+PRECAUTIONS?", re.IGNORECASE)),
     ("Shipping Papers", re.compile(
@@ -679,7 +712,9 @@ _WHITE_TOPICS = [
 ]
 
 
-def _parse_white_section(pages: list[str], boundaries: dict[str, int]) -> list[Section]:
+def _parse_white_section(
+    pages: list[str], boundaries: dict[str, int],
+) -> list[Section]:
     end = boundaries["yellow"]
 
     white_text = _page_range(pages, 0, end)
@@ -687,7 +722,6 @@ def _parse_white_section(pages: list[str], boundaries: dict[str, int]) -> list[S
         logger.warning("ERG: white section text is empty")
         return []
 
-    # Try to detect topic boundaries
     topic_spans: list[tuple[str, int, int]] = []
     for topic_name, pattern in _WHITE_TOPICS:
         match = pattern.search(white_text)
@@ -695,12 +729,8 @@ def _parse_white_section(pages: list[str], boundaries: dict[str, int]) -> list[S
             topic_spans.append((topic_name, match.start(), -1))
 
     if not topic_spans:
-        # Fallback: chunk by page groups
-        return _chunk_text_blocks(
-            white_text, "White", "Front Matter", chunk_lines=80,
-        )
+        return _chunk_text_blocks(white_text, "White", "Front Matter", chunk_lines=80)
 
-    # Sort by position and compute spans
     topic_spans.sort(key=lambda x: x[1])
     sections: list[Section] = []
     for idx, (name, start, _) in enumerate(topic_spans):
@@ -718,7 +748,6 @@ def _parse_white_section(pages: list[str], boundaries: dict[str, int]) -> list[S
                 parent="ERG White Section — Front Matter",
             ))
 
-    # If there's text before the first detected topic (cover page, TOC, etc.)
     if topic_spans and topic_spans[0][1] > 200:
         preamble = white_text[: topic_spans[0][1]].strip()
         if preamble:
@@ -729,7 +758,7 @@ def _parse_white_section(pages: list[str], boundaries: dict[str, int]) -> list[S
                 parent="ERG White Section — Front Matter",
             ))
 
-    logger.info("ERG: parsed %d White section chunks", len(sections))
+    logger.warning("ERG: parsed %d White section chunks", len(sections))
     return sections
 
 
@@ -750,7 +779,9 @@ _BACK_TOPICS = [
 ]
 
 
-def _parse_back_matter(pages: list[str], boundaries: dict[str, int]) -> list[Section]:
+def _parse_back_matter(
+    pages: list[str], boundaries: dict[str, int],
+) -> list[Section]:
     start = boundaries["back"]
 
     back_text = _page_range(pages, start, len(pages))
@@ -780,7 +811,6 @@ def _parse_back_matter(pages: list[str], boundaries: dict[str, int]) -> list[Sec
         # Split glossary into A-L and M-Z if large
         if name == "Glossary" and len(chunk_text) > 3000:
             mid = len(chunk_text) // 2
-            # Find a good split point near the middle (at a letter boundary)
             split_match = re.search(
                 r"\n[M-Nm-n]", chunk_text[mid - 200 : mid + 200],
             )
@@ -808,7 +838,7 @@ def _parse_back_matter(pages: list[str], boundaries: dict[str, int]) -> list[Sec
                 parent="ERG Back Matter",
             ))
 
-    logger.info("ERG: parsed %d Back Matter chunks", len(sections))
+    logger.warning("ERG: parsed %d Back Matter chunks", len(sections))
     return sections
 
 
@@ -820,7 +850,6 @@ def _chunk_text_blocks(
     label: str,
     chunk_lines: int = 60,
 ) -> list[Section]:
-    """Split text into fixed-size line blocks as a fallback chunking strategy."""
     lines = text.split("\n")
     sections: list[Section] = []
     for i in range(0, len(lines), chunk_lines):
