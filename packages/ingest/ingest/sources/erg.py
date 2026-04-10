@@ -145,8 +145,11 @@ def parse_source(pdf_path: Path) -> list[Section]:
 
     boundaries = _detect_boundaries(pages)
 
+    # Build guide -> materials mapping from Yellow section BEFORE Orange parsing
+    guide_materials = _build_guide_materials_map(pages, boundaries)
+
     sections: list[Section] = []
-    sections.extend(_parse_orange_guides(pages, boundaries))
+    sections.extend(_parse_orange_guides(pages, boundaries, guide_materials))
     sections.extend(_parse_yellow_section(pages, boundaries))
     sections.extend(_parse_blue_section(pages, boundaries))
     sections.extend(_parse_green_section(pages, boundaries))
@@ -338,6 +341,82 @@ def _page_range(pages: list[str], start: int, end: int) -> str:
     return "\n\n".join(pages[start:end])
 
 
+# -- Yellow -> Guide materials mapping -----------------------------------------
+
+def _build_guide_materials_map(
+    pages: list[str], boundaries: dict[str, int],
+) -> dict[str, list[tuple[str, str]]]:
+    """Parse Yellow section to build {guide_number: [(un_number, name), ...]}.
+
+    The Yellow section has rows like:
+        1219  129  Isopropanol
+        1170  129  Ethanol
+
+    Returns a dict mapping guide number strings (e.g. "129") to lists of
+    (UN/NA number, material name) tuples.
+    """
+    start = boundaries["yellow"]
+    end = boundaries["blue"]
+    yellow_text = _page_range(pages, start, end)
+
+    if not yellow_text.strip():
+        logger.warning("ERG: yellow section empty — no materials map")
+        return {}
+
+    # Match rows: 4-digit ID, 3-digit guide, material name
+    # The Yellow section has two columns per page, so the same pattern repeats.
+    entry_re = re.compile(
+        r"(\d{4})\s+(\d{3})\s+([A-Z][^\n]{3,})",
+        re.MULTILINE,
+    )
+
+    guide_map: dict[str, list[tuple[str, str]]] = {}
+    for m in entry_re.finditer(yellow_text):
+        un_num = m.group(1)
+        guide_num = m.group(2)
+        material = m.group(3).strip()
+        # Clean up second-column leakage: the Yellow section has two columns
+        # per page, so the regex may capture "Amyl acetates 1143 131 Crotonaldehyde"
+        # Truncate at the first embedded 4-digit ID + 3-digit guide pattern
+        material = re.split(r"\s+\d{4}\s+\d{3}", material)[0].strip()
+        # Also strip any trailing bare 4-digit number
+        material = re.sub(r"\s+\d{4}\s*$", "", material).strip()
+        guide_map.setdefault(guide_num, []).append((un_num, material))
+
+    total_entries = sum(len(v) for v in guide_map.values())
+    logger.warning(
+        "ERG: built guide->materials map: %d guides, %d total entries",
+        len(guide_map), total_entries,
+    )
+    return guide_map
+
+
+def _format_materials_preamble(
+    guide_num: str,
+    materials: list[tuple[str, str]],
+    max_materials: int = 30,
+) -> str:
+    """Format a materials preamble string for an Orange Guide chunk."""
+    if not materials:
+        return ""
+
+    # Deduplicate while preserving order
+    seen: set[str] = set()
+    unique: list[tuple[str, str]] = []
+    for un_num, name in materials:
+        key = un_num
+        if key not in seen:
+            seen.add(key)
+            unique.append((un_num, name))
+
+    items = [f"UN{un} {name}" for un, name in unique[:max_materials]]
+    preamble = "Materials covered by this guide include: " + ", ".join(items)
+    if len(unique) > max_materials:
+        preamble += f", and {len(unique) - max_materials} additional materials"
+    preamble += "."
+    return preamble
+
+
 # -- Orange Guide parsing (highest priority) -----------------------------------
 
 def _extract_guide_number_from_header(header: str) -> int | None:
@@ -362,7 +441,9 @@ def _extract_guide_number_from_header(header: str) -> int | None:
 
 
 def _parse_orange_guides(
-    pages: list[str], boundaries: dict[str, int],
+    pages: list[str],
+    boundaries: dict[str, int],
+    guide_materials: dict[str, list[tuple[str, str]]] | None = None,
 ) -> list[Section]:
     """Parse the 62 Emergency Response Guide cards (Guides 111-175).
 
@@ -425,10 +506,21 @@ def _parse_orange_guides(
 
     # Merge the (typically 2) pages per guide into one section
     sections: list[Section] = []
+    enriched_count = 0
     for guide_num in sorted(guide_pages.keys(), key=int):
         parts = guide_pages[guide_num]
         merged_text = "\n\n".join(parts)
         title = _extract_guide_title(merged_text, guide_num)
+
+        # Enrich with materials preamble from Yellow section mapping
+        if guide_materials and guide_num in guide_materials:
+            preamble = _format_materials_preamble(
+                guide_num, guide_materials[guide_num],
+            )
+            if preamble:
+                # Insert preamble after the section header tag but before guide content
+                merged_text = f"[ERG Guide {guide_num}]\n{preamble}\n\n{merged_text}"
+                enriched_count += 1
 
         sections.append(_make_section(
             section_number=f"ERG Guide {guide_num}",
@@ -437,7 +529,10 @@ def _parse_orange_guides(
             parent="ERG Orange Section",
         ))
 
-    logger.warning("ERG: parsed %d Orange Guide cards", len(sections))
+    logger.warning(
+        "ERG: parsed %d Orange Guide cards (%d enriched with materials)",
+        len(sections), enriched_count,
+    )
     return sections
 
 
