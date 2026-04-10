@@ -146,13 +146,18 @@ _ISM_ABBR_RE = re.compile(
 )
 
 _ERG_TERMS: tuple[str, ...] = (
-    "erg", "emergency response guidebook", "emergency response guide",
+    # NOTE: "erg" is matched via _ERG_ABBR_RE with word boundaries — do NOT
+    # put it here, because "erg" is a substring of "emergency" and would
+    # false-positive on every query containing that word.
+    "emergency response guidebook", "emergency response guide",
+    "emergency response for", "emergency response to",
     "hazmat", "hazardous material", "dangerous goods",
     "un number", "na number", "placard",
     "isolation distance", "protective action",
     "spill", "chemical spill", "toxic inhalation",
     "guide number", "guide 1",
 )
+_ERG_ABBR_RE = re.compile(r"\berg\b", re.IGNORECASE)
 _ERG_GUIDE_RE = re.compile(r"\bguide\s*(\d{3})\b", re.IGNORECASE)
 _ERG_UN_RE = re.compile(r"\b(?:UN|NA)\s*\d{4}\b", re.IGNORECASE)
 
@@ -187,6 +192,7 @@ def _source_affinity(query: str) -> dict[str, float]:
 
     if (
         any(t in q for t in _ERG_TERMS)
+        or _ERG_ABBR_RE.search(q)
         or _ERG_GUIDE_RE.search(q)
         or _ERG_UN_RE.search(q)
     ):
@@ -291,7 +297,20 @@ async def retrieve(
             fetch_limit,
             sources,
         )
-        candidates = [dict(r) for r in rows]
+        # Deduplicate by section_number (keep highest similarity)
+        candidates = []
+        seen_sections: dict[str, int] = {}
+        for r in rows:
+            chunk = dict(r)
+            sec = chunk.get("section_number", "")
+            if sec and sec in seen_sections:
+                existing_idx = seen_sections[sec]
+                if chunk["similarity"] > candidates[existing_idx]["similarity"]:
+                    candidates[existing_idx] = chunk
+                continue
+            if sec:
+                seen_sections[sec] = len(candidates)
+            candidates.append(chunk)
         active_groups: list[str] = []
     else:
         # Diversified fetch: one query per source group that has data, all
@@ -311,12 +330,25 @@ async def retrieve(
 
         candidates = []
         seen_ids: set = set()
+        seen_sections: dict[str, int] = {}  # section_number → index in candidates
         for group_results in results_per_group:
             for chunk in group_results:
                 chunk_id = chunk["id"]
                 if chunk_id in seen_ids:
                     continue
                 seen_ids.add(chunk_id)
+
+                # Deduplicate by section_number: keep the highest-similarity
+                # version.  Multiple ingest runs can create duplicate rows
+                # with different IDs but identical content.
+                sec = chunk.get("section_number", "")
+                if sec and sec in seen_sections:
+                    existing_idx = seen_sections[sec]
+                    if chunk["similarity"] > candidates[existing_idx]["similarity"]:
+                        candidates[existing_idx] = chunk
+                    continue
+                if sec:
+                    seen_sections[sec] = len(candidates)
                 candidates.append(chunk)
 
     if candidates:
@@ -364,8 +396,10 @@ def _rerank(
         for cargo in vessel_profile.get("cargo_types") or []:
             profile_terms.append(cargo.lower())
 
-    if source_boosts:
-        logger.info("Source affinity boosts: %s", source_boosts)
+    logger.info(
+        "Rerank: %d candidates, source_boosts=%s, profile_terms=%s",
+        len(results), source_boosts or "{}", profile_terms or "[]",
+    )
 
     # ERG-specific boosts: detect UN/NA numbers in query for cross-reference
     erg_active = "erg" in source_boosts
@@ -416,6 +450,12 @@ def _rerank(
                     break  # one match is enough
 
         result["_score"] = float(result["similarity"]) + boost
+
+        if boost > 0:
+            logger.debug(
+                "Boost %s: sim=%.3f +%.3f → %.3f",
+                section, float(result["similarity"]), boost, result["_score"],
+            )
 
     results.sort(key=lambda x: x["_score"], reverse=True)
     return results
