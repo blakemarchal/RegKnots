@@ -176,24 +176,47 @@ async def run_pdf_pipeline(
             else:
                 to_embed = all_chunks
 
-            # ── 5. Embed ─────────────────────────────────────────────────────
-            embed_task = progress.add_task("Embedding…", total=len(to_embed))
-            embedded = []
+            # ── 5+6. Embed + Store (progressive) ────────────────────────────
+            # Embed in batches and store each batch immediately so progress
+            # is preserved even if a later batch fails (e.g., API timeout).
+            embed_store_task = progress.add_task(
+                "Embedding + storing…", total=len(to_embed),
+            )
 
             if to_embed:
-                def _on_batch(done: int, _total: int) -> None:
-                    progress.update(embed_task, completed=done)
+                from ingest.embedder import BATCH_SIZE as _EMBED_BATCH
 
-                embedded = await embedder.embed_chunks(to_embed, on_batch=_on_batch)
-                result.embeddings_generated = len(embedded)
+                for batch_start in range(0, len(to_embed), _EMBED_BATCH):
+                    batch = to_embed[batch_start : batch_start + _EMBED_BATCH]
+                    try:
+                        batch_embedded = await embedder.embed_chunks(batch)
+                        result.embeddings_generated += len(batch_embedded)
 
-            progress.update(embed_task, completed=len(to_embed))
+                        if batch_embedded:
+                            result.upserts += await store.upsert_chunks(
+                                pool, batch_embedded,
+                            )
 
-            # ── 6. Store ─────────────────────────────────────────────────────
-            store_task = progress.add_task("Storing…", total=len(embedded))
-            if embedded:
-                result.upserts = await store.upsert_chunks(pool, embedded)
-            progress.update(store_task, completed=len(embedded))
+                    except Exception:
+                        progress.stop()
+                        console.print(
+                            f"[bold red]ERROR embedding/storing batch "
+                            f"{batch_start}-{batch_start + len(batch)} "
+                            f"of {len(to_embed)}:[/bold red]"
+                        )
+                        console.print_exception()
+                        console.print(
+                            f"[yellow]Partial progress saved: "
+                            f"{result.upserts} chunks stored before failure.[/yellow]"
+                        )
+                        raise
+
+                    progress.update(
+                        embed_store_task,
+                        completed=min(batch_start + len(batch), len(to_embed)),
+                    )
+
+            progress.update(embed_store_task, completed=len(to_embed))
 
             # Capture net chunk delta (additions/removals at the row level)
             chunks_after_count = await store.get_existing_chunk_count(pool, source)

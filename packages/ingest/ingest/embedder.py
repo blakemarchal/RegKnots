@@ -6,15 +6,15 @@ import asyncio
 import logging
 from collections.abc import Callable
 
-from openai import AsyncOpenAI, APIError, RateLimitError
+from openai import AsyncOpenAI, APIError, APIConnectionError, RateLimitError
 
 from ingest.models import Chunk, EmbeddedChunk
 
 logger = logging.getLogger(__name__)
 
 EMBED_MODEL = "text-embedding-3-small"
-BATCH_SIZE = 100
-MAX_RETRIES = 3
+BATCH_SIZE = 50
+MAX_RETRIES = 5
 
 
 class EmbedderClient:
@@ -79,20 +79,31 @@ class EmbedderClient:
                 return [item.embedding for item in response.data]
 
             except RateLimitError:
-                wait = 5 * (2 ** attempt)  # 5, 10, 20 seconds
+                wait = 5 * (2 ** attempt)  # 5, 10, 20, 40, 80 seconds
                 logger.warning(
                     f"Rate limit hit, waiting {wait}s "
                     f"(attempt {attempt + 1}/{MAX_RETRIES})"
                 )
                 await asyncio.sleep(wait)
 
-            except APIError as exc:
+            except (APIError, APIConnectionError) as exc:
                 if attempt == MAX_RETRIES - 1:
                     raise
-                wait = 2 ** attempt  # 1, 2, 4 seconds
+                wait = 2 ** attempt
                 logger.warning(
-                    f"API error ({exc.status_code}), waiting {wait}s "
+                    f"API error ({exc}), waiting {wait}s "
                     f"(attempt {attempt + 1}/{MAX_RETRIES})"
+                )
+                await asyncio.sleep(wait)
+
+            except Exception as exc:
+                # Catch connection timeouts, httpx errors, etc.
+                if attempt == MAX_RETRIES - 1:
+                    raise
+                wait = 3 * (2 ** attempt)  # 3, 6, 12, 24, 48 seconds
+                logger.warning(
+                    f"Unexpected error ({type(exc).__name__}: {exc}), "
+                    f"waiting {wait}s (attempt {attempt + 1}/{MAX_RETRIES})"
                 )
                 await asyncio.sleep(wait)
 
