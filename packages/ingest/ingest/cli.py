@@ -145,6 +145,19 @@ Examples:
         help="Force re-extraction of already-processed images (use with --extract).",
     )
 
+    enrich_grp = parser.add_mutually_exclusive_group()
+    enrich_grp.add_argument(
+        "--enrich",
+        action="store_true",
+        default=False,
+        help="Enrich chunks with LLM-generated search aliases before embedding.",
+    )
+    enrich_grp.add_argument(
+        "--no-enrich",
+        action="store_true",
+        help="Skip alias enrichment (default).",
+    )
+
     parser.add_argument(
         "--verbose",
         action="store_true",
@@ -158,12 +171,14 @@ Examples:
 
     sources = _SOURCES if args.all else [args.source]
     mode = "update" if args.update else "fresh"
+    enrich = args.enrich and not args.no_enrich
 
     asyncio.run(_run(
         sources, mode,
         dry_run=args.dry_run,
         extract=args.extract,
         force=args.force,
+        enrich=enrich,
     ))
 
 
@@ -173,6 +188,7 @@ async def _run(
     dry_run: bool = False,
     extract: bool = False,
     force: bool = False,
+    enrich: bool = False,
 ) -> None:
     import importlib
 
@@ -247,7 +263,7 @@ async def _run(
         for source in sources:
             console.rule(f"[cyan]{source}")
             if source in PDF_SOURCES:
-                result = await _run_pdf_source(source, mode, pool, console)
+                result = await _run_pdf_source(source, mode, pool, console, enrich=enrich)
             else:
                 result = await run_pipeline(
                     source=source,
@@ -289,6 +305,7 @@ async def _run_pdf_source(
     mode: str,
     pool: asyncpg.Pool,
     console: Console,
+    enrich: bool = False,
 ) -> IngestResult:
     """Dispatch a PDF/text-sourced ingest run.
 
@@ -310,7 +327,7 @@ async def _run_pdf_source(
 
     # ── Text-dir path (e.g. solas) ────────────────────────────────────────────
     if "text_dir" in cfg:
-        return await _run_text_source(source, mode, cfg, adapter, pool, console)
+        return await _run_text_source(source, mode, cfg, adapter, pool, console, enrich=enrich)
 
     # ── Multi-PDF path (e.g. nvic) ────────────────────────────────────────────
     if "raw_dir" in cfg:
@@ -337,6 +354,7 @@ async def _run_pdf_source(
             pool=pool,
             cfg=settings,
             console=console,
+            enrich=enrich,
         )
         # Surface download failures in the summary error count
         result.errors += dl_failures
@@ -361,6 +379,7 @@ async def _run_pdf_source(
         pool=pool,
         cfg=settings,
         console=console,
+        enrich=enrich,
     )
 
 
@@ -371,6 +390,7 @@ async def _run_text_source(
     adapter,
     pool: asyncpg.Pool,
     console: Console,
+    enrich: bool = False,
 ) -> IngestResult:
     """Ingest a pre-extracted text-dir source (e.g. SOLAS).
 
@@ -429,6 +449,7 @@ async def _run_text_source(
         pool=pool,
         cfg=settings,
         console=console,
+        enrich=enrich,
     )
 
 
