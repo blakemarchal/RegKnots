@@ -417,6 +417,43 @@ def _format_materials_preamble(
     return preamble
 
 
+_MAX_TITLE_MATERIALS = 5
+
+
+def _enrich_title_with_materials(
+    title: str,
+    materials: list[tuple[str, str]],
+) -> str:
+    """Append top material common names to an Orange Guide section_title.
+
+    The chunker prefixes every chunk with "[section_number] section_title",
+    so material names in the title appear in every chunk's header — giving
+    them outsized embedding weight and enabling trigram keyword search.
+
+    Names are stripped of storage-form qualifiers (", compressed",
+    ", liquefied", etc.) to match how mariners actually search.
+    """
+    if not materials:
+        return title
+
+    seen: set[str] = set()
+    names: list[str] = []
+    for _, raw_name in materials:
+        # Strip storage-form qualifiers that don't affect identity
+        name = re.split(r",\s*(?:compressed|liquefied|dissolved|stabilized|inhibited)\b", raw_name, flags=re.IGNORECASE)[0].strip()
+        name_lower = name.lower()
+        if name_lower not in seen and name:
+            seen.add(name_lower)
+            names.append(name)
+            if len(names) >= _MAX_TITLE_MATERIALS:
+                break
+
+    if not names:
+        return title
+
+    return f"{title} ({', '.join(names)})"
+
+
 # -- Orange Guide parsing (highest priority) -----------------------------------
 
 def _extract_guide_number_from_header(header: str) -> int | None:
@@ -514,13 +551,17 @@ def _parse_orange_guides(
 
         # Enrich with materials preamble from Yellow section mapping
         if guide_materials and guide_num in guide_materials:
-            preamble = _format_materials_preamble(
-                guide_num, guide_materials[guide_num],
-            )
+            materials = guide_materials[guide_num]
+            preamble = _format_materials_preamble(guide_num, materials)
             if preamble:
                 # Insert preamble after the section header tag but before guide content
                 merged_text = f"[ERG Guide {guide_num}]\n{preamble}\n\n{merged_text}"
                 enriched_count += 1
+
+            # Append top material common names to section_title so every
+            # chunk's header contains them — high embedding weight, also
+            # enables trigram keyword search.
+            title = _enrich_title_with_materials(title, materials)
 
         sections.append(_make_section(
             section_number=f"ERG Guide {guide_num}",
