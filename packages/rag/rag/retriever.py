@@ -46,7 +46,7 @@ SOURCE_GROUPS: dict[str, tuple[str, ...]] = {
     "solas": ("solas", "solas_supplement"),
     "nvic": ("nvic",),
     "stcw": ("stcw", "stcw_supplement"),
-    "ism": ("ism",),
+    "ism": ("ism", "ism_supplement"),
     "erg": ("erg",),
 }
 

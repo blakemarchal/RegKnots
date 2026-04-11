@@ -53,6 +53,10 @@ _PDF_SOURCE_CONFIG: dict[str, dict] = {
         "text_dir": _DATA_RAW / "ism" / "extracted",
         "adapter":  "ingest.sources.ism",
     },
+    "ism_supplement": {
+        "text_dir": _DATA_RAW / "ism" / "extracted",
+        "adapter":  "ingest.sources.ism_supplement",
+    },
     "nvic": {
         "raw_dir": _DATA_RAW / "nvic",
         "adapter": "ingest.sources.nvic",
