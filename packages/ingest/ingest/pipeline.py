@@ -41,6 +41,7 @@ async def run_pipeline(
     pool: asyncpg.Pool,
     cfg: IngestSettings | None = None,
     console: Console | None = None,
+    enrich: bool = False,
 ) -> IngestResult:
     """Run the full ingest pipeline for one CFR source.
 
@@ -175,6 +176,31 @@ async def run_pipeline(
                         result.errors += 1
                         result.error_details.append(msg)
                         return result
+
+            # ── 5c. Alias enrichment (optional) ────────────────────────────
+            if enrich and cfg and cfg.anthropic_api_key:
+                from ingest.enricher import AliasEnricher
+
+                cache_dir = Path(__file__).resolve().parents[3] / "data" / "cache" / "aliases"
+                enricher = AliasEnricher(
+                    api_key=cfg.anthropic_api_key, cache_dir=cache_dir,
+                )
+                enrich_task = progress.add_task(
+                    "Enriching with aliases…", total=len(all_chunks),
+                )
+                try:
+                    all_chunks = await enricher.enrich_chunks(all_chunks, source)
+                finally:
+                    await enricher.close()
+                progress.update(
+                    enrich_task, completed=len(all_chunks),
+                    description=f"Enriched: {len(all_chunks):,} chunks",
+                )
+            elif enrich and (not cfg or not cfg.anthropic_api_key):
+                console.print(
+                    "  [yellow]WARN: --enrich requested but ANTHROPIC_API_KEY "
+                    "not set — skipping enrichment[/yellow]"
+                )
 
             # ── 6. Dedup + change detection ──────────────────────────────────
             # Always compute new_or_modified_chunks so the auto-notification

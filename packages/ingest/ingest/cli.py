@@ -271,6 +271,7 @@ async def _run(
                     pool=pool,
                     cfg=settings,
                     console=console,
+                    enrich=enrich,
                 )
             all_results.append(result)
 
