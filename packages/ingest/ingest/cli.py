@@ -387,7 +387,7 @@ async def _run_text_source(
 
     # STCW and ISM use auto-detected structure from extracted .txt files (no headers.txt).
     # SOLAS uses headers.txt + range-named .txt files.
-    needs_headers = source not in ("stcw", "ism")
+    needs_headers = source not in ("stcw", "ism", "ism_supplement")
 
     if needs_headers:
         headers_path = raw_dir / "headers.txt"
