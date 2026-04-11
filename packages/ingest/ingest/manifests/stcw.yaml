@@ -296,12 +296,11 @@ expected_sections:
   - section_number: "STCW Code A-II/1"
     title: "Section A-II/1 — Officer in charge of a navigational watch on ships of 500 GT or more"
     min_chars: 1000
-  # NOTE: A-II/2 and A-II/3 are not currently in the ingested edition — the
-  # source screenshots on disk appear to skip pages ~115–135 where these
-  # code sections live. The audit will keep flagging them as MISSING until
-  # the source PDF is re-captured or the sections are added via
-  # `ingest.manual_add`. They are NOT parser bugs — the content is simply
-  # absent from the extracted .txt files.
+  # NOTE (fixed 2026-04-10): A-II/2 and A-II/3 were previously missing due
+  # to Vision OCR heading errors — A-II/3 was misread as "Section A-II/1",
+  # and A-II/2's heading was dropped entirely (competence tables survived
+  # as "Table A-II/2"). _normalize_headings() now corrects both.
+  # The source screenshots DO cover these pages (5:12:09–5:12:55 PM).
   - section_number: "STCW Code A-II/2"
     title: "Section A-II/2 — Masters and chief mates on ships of 500 GT or more"
     min_chars: 1000

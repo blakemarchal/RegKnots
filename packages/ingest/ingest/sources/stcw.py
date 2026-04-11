@@ -112,30 +112,96 @@ _PART_RE = re.compile(
 # ── Heading normalisation ────────────────────────────────────────────────────
 
 def _normalize_headings(text: str) -> str:
-    """Correct systematic OCR typos in STCW section headings.
+    """Correct systematic Vision OCR errors in STCW section headings.
 
-    Vision extraction of scanned IMO pages occasionally loses the slash
-    character in dense, table-heavy layouts, turning "Section A-V/1-1"
-    (oil/chemical tanker code section) into the look-alike "Section A-VI-1".
-    This function patches the known typo when the context around the
-    heading makes the correct interpretation unambiguous (tanker / oil /
-    chemical keywords appear within a few lines).
+    Three classes of error are corrected:
 
-    Safe to run multiple times — the replacement is a no-op once the
-    heading is already in canonical form.
+    1. **Misread section numbers**: Vision occasionally misreads digits or
+       loses the slash character.  E.g., "Section A-VI-1" → "Section A-V/1-1",
+       or "Section A-II/1" with A-II/3's title → "Section A-II/3".
+
+    2. **Missing section headings**: Vision sometimes drops the "Section A-..."
+       heading entirely while preserving the "Table A-..." competence tables
+       that follow.  We synthesise the missing heading so boundary detection
+       can find it.
+
+    All corrections use contextual keywords from the next few lines to
+    verify the fix is unambiguous.  Safe to run multiple times — replacements
+    and insertions are no-ops once the heading is already in canonical form.
     """
     lines = text.split("\n")
-    patched = False
+    fixes: list[str] = []
+
+    # Track which headings we've already seen or synthesised so we don't
+    # double-insert if the function is called repeatedly.
+    seen_headings = set()
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("Section A-"):
+            seen_headings.add(stripped)
+
+    # Pass 1: Line-level renames and insertions (iterate by index so we
+    # can insert lines).  We iterate in reverse so insertions don't shift
+    # indices for subsequent iterations.
+    insertions: list[tuple[int, list[str]]] = []
+
     for i, line in enumerate(lines):
-        if line.strip() != "Section A-VI-1":
-            continue
-        # Look at the next 10 non-empty lines for tanker/oil/chemical context
-        context = "\n".join(lines[i + 1 : i + 11]).lower()
-        if "tanker" in context or ("oil" in context and "chemical" in context):
-            lines[i] = "Section A-V/1-1"
-            patched = True
-    if patched:
-        logger.info("stcw: normalised 'Section A-VI-1' OCR typo → 'Section A-V/1-1'")
+        stripped = line.strip()
+
+        # ── Fix 1: "Section A-VI-1" → "Section A-V/1-1" (existing) ────────
+        if stripped == "Section A-VI-1":
+            context = "\n".join(lines[i + 1 : i + 11]).lower()
+            if "tanker" in context or ("oil" in context and "chemical" in context):
+                lines[i] = "Section A-V/1-1"
+                fixes.append("'Section A-VI-1' OCR typo → 'Section A-V/1-1'")
+
+        # ── Fix 2: "Section A-II/1" with A-II/3 title → rename ────────────
+        # Vision misread the "3" as "1".  The real A-II/1 title says
+        # "500 gross tonnage or more"; A-II/3's title says "less than
+        # 500 gross tonnage" and "near-coastal".
+        elif stripped == "Section A-II/1":
+            context = "\n".join(lines[i + 1 : i + 6]).lower()
+            if "less than 500 gross tonnage" in context or "near-coastal" in context:
+                lines[i] = "Section A-II/3"
+                fixes.append("'Section A-II/1' with <500 GT title → 'Section A-II/3'")
+
+        # ── Fix 3: Missing "Section A-II/2" — synthesise from Table ref ───
+        # The section heading was lost in OCR but the competence tables
+        # survived as "Table A-II/2".  Insert a synthetic heading.
+        elif stripped.startswith("Table A-II/2") and "Section A-II/2" not in seen_headings:
+            context = "\n".join(lines[i : i + 3]).lower()
+            if "master" in context or "chief mate" in context or "500 gross tonnage" in context:
+                insertions.append((i, [
+                    "Section A-II/2",
+                    "Mandatory minimum requirements for certification of masters "
+                    "and chief mates on ships of 500 gross tonnage or more",
+                    "",
+                ]))
+                seen_headings.add("Section A-II/2")
+                fixes.append("synthesised missing 'Section A-II/2' before Table A-II/2")
+
+        # ── Fix 4: Missing "Section A-V/1-2" — synthesise from Table ref ──
+        # Same pattern: heading lost, table reference survived.
+        elif stripped.startswith("Table A-V/1-2") and not stripped.endswith("(continued)") \
+                and "Section A-V/1-2" not in seen_headings:
+            insertions.append((i, [
+                "Section A-V/1-2",
+                "Mandatory minimum requirements for training and qualifications "
+                "of masters, officers and ratings on ships subject to the IGF Code",
+                "",
+            ]))
+            seen_headings.add("Section A-V/1-2")
+            fixes.append("synthesised missing 'Section A-V/1-2' before Table A-V/1-2")
+
+    # Apply insertions in reverse order so indices remain valid
+    for idx, new_lines in sorted(insertions, reverse=True):
+        for j, new_line in enumerate(new_lines):
+            lines.insert(idx + j, new_line)
+
+    if fixes:
+        for fix in fixes:
+            logger.info("stcw: heading normalisation — %s", fix)
+
     return "\n".join(lines)
 
 
