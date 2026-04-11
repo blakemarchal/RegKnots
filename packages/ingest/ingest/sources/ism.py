@@ -246,6 +246,79 @@ async def extract_images(raw_dir: Path, force: bool = False) -> None:
     print(f"\nExtraction complete: {extracted} pages extracted, {skipped} skipped")
 
 
+# ── Code boundary detection ─────────────────────────────────────────────────
+#
+# The IMO ISM e-Publication contains the ISM Code (Resolution A.741(18))
+# plus 6 supplementary documents (guidelines, circulars, cyber risk mgmt).
+# All use numbered sections 1-N, so without scoping the parser ingests
+# supplement sections that overwrite the real ISM Code sections at upsert
+# time (same source + section_number + chunk_index key).
+#
+# _find_code_bounds() locates the ISM Code proper within the concatenated
+# text so only Code content is parsed.  Supplements will be handled by a
+# future `ism_supplement` source adapter.
+
+# First supplement after the Code: Resolution A.1118(30) or "Guidelines"
+_SUPPLEMENT_START_RE = re.compile(
+    r"^(?:Guidelines|Revised Guidelines|Resolution\s+(?:A\.1118|MSC)|MSC-)",
+    re.MULTILINE,
+)
+
+# Resolution A.741(18) — the ISM Code's own resolution header.
+# Appears twice: once in the TOC (first ~200 lines) and once as the
+# actual resolution text before PART A.  We want the second occurrence.
+_RESOLUTION_741_RE = re.compile(
+    r"^Resolution\s+A\.741\(18\)",
+    re.MULTILINE,
+)
+
+# PART A marks the start of the Code's substantive content.
+_PART_A_RE = re.compile(r"^PART\s+A\b", re.MULTILINE)
+
+
+def _find_code_bounds(text: str) -> tuple[int, int]:
+    """Return (start, end) character positions of the ISM Code proper.
+
+    Start: the Resolution A.741(18) preamble (second occurrence — first
+    is in the TOC) or PART A if the resolution header is not found.
+
+    End: the first supplement header (Resolution A.1118, Guidelines, or
+    MSC circular) that appears AFTER PART A.  Falls back to end-of-text.
+    """
+    # Find PART A first — it's the most reliable anchor
+    part_a = _PART_A_RE.search(text)
+    if not part_a:
+        logger.warning("ism: PART A not found — using full text")
+        return 0, len(text)
+
+    # Start: try to include the Resolution A.741(18) preamble
+    # (the actual resolution text, not the TOC reference)
+    start = part_a.start()
+    for m in _RESOLUTION_741_RE.finditer(text):
+        # Only use it if it's reasonably close before PART A
+        # (within ~5000 chars = a few pages of preamble)
+        if m.start() < part_a.start() and part_a.start() - m.start() < 5000:
+            start = m.start()
+            break
+
+    # End: first supplement header after PART A
+    end = len(text)
+    for m in _SUPPLEMENT_START_RE.finditer(text):
+        if m.start() > part_a.start():
+            end = m.start()
+            logger.info(
+                "ism: Code ends at pos %d (supplement: %s)",
+                end, m.group(0)[:40],
+            )
+            break
+
+    logger.info(
+        "ism: Code bounds [%d:%d] (%d chars of %d total)",
+        start, end, end - start, len(text),
+    )
+    return start, end
+
+
 # ── Phase 2: Parse extracted text into sections ──────────────────────────────
 
 def parse_source(raw_dir: Path) -> list[Section]:
@@ -271,6 +344,11 @@ def parse_source(raw_dir: Path) -> list[Section]:
     for txt_path in txt_files:
         page_text = txt_path.read_text(encoding="utf-8", errors="replace")
         full_text += page_text + "\n\n"
+
+    # Scope to ISM Code only — exclude supplementary documents whose
+    # numbered sections would collide with Code sections during upsert.
+    code_start, code_end = _find_code_bounds(full_text)
+    full_text = full_text[code_start:code_end]
 
     # Detect and skip table of contents pages
     full_text = _skip_toc(full_text)
