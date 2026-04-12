@@ -21,7 +21,8 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin", tags=["admin"])
 
 # Read-only admins: can view dashboard but cannot perform mutations
-READONLY_ADMIN_EMAILS: set[str] = {"kdmarchal@gmail.com"}
+# (Karynn promoted to full admin 2026-04-12)
+READONLY_ADMIN_EMAILS: set[str] = set()
 
 
 async def require_admin(

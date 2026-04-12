@@ -180,7 +180,8 @@ const USER_FILTERS: { value: UserFilter; label: string }[] = [
 const CHART_COLORS = ['#2dd4bf', '#1d9e75', '#0f6e56', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899']
 
 // Read-only admin emails — mirrors backend READONLY_ADMIN_EMAILS
-const READONLY_ADMIN_EMAILS = new Set(['kdmarchal@gmail.com'])
+// (Karynn promoted to full admin 2026-04-12)
+const READONLY_ADMIN_EMAILS = new Set<string>([])
 
 // ── Stat card ───────────────────────────────────────────────────────────────────
 
@@ -282,6 +283,8 @@ function AdminContent() {
   const [notifSource, setNotifSource] = useState('')
   const [notifSending, setNotifSending] = useState(false)
   const [notifToast, setNotifToast] = useState<{ msg: string; ok: boolean } | null>(null)
+  const [notifFilter, setNotifFilter] = useState<'active' | 'all'>('active')
+  const [notifFormOpen, setNotifFormOpen] = useState(false)
   const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({})
   const [ticketActionId, setTicketActionId] = useState<string | null>(null)
   const [ticketToast, setTicketToast] = useState<{ msg: string; ok: boolean } | null>(null)
@@ -701,125 +704,6 @@ function AdminContent() {
                 </span>
               )}
             </div>
-          </div>
-
-          {/* ── Notifications ────────────────────────────────────────── */}
-          <div className="mb-8">
-            <h2 className="font-display text-lg font-bold text-[#f0ece4] tracking-wide mb-3">
-              In-App Notifications
-            </h2>
-            {!isReadOnly && (
-              <div className="bg-[#111827] rounded-xl border border-white/8 px-5 py-4 mb-3">
-                <div className="flex flex-col gap-3">
-                  <input
-                    type="text"
-                    value={notifTitle}
-                    onChange={(e) => setNotifTitle(e.target.value)}
-                    placeholder="Title (e.g. 'SOLAS January 2026 Amendments Available')"
-                    className="w-full font-mono text-sm px-3 py-2 rounded-lg
-                      bg-[#0a0e1a] border border-white/10 text-[#f0ece4]
-                      placeholder:text-[#6b7594] focus:border-[#2dd4bf]/50 focus:outline-none"
-                  />
-                  <textarea
-                    value={notifBody}
-                    onChange={(e) => setNotifBody(e.target.value)}
-                    placeholder="Body — short summary of the update"
-                    rows={3}
-                    className="w-full font-mono text-xs px-3 py-2 rounded-lg resize-y
-                      bg-[#0a0e1a] border border-white/10 text-[#f0ece4]
-                      placeholder:text-[#6b7594] focus:border-[#2dd4bf]/50 focus:outline-none"
-                  />
-                  <div className="flex flex-col sm:flex-row gap-3">
-                    <select
-                      value={notifType}
-                      onChange={(e) => setNotifType(e.target.value as typeof notifType)}
-                      className="font-mono text-xs px-3 py-2 rounded-lg
-                        bg-[#0a0e1a] border border-white/10 text-[#f0ece4]
-                        focus:border-[#2dd4bf]/50 focus:outline-none"
-                    >
-                      <option value="regulation_update">Regulation Update</option>
-                      <option value="system">System</option>
-                      <option value="announcement">Announcement</option>
-                    </select>
-                    <input
-                      type="text"
-                      value={notifSource}
-                      onChange={(e) => setNotifSource(e.target.value)}
-                      placeholder="Source (optional, e.g. 'solas_supplement')"
-                      className="flex-1 font-mono text-xs px-3 py-2 rounded-lg
-                        bg-[#0a0e1a] border border-white/10 text-[#f0ece4]
-                        placeholder:text-[#6b7594] focus:border-[#2dd4bf]/50 focus:outline-none"
-                    />
-                    <button
-                      onClick={createNotification}
-                      disabled={notifSending}
-                      className="font-mono text-xs font-bold uppercase tracking-wider
-                        bg-[#2dd4bf] text-[#0a0e1a]
-                        hover:brightness-110 rounded-lg px-4 py-2
-                        transition-[filter] duration-150 disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      {notifSending ? 'Publishing…' : 'Send Notification'}
-                    </button>
-                  </div>
-                  {notifToast && (
-                    <div className={`font-mono text-xs px-3 py-2 rounded
-                      ${notifToast.ok
-                        ? 'bg-[#2dd4bf]/10 text-[#2dd4bf] border border-[#2dd4bf]/30'
-                        : 'bg-red-500/10 text-red-400 border border-red-500/30'}`}>
-                      {notifToast.msg}
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-            {notifications.length === 0 ? (
-              <div className="bg-[#111827] rounded-xl border border-white/8 px-4 py-4 text-center">
-                <p className="font-mono text-xs text-[#6b7594]">No notifications yet.</p>
-              </div>
-            ) : (
-              <div className="flex flex-col gap-2">
-                {notifications.map((n) => (
-                  <div
-                    key={n.id}
-                    className="bg-[#111827] rounded-lg border border-white/8 px-4 py-3
-                      flex items-start justify-between gap-3"
-                  >
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <p className="font-display font-bold text-sm text-[#f0ece4] uppercase tracking-wide">
-                          {n.title}
-                        </p>
-                        <span className={`inline-block text-[9px] font-bold px-1.5 py-0.5 rounded uppercase
-                          ${n.is_active
-                            ? 'bg-[#2dd4bf]/15 text-[#2dd4bf] border border-[#2dd4bf]/30'
-                            : 'bg-white/5 text-[#6b7594] border border-white/10'}`}>
-                          {n.is_active ? 'Active' : 'Inactive'}
-                        </span>
-                      </div>
-                      <p className="font-mono text-xs text-[#6b7594] mt-1 line-clamp-2">
-                        {n.body}
-                      </p>
-                      <p className="font-mono text-[10px] text-[#6b7594]/70 mt-1">
-                        {n.notification_type}
-                        {n.source ? ` · ${n.source}` : ''}
-                        {` · ${fmtDate(n.created_at)}`}
-                      </p>
-                    </div>
-                    {!isReadOnly && (
-                      <button
-                        onClick={() => toggleNotification(n.id)}
-                        className="font-mono text-[10px] font-bold uppercase tracking-wider
-                          border border-white/10 text-[#f0ece4]/80
-                          hover:bg-white/5 rounded-md px-2.5 py-1.5 whitespace-nowrap
-                          transition-colors"
-                      >
-                        {n.is_active ? 'Deactivate' : 'Activate'}
-                      </button>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
           </div>
 
           {/* ── Stats grid ───────────────────────────────────────────── */}
@@ -1263,6 +1147,161 @@ function AdminContent() {
                 </table>
               </div>
             )}
+          </div>
+
+          {/* ── Notifications (demoted) ─────────────────────────────────── */}
+          <div className="mb-8">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="font-display text-lg font-bold text-[#f0ece4] tracking-wide">
+                In-App Notifications
+              </h2>
+              <div className="flex items-center gap-2">
+                {(['active', 'all'] as const).map((f) => (
+                  <button
+                    key={f}
+                    onClick={() => setNotifFilter(f)}
+                    className={`font-mono text-[10px] font-bold uppercase tracking-wider
+                      px-2.5 py-1 rounded-md border transition-colors
+                      ${notifFilter === f
+                        ? 'bg-[#2dd4bf]/15 border-[#2dd4bf]/40 text-[#2dd4bf]'
+                        : 'border-white/10 text-[#6b7594] hover:bg-white/5'}`}
+                  >
+                    {f}
+                  </button>
+                ))}
+                {!isReadOnly && (
+                  <button
+                    onClick={() => setNotifFormOpen(!notifFormOpen)}
+                    className="font-mono text-[10px] font-bold uppercase tracking-wider
+                      border border-[#2dd4bf]/30 text-[#2dd4bf]
+                      hover:bg-[#2dd4bf]/10 rounded-md px-2.5 py-1
+                      transition-colors ml-1"
+                  >
+                    {notifFormOpen ? '− Close' : '+ Create'}
+                  </button>
+                )}
+              </div>
+            </div>
+            {!isReadOnly && notifFormOpen && (
+              <div className="bg-[#111827] rounded-xl border border-white/8 px-5 py-4 mb-3">
+                <div className="flex flex-col gap-3">
+                  <input
+                    type="text"
+                    value={notifTitle}
+                    onChange={(e) => setNotifTitle(e.target.value)}
+                    placeholder="Title (e.g. 'SOLAS January 2026 Amendments Available')"
+                    className="w-full font-mono text-sm px-3 py-2 rounded-lg
+                      bg-[#0a0e1a] border border-white/10 text-[#f0ece4]
+                      placeholder:text-[#6b7594] focus:border-[#2dd4bf]/50 focus:outline-none"
+                  />
+                  <textarea
+                    value={notifBody}
+                    onChange={(e) => setNotifBody(e.target.value)}
+                    placeholder="Body — short summary of the update"
+                    rows={3}
+                    className="w-full font-mono text-xs px-3 py-2 rounded-lg resize-y
+                      bg-[#0a0e1a] border border-white/10 text-[#f0ece4]
+                      placeholder:text-[#6b7594] focus:border-[#2dd4bf]/50 focus:outline-none"
+                  />
+                  <div className="flex flex-col sm:flex-row gap-3">
+                    <select
+                      value={notifType}
+                      onChange={(e) => setNotifType(e.target.value as typeof notifType)}
+                      className="font-mono text-xs px-3 py-2 rounded-lg
+                        bg-[#0a0e1a] border border-white/10 text-[#f0ece4]
+                        focus:border-[#2dd4bf]/50 focus:outline-none"
+                    >
+                      <option value="regulation_update">Regulation Update</option>
+                      <option value="system">System</option>
+                      <option value="announcement">Announcement</option>
+                    </select>
+                    <input
+                      type="text"
+                      value={notifSource}
+                      onChange={(e) => setNotifSource(e.target.value)}
+                      placeholder="Source (optional, e.g. 'solas_supplement')"
+                      className="flex-1 font-mono text-xs px-3 py-2 rounded-lg
+                        bg-[#0a0e1a] border border-white/10 text-[#f0ece4]
+                        placeholder:text-[#6b7594] focus:border-[#2dd4bf]/50 focus:outline-none"
+                    />
+                    <button
+                      onClick={createNotification}
+                      disabled={notifSending}
+                      className="font-mono text-xs font-bold uppercase tracking-wider
+                        bg-[#2dd4bf] text-[#0a0e1a]
+                        hover:brightness-110 rounded-lg px-4 py-2
+                        transition-[filter] duration-150 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {notifSending ? 'Publishing…' : 'Send Notification'}
+                    </button>
+                  </div>
+                  {notifToast && (
+                    <div className={`font-mono text-xs px-3 py-2 rounded
+                      ${notifToast.ok
+                        ? 'bg-[#2dd4bf]/10 text-[#2dd4bf] border border-[#2dd4bf]/30'
+                        : 'bg-red-500/10 text-red-400 border border-red-500/30'}`}>
+                      {notifToast.msg}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+            {(() => {
+              const filtered = notifFilter === 'active'
+                ? notifications.filter((n) => n.is_active)
+                : notifications
+              return filtered.length === 0 ? (
+                <div className="bg-[#111827] rounded-xl border border-white/8 px-4 py-4 text-center">
+                  <p className="font-mono text-xs text-[#6b7594]">
+                    {notifFilter === 'active' ? 'No active notifications.' : 'No notifications yet.'}
+                  </p>
+                </div>
+              ) : (
+                <div className="flex flex-col gap-2 max-h-[400px] overflow-y-auto
+                  scrollbar-thin scrollbar-track-transparent scrollbar-thumb-[#2dd4bf]/30 pr-1">
+                  {filtered.map((n) => (
+                    <div
+                      key={n.id}
+                      className="bg-[#111827] rounded-lg border border-white/8 px-4 py-3
+                        flex items-start justify-between gap-3"
+                    >
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <p className="font-display font-bold text-sm text-[#f0ece4] uppercase tracking-wide">
+                            {n.title}
+                          </p>
+                          <span className={`inline-block text-[9px] font-bold px-1.5 py-0.5 rounded uppercase
+                            ${n.is_active
+                              ? 'bg-[#2dd4bf]/15 text-[#2dd4bf] border border-[#2dd4bf]/30'
+                              : 'bg-white/5 text-[#6b7594] border border-white/10'}`}>
+                            {n.is_active ? 'Active' : 'Inactive'}
+                          </span>
+                        </div>
+                        <p className="font-mono text-xs text-[#6b7594] mt-1 line-clamp-2">
+                          {n.body}
+                        </p>
+                        <p className="font-mono text-[10px] text-[#6b7594]/70 mt-1">
+                          {n.notification_type}
+                          {n.source ? ` · ${n.source}` : ''}
+                          {` · ${fmtDate(n.created_at)}`}
+                        </p>
+                      </div>
+                      {!isReadOnly && (
+                        <button
+                          onClick={() => toggleNotification(n.id)}
+                          className="font-mono text-[10px] font-bold uppercase tracking-wider
+                            border border-white/10 text-[#f0ece4]/80
+                            hover:bg-white/5 rounded-md px-2.5 py-1.5 whitespace-nowrap
+                            transition-colors"
+                        >
+                          {n.is_active ? 'Deactivate' : 'Activate'}
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )
+            })()}
           </div>
 
           {/* ── Analytics Charts ─────────────────────────────────────── */}
