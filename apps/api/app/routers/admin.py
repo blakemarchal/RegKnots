@@ -761,6 +761,101 @@ async def send_test_email(
     return TestEmailResult(success=True, type=body.type, recipient=recipient)
 
 
+# ── Custom email blast ───────────────────────────────────────────────────────
+
+
+class CustomEmailCountResult(BaseModel):
+    count: int
+
+
+@router.get("/custom-email-count", response_model=CustomEmailCountResult)
+async def get_custom_email_count(
+    filter: str,
+    _admin: Annotated[CurrentUser, Depends(require_admin)],
+    pool: Annotated[asyncpg.Pool, Depends(get_pool)],
+) -> CustomEmailCountResult:
+    """Preview how many users match a recipient filter."""
+    clause = {
+        "all": "subscription_status = 'active'",
+        "pro": "subscription_tier = 'solo' AND subscription_status = 'active'",
+        "trial": "trial_ends_at IS NOT NULL AND trial_ends_at > NOW() AND subscription_tier = 'free'",
+    }.get(filter, "FALSE")
+    count = await pool.fetchval(
+        f"SELECT count(*) FROM users WHERE {clause} AND is_internal = FALSE"
+    )
+    return CustomEmailCountResult(count=int(count or 0))
+
+
+class CustomEmailRequest(BaseModel):
+    subject: str
+    body_text: str
+    recipient_filter: str  # "all" | "pro" | "trial" | "custom"
+    custom_emails: list[str] | None = None
+
+
+class CustomEmailResult(BaseModel):
+    sent: int
+    failed: int
+    failed_emails: list[str]
+
+
+@router.post("/send-custom-email", response_model=CustomEmailResult)
+async def send_custom_email_blast(
+    body: CustomEmailRequest,
+    admin: Annotated[CurrentUser, Depends(require_write_admin)],
+    pool: Annotated[asyncpg.Pool, Depends(get_pool)],
+) -> CustomEmailResult:
+    """Send a custom admin-composed email to filtered recipients."""
+    import asyncio as _asyncio
+
+    from app.email import send_custom_email, send_with_throttle, RESEND_THROTTLE_SECONDS
+
+    # Resolve recipients
+    if body.recipient_filter == "custom":
+        if not body.custom_emails:
+            raise HTTPException(status_code=400, detail="custom_emails required for custom filter")
+        emails = body.custom_emails
+    else:
+        filter_clause = {
+            "all": "subscription_status = 'active'",
+            "pro": "subscription_tier = 'solo' AND subscription_status = 'active'",
+            "trial": "trial_ends_at IS NOT NULL AND trial_ends_at > NOW() AND subscription_tier = 'free'",
+        }.get(body.recipient_filter)
+        if not filter_clause:
+            raise HTTPException(status_code=400, detail=f"Unknown filter: {body.recipient_filter}")
+
+        rows = await pool.fetch(
+            f"SELECT email FROM users WHERE {filter_clause} AND is_internal = FALSE"
+        )
+        emails = [r["email"] for r in rows]
+
+    if not emails:
+        return CustomEmailResult(sent=0, failed=0, failed_emails=[])
+
+    sent = 0
+    failed_emails: list[str] = []
+
+    for i, email in enumerate(emails):
+        try:
+            await send_with_throttle(
+                lambda e=email: send_custom_email(e, body.subject, body.body_text),
+                label=email,
+            )
+            sent += 1
+        except Exception as exc:
+            logger.warning("Custom email failed to %s: %s", email, exc)
+            failed_emails.append(email)
+
+        if i < len(emails) - 1:
+            await _asyncio.sleep(RESEND_THROTTLE_SECONDS)
+
+    logger.info(
+        "Admin %s sent custom email '%s' filter=%s: sent=%d failed=%d",
+        admin.email, body.subject, body.recipient_filter, sent, len(failed_emails),
+    )
+    return CustomEmailResult(sent=sent, failed=len(failed_emails), failed_emails=failed_emails)
+
+
 # ── Founding member email ────────────────────────────────────────────────────
 
 

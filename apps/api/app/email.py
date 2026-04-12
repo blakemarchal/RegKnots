@@ -664,3 +664,23 @@ async def send_subscription_resumed_email(to_email: str, full_name: str) -> None
         "subject": f"RegKnot — Welcome Back! Subscription Resumed",
         "html": html,
     })
+
+
+async def send_custom_email(to_email: str, subject: str, body_text: str) -> None:
+    """Send an admin-composed custom email to a user.
+
+    The body_text is plain text with line breaks preserved. It is rendered
+    inside the standard RegKnot email template with the teal/dark styling.
+    """
+    safe_body = _html_lib.escape(body_text)
+    html = _html(f"""
+      <h1>{_html_lib.escape(subject)}</h1>
+      <p style="white-space: pre-wrap; color: #f0ece4;">{safe_body}</p>
+      <a href="{APP_URL}" class="cta">Open RegKnot</a>
+    """)
+    resend.Emails.send({
+        "from": CAPTAIN_EMAIL,
+        "to": [to_email],
+        "subject": f"RegKnot — {subject}",
+        "html": html,
+    })

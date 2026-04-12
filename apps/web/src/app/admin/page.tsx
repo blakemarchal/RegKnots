@@ -285,6 +285,15 @@ function AdminContent() {
   const [notifToast, setNotifToast] = useState<{ msg: string; ok: boolean } | null>(null)
   const [notifFilter, setNotifFilter] = useState<'active' | 'all'>('active')
   const [notifFormOpen, setNotifFormOpen] = useState(false)
+
+  // Custom email state
+  const [customSubject, setCustomSubject] = useState('')
+  const [customBody, setCustomBody] = useState('')
+  const [customFilter, setCustomFilter] = useState<'all' | 'pro' | 'trial' | 'custom'>('all')
+  const [customEmails, setCustomEmails] = useState('')
+  const [customSending, setCustomSending] = useState(false)
+  const [customToast, setCustomToast] = useState<{ msg: string; ok: boolean } | null>(null)
+  const [customCount, setCustomCount] = useState<number | null>(null)
   const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({})
   const [ticketActionId, setTicketActionId] = useState<string | null>(null)
   const [ticketToast, setTicketToast] = useState<{ msg: string; ok: boolean } | null>(null)
@@ -435,6 +444,54 @@ function AdminContent() {
       setNotifToast({ msg: 'Failed to toggle', ok: false })
       setTimeout(() => setNotifToast(null), 4000)
     }
+  }
+
+  // Custom email: fetch recipient count when filter changes
+  useEffect(() => {
+    if (customFilter === 'custom') { setCustomCount(null); return }
+    apiRequest<{ count: number }>(`/admin/custom-email-count?filter=${customFilter}`)
+      .then((r) => setCustomCount(r.count))
+      .catch(() => setCustomCount(null))
+  }, [customFilter])
+
+  async function sendCustomEmail() {
+    if (!customSubject.trim() || !customBody.trim()) {
+      setCustomToast({ msg: 'Subject and body are required', ok: false })
+      setTimeout(() => setCustomToast(null), 4000)
+      return
+    }
+    const emails = customFilter === 'custom'
+      ? customEmails.split(/[,\n]+/).map(e => e.trim()).filter(Boolean)
+      : undefined
+    if (customFilter === 'custom' && (!emails || emails.length === 0)) {
+      setCustomToast({ msg: 'Enter at least one email address', ok: false })
+      setTimeout(() => setCustomToast(null), 4000)
+      return
+    }
+    setCustomSending(true)
+    try {
+      const result = await apiRequest<{ sent: number; failed: number; failed_emails: string[] }>(
+        '/admin/send-custom-email',
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            subject: customSubject.trim(),
+            body_text: customBody.trim(),
+            recipient_filter: customFilter,
+            custom_emails: emails,
+          }),
+        }
+      )
+      setCustomToast({
+        msg: `Sent to ${result.sent} user${result.sent !== 1 ? 's' : ''}${result.failed ? ` (${result.failed} failed)` : ''}`,
+        ok: result.failed === 0,
+      })
+      if (result.failed === 0) { setCustomSubject(''); setCustomBody(''); setCustomEmails('') }
+    } catch (e) {
+      setCustomToast({ msg: e instanceof Error ? e.message : 'Send failed', ok: false })
+    }
+    setCustomSending(false)
+    setTimeout(() => setCustomToast(null), 6000)
   }
 
   useEffect(() => {
@@ -1479,6 +1536,90 @@ function AdminContent() {
                 {emailToast.msg}
               </div>
             )}
+          </div>
+          )}
+
+          {/* ── Custom Email Sender ──────────────────────────────────── */}
+          {!isReadOnly && (
+          <div className="mb-8">
+            <h2 className="font-display text-lg font-bold text-[#f0ece4] tracking-wide mb-3">
+              Send Custom Email
+            </h2>
+            <div className="bg-[#111827] rounded-xl border border-white/8 px-5 py-4">
+              <div className="flex flex-col gap-3">
+                <input
+                  type="text"
+                  value={customSubject}
+                  onChange={(e) => setCustomSubject(e.target.value)}
+                  placeholder="Subject line"
+                  className="w-full font-mono text-sm px-3 py-2 rounded-lg
+                    bg-[#0a0e1a] border border-white/10 text-[#f0ece4]
+                    placeholder:text-[#6b7594] focus:border-[#2dd4bf]/50 focus:outline-none"
+                />
+                <textarea
+                  value={customBody}
+                  onChange={(e) => setCustomBody(e.target.value)}
+                  placeholder="Email body (plain text — line breaks preserved)"
+                  rows={5}
+                  className="w-full font-mono text-xs px-3 py-2 rounded-lg resize-y
+                    bg-[#0a0e1a] border border-white/10 text-[#f0ece4]
+                    placeholder:text-[#6b7594] focus:border-[#2dd4bf]/50 focus:outline-none"
+                />
+                <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center">
+                  <div className="flex gap-1.5">
+                    {(['all', 'pro', 'trial', 'custom'] as const).map((f) => (
+                      <button
+                        key={f}
+                        onClick={() => setCustomFilter(f)}
+                        className={`font-mono text-[10px] font-bold uppercase tracking-wider
+                          px-2.5 py-1 rounded-md border transition-colors
+                          ${customFilter === f
+                            ? 'bg-[#2dd4bf]/15 border-[#2dd4bf]/40 text-[#2dd4bf]'
+                            : 'border-white/10 text-[#6b7594] hover:bg-white/5'}`}
+                      >
+                        {f}
+                      </button>
+                    ))}
+                  </div>
+                  {customFilter !== 'custom' && customCount !== null && (
+                    <span className="font-mono text-[10px] text-[#6b7594]">
+                      {customCount} recipient{customCount !== 1 ? 's' : ''}
+                    </span>
+                  )}
+                </div>
+                {customFilter === 'custom' && (
+                  <textarea
+                    value={customEmails}
+                    onChange={(e) => setCustomEmails(e.target.value)}
+                    placeholder="Email addresses (comma or newline separated)"
+                    rows={2}
+                    className="w-full font-mono text-xs px-3 py-2 rounded-lg resize-y
+                      bg-[#0a0e1a] border border-white/10 text-[#f0ece4]
+                      placeholder:text-[#6b7594] focus:border-[#2dd4bf]/50 focus:outline-none"
+                  />
+                )}
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={sendCustomEmail}
+                    disabled={customSending}
+                    className="font-mono text-xs font-bold uppercase tracking-wider
+                      bg-[#2dd4bf] text-[#0a0e1a]
+                      hover:brightness-110 rounded-lg px-4 py-2
+                      transition-[filter] duration-150 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {customSending ? 'Sending…' : 'Send Email'}
+                  </button>
+                  {customToast && (
+                    <span className={`font-mono text-xs px-3 py-1.5 rounded
+                      ${customToast.ok
+                        ? 'bg-[#2dd4bf]/10 text-[#2dd4bf] border border-[#2dd4bf]/30'
+                        : 'bg-red-500/10 text-red-400 border border-red-500/30'}`}>
+                      {customToast.msg}
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
           </div>
           )}
 
