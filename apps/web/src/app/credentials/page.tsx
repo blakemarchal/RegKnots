@@ -1,9 +1,9 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import AuthGuard from '@/components/AuthGuard'
 import { AppHeader } from '@/components/AppHeader'
-import { apiRequest } from '@/lib/api'
+import { apiRequest, apiUpload } from '@/lib/api'
 
 const CREDENTIAL_TYPES = [
   { value: 'mmc', label: 'MMC' },
@@ -78,6 +78,39 @@ function CredentialsContent() {
   const [formIssueDate, setFormIssueDate] = useState('')
   const [formExpiryDate, setFormExpiryDate] = useState('')
   const [formNotes, setFormNotes] = useState('')
+  const [scanning, setScanning] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  async function handlePhotoScan(file: File) {
+    setScanning(true)
+    setError(null)
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      const result = await apiUpload<{
+        credential_type: string | null
+        title: string | null
+        credential_number: string | null
+        issuing_authority: string | null
+        issue_date: string | null
+        expiry_date: string | null
+      }>('/credentials/extract-from-photo', formData)
+
+      // Pre-fill form with extracted data
+      if (result.credential_type) setFormType(result.credential_type)
+      if (result.title) setFormTitle(result.title)
+      if (result.credential_number) setFormNumber(result.credential_number)
+      if (result.issuing_authority) setFormAuthority(result.issuing_authority)
+      if (result.issue_date) setFormIssueDate(result.issue_date)
+      if (result.expiry_date) setFormExpiryDate(result.expiry_date)
+      setShowForm(true)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to extract credential data')
+      setShowForm(true)
+    } finally {
+      setScanning(false)
+    }
+  }
 
   useEffect(() => {
     apiRequest<Credential[]>('/credentials')
@@ -178,15 +211,43 @@ function CredentialsContent() {
       <main className="flex-1 overflow-y-auto px-4 py-6">
         <div className="max-w-sm mx-auto flex flex-col gap-5">
 
-          {/* Add button */}
+          {/* Add buttons */}
           {!showForm && (
-            <button
-              onClick={() => { resetForm(); setShowForm(true) }}
-              className="w-full font-mono text-sm font-bold text-[#0a0e1a] bg-[#2dd4bf]
-                hover:brightness-110 rounded-xl py-3 transition-[filter] duration-150"
-            >
-              + Add Credential
-            </button>
+            <div className="flex gap-2">
+              <button
+                onClick={() => { resetForm(); setShowForm(true) }}
+                className="flex-1 font-mono text-sm font-bold text-[#0a0e1a] bg-[#2dd4bf]
+                  hover:brightness-110 rounded-xl py-3 transition-[filter] duration-150"
+              >
+                + Add Credential
+              </button>
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                disabled={scanning}
+                className="font-mono text-sm font-bold text-[#2dd4bf]
+                  border border-[#2dd4bf]/40 hover:bg-[#2dd4bf]/10
+                  disabled:opacity-50 rounded-xl px-4 py-3 transition-colors duration-150
+                  flex items-center gap-2"
+              >
+                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="3" y="3" width="18" height="18" rx="2" />
+                  <circle cx="8.5" cy="8.5" r="1.5" />
+                  <path d="M21 15l-5-5L5 21" />
+                </svg>
+                {scanning ? 'Scanning...' : 'Scan'}
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/jpeg,image/png,image/webp,application/pdf"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0]
+                  if (file) handlePhotoScan(file)
+                  e.target.value = ''
+                }}
+              />
+            </div>
           )}
 
           {/* Add/Edit form */}
