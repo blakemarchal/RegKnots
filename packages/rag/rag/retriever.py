@@ -118,7 +118,10 @@ _SOLAS_TERMS: tuple[str, ...] = (
     "solas", "safety of life at sea", "msc.",
     "regulation ii", "regulation iii", "regulation iv", "regulation v",
     "chapter ii", "chapter iii", "chapter iv", "chapter v",
+    "voyage data recorder", "lrit",
+    "global maritime distress", "gmdss",
 )
+_SOLAS_ABBR_RE = re.compile(r"\b(?:vdr|s-vdr|epirb|sart)\b", re.IGNORECASE)
 
 _STCW_TERMS: tuple[str, ...] = (
     "stcw", "training certification watchkeeping", "seafarer credential",
@@ -176,7 +179,7 @@ def _source_affinity(query: str) -> dict[str, float]:
     ):
         boosts["colregs"] = 0.20
 
-    if any(t in q for t in _SOLAS_TERMS):
+    if any(t in q for t in _SOLAS_TERMS) or _SOLAS_ABBR_RE.search(q):
         boosts["solas"] = 0.20
 
     if any(t in q for t in _STCW_TERMS):
