@@ -18,6 +18,7 @@ const BASE_MENU_ITEMS = [
   { icon: '\u2261', label: 'Chat History', action: 'history' },
   { icon: '\u2693', label: 'My Vessels', action: 'vessels' },
   { icon: '\u25A1', label: 'Certificates', action: 'certificates' },
+  { icon: '\u2299', label: 'My Credentials', action: 'credentials' },
   { icon: '\u2750', label: 'Reference', action: 'reference' },
   { icon: '?', label: 'Help', action: 'help' },
   { icon: '\u2709', label: 'Give Feedback', action: 'feedback' },
@@ -46,6 +47,7 @@ export function HamburgerMenu({ open, onClose, onNewChat, onOpenVessels, onOpenS
     if (action === 'history') { signalNavigation(); router.push('/history') }
     if (action === 'vessels') onOpenVessels()
     if (action === 'certificates') { signalNavigation(); onClose(); router.push('/certificates') }
+    if (action === 'credentials') { signalNavigation(); onClose(); router.push('/credentials') }
     if (action === 'reference') { signalNavigation(); onClose(); router.push('/reference') }
     if (action === 'help') { signalNavigation(); onClose(); router.push('/support') }
     if (action === 'feedback') { onClose(); onOpenSurvey?.() }

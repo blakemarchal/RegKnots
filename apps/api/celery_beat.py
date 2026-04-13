@@ -29,4 +29,14 @@ celery.conf.beat_schedule = {
         # 1st of every month at 03:00 UTC
         "schedule": crontab(hour=3, minute=0, day_of_month="1"),
     },
+    "send-credential-expiry-reminders-daily": {
+        "task": "app.tasks.send_credential_expiry_reminders",
+        # Daily at 13:00 UTC (morning in U.S.) — offset from trial reminders
+        "schedule": crontab(hour=13, minute=0),
+    },
+    "send-regulation-digest-weekly": {
+        "task": "app.tasks.send_regulation_digest",
+        # Every Monday at 15:00 UTC (late morning in U.S.)
+        "schedule": crontab(hour=15, minute=0, day_of_week="monday"),
+    },
 }

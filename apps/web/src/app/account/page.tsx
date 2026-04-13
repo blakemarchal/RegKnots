@@ -69,6 +69,17 @@ function AccountContent() {
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
 
+  // ── Notification preferences ────────────────────────────────────
+  const [notifPrefs, setNotifPrefs] = useState<{
+    cert_expiry_reminders: boolean
+    cert_expiry_days: number[]
+    reg_change_digest: boolean
+    reg_digest_frequency: string
+  } | null>(null)
+  const [notifLoading, setNotifLoading] = useState(true)
+  const [notifSaving, setNotifSaving] = useState(false)
+  const [notifMsg, setNotifMsg] = useState<string | null>(null)
+
   // ── Chat history export ────────────────────────────────────────
   const [exporting, setExporting] = useState<'json' | 'text' | null>(null)
   const [exportError, setExportError] = useState<string | null>(null)
@@ -84,7 +95,38 @@ function AccountContent() {
       .then(setBilling)
       .catch(() => setBillingError(true))
       .finally(() => setBillingLoading(false))
+    apiRequest<typeof notifPrefs>('/preferences/notifications')
+      .then(setNotifPrefs)
+      .catch(() => {})
+      .finally(() => setNotifLoading(false))
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function saveNotifPrefs() {
+    if (!notifPrefs) return
+    setNotifSaving(true)
+    setNotifMsg(null)
+    try {
+      const saved = await apiRequest<typeof notifPrefs>('/preferences/notifications', {
+        method: 'PUT',
+        body: JSON.stringify(notifPrefs),
+      })
+      setNotifPrefs(saved)
+      setNotifMsg('Saved')
+      setTimeout(() => setNotifMsg(null), 2000)
+    } catch (e) {
+      setNotifMsg(e instanceof Error ? e.message : 'Failed to save')
+    } finally {
+      setNotifSaving(false)
+    }
+  }
+
+  function toggleExpiryDay(day: number) {
+    if (!notifPrefs) return
+    const days = notifPrefs.cert_expiry_days.includes(day)
+      ? notifPrefs.cert_expiry_days.filter((d) => d !== day)
+      : [...notifPrefs.cert_expiry_days, day].sort((a, b) => b - a)
+    setNotifPrefs({ ...notifPrefs, cert_expiry_days: days })
+  }
 
   async function saveProfile() {
     setProfileSaving(true)
@@ -363,6 +405,111 @@ function AccountContent() {
             </section>
           )}
 
+          {/* ── Notification Preferences ─────────────────────────── */}
+          <section className="bg-[#111827] border border-white/8 rounded-xl p-5 flex flex-col gap-4">
+            <p className="font-mono text-xs text-[#6b7594] uppercase tracking-wider">Notifications</p>
+
+            {notifLoading && (
+              <div className="h-20 bg-white/5 rounded-lg animate-pulse" />
+            )}
+
+            {!notifLoading && notifPrefs && (
+              <>
+                {/* Cert expiry reminders toggle */}
+                <div className="flex items-center justify-between">
+                  <div className="flex flex-col gap-0.5">
+                    <p className="font-mono text-sm text-[#f0ece4]">Certificate expiry reminders</p>
+                    <p className="font-mono text-xs text-[#6b7594]">Get emailed when credentials are expiring</p>
+                  </div>
+                  <button
+                    onClick={() => setNotifPrefs({ ...notifPrefs, cert_expiry_reminders: !notifPrefs.cert_expiry_reminders })}
+                    className={`relative w-10 h-5 rounded-full transition-colors duration-200 ${
+                      notifPrefs.cert_expiry_reminders ? 'bg-[#2dd4bf]' : 'bg-white/15'
+                    }`}
+                  >
+                    <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full transition-transform duration-200 ${
+                      notifPrefs.cert_expiry_reminders ? 'translate-x-5' : ''
+                    }`} />
+                  </button>
+                </div>
+
+                {/* Expiry day selectors */}
+                {notifPrefs.cert_expiry_reminders && (
+                  <div className="flex items-center gap-2 ml-0.5">
+                    <p className="font-mono text-xs text-[#6b7594] shrink-0">Remind at:</p>
+                    {[90, 30, 7].map((day) => (
+                      <button
+                        key={day}
+                        onClick={() => toggleExpiryDay(day)}
+                        className={`font-mono text-xs px-2.5 py-1 rounded-md border transition-colors duration-150 ${
+                          notifPrefs.cert_expiry_days.includes(day)
+                            ? 'border-[#2dd4bf]/50 bg-[#2dd4bf]/10 text-[#2dd4bf]'
+                            : 'border-white/10 text-[#6b7594] hover:border-white/20'
+                        }`}
+                      >
+                        {day}d
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                <hr className="border-white/8" />
+
+                {/* Reg change digest toggle */}
+                <div className="flex items-center justify-between">
+                  <div className="flex flex-col gap-0.5">
+                    <p className="font-mono text-sm text-[#f0ece4]">Regulation change digest</p>
+                    <p className="font-mono text-xs text-[#6b7594]">Summary of updated regulations</p>
+                  </div>
+                  <button
+                    onClick={() => setNotifPrefs({ ...notifPrefs, reg_change_digest: !notifPrefs.reg_change_digest })}
+                    className={`relative w-10 h-5 rounded-full transition-colors duration-200 ${
+                      notifPrefs.reg_change_digest ? 'bg-[#2dd4bf]' : 'bg-white/15'
+                    }`}
+                  >
+                    <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full transition-transform duration-200 ${
+                      notifPrefs.reg_change_digest ? 'translate-x-5' : ''
+                    }`} />
+                  </button>
+                </div>
+
+                {/* Digest frequency */}
+                {notifPrefs.reg_change_digest && (
+                  <div className="flex items-center gap-2 ml-0.5">
+                    <p className="font-mono text-xs text-[#6b7594] shrink-0">Frequency:</p>
+                    {(['weekly', 'biweekly'] as const).map((freq) => (
+                      <button
+                        key={freq}
+                        onClick={() => setNotifPrefs({ ...notifPrefs, reg_digest_frequency: freq })}
+                        className={`font-mono text-xs px-2.5 py-1 rounded-md border transition-colors duration-150 ${
+                          notifPrefs.reg_digest_frequency === freq
+                            ? 'border-[#2dd4bf]/50 bg-[#2dd4bf]/10 text-[#2dd4bf]'
+                            : 'border-white/10 text-[#6b7594] hover:border-white/20'
+                        }`}
+                      >
+                        {freq === 'weekly' ? 'Weekly' : 'Biweekly'}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={saveNotifPrefs}
+                    disabled={notifSaving}
+                    className="font-mono text-sm font-bold text-[#0a0e1a] bg-[#2dd4bf] hover:brightness-110
+                      disabled:opacity-50 rounded-lg px-4 py-2 transition-[filter] duration-150"
+                  >
+                    {notifSaving ? 'Saving...' : 'Save'}
+                  </button>
+                  {notifMsg && (
+                    <p className="font-mono text-xs text-[#2dd4bf]">{notifMsg}</p>
+                  )}
+                </div>
+              </>
+            )}
+          </section>
+
           {/* ── Change password ──────────────────────────────────── */}
           <section className="bg-[#111827] border border-white/8 rounded-xl p-5 flex flex-col gap-4">
             <p className="font-mono text-xs text-[#6b7594] uppercase tracking-wider">Change Password</p>
@@ -487,6 +634,22 @@ function AccountContent() {
                 </div>
               </div>
             ))}
+          </section>
+
+          {/* ── My Credentials shortcut ────────────────────────── */}
+          <section className="bg-[#111827] border border-white/8 rounded-xl p-5 flex flex-col gap-3">
+            <p className="font-mono text-xs text-[#6b7594] uppercase tracking-wider">My Credentials</p>
+            <p className="font-mono text-xs text-[#f0ece4]/60 leading-relaxed">
+              Track your MMC, STCW endorsements, medical certificate, TWIC, and other credentials with expiry reminders.
+            </p>
+            <a
+              href="/credentials"
+              className="w-full text-center font-mono text-sm font-bold text-[#2dd4bf]
+                border border-[#2dd4bf]/40 hover:bg-[#2dd4bf]/10
+                rounded-lg py-2.5 transition-colors duration-150 block"
+            >
+              Manage Credentials
+            </a>
           </section>
 
           {/* ── Chat History export ──────────────────────────────── */}

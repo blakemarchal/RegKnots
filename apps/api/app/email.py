@@ -684,3 +684,91 @@ async def send_custom_email(to_email: str, subject: str, body_text: str) -> None
         "subject": f"RegKnot — {subject}",
         "html": html,
     })
+
+
+async def send_credential_expiry_email(
+    to_email: str, full_name: str, credential_title: str, days_remaining: int,
+) -> None:
+    """Notify a user that a credential is expiring soon (or already expired)."""
+    raw_first = full_name.split()[0] if full_name and full_name.strip() else "Mariner"
+    first_name = _html_lib.escape(raw_first)
+    safe_title = _html_lib.escape(credential_title)
+
+    if days_remaining < 0:
+        urgency = f'<span style="color:#f87171;">expired {abs(days_remaining)} day{"s" if abs(days_remaining) != 1 else ""} ago</span>'
+        headline = f"Your {safe_title} has expired"
+    elif days_remaining == 0:
+        urgency = '<span style="color:#f87171;">expires today</span>'
+        headline = f"Your {safe_title} expires today"
+    elif days_remaining <= 7:
+        urgency = f'<span style="color:#f87171;">expires in {days_remaining} day{"s" if days_remaining != 1 else ""}</span>'
+        headline = f"Your {safe_title} expires in {days_remaining} days"
+    elif days_remaining <= 30:
+        urgency = f'<span style="color:#fbbf24;">expires in {days_remaining} days</span>'
+        headline = f"Your {safe_title} expires in {days_remaining} days"
+    else:
+        urgency = f'<span style="color:#facc15;">expires in {days_remaining} days</span>'
+        headline = f"Heads up: {safe_title} expires in {days_remaining} days"
+
+    html = _html(f"""
+      <h1>{headline}</h1>
+      <p>Hey {first_name},</p>
+      <div style="background-color:#0d1225; border:1px solid rgba(255,255,255,0.1); border-radius:10px; padding:20px; margin:16px 0;">
+        <p style="color:#f0ece4; margin:0 0 8px; font-size:16px; font-weight:bold;">{safe_title}</p>
+        <p style="margin:0; font-size:14px;">Status: {urgency}</p>
+      </div>
+      <p>
+        Make sure your renewal is in progress to avoid lapses in your qualifications.
+        You can manage all your credentials in RegKnot.
+      </p>
+      <a href="{APP_URL}/credentials" class="cta">View My Credentials</a>
+      <p style="font-size:12px; color:rgba(107,117,148,0.7); margin-top:8px;">
+        You can adjust reminder settings in your Account page.
+      </p>
+    """)
+    resend.Emails.send({
+        "from": FROM_EMAIL,
+        "to": [to_email],
+        "subject": f"{headline} — RegKnot",
+        "html": html,
+    })
+
+
+async def send_regulation_digest_email(
+    to_email: str, full_name: str, updates: list[dict],
+) -> None:
+    """Send a digest of recent regulation changes.
+
+    Each item in ``updates`` has keys: title, body, source, created_at.
+    """
+    raw_first = full_name.split()[0] if full_name and full_name.strip() else "Mariner"
+    first_name = _html_lib.escape(raw_first)
+
+    items_html = ""
+    for u in updates:
+        safe_title = _html_lib.escape(u.get("title", ""))
+        safe_body = _html_lib.escape(u.get("body", ""))
+        items_html += f"""
+          <div style="background-color:#0d1225; border:1px solid rgba(255,255,255,0.08);
+            border-radius:8px; padding:14px 16px; margin:10px 0;">
+            <p style="color:#2dd4bf; font-size:13px; font-weight:bold; margin:0 0 6px;">{safe_title}</p>
+            <p style="color:#f0ece4; font-size:13px; margin:0;">{safe_body}</p>
+          </div>
+        """
+
+    count = len(updates)
+    html = _html(f"""
+      <h1>Regulation Update Digest</h1>
+      <p>Hey {first_name} — here{"'s what" if count == 1 else " are the"} changed since your last digest:</p>
+      {items_html}
+      <a href="{APP_URL}" class="cta">Ask About These Changes</a>
+      <p style="font-size:12px; color:rgba(107,117,148,0.7); margin-top:8px;">
+        You can adjust digest frequency in your Account settings.
+      </p>
+    """)
+    resend.Emails.send({
+        "from": FROM_EMAIL,
+        "to": [to_email],
+        "subject": f"{count} regulation update{'s' if count != 1 else ''} this week — RegKnot",
+        "html": html,
+    })

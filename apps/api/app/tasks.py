@@ -279,6 +279,200 @@ async def _check_imo_amendments_async():
         await conn.close()
 
 
+@celery.task(name="app.tasks.send_credential_expiry_reminders")
+def send_credential_expiry_reminders():
+    """Send expiry reminder emails for credentials approaching their expiry date.
+
+    Checks each user's notification_preferences for enabled cert_expiry_reminders
+    and cert_expiry_days (90, 30, 7). Sends one email per credential per threshold
+    and marks the corresponding reminder_sent flag to avoid duplicates.
+    """
+    _run_async(_send_credential_expiry_reminders_async())
+
+
+async def _send_credential_expiry_reminders_async():
+    import asyncpg
+    from app.config import settings
+    from app.email import (
+        RESEND_THROTTLE_SECONDS,
+        send_credential_expiry_email,
+        send_with_throttle,
+    )
+
+    dsn = settings.database_url.replace("postgresql+asyncpg://", "postgresql://")
+    conn = await asyncpg.connect(dsn)
+    try:
+        # Fetch credentials with upcoming expiry for users who have reminders enabled
+        rows = await conn.fetch(
+            """
+            SELECT
+                c.id AS cred_id,
+                c.title,
+                c.expiry_date,
+                c.reminder_sent_90,
+                c.reminder_sent_30,
+                c.reminder_sent_7,
+                u.id AS user_id,
+                u.email,
+                u.full_name,
+                u.notification_preferences
+            FROM user_credentials c
+            JOIN users u ON u.id = c.user_id
+            WHERE c.expiry_date IS NOT NULL
+              AND c.expiry_date <= CURRENT_DATE + INTERVAL '91 days'
+            """
+        )
+
+        sent_count = 0
+        for row in rows:
+            prefs = row["notification_preferences"] or {}
+            if isinstance(prefs, str):
+                import json
+                prefs = json.loads(prefs)
+
+            if not prefs.get("cert_expiry_reminders", True):
+                continue
+
+            enabled_days = prefs.get("cert_expiry_days", [90, 30, 7])
+            days_left = (row["expiry_date"] - __import__("datetime").date.today()).days
+
+            # Determine which threshold to fire
+            thresholds = [
+                (90, "reminder_sent_90"),
+                (30, "reminder_sent_30"),
+                (7, "reminder_sent_7"),
+            ]
+
+            for threshold, flag_col in thresholds:
+                if threshold not in enabled_days:
+                    continue
+                if row[flag_col]:
+                    continue
+                if days_left > threshold:
+                    continue
+
+                # Send reminder
+                try:
+                    await send_with_throttle(
+                        lambda email=row["email"], name=(row["full_name"] or ""),
+                               title=row["title"], days=days_left:
+                            send_credential_expiry_email(email, name, title, days),
+                        label=f"{row['email']}:{row['title']}:{threshold}d",
+                    )
+                    await conn.execute(
+                        f"UPDATE user_credentials SET {flag_col} = TRUE WHERE id = $1",
+                        row["cred_id"],
+                    )
+                    sent_count += 1
+                    logger.info(
+                        "Sent %dd credential expiry reminder to %s for '%s'",
+                        threshold, row["email"], row["title"],
+                    )
+                except Exception as exc:
+                    logger.error(
+                        "Failed to send credential expiry reminder to %s: %s",
+                        row["email"], exc,
+                    )
+
+                await asyncio.sleep(RESEND_THROTTLE_SECONDS)
+                break  # Only send one reminder per credential per run
+
+        logger.info("Credential expiry reminder run complete: %d emails sent", sent_count)
+    finally:
+        await conn.close()
+
+
+@celery.task(name="app.tasks.send_regulation_digest")
+def send_regulation_digest():
+    """Send weekly/biweekly regulation change digest emails to opted-in users."""
+    _run_async(_send_regulation_digest_async())
+
+
+async def _send_regulation_digest_async():
+    import asyncpg
+    import json
+    from app.config import settings
+    from app.email import (
+        RESEND_THROTTLE_SECONDS,
+        send_regulation_digest_email,
+        send_with_throttle,
+    )
+
+    dsn = settings.database_url.replace("postgresql+asyncpg://", "postgresql://")
+    conn = await asyncpg.connect(dsn)
+    try:
+        # Get recent regulation notifications (last 14 days covers both weekly and biweekly)
+        notifications = await conn.fetch(
+            """
+            SELECT title, body, source, created_at
+            FROM notifications
+            WHERE notification_type = 'regulation_update'
+              AND is_active = true
+              AND created_at > NOW() - INTERVAL '14 days'
+            ORDER BY created_at DESC
+            """
+        )
+
+        if not notifications:
+            logger.info("No regulation updates in the last 14 days — skipping digest")
+            return
+
+        updates = [
+            {
+                "title": n["title"],
+                "body": n["body"],
+                "source": n["source"],
+                "created_at": n["created_at"].isoformat(),
+            }
+            for n in notifications
+        ]
+
+        # Get users opted in to digest
+        users = await conn.fetch(
+            """
+            SELECT id, email, full_name, notification_preferences
+            FROM users
+            WHERE subscription_tier != 'free'
+               OR trial_ends_at > NOW()
+            """
+        )
+
+        sent_count = 0
+        for idx, user in enumerate(users):
+            prefs = user["notification_preferences"] or {}
+            if isinstance(prefs, str):
+                prefs = json.loads(prefs)
+
+            if not prefs.get("reg_change_digest", True):
+                continue
+
+            # For biweekly users, only send every other week
+            freq = prefs.get("reg_digest_frequency", "weekly")
+            if freq == "biweekly":
+                from datetime import datetime
+                week_num = datetime.utcnow().isocalendar()[1]
+                if week_num % 2 != 0:
+                    continue
+
+            try:
+                await send_with_throttle(
+                    lambda email=user["email"], name=(user["full_name"] or ""),
+                           u=updates:
+                        send_regulation_digest_email(email, name, u),
+                    label=f"digest:{user['email']}",
+                )
+                sent_count += 1
+            except Exception as exc:
+                logger.error("Failed to send digest to %s: %s", user["email"], exc)
+
+            if idx < len(users) - 1:
+                await asyncio.sleep(RESEND_THROTTLE_SECONDS)
+
+        logger.info("Regulation digest run complete: %d emails sent", sent_count)
+    finally:
+        await conn.close()
+
+
 def _send_amendment_alert(findings: list[dict]):
     """Send alert email about new SOLAS/STCW supplement references."""
     try:
