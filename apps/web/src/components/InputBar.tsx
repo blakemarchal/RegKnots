@@ -1,6 +1,7 @@
 'use client'
 
 import { useRef, useEffect, type KeyboardEvent, type ChangeEvent } from 'react'
+import { useVoiceInput } from '@/lib/useVoiceInput'
 
 interface Props {
   value: string
@@ -11,6 +12,12 @@ interface Props {
 
 export function InputBar({ value, onChange, onSend, loading }: Props) {
   const ref = useRef<HTMLTextAreaElement>(null)
+
+  const { listening, supported, toggle } = useVoiceInput({
+    onTranscript: (text) => {
+      onChange(value ? `${value} ${text}` : text)
+    },
+  })
 
   // Auto-resize textarea
   useEffect(() => {
@@ -35,6 +42,29 @@ export function InputBar({ value, onChange, onSend, loading }: Props) {
         bg-[#0d1225] border border-white/10
         focus-within:border-teal/40 transition-colors duration-150">
 
+        {/* Voice input button */}
+        {supported && (
+          <button
+            onClick={toggle}
+            disabled={loading}
+            aria-label={listening ? 'Stop recording' : 'Start voice input'}
+            className={`flex-shrink-0 w-8 h-8 mb-0.5 rounded-xl flex items-center justify-center
+              transition-all duration-150
+              ${listening
+                ? 'bg-red-500/20 text-red-400 animate-pulse'
+                : 'text-[#6b7594] hover:text-[#2dd4bf] hover:bg-white/5'
+              }
+              disabled:opacity-30 disabled:cursor-not-allowed`}
+          >
+            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="9" y="1" width="6" height="14" rx="3" />
+              <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+              <line x1="12" y1="19" x2="12" y2="23" />
+              <line x1="8" y1="23" x2="16" y2="23" />
+            </svg>
+          </button>
+        )}
+
         <textarea
           ref={ref}
           value={value}
@@ -42,7 +72,7 @@ export function InputBar({ value, onChange, onSend, loading }: Props) {
           onKeyDown={onKey}
           disabled={loading}
           rows={1}
-          placeholder="Ask a regulation question…"
+          placeholder={listening ? 'Listening...' : 'Ask a regulation question\u2026'}
           className="flex-1 bg-transparent text-sm text-[#f0ece4] placeholder:text-[#6b7594]/60
             resize-none outline-none leading-relaxed py-1
             disabled:opacity-50"

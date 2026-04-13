@@ -399,6 +399,26 @@ function ChatInterfaceInner({ initialConversationId }: Props) {
           </div>
         )}
 
+        {/* Quick Log shortcut — voice-first entry point */}
+        {messages.length === 0 && !loading && !restoring && (
+          <div className="px-3 pt-2">
+            <button
+              onClick={() => router.push('/log?quick=true')}
+              className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl
+                border border-white/10 hover:border-[#2dd4bf]/30 hover:bg-[#2dd4bf]/5
+                transition-colors duration-150"
+            >
+              <svg className="w-4 h-4 text-[#2dd4bf]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="9" y="1" width="6" height="14" rx="3" />
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                <line x1="12" y1="19" x2="12" y2="23" />
+                <line x1="8" y1="23" x2="16" y2="23" />
+              </svg>
+              <span className="font-mono text-xs font-bold text-[#2dd4bf]">Quick Log</span>
+            </button>
+          </div>
+        )}
+
         <VesselPill
           vesselName={activeVessel?.name ?? null}
           hasVessels={vessels.length > 0}
