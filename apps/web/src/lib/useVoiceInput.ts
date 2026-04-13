@@ -23,20 +23,22 @@ interface UseVoiceInputReturn {
   toggle: () => void
 }
 
-// Check for Web Speech API support
-function getSpeechRecognition(): typeof SpeechRecognition | null {
+// Check for Web Speech API support — returns the constructor or null.
+// The Web Speech API is not typed in all TS environments, so we use `any`.
+function getSpeechRecognitionCtor(): (new () => any) | null {
   if (typeof window === 'undefined') return null
   return (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition || null
 }
 
 export function useVoiceInput({ onTranscript, onError }: UseVoiceInputOptions): UseVoiceInputReturn {
   const [listening, setListening] = useState(false)
-  const recognitionRef = useRef<SpeechRecognition | null>(null)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const recognitionRef = useRef<any>(null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const chunksRef = useRef<Blob[]>([])
   const usingFallbackRef = useRef(false)
 
-  const SpeechRecognitionClass = getSpeechRecognition()
+  const SpeechRecognitionClass = getSpeechRecognitionCtor()
   const supported = typeof window !== 'undefined' && (
     !!SpeechRecognitionClass || !!navigator.mediaDevices?.getUserMedia
   )
@@ -69,7 +71,7 @@ export function useVoiceInput({ onTranscript, onError }: UseVoiceInputOptions): 
           if (result.text.trim()) {
             onTranscript(result.text.trim())
           }
-        } catch (err) {
+        } catch {
           onError?.('Transcription failed. Please try again.')
         }
         resolve()
@@ -108,7 +110,7 @@ export function useVoiceInput({ onTranscript, onError }: UseVoiceInputOptions): 
 
       recorder.start(1000) // Collect chunks every second
       setListening(true)
-    } catch (err) {
+    } catch {
       onError?.('Microphone access denied')
       setListening(false)
     }
@@ -125,14 +127,14 @@ export function useVoiceInput({ onTranscript, onError }: UseVoiceInputOptions): 
         recognition.interimResults = false
         recognition.lang = 'en-US'
 
-        recognition.onresult = (event: SpeechRecognitionEvent) => {
+        recognition.onresult = (event: any) => {
           const last = event.results[event.results.length - 1]
           if (last.isFinal) {
             onTranscript(last[0].transcript.trim())
           }
         }
 
-        recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
+        recognition.onerror = (event: any) => {
           if (event.error === 'not-allowed') {
             onError?.('Microphone access denied')
           } else if (event.error === 'no-speech') {
