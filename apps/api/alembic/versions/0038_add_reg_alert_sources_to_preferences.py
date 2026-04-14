@@ -24,7 +24,7 @@ depends_on: Union[str, Sequence[str], None] = None
 _NEW_DEFAULT = (
     '{"cert_expiry_reminders": true, "cert_expiry_days": [90, 30, 7], '
     '"reg_change_digest": true, "reg_digest_frequency": "weekly", '
-    '"reg_alert_sources": ["cfr_33", "cfr_46", "cfr_49", "nvic", "colregs", "solas", "stcw", "ism"]}'
+    '"reg_alert_sources": []}'
 )
 
 

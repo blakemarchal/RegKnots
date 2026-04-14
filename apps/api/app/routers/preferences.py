@@ -29,7 +29,7 @@ class NotificationPreferences(BaseModel):
     cert_expiry_days: list[int] = Field(default=[90, 30, 7])
     reg_change_digest: bool = True
     reg_digest_frequency: str = Field(default="weekly", pattern="^(weekly|biweekly)$")
-    reg_alert_sources: list[str] = Field(default=ALL_REG_SOURCES)
+    reg_alert_sources: list[str] = Field(default_factory=list)  # empty = opt-in required
 
 
 @router.get("/notifications", response_model=NotificationPreferences)

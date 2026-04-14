@@ -164,6 +164,12 @@ Examples:
         help="Enable DEBUG logging",
     )
 
+    parser.add_argument(
+        "--no-notify",
+        action="store_true",
+        help="Suppress all notifications and email alerts (use for dev/maintenance ingest).",
+    )
+
     args = parser.parse_args()
 
     if args.verbose:
@@ -179,6 +185,7 @@ Examples:
         extract=args.extract,
         force=args.force,
         enrich=enrich,
+        notify=not args.no_notify,
     ))
 
 
@@ -189,6 +196,7 @@ async def _run(
     extract: bool = False,
     force: bool = False,
     enrich: bool = False,
+    notify: bool = True,
 ) -> None:
     import importlib
 
@@ -278,7 +286,8 @@ async def _run(
             # Auto-notification hook: fire a regulation_update notification
             # when this source actually introduced new or modified content.
             # No-op runs (0 changes) are intentionally silent.
-            if result.new_or_modified_chunks > 0:
+            # Use --no-notify to suppress during dev/maintenance ingest.
+            if result.new_or_modified_chunks > 0 and notify:
                 notif_id = await create_regulation_update_notification(pool, result)
                 if notif_id:
                     console.print(
@@ -286,6 +295,11 @@ async def _run(
                         f"[dim]({notif_id[:8]}…)[/dim] — "
                         f"{result.new_or_modified_chunks} new/modified chunks"
                     )
+            elif result.new_or_modified_chunks > 0 and not notify:
+                console.print(
+                    f"  [yellow]Notifications suppressed (--no-notify)[/yellow] — "
+                    f"{result.new_or_modified_chunks} new/modified chunks"
+                )
 
         # Rebuild the HNSW vector index after ingest to prevent stale results
         total_upserts = sum(r.upserts for r in all_results)
