@@ -828,8 +828,99 @@ function VesselEditContent() {
               </div>
             )}
           </div>
+
+          {/* ── Export & Share ────────────────────────────────────── */}
+          <VesselExportShare vesselId={vesselId} />
         </div>
       </main>
+    </div>
+  )
+}
+
+function VesselExportShare({ vesselId }: { vesselId: string }) {
+  const [shareUrl, setShareUrl] = useState<string | null>(null)
+  const [sharing, setSharing] = useState(false)
+  const [copied, setCopied] = useState(false)
+
+  async function handleExportPdf() {
+    try {
+      const { useAuthStore } = await import('@/lib/auth')
+      const token = useAuthStore.getState().accessToken
+      const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+      const resp = await fetch(`${API_URL}/export/vessel/${vesselId}/pdf`, {
+        credentials: 'include',
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      })
+      if (!resp.ok) throw new Error('Export failed')
+      const blob = await resp.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `compliance_summary.pdf`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch {
+      // ignore
+    }
+  }
+
+  async function handleShare() {
+    setSharing(true)
+    try {
+      const result = await apiRequest<{ share_token: string; share_url: string }>(
+        `/export/vessel/${vesselId}/share`,
+        { method: 'POST' },
+      )
+      setShareUrl(result.share_url)
+    } catch {
+      // ignore
+    } finally {
+      setSharing(false)
+    }
+  }
+
+  async function handleCopy() {
+    if (!shareUrl) return
+    await navigator.clipboard.writeText(shareUrl)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+
+  return (
+    <div className="bg-[#111827] border border-white/8 rounded-xl p-5 flex flex-col gap-4">
+      <p className="font-mono text-xs text-[#6b7594] uppercase tracking-wider">Export & Share</p>
+
+      <div className="flex gap-2">
+        <button
+          onClick={handleExportPdf}
+          className="flex-1 font-mono text-xs font-bold text-[#2dd4bf]
+            border border-[#2dd4bf]/40 hover:bg-[#2dd4bf]/10
+            rounded-lg py-2.5 transition-colors duration-150"
+        >
+          Download PDF
+        </button>
+        <button
+          onClick={handleShare}
+          disabled={sharing}
+          className="flex-1 font-mono text-xs font-bold text-[#2dd4bf]
+            border border-[#2dd4bf]/40 hover:bg-[#2dd4bf]/10
+            disabled:opacity-50 rounded-lg py-2.5 transition-colors duration-150"
+        >
+          {sharing ? 'Generating...' : 'Share Profile'}
+        </button>
+      </div>
+
+      {shareUrl && (
+        <div className="flex items-center gap-2 bg-[#0d1225] border border-white/10 rounded-lg p-3">
+          <p className="font-mono text-xs text-[#f0ece4]/70 truncate flex-1">{shareUrl}</p>
+          <button
+            onClick={handleCopy}
+            className="font-mono text-xs text-[#2dd4bf] hover:underline shrink-0"
+          >
+            {copied ? 'Copied!' : 'Copy'}
+          </button>
+        </div>
+      )}
     </div>
   )
 }
