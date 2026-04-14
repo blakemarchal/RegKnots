@@ -1450,3 +1450,192 @@ async def close_ticket(
         raise HTTPException(status_code=404, detail="Ticket not found")
     logger.info("Admin %s closed ticket %s", admin.email, ticket_id)
     return AdminActionResult(ok=True)
+
+
+# ── Job testing endpoints ───────────────────────────────────────────────────
+
+
+class JobTestResult(BaseModel):
+    ok: bool
+    sent: int
+    details: str
+
+
+@router.post("/test-job/credential-reminders", response_model=JobTestResult)
+async def test_credential_reminders(
+    admin: Annotated[CurrentUser, Depends(require_write_admin)],
+) -> JobTestResult:
+    """Run the credential expiry reminder job inline (sends real emails)."""
+    import asyncio
+    from app.tasks import _send_credential_expiry_reminders_async
+
+    logger.info("Admin %s triggered credential expiry reminder job", admin.email)
+    try:
+        await _send_credential_expiry_reminders_async()
+        return JobTestResult(ok=True, sent=-1, details="Job completed — check logs for send count")
+    except Exception as exc:
+        logger.exception("Credential reminder test job failed: %s", exc)
+        return JobTestResult(ok=False, sent=0, details=str(exc)[:200])
+
+
+@router.post("/test-job/regulation-digest", response_model=JobTestResult)
+async def test_regulation_digest(
+    admin: Annotated[CurrentUser, Depends(require_write_admin)],
+) -> JobTestResult:
+    """Run the regulation digest job inline (sends real emails)."""
+    from app.tasks import _send_regulation_digest_async
+
+    logger.info("Admin %s triggered regulation digest job", admin.email)
+    try:
+        await _send_regulation_digest_async()
+        return JobTestResult(ok=True, sent=-1, details="Job completed — check logs for send count")
+    except Exception as exc:
+        logger.exception("Regulation digest test job failed: %s", exc)
+        return JobTestResult(ok=False, sent=0, details=str(exc)[:200])
+
+
+class DigestPreviewItem(BaseModel):
+    title: str
+    body: str
+    source: str | None
+    created_at: str
+
+
+class DigestPreview(BaseModel):
+    notification_count: int
+    recipient_count: int
+    notifications: list[DigestPreviewItem]
+    recipients: list[str]
+
+
+@router.get("/test-job/preview-digest", response_model=DigestPreview)
+async def preview_regulation_digest(
+    admin: Annotated[CurrentUser, Depends(require_admin)],
+) -> DigestPreview:
+    """Dry-run: show what the digest would send without emailing anyone."""
+    import json
+
+    pool = await get_pool()
+
+    notifications = await pool.fetch(
+        """
+        SELECT title, body, source, created_at
+        FROM notifications
+        WHERE notification_type = 'regulation_update'
+          AND is_active = true
+          AND created_at > NOW() - INTERVAL '14 days'
+        ORDER BY created_at DESC
+        """
+    )
+
+    users = await pool.fetch(
+        """
+        SELECT email, notification_preferences
+        FROM users
+        WHERE subscription_tier != 'free'
+           OR trial_ends_at > NOW()
+        """
+    )
+
+    recipients = []
+    for user in users:
+        prefs = user["notification_preferences"] or {}
+        if isinstance(prefs, str):
+            prefs = json.loads(prefs)
+        if prefs.get("reg_change_digest", True):
+            recipients.append(user["email"])
+
+    return DigestPreview(
+        notification_count=len(notifications),
+        recipient_count=len(recipients),
+        notifications=[
+            DigestPreviewItem(
+                title=n["title"],
+                body=n["body"],
+                source=n["source"],
+                created_at=n["created_at"].isoformat(),
+            )
+            for n in notifications
+        ],
+        recipients=recipients,
+    )
+
+
+class CredentialReminderPreviewItem(BaseModel):
+    user_email: str
+    credential_title: str
+    expiry_date: str
+    days_remaining: int
+    threshold: int
+    flag: str
+
+
+class CredentialReminderPreview(BaseModel):
+    pending_reminders: list[CredentialReminderPreviewItem]
+    total: int
+
+
+@router.get("/test-job/preview-credential-reminders", response_model=CredentialReminderPreview)
+async def preview_credential_reminders(
+    admin: Annotated[CurrentUser, Depends(require_admin)],
+) -> CredentialReminderPreview:
+    """Dry-run: show which credential reminders would fire without sending."""
+    import json
+    from datetime import date
+
+    pool = await get_pool()
+
+    rows = await pool.fetch(
+        """
+        SELECT
+            c.title,
+            c.expiry_date,
+            c.reminder_sent_90,
+            c.reminder_sent_30,
+            c.reminder_sent_7,
+            u.email,
+            u.notification_preferences
+        FROM user_credentials c
+        JOIN users u ON u.id = c.user_id
+        WHERE c.expiry_date IS NOT NULL
+          AND c.expiry_date <= CURRENT_DATE + INTERVAL '91 days'
+        ORDER BY c.expiry_date ASC
+        """
+    )
+
+    pending = []
+    for row in rows:
+        prefs = row["notification_preferences"] or {}
+        if isinstance(prefs, str):
+            prefs = json.loads(prefs)
+        if not prefs.get("cert_expiry_reminders", True):
+            continue
+
+        enabled_days = prefs.get("cert_expiry_days", [90, 30, 7])
+        days_left = (row["expiry_date"] - date.today()).days
+
+        thresholds = [
+            (90, "reminder_sent_90"),
+            (30, "reminder_sent_30"),
+            (7, "reminder_sent_7"),
+        ]
+
+        for threshold, flag_col in thresholds:
+            if threshold not in enabled_days:
+                continue
+            if row[flag_col]:
+                continue
+            if days_left > threshold:
+                continue
+
+            pending.append(CredentialReminderPreviewItem(
+                user_email=row["email"],
+                credential_title=row["title"],
+                expiry_date=row["expiry_date"].isoformat(),
+                days_remaining=days_left,
+                threshold=threshold,
+                flag=flag_col,
+            ))
+            break
+
+    return CredentialReminderPreview(pending_reminders=pending, total=len(pending))
