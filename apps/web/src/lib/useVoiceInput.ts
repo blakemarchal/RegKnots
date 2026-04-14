@@ -23,6 +23,69 @@ interface UseVoiceInputReturn {
   toggle: () => void
 }
 
+// ── Maritime acronym enrichment ─────────────────────────────────────────
+// Web Speech API has no maritime vocabulary. These replacements fix common
+// misrecognitions when mariners speak acronyms and regulation names.
+const ACRONYM_REPLACEMENTS: [RegExp, string][] = [
+  // COLREGs — the most problematic one
+  [/\bcall regs?\b/gi, 'COLREGs'],
+  [/\bcole regs?\b/gi, 'COLREGs'],
+  [/\bcol regs?\b/gi, 'COLREGs'],
+  [/\bco[au]l regs?\b/gi, 'COLREGs'],
+  [/\bcoldregs?\b/gi, 'COLREGs'],
+  [/\bcolleagues\b/gi, 'COLREGs'],  // very common misrecognition
+  // SOLAS
+  [/\bso loss\b/gi, 'SOLAS'],
+  [/\bso las\b/gi, 'SOLAS'],
+  [/\bsole us\b/gi, 'SOLAS'],
+  [/\bsolace\b/gi, 'SOLAS'],
+  // STCW
+  [/\bs ?t ?c ?w\b/gi, 'STCW'],
+  [/\bstew cee w\b/gi, 'STCW'],
+  [/\best[ie]c?[eé]? ?w\b/gi, 'STCW'],
+  // ISM
+  [/\bi ?s ?m\b(?! code)/gi, 'ISM'],
+  [/\bism code\b/gi, 'ISM Code'],
+  // CFR
+  [/\bc ?f ?r\b/gi, 'CFR'],
+  [/\bsee far\b/gi, 'CFR'],
+  // MMC
+  [/\bm ?m ?c\b/gi, 'MMC'],
+  // TWIC
+  [/\btwick\b/gi, 'TWIC'],
+  [/\btweak\b/gi, 'TWIC'],
+  [/\bt ?w ?i ?c\b/gi, 'TWIC'],
+  // NVIC
+  [/\bn ?v ?i ?c\b/gi, 'NVIC'],
+  [/\ben vic\b/gi, 'NVIC'],
+  // ISPS
+  [/\bi ?s ?p ?s\b/gi, 'ISPS'],
+  // USCG
+  [/\bu ?s ?c ?g\b/gi, 'USCG'],
+  [/\bus coast guard\b/gi, 'USCG'],
+  // MARPOL
+  [/\bmar ?paul?\b/gi, 'MARPOL'],
+  [/\bmar ?pole?\b/gi, 'MARPOL'],
+  // PSC
+  [/\bp ?s ?c\b/gi, 'PSC'],
+  [/\bport state\b/gi, 'Port State'],
+  // NMC
+  [/\bn ?m ?c\b/gi, 'NMC'],
+  // IMO
+  [/\bi ?m ?o\b/gi, 'IMO'],
+  // Common maritime terms
+  [/\bReg ?Knot\b/gi, 'RegKnot'],
+  [/\breg not\b/gi, 'RegKnot'],
+]
+
+function enrichTranscript(raw: string): string {
+  let text = raw
+  for (const [pattern, replacement] of ACRONYM_REPLACEMENTS) {
+    text = text.replace(pattern, replacement)
+  }
+  return text
+}
+
 // Check for Web Speech API support — returns the constructor or null.
 // The Web Speech API is not typed in all TS environments, so we use `any`.
 function getSpeechRecognitionCtor(): (new () => any) | null {
@@ -69,7 +132,7 @@ export function useVoiceInput({ onTranscript, onError }: UseVoiceInputOptions): 
 
           const result = await apiUpload<{ text: string }>('/transcribe', formData)
           if (result.text.trim()) {
-            onTranscript(result.text.trim())
+            onTranscript(enrichTranscript(result.text.trim()))
           }
         } catch {
           onError?.('Transcription failed. Please try again.')
@@ -130,7 +193,7 @@ export function useVoiceInput({ onTranscript, onError }: UseVoiceInputOptions): 
         recognition.onresult = (event: any) => {
           const last = event.results[event.results.length - 1]
           if (last.isFinal) {
-            onTranscript(last[0].transcript.trim())
+            onTranscript(enrichTranscript(last[0].transcript.trim()))
           }
         }
 

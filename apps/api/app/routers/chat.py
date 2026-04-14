@@ -47,6 +47,28 @@ _MODEL_ALIAS: dict[str, str] = {
     "fallback:gpt-4o": "fallback_gpt4o",
 }
 
+# Regulation sources we don't currently cover. Used by missing-source detection.
+_MISSING_SOURCES: dict[str, str] = {
+    "marpol": "MARPOL (Marine Pollution)",
+    "mlc": "MLC (Maritime Labour Convention)",
+    "imdg": "IMDG Code (Dangerous Goods)",
+    "imsbc": "IMSBC Code (Solid Bulk Cargoes)",
+    "igc": "IGC Code (Gas Carriers)",
+    "ibc": "IBC Code (Chemical Carriers)",
+    "css": "CSS Code (Safe Stowage)",
+    "grain": "International Grain Code",
+    "bnwas": "BNWAS Regulations",
+    "ballast": "BWM Convention (Ballast Water)",
+    "polar code": "Polar Code",
+    "llmc": "LLMC (Limitation of Liability)",
+}
+
+_MISSING_NOTE = (
+    "\n\n*This regulation source is not yet in the RegKnot database. "
+    "Our team has been notified and will consider adding it. "
+    "In the meantime, consult the authoritative source directly.*"
+)
+
 
 async def _run_chat_preflight(
     body: "ChatRequestBody",
@@ -107,7 +129,9 @@ async def _run_chat_preflight(
             )
 
     # ── Subscription gate ────────────────────────────────────────────────────
-    if sub_row and sub_row["subscription_tier"] == "free":
+    # Admins and internal users always get unlimited access.
+    _is_privileged = current_user.is_admin or getattr(current_user, "is_internal", False)
+    if sub_row and sub_row["subscription_tier"] == "free" and not _is_privileged:
         trial_expired = sub_row["trial_ends_at"] < datetime.now(timezone.utc)
         over_limit = sub_row["message_count"] >= 50
         if trial_expired or over_limit:
@@ -322,6 +346,16 @@ async def _persist_chat_outcome(
             )
         )
 
+    # Detect queries about regulation sources we don't cover and notify admins.
+    asyncio.create_task(
+        _check_missing_regulation_request(
+            pool=pool,
+            user_query=user_query,
+            answer=answer,
+            cited_count=len(cited_section_numbers),
+        )
+    )
+
 
 @router.post("", status_code=status.HTTP_200_OK)
 async def chat_endpoint(
@@ -410,6 +444,8 @@ async def chat_stream_endpoint(
                 event_type = event["event"]
                 payload = event["data"]
                 if event_type == "done":
+                    # Enrich answer if a missing regulation source was detected
+                    payload = _enrich_missing_source_note(body.query, payload)
                     final_data = payload
                 yield f"event: {event_type}\ndata: {json.dumps(payload)}\n\n"
         except Exception:
@@ -494,6 +530,90 @@ async def _apply_vessel_update(pool: asyncpg.Pool, vessel_id: uuid.UUID, update:
         query = f"UPDATE vessels SET {', '.join(sets)} WHERE id = ${idx}"
         await pool.execute(query, *params)
         logger.info("Updated vessel profile %s with: %s", vessel_id, list(update.keys()))
+
+
+def _enrich_missing_source_note(query: str, payload: dict) -> dict:
+    """Append a note to the answer if the query targets a regulation source we don't cover."""
+    if not isinstance(payload, dict):
+        return payload
+    cited = payload.get("cited_regulations", [])
+    if cited:
+        return payload  # Got results — not a missing source issue
+
+    query_lower = query.lower()
+    for keyword in _MISSING_SOURCES:
+        if keyword in query_lower:
+            payload = dict(payload)
+            payload["answer"] = payload.get("answer", "") + _MISSING_NOTE
+            return payload
+    return payload
+
+
+# ── Missing regulation detection ─────────────────────────────────────────────
+
+
+async def _check_missing_regulation_request(
+    pool: asyncpg.Pool,
+    user_query: str,
+    answer: str,
+    cited_count: int,
+) -> None:
+    """Detect queries about unsupported regulation sources and notify admins.
+
+    Only fires when:
+    1. The query mentions a known missing source keyword, AND
+    2. The response produced zero citations (indicating no retrieval match)
+
+    Silently logs and never raises — this is a background best-effort notification.
+    """
+    if cited_count > 0:
+        return  # Got results — not a missing source issue
+
+    query_lower = user_query.lower()
+    detected: list[str] = []
+    for keyword, label in _MISSING_SOURCES.items():
+        if keyword in query_lower:
+            detected.append(label)
+
+    if not detected:
+        return
+
+    labels = ", ".join(detected)
+    logger.info("Missing regulation source detected: %s (query: %s)", labels, user_query[:100])
+
+    try:
+        # Insert a support-style notification for admin visibility
+        await pool.execute(
+            """
+            INSERT INTO notifications
+                (title, body, notification_type, source, is_active)
+            VALUES ($1, $2, 'regulation_request', 'system', true)
+            """,
+            f"Regulation source requested: {labels}",
+            f"A user asked about {labels} which is not in the RegKnot database. Query: \"{user_query[:200]}\"",
+        )
+    except Exception:
+        logger.debug("Could not insert regulation request notification", exc_info=True)
+
+    try:
+        # Email admin
+        import resend
+        from app.config import settings
+        resend.api_key = settings.resend_api_key
+        resend.Emails.send({
+            "from": "RegKnot <hello@mail.regknots.com>",
+            "to": ["hello@regknots.com"],
+            "subject": f"Regulation source requested: {labels}",
+            "html": (
+                f"<h2>Regulation Source Request</h2>"
+                f"<p>A user asked about <strong>{labels}</strong> which is not "
+                f"currently in the RegKnot database.</p>"
+                f"<p><strong>User query:</strong> {user_query[:500]}</p>"
+                f"<p>Consider adding this source to the ingest pipeline.</p>"
+            ),
+        })
+    except Exception:
+        logger.debug("Could not send regulation request email", exc_info=True)
 
 
 async def _generate_title(

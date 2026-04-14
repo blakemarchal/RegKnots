@@ -69,11 +69,20 @@ async def transcribe_audio(
             tmp.write(content)
             tmp_path = tmp.name
 
+        # The prompt parameter provides vocabulary hints to Whisper so it
+        # correctly recognizes maritime acronyms and regulation names.
+        _WHISPER_VOCAB_HINT = (
+            "COLREGs, SOLAS, STCW, ISM, ISM Code, CFR, MMC, TWIC, NVIC, "
+            "ISPS, USCG, MARPOL, PSC, NMC, IMO, RegKnot, "
+            "46 CFR, 33 CFR, 49 CFR, Port State Control"
+        )
+
         with open(tmp_path, "rb") as audio_file:
             transcript = client.audio.transcriptions.create(
                 model="whisper-1",
                 file=audio_file,
                 language="en",
+                prompt=_WHISPER_VOCAB_HINT,
             )
 
         Path(tmp_path).unlink(missing_ok=True)

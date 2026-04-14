@@ -772,3 +772,37 @@ async def send_regulation_digest_email(
         "subject": f"{count} regulation update{'s' if count != 1 else ''} this week — RegKnot",
         "html": html,
     })
+
+
+async def send_regulation_alert_email(
+    to_email: str, full_name: str, source_label: str, summary: str,
+) -> None:
+    """Send an immediate alert when a regulation source is updated."""
+    raw_first = full_name.split()[0] if full_name and full_name.strip() else "Mariner"
+    first_name = _html_lib.escape(raw_first)
+    safe_label = _html_lib.escape(source_label)
+    safe_summary = _html_lib.escape(summary)
+
+    html = _html(f"""
+      <h1>{safe_label}</h1>
+      <p>Hey {first_name},</p>
+      <div style="background-color:#0d1225; border:1px solid rgba(45,212,191,0.2);
+        border-radius:10px; padding:20px; margin:16px 0;">
+        <p style="color:#f0ece4; margin:0; font-size:14px;">{safe_summary}</p>
+      </div>
+      <p>
+        This regulation source has been updated in the RegKnot database.
+        Ask me about the changes to understand how they affect your vessel.
+      </p>
+      <a href="{APP_URL}" class="cta">Ask About This Update</a>
+      <p style="font-size:12px; color:rgba(107,117,148,0.7); margin-top:8px;">
+        You're receiving this because you have alerts enabled for this regulation source.
+        Adjust your alert preferences in Account settings.
+      </p>
+    """)
+    resend.Emails.send({
+        "from": FROM_EMAIL,
+        "to": [to_email],
+        "subject": f"{source_label} — RegKnot",
+        "html": html,
+    })

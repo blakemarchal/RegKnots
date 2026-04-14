@@ -75,6 +75,7 @@ function AccountContent() {
     cert_expiry_days: number[]
     reg_change_digest: boolean
     reg_digest_frequency: string
+    reg_alert_sources: string[]
   } | null>(null)
   const [notifLoading, setNotifLoading] = useState(true)
   const [notifSaving, setNotifSaving] = useState(false)
@@ -126,6 +127,14 @@ function AccountContent() {
       ? notifPrefs.cert_expiry_days.filter((d) => d !== day)
       : [...notifPrefs.cert_expiry_days, day].sort((a, b) => b - a)
     setNotifPrefs({ ...notifPrefs, cert_expiry_days: days })
+  }
+
+  function toggleAlertSource(source: string) {
+    if (!notifPrefs) return
+    const sources = (notifPrefs.reg_alert_sources || []).includes(source)
+      ? notifPrefs.reg_alert_sources.filter((s) => s !== source)
+      : [...(notifPrefs.reg_alert_sources || []), source]
+    setNotifPrefs({ ...notifPrefs, reg_alert_sources: sources })
   }
 
   async function saveProfile() {
@@ -492,6 +501,38 @@ function AccountContent() {
                     ))}
                   </div>
                 )}
+
+                <hr className="border-white/8" />
+
+                {/* Per-source immediate alerts */}
+                <div className="flex flex-col gap-2">
+                  <p className="font-mono text-sm text-[#f0ece4]">Immediate regulation alerts</p>
+                  <p className="font-mono text-xs text-[#6b7594]">Get emailed as soon as a source is updated</p>
+                  <div className="flex flex-wrap gap-1.5 mt-1">
+                    {[
+                      { key: 'cfr_33', label: 'CFR 33' },
+                      { key: 'cfr_46', label: 'CFR 46' },
+                      { key: 'cfr_49', label: 'CFR 49' },
+                      { key: 'nvic', label: 'NVIC' },
+                      { key: 'colregs', label: 'COLREGs' },
+                      { key: 'solas', label: 'SOLAS' },
+                      { key: 'stcw', label: 'STCW' },
+                      { key: 'ism', label: 'ISM' },
+                    ].map((s) => (
+                      <button
+                        key={s.key}
+                        onClick={() => toggleAlertSource(s.key)}
+                        className={`font-mono text-xs px-2.5 py-1 rounded-md border transition-colors duration-150 ${
+                          (notifPrefs.reg_alert_sources || []).includes(s.key)
+                            ? 'border-[#2dd4bf]/50 bg-[#2dd4bf]/10 text-[#2dd4bf]'
+                            : 'border-white/10 text-[#6b7594] hover:border-white/20'
+                        }`}
+                      >
+                        {s.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
 
                 <div className="flex items-center gap-3">
                   <button
