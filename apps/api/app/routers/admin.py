@@ -1453,6 +1453,9 @@ async def close_ticket(
 
 
 # ── Job testing endpoints ───────────────────────────────────────────────────
+#
+# IMPORTANT: The send endpoints only email the requesting admin, NOT all users.
+# They run the same logic as the Celery jobs but scoped to a single user.
 
 
 class JobTestResult(BaseModel):
@@ -1465,32 +1468,111 @@ class JobTestResult(BaseModel):
 async def test_credential_reminders(
     admin: Annotated[CurrentUser, Depends(require_write_admin)],
 ) -> JobTestResult:
-    """Run the credential expiry reminder job inline (sends real emails)."""
-    import asyncio
-    from app.tasks import _send_credential_expiry_reminders_async
+    """Send credential expiry reminders for the ADMIN'S OWN credentials only.
 
-    logger.info("Admin %s triggered credential expiry reminder job", admin.email)
-    try:
-        await _send_credential_expiry_reminders_async()
-        return JobTestResult(ok=True, sent=-1, details="Job completed — check logs for send count")
-    except Exception as exc:
-        logger.exception("Credential reminder test job failed: %s", exc)
-        return JobTestResult(ok=False, sent=0, details=str(exc)[:200])
+    Does NOT run the full production job — only processes credentials
+    belonging to the requesting admin. Safe to call in production.
+    """
+    import json as _json
+    from datetime import date
+
+    from app.email import send_credential_expiry_email, send_with_throttle, RESEND_THROTTLE_SECONDS
+
+    pool = await get_pool()
+    admin_id = uuid.UUID(admin.user_id)
+
+    logger.info("Admin %s triggered scoped credential reminder test", admin.email)
+
+    prefs_raw = await pool.fetchval(
+        "SELECT notification_preferences FROM users WHERE id = $1", admin_id,
+    )
+    prefs = _json.loads(prefs_raw) if isinstance(prefs_raw, str) else (prefs_raw or {})
+    enabled_days = prefs.get("cert_expiry_days", [90, 30, 7])
+
+    rows = await pool.fetch(
+        """
+        SELECT id, title, expiry_date, reminder_sent_90, reminder_sent_30, reminder_sent_7
+        FROM user_credentials
+        WHERE user_id = $1
+          AND expiry_date IS NOT NULL
+          AND expiry_date <= CURRENT_DATE + INTERVAL '91 days'
+        """,
+        admin_id,
+    )
+
+    sent = 0
+    for row in rows:
+        days_left = (row["expiry_date"] - date.today()).days
+        thresholds = [(90, "reminder_sent_90"), (30, "reminder_sent_30"), (7, "reminder_sent_7")]
+
+        for threshold, flag_col in thresholds:
+            if threshold not in enabled_days:
+                continue
+            if row[flag_col]:
+                continue
+            if days_left > threshold:
+                continue
+
+            try:
+                await send_with_throttle(
+                    lambda title=row["title"], days=days_left:
+                        send_credential_expiry_email(admin.email, admin.full_name or "", title, days),
+                    label=f"test:{admin.email}:{row['title']}:{threshold}d",
+                )
+                await pool.execute(
+                    f"UPDATE user_credentials SET {flag_col} = TRUE WHERE id = $1",
+                    row["id"],
+                )
+                sent += 1
+            except Exception as exc:
+                logger.error("Test credential reminder failed: %s", exc)
+            break
+
+    return JobTestResult(ok=True, sent=sent, details=f"Sent {sent} reminder(s) to {admin.email}")
 
 
 @router.post("/test-job/regulation-digest", response_model=JobTestResult)
 async def test_regulation_digest(
     admin: Annotated[CurrentUser, Depends(require_write_admin)],
 ) -> JobTestResult:
-    """Run the regulation digest job inline (sends real emails)."""
-    from app.tasks import _send_regulation_digest_async
+    """Send a regulation digest email to the ADMIN ONLY.
 
-    logger.info("Admin %s triggered regulation digest job", admin.email)
+    Does NOT email all users — sends one digest to the requesting admin
+    containing recent regulation update notifications. Safe to call in production.
+    """
+    from app.email import send_regulation_digest_email, send_with_throttle
+
+    pool = await get_pool()
+
+    logger.info("Admin %s triggered scoped regulation digest test", admin.email)
+
+    notifications = await pool.fetch(
+        """
+        SELECT title, body, source, created_at
+        FROM notifications
+        WHERE notification_type = 'regulation_update'
+          AND is_active = true
+          AND created_at > NOW() - INTERVAL '14 days'
+        ORDER BY created_at DESC
+        """
+    )
+
+    if not notifications:
+        return JobTestResult(ok=True, sent=0, details="No regulation updates in the last 14 days — nothing to send")
+
+    updates = [
+        {"title": n["title"], "body": n["body"], "source": n["source"], "created_at": n["created_at"].isoformat()}
+        for n in notifications
+    ]
+
     try:
-        await _send_regulation_digest_async()
-        return JobTestResult(ok=True, sent=-1, details="Job completed — check logs for send count")
+        await send_with_throttle(
+            lambda: send_regulation_digest_email(admin.email, admin.full_name or "", updates),
+            label=f"test-digest:{admin.email}",
+        )
+        return JobTestResult(ok=True, sent=1, details=f"Sent digest with {len(updates)} update(s) to {admin.email}")
     except Exception as exc:
-        logger.exception("Regulation digest test job failed: %s", exc)
+        logger.exception("Test regulation digest failed: %s", exc)
         return JobTestResult(ok=False, sent=0, details=str(exc)[:200])
 
 
@@ -1513,7 +1595,7 @@ async def preview_regulation_digest(
     admin: Annotated[CurrentUser, Depends(require_admin)],
 ) -> DigestPreview:
     """Dry-run: show what the digest would send without emailing anyone."""
-    import json
+    import json as _json
 
     pool = await get_pool()
 
@@ -1541,7 +1623,7 @@ async def preview_regulation_digest(
     for user in users:
         prefs = user["notification_preferences"] or {}
         if isinstance(prefs, str):
-            prefs = json.loads(prefs)
+            prefs = _json.loads(prefs)
         if prefs.get("reg_change_digest", True):
             recipients.append(user["email"])
 
@@ -1580,7 +1662,7 @@ async def preview_credential_reminders(
     admin: Annotated[CurrentUser, Depends(require_admin)],
 ) -> CredentialReminderPreview:
     """Dry-run: show which credential reminders would fire without sending."""
-    import json
+    import json as _json
     from datetime import date
 
     pool = await get_pool()
@@ -1607,7 +1689,7 @@ async def preview_credential_reminders(
     for row in rows:
         prefs = row["notification_preferences"] or {}
         if isinstance(prefs, str):
-            prefs = json.loads(prefs)
+            prefs = _json.loads(prefs)
         if not prefs.get("cert_expiry_reminders", True):
             continue
 
