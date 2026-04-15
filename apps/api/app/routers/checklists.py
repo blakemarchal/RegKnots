@@ -68,7 +68,7 @@ regulations provided, produce a structured JSON array of checklist items.
 STRICT OUTPUT RULES:
 - Begin your response with `[` — no preamble, no explanation, no markdown.
 - End with `]`.
-- Maximum 7 categories total.
+- Maximum 8 categories total.
 - Exactly 5 items per category (no fewer, no more).
 - Each "item" text must be under 20 words and focused on a single check.
 - Each "notes" field must be under 25 words and provide practical guidance.
@@ -77,16 +77,23 @@ code, ISM section). Multiple citations allowed, separated by semicolons.
 - Prioritize items most likely to be flagged in an actual PSC inspection over \
 comprehensive coverage.
 
-Pick 7 categories from this list most applicable to the vessel:
+MANDATORY CATEGORIES (always include these two):
 - Safety Equipment & LSA
+- Structural & Hull
+
+ADDITIONAL CATEGORIES — pick 4-6 more that apply to this vessel:
 - Fire Safety
 - Navigation & Communications
-- Structural & Hull
 - Pollution Prevention
 - Manning & Certification
 - ISM / SMS Documentation
 - ISPS Security
 - Working & Living Conditions
+
+For the Structural & Hull category, always include items covering: hull \
+integrity inspection, watertight penetrations/closures, bilge pump system, \
+and any vessel-specific structural concerns (e.g., DUKW stern reference line, \
+hull plating for steel vessels, sea cocks).
 
 Each object must have exactly these fields:
 - category: string

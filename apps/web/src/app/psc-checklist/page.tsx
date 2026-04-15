@@ -227,22 +227,33 @@ function PSCContent() {
 
             <div className="flex flex-col gap-1">
               <label className="font-mono text-xs text-[#6b7594]">Vessel</label>
-              <select
-                value={selectedVessel}
-                onChange={(e) => setSelectedVessel(e.target.value)}
-                className="font-mono w-full border border-white/10 rounded-lg px-3 py-2 text-sm
-                  outline-none focus:border-[#2dd4bf] transition-colors"
-                style={{ backgroundColor: '#0d1225', color: '#f0ece4' }}
-              >
-                <option value="" style={{ backgroundColor: '#111827', color: '#f0ece4' }}>
-                  Select a vessel
-                </option>
-                {vessels.map((v) => (
-                  <option key={v.id} value={v.id} style={{ backgroundColor: '#111827', color: '#f0ece4' }}>
-                    {v.name}
+              <div className="relative">
+                <select
+                  value={selectedVessel}
+                  onChange={(e) => setSelectedVessel(e.target.value)}
+                  className="font-mono w-full border border-white/10 rounded-lg pl-3 pr-10 py-2 text-sm
+                    outline-none focus:border-[#2dd4bf] transition-colors
+                    appearance-none cursor-pointer"
+                  style={{ backgroundColor: '#0d1225', color: '#f0ece4' }}
+                >
+                  <option value="" style={{ backgroundColor: '#111827', color: '#f0ece4' }}>
+                    Select a vessel
                   </option>
-                ))}
-              </select>
+                  {vessels.map((v) => (
+                    <option key={v.id} value={v.id} style={{ backgroundColor: '#111827', color: '#f0ece4' }}>
+                      {v.name}
+                    </option>
+                  ))}
+                </select>
+                {/* Custom chevron — positioned with enough inset from edge */}
+                <svg
+                  className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#6b7594] pointer-events-none"
+                  viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <polyline points="6 9 12 15 18 9" />
+                </svg>
+              </div>
             </div>
 
             {loadingSaved && selectedVessel && (
@@ -330,7 +341,7 @@ function PSCContent() {
                 </p>
               </div>
               <p className="font-mono text-[10px] text-[#6b7594]/60 text-center leading-relaxed">
-                Generating a PSC checklist takes about 30–45 seconds.
+                This can take up to a minute.
                 <br />
                 Please keep this page open.
               </p>
