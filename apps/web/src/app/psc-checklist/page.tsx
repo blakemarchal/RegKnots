@@ -77,10 +77,37 @@ function formatRelativeDate(iso: string): string {
   return new Date(iso).toLocaleDateString()
 }
 
+const LAST_VESSEL_KEY = 'regknot:psc:lastVesselId'
+
+function readLastVesselId(): string {
+  if (typeof window === 'undefined') return ''
+  try {
+    return window.localStorage.getItem(LAST_VESSEL_KEY) ?? ''
+  } catch {
+    return ''
+  }
+}
+
+function writeLastVesselId(id: string): void {
+  if (typeof window === 'undefined') return
+  try {
+    if (id) window.localStorage.setItem(LAST_VESSEL_KEY, id)
+    else window.localStorage.removeItem(LAST_VESSEL_KEY)
+  } catch {
+    /* noop — quota, private mode, etc */
+  }
+}
+
 function PSCContent() {
   const router = useRouter()
   const { vessels, activeVesselId } = useAuthStore()
-  const [selectedVessel, setSelectedVessel] = useState(activeVesselId ?? '')
+  // Last vessel persists across navigation via localStorage.
+  // On mount: prefer the last-used vessel on this page; fall back to the
+  // globally-active vessel only if nothing was previously picked here.
+  const [selectedVessel, setSelectedVessel] = useState<string>(() => {
+    const last = readLastVesselId()
+    return last || activeVesselId || ''
+  })
   const [checklist, setChecklist] = useState<PSCChecklist | null>(null)
   const [loading, setLoading] = useState(false)
   const [loadingSaved, setLoadingSaved] = useState(false)
@@ -113,8 +140,29 @@ function PSCContent() {
   }, [loading, loadingStartedAt])
 
   useEffect(() => {
-    if (!selectedVessel && activeVesselId) setSelectedVessel(activeVesselId)
+    // Only backfill from the global active vessel if nothing is selected here
+    // AND nothing was ever persisted for this page. We don't want the global
+    // selection to override a vessel the user deliberately picked on PSC.
+    if (!selectedVessel && activeVesselId && !readLastVesselId()) {
+      setSelectedVessel(activeVesselId)
+    }
   }, [activeVesselId, selectedVessel])
+
+  // Persist every vessel change so it survives navigation and refresh.
+  useEffect(() => {
+    writeLastVesselId(selectedVessel)
+  }, [selectedVessel])
+
+  // If the persisted vessel no longer exists (e.g. deleted), clear it.
+  useEffect(() => {
+    if (!selectedVessel) return
+    if (vessels.length === 0) return  // still hydrating
+    const exists = vessels.some((v) => v.id === selectedVessel)
+    if (!exists) {
+      setSelectedVessel('')
+      writeLastVesselId('')
+    }
+  }, [selectedVessel, vessels])
 
   useEffect(() => {
     if (!selectedVessel) {
