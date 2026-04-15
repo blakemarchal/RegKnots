@@ -39,4 +39,10 @@ celery.conf.beat_schedule = {
         # Every Monday at 15:00 UTC (late morning in U.S.)
         "schedule": crontab(hour=15, minute=0, day_of_week="monday"),
     },
+    "check-erg-updates-monthly": {
+        "task": "app.tasks.check_erg_updates",
+        # 2nd of every month at 11:00 UTC — checks PHMSA for a new ERG edition.
+        # ERG updates every ~4 years; monthly cadence is plenty with low noise.
+        "schedule": crontab(hour=11, minute=0, day_of_month="2"),
+    },
 }

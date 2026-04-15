@@ -31,7 +31,7 @@ export function EmptyState({ onPrompt, isNewConversation }: Props) {
         Maritime Compliance Co-Pilot
       </p>
       <p className="text-sm text-[#6b7594] max-w-xs mb-10 leading-relaxed">
-        Ask anything about U.S. maritime regulations. Cited answers from CFR, SOLAS, COLREGs, STCW, ISM, and USCG guidance.
+        Ask anything about U.S. maritime regulations. Cited answers from CFR, SOLAS, COLREGs, STCW, ISM, ERG, and USCG guidance.
       </p>
 
       {/* Suggested prompts — only on a fresh new conversation */}

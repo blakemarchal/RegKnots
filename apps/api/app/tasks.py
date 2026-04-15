@@ -536,3 +536,155 @@ def _send_amendment_alert(findings: list[dict]):
         )
     except Exception as exc:
         logger.error("Failed to send IMO amendment alert email: %s", exc)
+
+
+# ── ERG release monitor ────────────────────────────────────────────────────
+#
+# The Emergency Response Guidebook is republished every ~4 years by US DOT
+# PHMSA (current: ERG 2024, prior: ERG 2020, ERG 2016). Because it's a PDF
+# we have to ingest manually, we want an early warning when a new edition
+# is announced so we can swap the PDF on the server and run a manual
+# `uv run python -m ingest.cli --source erg --update`.
+#
+# The task below scrapes the PHMSA ERG landing page monthly and compares
+# any edition year it finds against the most recent ERG record's
+# `up_to_date_as_of` in our DB. If a newer year is mentioned on PHMSA,
+# hello@regknots.com gets a heads-up email with the detected year and
+# source URL so an admin can manually procure the new PDF and re-ingest.
+
+_ERG_SOURCES = [
+    {
+        "name": "PHMSA ERG landing page",
+        "url": "https://www.phmsa.dot.gov/hazmat/erg/erg",
+    },
+    {
+        "name": "PHMSA Emergency Response Guidebook",
+        "url": "https://www.phmsa.dot.gov/hazmat/outreach-training/emergency-response-guidebook-erg",
+    },
+]
+
+# Matches four-digit years reasonably constrained to ERG range (ERG 20XX).
+# Captures just the year digits so we can compare numerically.
+_ERG_YEAR_RE = re.compile(r"(?:ERG|Emergency Response Guidebook)[^0-9]{0,40}(20\d{2})", re.IGNORECASE)
+
+
+@celery.task(name="app.tasks.check_erg_updates")
+def check_erg_updates():
+    """Check PHMSA for a new ERG edition and alert hello@regknots.com if found."""
+    _run_async(_check_erg_updates_async())
+
+
+async def _check_erg_updates_async():
+    import asyncpg
+    from app.config import settings
+
+    dsn = settings.database_url.replace("postgresql+asyncpg://", "postgresql://")
+    conn = await asyncpg.connect(dsn)
+
+    try:
+        # Figure out the newest ERG edition year we already have ingested.
+        # We use the max year across `up_to_date_as_of` and `source_version`
+        # so either dating convention catches the current edition.
+        row = await conn.fetchrow(
+            """
+            SELECT
+                MAX(EXTRACT(YEAR FROM up_to_date_as_of)::int) AS ud_year,
+                MAX(source_version) AS sv
+            FROM regulations
+            WHERE source = 'erg'
+            """
+        )
+        db_year: int | None = row["ud_year"] if row else None
+        if row and row["sv"]:
+            # Extract any 20XX year mentioned in source_version (e.g. "ERG 2024")
+            m = re.search(r"20\d{2}", row["sv"])
+            if m:
+                sv_year = int(m.group(0))
+                db_year = max(db_year or 0, sv_year)
+
+        if not db_year:
+            logger.warning("ERG monitor: no ERG records in DB — skipping check")
+            return
+
+        # Scrape PHMSA pages looking for a newer edition year.
+        found_years: set[int] = set()
+        scrape_hits: list[tuple[str, str, int]] = []  # (source_name, source_url, year)
+
+        for source in _ERG_SOURCES:
+            try:
+                resp = requests.get(
+                    source["url"],
+                    timeout=30,
+                    headers={"User-Agent": "RegKnot ERG Monitor/1.0"},
+                )
+                resp.raise_for_status()
+                for m in _ERG_YEAR_RE.finditer(resp.text):
+                    year = int(m.group(1))
+                    if 2000 <= year <= 2099:
+                        found_years.add(year)
+                        if year > db_year:
+                            scrape_hits.append((source["name"], source["url"], year))
+            except Exception as exc:
+                logger.warning("ERG monitor: failed to scrape %s: %s", source["name"], exc)
+
+        max_found = max(found_years) if found_years else 0
+        logger.info(
+            "ERG monitor: db_year=%s scrape_max=%s all_found=%s",
+            db_year, max_found, sorted(found_years),
+        )
+
+        if not scrape_hits:
+            return
+
+        # Alert — deduplicate by year + source
+        _send_erg_release_alert(db_year, scrape_hits)
+
+    finally:
+        await conn.close()
+
+
+def _send_erg_release_alert(db_year: int, hits: list[tuple[str, str, int]]):
+    """Send heads-up email when PHMSA appears to list a newer ERG edition."""
+    try:
+        import resend
+        from app.config import settings
+        resend.api_key = settings.resend_api_key
+
+        # Dedupe by (source, year); keep unique entries
+        seen: set[tuple[str, int]] = set()
+        unique_hits: list[tuple[str, str, int]] = []
+        for name, url, year in hits:
+            key = (name, year)
+            if key in seen:
+                continue
+            seen.add(key)
+            unique_hits.append((name, url, year))
+
+        items_html = "".join(
+            f"<li><strong>{year}</strong> — <a href='{url}'>{name}</a></li>"
+            for name, url, year in unique_hits
+        )
+        newest = max(y for _, _, y in unique_hits)
+
+        resend.Emails.send({
+            "from": "RegKnot <hello@mail.regknots.com>",
+            "to": ["hello@regknots.com"],
+            "subject": f"Possible new ERG edition detected ({newest}) — RegKnot",
+            "html": (
+                f"<h2>Possible new ERG edition detected</h2>"
+                f"<p>The PHMSA ERG pages now mention a year ({newest}) newer than "
+                f"what's ingested in the RegKnot database (currently: {db_year}).</p>"
+                f"<p>Detected references:</p>"
+                f"<ul>{items_html}</ul>"
+                f"<p><strong>Action required:</strong> If a new ERG edition is "
+                f"actually out, download the PDF from PHMSA, place it in "
+                f"<code>data/raw/erg/</code>, update the adapter if needed, and "
+                f"run <code>uv run python -m ingest.cli --source erg --update</code>. "
+                f"Opted-in users will receive immediate alerts when content changes.</p>"
+                f"<p>If the year is a false positive (e.g. a historical reference "
+                f"on the page), no action is needed — the monitor will keep checking.</p>"
+            ),
+        })
+        logger.info("Sent ERG release alert: db_year=%s newest_found=%s", db_year, newest)
+    except Exception as exc:
+        logger.error("Failed to send ERG release alert email: %s", exc)
