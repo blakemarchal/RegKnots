@@ -1,10 +1,21 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import AuthGuard from '@/components/AuthGuard'
 import { AppHeader } from '@/components/AppHeader'
 import { apiRequest } from '@/lib/api'
 import { useAuthStore } from '@/lib/auth'
+
+const LOADING_MESSAGES = [
+  'Loading vessel profile...',
+  'Matching applicable regulations...',
+  'Reviewing safety equipment requirements...',
+  'Reviewing fire safety items...',
+  'Checking manning & certification rules...',
+  'Adding ISM and ISPS items...',
+  'Drafting checklist...',
+  'Finalizing citations...',
+]
 
 interface ChecklistItem {
   category: string
@@ -25,8 +36,30 @@ function PSCContent() {
   const [selectedVessel, setSelectedVessel] = useState(activeVesselId ?? '')
   const [checklist, setChecklist] = useState<PSCChecklist | null>(null)
   const [loading, setLoading] = useState(false)
+  const [loadingStartedAt, setLoadingStartedAt] = useState<number | null>(null)
+  const [loadingMsgIdx, setLoadingMsgIdx] = useState(0)
+  const [elapsedSeconds, setElapsedSeconds] = useState(0)
   const [error, setError] = useState<string | null>(null)
   const [checked, setChecked] = useState<Set<number>>(new Set())
+
+  // Cycle loading messages every 3.5s and track elapsed time
+  useEffect(() => {
+    if (!loading || !loadingStartedAt) return
+    const tick = setInterval(() => {
+      setElapsedSeconds(Math.floor((Date.now() - loadingStartedAt) / 1000))
+    }, 500)
+    const rotate = setInterval(() => {
+      setLoadingMsgIdx((i) => (i + 1) % LOADING_MESSAGES.length)
+    }, 3500)
+    return () => { clearInterval(tick); clearInterval(rotate) }
+  }, [loading, loadingStartedAt])
+
+  // Keep selectedVessel in sync when vessels hydrate after mount
+  useEffect(() => {
+    if (!selectedVessel && activeVesselId) {
+      setSelectedVessel(activeVesselId)
+    }
+  }, [activeVesselId, selectedVessel])
 
   async function generate() {
     if (!selectedVessel) {
@@ -34,6 +67,9 @@ function PSCContent() {
       return
     }
     setLoading(true)
+    setLoadingStartedAt(Date.now())
+    setLoadingMsgIdx(0)
+    setElapsedSeconds(0)
     setError(null)
     setChecklist(null)
     setChecked(new Set())
@@ -47,6 +83,7 @@ function PSCContent() {
       setError(e instanceof Error ? e.message : 'Failed to generate checklist')
     } finally {
       setLoading(false)
+      setLoadingStartedAt(null)
     }
   }
 
@@ -114,19 +151,45 @@ function PSCContent() {
                 hover:brightness-110 disabled:opacity-50 rounded-lg py-2.5
                 transition-[filter] duration-150"
             >
-              {loading ? 'Generating...' : 'Generate Checklist'}
+              {loading ? 'Generating…' : 'Generate Checklist'}
             </button>
 
             {error && <p className="font-mono text-xs text-red-400">{error}</p>}
           </section>
 
-          {/* Loading skeleton */}
+          {/* Loading state */}
           {loading && (
-            <div className="flex flex-col gap-3">
-              {[1, 2, 3, 4].map((i) => (
-                <div key={i} className="h-24 bg-[#111827] border border-white/8 rounded-xl animate-pulse" />
-              ))}
-            </div>
+            <section className="bg-[#111827] border border-[#2dd4bf]/20 rounded-xl p-6 flex flex-col items-center gap-4">
+              {/* Animated teal pulse dot */}
+              <div className="relative w-12 h-12 flex items-center justify-center">
+                <div className="absolute inset-0 rounded-full bg-[#2dd4bf]/20 animate-ping" />
+                <div className="relative w-6 h-6 rounded-full bg-[#2dd4bf]" />
+              </div>
+
+              {/* Rotating status message */}
+              <div className="flex flex-col items-center gap-1 min-h-[3rem]">
+                <p className="font-mono text-sm text-[#2dd4bf] text-center transition-opacity duration-300">
+                  {LOADING_MESSAGES[loadingMsgIdx]}
+                </p>
+                <p className="font-mono text-xs text-[#6b7594]">
+                  {elapsedSeconds > 0 ? `${elapsedSeconds}s elapsed` : 'Starting...'}
+                </p>
+              </div>
+
+              {/* Estimate */}
+              <p className="font-mono text-[10px] text-[#6b7594]/60 text-center leading-relaxed">
+                Generating a PSC checklist takes about 20–30 seconds.
+                <br />
+                Please keep this page open.
+              </p>
+
+              {/* Placeholder skeletons */}
+              <div className="w-full flex flex-col gap-2 mt-2 opacity-50">
+                {[1, 2, 3].map((i) => (
+                  <div key={i} className="h-16 bg-white/5 border border-white/8 rounded-lg animate-pulse" />
+                ))}
+              </div>
+            </section>
           )}
 
           {/* Checklist results */}

@@ -138,7 +138,7 @@ async def generate_psc_checklist(
         anthropic_client: AsyncAnthropic = request.app.state.anthropic
         response = await anthropic_client.messages.create(
             model="claude-sonnet-4-6",
-            max_tokens=4096,
+            max_tokens=8192,
             system=_PSC_SYSTEM_PROMPT,
             messages=[{
                 "role": "user",
@@ -146,15 +146,26 @@ async def generate_psc_checklist(
             }],
         )
 
+        if response.stop_reason == "max_tokens":
+            logger.warning(
+                "PSC checklist hit max_tokens — will attempt partial JSON recovery (vessel=%s)",
+                vessel["name"],
+            )
+
         text = response.content[0].text.strip()
         if text.startswith("```"):
             text = text.split("\n", 1)[1] if "\n" in text else text[3:]
         if text.endswith("```"):
             text = text[:-3]
-        items = json.loads(text.strip())
+        text = text.strip()
+
+        items = _parse_or_recover_json(text)
 
         from datetime import datetime, timezone
-        checklist = [ChecklistItem(**item) for item in items]
+        checklist = [ChecklistItem(**item) for item in items if _is_valid_item(item)]
+
+        if not checklist:
+            raise ValueError("No valid checklist items parsed")
 
         logger.info("PSC checklist generated: vessel=%s items=%d", vessel['name'], len(checklist))
 
@@ -165,15 +176,85 @@ async def generate_psc_checklist(
             generated_at=datetime.now(timezone.utc).isoformat(),
         )
 
-    except json.JSONDecodeError:
-        logger.exception("PSC checklist JSON parse failed")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to generate checklist. Please try again.",
-        )
+    except HTTPException:
+        raise
     except Exception:
         logger.exception("PSC checklist generation failed")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to generate checklist. Please try again.",
         )
+
+
+def _is_valid_item(item: dict) -> bool:
+    """Check that a parsed item has the required fields."""
+    return (
+        isinstance(item, dict)
+        and item.get("category")
+        and item.get("item")
+        and item.get("regulation")
+    )
+
+
+def _parse_or_recover_json(text: str) -> list[dict]:
+    """Parse JSON array, recovering gracefully from truncation.
+
+    Strategy:
+    1. Try json.loads directly — works when response is complete.
+    2. On failure, find the last complete object (closing "}") and
+       truncate there, then close the array. This recovers truncated
+       responses that hit max_tokens mid-string or mid-field.
+    """
+    try:
+        parsed = json.loads(text)
+        if isinstance(parsed, list):
+            return parsed
+        logger.warning("PSC: JSON parsed but not a list (type=%s)", type(parsed).__name__)
+        return []
+    except json.JSONDecodeError as exc:
+        logger.warning("PSC: direct JSON parse failed (%s) — attempting recovery", str(exc)[:120])
+
+    # Recovery: find the last complete object before the truncation point.
+    # Walk backwards to find a "}," or "}" that's followed by whitespace/EOF.
+    # Then close the array at that point.
+    if not text.startswith("["):
+        logger.error("PSC: response does not start with '[' — cannot recover")
+        return []
+
+    # Find last complete object by matching braces at depth 1 (inside the array)
+    depth = 0
+    last_complete_end = -1
+    in_string = False
+    escape_next = False
+
+    for i, ch in enumerate(text):
+        if escape_next:
+            escape_next = False
+            continue
+        if ch == "\\":
+            escape_next = True
+            continue
+        if ch == '"' and not escape_next:
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 1:  # We're back at array level — this object is complete
+                last_complete_end = i
+
+    if last_complete_end == -1:
+        logger.error("PSC: no complete objects found in truncated response")
+        return []
+
+    recovered = text[: last_complete_end + 1] + "]"
+    try:
+        parsed = json.loads(recovered)
+        logger.info("PSC: recovered %d items from truncated response", len(parsed))
+        return parsed
+    except json.JSONDecodeError:
+        logger.exception("PSC: recovery attempt also failed to parse")
+        return []
