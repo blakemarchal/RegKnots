@@ -50,6 +50,7 @@ _SOURCE_LABELS: dict[str, tuple[str, str]] = {
         "STCW supplement (MSC resolution amendments)",
     ),
     "ism":    ("ISM Code Updated", "ISM Code (Safe Operation of Ships)"),
+    "erg":    ("ERG Updated", "ERG (Emergency Response Guidebook)"),
 }
 
 

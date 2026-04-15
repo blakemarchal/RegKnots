@@ -15,11 +15,15 @@ _INGEST_DIR = Path(__file__).resolve().parents[3] / "packages" / "ingest"
 
 # Sources that can actually run unattended (fetch from public APIs / scrapers).
 # Sources NOT in this list (colregs, solas, solas_supplement, stcw,
-# stcw_supplement, ism) require local PDF / pre-extracted text files that
-# must be placed manually — they are MANUAL INGEST ONLY and intentionally
-# left out of the scheduled task. The SOLAS/STCW supplement DETECTION is
-# covered separately by `check_solas_supplements`, which emails an alert
-# when new MSC references appear so a human can review + ingest manually.
+# stcw_supplement, ism, erg) require local PDF / pre-extracted text files
+# that must be placed manually — they are MANUAL INGEST ONLY and
+# intentionally left out of the scheduled task. When a fresh PDF is
+# dropped on the server and the admin runs
+#   `uv run python -m ingest.cli --source <name> --update`
+# the notify hook fires alerts to opted-in users if content actually
+# changed. The SOLAS/STCW supplement DETECTION is covered separately by
+# `check_solas_supplements`, which emails an alert when new MSC
+# references appear so a human can review + ingest manually.
 _AUTOMATABLE_SOURCES: list[str] = [
     "cfr_33",
     "cfr_46",

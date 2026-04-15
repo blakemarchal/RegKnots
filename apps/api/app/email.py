@@ -127,7 +127,7 @@ async def send_welcome_email(to_email: str, full_name: str) -> None:
       <p>
         You're now registered with RegKnot — your AI-powered maritime compliance co-pilot.
         Get instant cited answers to questions across CFR Titles 33, 46 &amp; 49, COLREGs, NVICs,
-        SOLAS 2024, STCW, and the ISM Code — all tailored to your vessel profile.
+        SOLAS 2024, STCW, the ISM Code, and the ERG — all tailored to your vessel profile.
       </p>
       <p>
         Ask about inspection schedules, certificate requirements, carriage requirements, SOLAS
@@ -324,8 +324,8 @@ async def send_pilot_ended_email(to_email: str, full_name: str) -> None:
         Hey {first_name} — your 14-day RegKnot free trial has expired.
       </p>
       <p>
-        To continue getting instant cited answers across CFR, COLREGs, NVICs, SOLAS, STCW, and
-        the ISM Code — subscribe to RegKnot Pro for
+        To continue getting instant cited answers across CFR, COLREGs, NVICs, SOLAS, STCW,
+        the ISM Code, and the ERG — subscribe to RegKnot Pro for
         <strong style="color:#f0ece4;">$39/month</strong>
         (or save 26% with the annual plan at <strong style="color:#f0ece4;">$29/month</strong>).
       </p>
@@ -353,7 +353,7 @@ async def send_waitlist_confirmed_email(to_email: str, full_name: str) -> None:
       </p>
       <p>
         In the meantime, here's what you can look forward to: instant cited answers across
-        CFR Titles 33, 46 &amp; 49, COLREGs, NVICs, SOLAS 2024, STCW, and the ISM Code —
+        CFR Titles 33, 46 &amp; 49, COLREGs, NVICs, SOLAS 2024, STCW, the ISM Code, and the ERG —
         all tailored to your vessel profile.
       </p>
       <p style="font-size:13px; color:#2dd4bf;">
@@ -408,7 +408,7 @@ async def send_subscription_confirmed_email(to_email: str, full_name: str) -> No
       </p>
       <ul style="padding-left:20px; margin:0 0 16px;">
         <li style="color:#6b7594; font-size:14px; line-height:1.7;">Unlimited questions — no message caps</li>
-        <li style="color:#6b7594; font-size:14px; line-height:1.7;">CFR Titles 33, 46 &amp; 49 + COLREGs, NVICs, SOLAS 2024, STCW &amp; ISM Code</li>
+        <li style="color:#6b7594; font-size:14px; line-height:1.7;">CFR Titles 33, 46 &amp; 49 + COLREGs, NVICs, SOLAS 2024, STCW, ISM Code &amp; ERG</li>
         <li style="color:#6b7594; font-size:14px; line-height:1.7;">Vessel-specific compliance answers</li>
         <li style="color:#6b7594; font-size:14px; line-height:1.7;">Audit-ready chat logs</li>
       </ul>
@@ -535,7 +535,7 @@ def render_founding_member_email(full_name: str | None) -> tuple[str, str]:
       </p>
       <ul style="padding-left:20px; margin:0 0 16px;">
         <li style="color:#6b7594; font-size:14px; line-height:1.7;">
-          Unlimited compliance questions across CFR, SOLAS, COLREGs, STCW, NVICs, and ISM
+          Unlimited compliance questions across CFR, SOLAS, COLREGs, STCW, NVICs, ISM, and the ERG
         </li>
         <li style="color:#6b7594; font-size:14px; line-height:1.7;">
           Cited, regulation-backed answers you can trust

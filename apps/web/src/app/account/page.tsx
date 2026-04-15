@@ -518,6 +518,7 @@ function AccountContent() {
                       { key: 'solas', label: 'SOLAS' },
                       { key: 'stcw', label: 'STCW' },
                       { key: 'ism', label: 'ISM' },
+                      { key: 'erg', label: 'ERG' },
                     ].map((s) => (
                       <button
                         key={s.key}
