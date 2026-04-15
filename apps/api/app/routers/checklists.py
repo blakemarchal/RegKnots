@@ -1,9 +1,12 @@
-"""PSC inspection checklist generator with per-vessel persistence.
+"""PSC inspection checklist generator with persistence and item-level editing.
 
-POST   /checklists/psc                      — generate + save (upserts on vessel)
-GET    /checklists/psc/{vessel_id}          — load saved checklist if it exists
-PATCH  /checklists/psc/{vessel_id}/checks   — update checked_indices
-DELETE /checklists/psc/{vessel_id}          — discard saved checklist
+POST   /checklists/psc                            — generate + save (upserts)
+GET    /checklists/psc/{vessel_id}                — load saved checklist
+DELETE /checklists/psc/{vessel_id}                — discard saved
+PATCH  /checklists/psc/{vessel_id}/checks         — update checked_indices
+PATCH  /checklists/psc/{vessel_id}/items/{index}  — edit item at index
+DELETE /checklists/psc/{vessel_id}/items/{index}  — delete item at index
+POST   /checklists/psc/{vessel_id}/items          — add custom item
 """
 
 import json
@@ -12,6 +15,7 @@ import uuid as _uuid
 from datetime import datetime, timezone
 from typing import Annotated
 
+import asyncpg
 from anthropic import AsyncAnthropic
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
@@ -37,6 +41,17 @@ class ChecklistItem(BaseModel):
     item: str
     regulation: str
     notes: str | None = None
+    user_added: bool = False
+
+
+class OmittedCategory(BaseModel):
+    category: str
+    reason: str
+
+
+class CoverageInfo(BaseModel):
+    included_categories: list[str]
+    omitted_categories: list[OmittedCategory]
 
 
 class PSCChecklist(BaseModel):
@@ -44,6 +59,7 @@ class PSCChecklist(BaseModel):
     vessel_type: str
     checklist: list[ChecklistItem]
     checked_indices: list[int] = []
+    coverage: CoverageInfo | None = None
     generated_at: str
 
 
@@ -51,11 +67,17 @@ class ChecksUpdate(BaseModel):
     checked_indices: list[int]
 
 
-class ProfileIncompleteResponse(BaseModel):
-    detail: str
-    missing_fields: list[str]
-    completeness_score: int
-    required_score: int
+class ItemUpdate(BaseModel):
+    item: str | None = None
+    regulation: str | None = None
+    notes: str | None = None
+
+
+class ItemAdd(BaseModel):
+    category: str
+    item: str
+    regulation: str
+    notes: str | None = None
 
 
 # ── Prompt ─────────────────────────────────────────────────────────────────
@@ -63,19 +85,20 @@ class ProfileIncompleteResponse(BaseModel):
 _PSC_SYSTEM_PROMPT = """\
 You are a maritime compliance expert generating a Port State Control (PSC) \
 inspection readiness checklist. Based on the vessel profile and applicable \
-regulations provided, produce a structured JSON array of checklist items.
+regulations provided, produce a structured JSON OBJECT.
 
 STRICT OUTPUT RULES:
-- Begin your response with `[` — no preamble, no explanation, no markdown.
-- End with `]`.
-- Maximum 8 categories total.
-- Exactly 5 items per category (no fewer, no more).
-- Each "item" text must be under 20 words and focused on a single check.
-- Each "notes" field must be under 25 words and provide practical guidance.
+- Begin your response with `{` — no preamble, no explanation, no markdown.
+- End with `}`.
+- Do NOT create two items that cover essentially the same check, even across \
+different categories. Before finalizing, review your items and merge or drop \
+any redundant entries.
+- Maximum 8 categories total, exactly 5 items per category.
+- Each "item" text must be under 20 words, focused on a single check.
+- Each "notes" field must be under 25 words, with practical guidance.
 - Each item must cite specific regulations (CFR section, SOLAS chapter, STCW \
 code, ISM section). Multiple citations allowed, separated by semicolons.
-- Prioritize items most likely to be flagged in an actual PSC inspection over \
-comprehensive coverage.
+- Prioritize items most likely to be flagged in an actual PSC inspection.
 
 MANDATORY CATEGORIES (always include these two):
 - Safety Equipment & LSA
@@ -90,61 +113,69 @@ ADDITIONAL CATEGORIES — pick 4-6 more that apply to this vessel:
 - ISPS Security
 - Working & Living Conditions
 
-For the Structural & Hull category, always include items covering: hull \
-integrity inspection, watertight penetrations/closures, bilge pump system, \
-and any vessel-specific structural concerns (e.g., DUKW stern reference line, \
-hull plating for steel vessels, sea cocks).
+For Structural & Hull, always include items covering: hull integrity \
+inspection, watertight penetrations/closures, bilge pump system, and any \
+vessel-specific structural concerns (e.g., DUKW stern reference line, hull \
+plating for steel vessels, sea cocks).
 
-Each object must have exactly these fields:
-- category: string
-- item: string (under 20 words)
-- regulation: string (specific citations)
-- notes: string (under 25 words, practical guidance)
+OUTPUT SHAPE — return exactly this JSON object structure:
+{
+  "items": [
+    {"category": string, "item": string, "regulation": string, "notes": string},
+    ...
+  ],
+  "coverage": {
+    "included_categories": [list of categories you included],
+    "omitted_categories": [
+      {"category": string, "reason": "brief why this does not apply (under 20 words)"}
+    ]
+  }
+}
 
-Return ONLY the JSON array."""
+For omitted_categories, briefly explain why a category in the ADDITIONAL \
+list was not applicable to this specific vessel (e.g., "Vessel is domestic \
+inland — not subject to 33 CFR Part 104 ISPS requirements"). Do NOT include \
+categories that simply didn't fit in the 8-category budget without a real \
+applicability reason. If no categories were excluded for applicability, \
+return an empty array.
+
+Return ONLY the JSON object."""
 
 
 # ── Profile completeness gate ──────────────────────────────────────────────
 
-_REQUIRED_COMPLETENESS_SCORE = 4  # Out of 6
+_REQUIRED_COMPLETENESS_SCORE = 4
 
 
 def _score_vessel_profile(vessel: dict, additional: dict) -> tuple[int, list[str]]:
-    """Score vessel profile completeness. Returns (score, missing_field_labels)."""
     score = 0
     missing: list[str] = []
 
-    # 1. Vessel type (always required anyway, but count it)
     if vessel.get("vessel_type"):
         score += 1
     else:
         missing.append("Vessel type")
 
-    # 2. Gross tonnage
     if vessel.get("gross_tonnage") is not None:
         score += 1
     else:
         missing.append("Gross tonnage")
 
-    # 3. Route types
     if vessel.get("route_types") and len(vessel["route_types"]) > 0:
         score += 1
     else:
         missing.append("Route types")
 
-    # 4. Subchapter
     if vessel.get("subchapter"):
         score += 1
     else:
         missing.append("USCG subchapter")
 
-    # 5. Manning requirement OR inspection certificate type
     if vessel.get("manning_requirement") or vessel.get("inspection_certificate_type"):
         score += 1
     else:
         missing.append("Manning requirement or certificate type")
 
-    # 6. Equipment details (from additional_details or COI extraction)
     if additional.get("lifesaving_equipment") or additional.get("fire_equipment") \
             or additional.get("max_persons") or additional.get("conditions_of_operation"):
         score += 1
@@ -158,9 +189,8 @@ def _score_vessel_profile(vessel: dict, additional: dict) -> tuple[int, list[str
 
 
 async def _verify_vessel_ownership(
-    pool, vessel_id: _uuid.UUID, user_id: _uuid.UUID,
+    pool: asyncpg.Pool, vessel_id: _uuid.UUID, user_id: _uuid.UUID,
 ) -> dict:
-    """Load vessel row if owned by user. Raises 404 otherwise."""
     row = await pool.fetchrow(
         "SELECT * FROM vessels WHERE id = $1 AND user_id = $2",
         vessel_id, user_id,
@@ -168,6 +198,16 @@ async def _verify_vessel_ownership(
     if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Vessel not found")
     return dict(row)
+
+
+async def _load_checklist_row(
+    pool: asyncpg.Pool, user_id: _uuid.UUID, vessel_id: _uuid.UUID,
+) -> dict | None:
+    row = await pool.fetchrow(
+        "SELECT * FROM psc_checklists WHERE user_id = $1 AND vessel_id = $2",
+        user_id, vessel_id,
+    )
+    return dict(row) if row else None
 
 
 def _is_valid_item(item: dict) -> bool:
@@ -179,33 +219,52 @@ def _is_valid_item(item: dict) -> bool:
     )
 
 
-def _parse_or_recover_json(text: str) -> list[dict]:
-    """Parse a JSON array, recovering gracefully from truncation or prose preamble.
+def _parse_or_recover_json(text: str) -> dict | list:
+    """Parse the AI response, recovering gracefully from truncation or prose preamble.
 
-    1. Find the first `[` — slice from there (drops any preamble).
-    2. Try json.loads directly.
-    3. On failure, walk to find the last complete object and close the array.
+    Expected shape: {"items": [...], "coverage": {...}}
+    Legacy shape: just an array [...]
     """
-    start = text.find("[")
-    if start == -1:
-        logger.error("PSC: no '[' found in response")
-        return []
+    # Strip any preamble before the first JSON structural character.
+    first_brace = text.find("{")
+    first_bracket = text.find("[")
+    starts = [s for s in (first_brace, first_bracket) if s != -1]
+    if not starts:
+        logger.error("PSC: no JSON structure found in response")
+        return {}
+    start = min(starts)
     text = text[start:]
 
     try:
         parsed = json.loads(text)
-        if isinstance(parsed, list):
-            return parsed
-        return []
+        return parsed
     except json.JSONDecodeError as exc:
         logger.warning("PSC: direct JSON parse failed (%s) — attempting recovery", str(exc)[:120])
 
+    # Recovery: find the last complete top-level item and close structure.
     depth = 0
     last_complete_end = -1
     in_string = False
     escape_next = False
 
-    for i, ch in enumerate(text):
+    # Are we parsing an object (first char `{`) or array (`[`)?
+    is_object = text.startswith("{")
+
+    # For object shape, we recover the `items` array specifically; find its `[`
+    if is_object:
+        items_start = text.find('"items"')
+        if items_start == -1:
+            logger.error("PSC: truncated response has no 'items' field")
+            return {}
+        arr_start = text.find("[", items_start)
+        if arr_start == -1:
+            return {}
+        walk_from = arr_start
+    else:
+        walk_from = 0
+
+    for i in range(walk_from, len(text)):
+        ch = text[i]
         if escape_next:
             escape_next = False
             continue
@@ -221,21 +280,46 @@ def _parse_or_recover_json(text: str) -> list[dict]:
             depth += 1
         elif ch == "}":
             depth -= 1
-            if depth == 1:
+            if depth == 1 if is_object else depth == 0:
                 last_complete_end = i
 
     if last_complete_end == -1:
         logger.error("PSC: no complete objects found in truncated response")
-        return []
+        return {}
 
-    recovered = text[: last_complete_end + 1] + "]"
-    try:
-        parsed = json.loads(recovered)
-        logger.info("PSC: recovered %d items from truncated response", len(parsed))
-        return parsed
-    except json.JSONDecodeError:
-        logger.exception("PSC: recovery attempt also failed to parse")
-        return []
+    if is_object:
+        # Build a minimal valid object using just the recovered items.
+        recovered = text[walk_from: last_complete_end + 1] + "]"
+        try:
+            items = json.loads(recovered)
+            logger.info("PSC: recovered %d items from truncated object response", len(items))
+            return {"items": items, "coverage": {"included_categories": [], "omitted_categories": []}}
+        except json.JSONDecodeError:
+            logger.exception("PSC: recovery of object form failed")
+            return {}
+    else:
+        recovered = text[: last_complete_end + 1] + "]"
+        try:
+            items = json.loads(recovered)
+            logger.info("PSC: recovered %d items from truncated array response", len(items))
+            return items
+        except json.JSONDecodeError:
+            logger.exception("PSC: recovery of array form failed")
+            return []
+
+
+def _extract_items_and_coverage(parsed) -> tuple[list[dict], dict | None]:
+    """Normalize parser output into (items, coverage). Coverage may be None."""
+    if isinstance(parsed, list):
+        return [x for x in parsed if _is_valid_item(x)], None
+    if isinstance(parsed, dict):
+        raw_items = parsed.get("items") or []
+        items = [x for x in raw_items if _is_valid_item(x)]
+        coverage = parsed.get("coverage")
+        if coverage and isinstance(coverage, dict):
+            return items, coverage
+        return items, None
+    return [], None
 
 
 def _row_to_checklist(row: dict, vessel_name: str, vessel_type: str) -> PSCChecklist:
@@ -243,13 +327,56 @@ def _row_to_checklist(row: dict, vessel_name: str, vessel_type: str) -> PSCCheck
     if isinstance(items_raw, str):
         items_raw = json.loads(items_raw)
     checklist = [ChecklistItem(**item) for item in items_raw if _is_valid_item(item)]
+
+    coverage: CoverageInfo | None = None
+    cov_raw = row.get("coverage")
+    if cov_raw:
+        if isinstance(cov_raw, str):
+            cov_raw = json.loads(cov_raw)
+        try:
+            omitted = [OmittedCategory(**c) for c in cov_raw.get("omitted_categories", []) if isinstance(c, dict)]
+            coverage = CoverageInfo(
+                included_categories=list(cov_raw.get("included_categories") or []),
+                omitted_categories=omitted,
+            )
+        except Exception:
+            coverage = None
+
     return PSCChecklist(
         vessel_name=vessel_name,
         vessel_type=vessel_type,
         checklist=checklist,
         checked_indices=list(row["checked_indices"] or []),
+        coverage=coverage,
         generated_at=row["generated_at"].isoformat(),
     )
+
+
+async def _log_feedback(
+    pool: asyncpg.Pool,
+    user_id: _uuid.UUID,
+    vessel_id: _uuid.UUID,
+    checklist_id: _uuid.UUID,
+    action_type: str,
+    original_item: dict | None,
+    final_item: dict | None,
+    item_index: int | None,
+) -> None:
+    """Silently record a user action. Never raises — logging failure must not block UX."""
+    try:
+        await pool.execute(
+            """
+            INSERT INTO checklist_feedback
+                (user_id, vessel_id, checklist_id, action_type, original_item, final_item, item_index)
+            VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7)
+            """,
+            user_id, vessel_id, checklist_id, action_type,
+            json.dumps(original_item) if original_item else None,
+            json.dumps(final_item) if final_item else None,
+            item_index,
+        )
+    except Exception:
+        logger.exception("Failed to log checklist feedback (user=%s, action=%s)", user_id, action_type)
 
 
 # ── Endpoints ──────────────────────────────────────────────────────────────
@@ -271,7 +398,6 @@ async def generate_psc_checklist(
     if isinstance(additional, str):
         additional = json.loads(additional)
 
-    # ── Completeness gate ────────────────────────────────────────────────
     score, missing = _score_vessel_profile(vessel, additional)
     if score < _REQUIRED_COMPLETENESS_SCORE:
         raise HTTPException(
@@ -279,7 +405,7 @@ async def generate_psc_checklist(
             detail={
                 "detail": (
                     f"Vessel profile is too sparse to generate an accurate PSC checklist "
-                    f"({score}/{6} fields populated, {_REQUIRED_COMPLETENESS_SCORE} required). "
+                    f"({score}/6 fields populated, {_REQUIRED_COMPLETENESS_SCORE} required). "
                     f"Please add missing details to the vessel profile."
                 ),
                 "missing_fields": missing,
@@ -288,7 +414,6 @@ async def generate_psc_checklist(
             },
         )
 
-    # ── Build context ────────────────────────────────────────────────────
     vessel_context = f"""Vessel Profile:
 - Name: {vessel['name']}
 - Type: {vessel['vessel_type']}
@@ -333,7 +458,6 @@ async def generate_psc_checklist(
             text_preview = (r["full_text"] or "")[:300]
             reg_context += f"\n[{r['section_number']} — {r['section_title']}]\n{text_preview}\n"
 
-    # ── Generate ─────────────────────────────────────────────────────────
     try:
         anthropic_client: AsyncAnthropic = request.app.state.anthropic
         response = await anthropic_client.messages.create(
@@ -342,13 +466,13 @@ async def generate_psc_checklist(
             system=_PSC_SYSTEM_PROMPT,
             messages=[{
                 "role": "user",
-                "content": f"{vessel_context}{reg_context}\n\nGenerate a focused PSC inspection readiness checklist for this vessel. Remember: exactly 5 items per category, 7 categories max, concise item and notes text.",
+                "content": f"{vessel_context}{reg_context}\n\nGenerate a focused PSC inspection readiness checklist for this vessel. Exactly 5 items per category, 8 categories max, concise item and notes text. Include the coverage object explaining any applicable categories omitted.",
             }],
         )
 
         if response.stop_reason == "max_tokens":
             logger.warning(
-                "PSC checklist hit max_tokens — will attempt recovery (vessel=%s)",
+                "PSC checklist hit max_tokens (vessel=%s) — attempting recovery",
                 vessel["name"],
             )
 
@@ -359,39 +483,48 @@ async def generate_psc_checklist(
             text = text[:-3]
         text = text.strip()
 
-        items = _parse_or_recover_json(text)
-        valid_items = [item for item in items if _is_valid_item(item)]
+        parsed = _parse_or_recover_json(text)
+        items, coverage_dict = _extract_items_and_coverage(parsed)
 
-        if not valid_items:
+        if not items:
             raise ValueError("No valid checklist items parsed")
 
+        # Mark user_added=false on all AI-generated items
+        for item in items:
+            item["user_added"] = False
+
         logger.info(
-            "PSC checklist generated: vessel=%s items=%d (score=%d/6)",
-            vessel["name"], len(valid_items), score,
+            "PSC checklist generated: vessel=%s items=%d score=%d/6",
+            vessel["name"], len(items), score,
         )
 
-        # ── Save / upsert ───────────────────────────────────────────────
-        items_json = json.dumps(valid_items)
         now = datetime.now(timezone.utc)
-        await pool.execute(
+        checklist_row = await pool.fetchrow(
             """
-            INSERT INTO psc_checklists (user_id, vessel_id, items, checked_indices, generated_at)
-            VALUES ($1, $2, $3::jsonb, '{}', $4)
+            INSERT INTO psc_checklists
+                (user_id, vessel_id, items, checked_indices, coverage, generated_at)
+            VALUES ($1, $2, $3::jsonb, '{}', $4::jsonb, $5)
             ON CONFLICT (user_id, vessel_id) DO UPDATE
                 SET items = EXCLUDED.items,
                     checked_indices = '{}',
+                    coverage = EXCLUDED.coverage,
                     generated_at = EXCLUDED.generated_at
+            RETURNING id
             """,
-            user_id, vessel_id, items_json, now,
+            user_id, vessel_id,
+            json.dumps(items),
+            json.dumps(coverage_dict) if coverage_dict else None,
+            now,
         )
 
-        checklist = [ChecklistItem(**item) for item in valid_items]
-        return PSCChecklist(
-            vessel_name=vessel["name"],
-            vessel_type=vessel["vessel_type"],
-            checklist=checklist,
-            checked_indices=[],
-            generated_at=now.isoformat(),
+        return _row_to_checklist(
+            {
+                "items": items,
+                "checked_indices": [],
+                "coverage": coverage_dict,
+                "generated_at": now,
+            },
+            vessel["name"], vessel["vessel_type"],
         )
 
     except HTTPException:
@@ -409,24 +542,14 @@ async def get_saved_psc_checklist(
     vessel_id: _uuid.UUID,
     user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> PSCChecklist | None:
-    """Load the saved PSC checklist for this vessel, if any."""
     pool = await get_pool()
     user_id = _uuid.UUID(user.user_id)
-
     vessel = await _verify_vessel_ownership(pool, vessel_id, user_id)
 
-    row = await pool.fetchrow(
-        """
-        SELECT items, checked_indices, generated_at
-        FROM psc_checklists
-        WHERE user_id = $1 AND vessel_id = $2
-        """,
-        user_id, vessel_id,
-    )
+    row = await _load_checklist_row(pool, user_id, vessel_id)
     if not row:
         return None
-
-    return _row_to_checklist(dict(row), vessel["name"], vessel["vessel_type"])
+    return _row_to_checklist(row, vessel["name"], vessel["vessel_type"])
 
 
 @router.patch("/psc/{vessel_id}/checks", status_code=status.HTTP_204_NO_CONTENT)
@@ -435,18 +558,15 @@ async def update_checks(
     body: ChecksUpdate,
     user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> None:
-    """Update which items are checked off."""
     pool = await get_pool()
     user_id = _uuid.UUID(user.user_id)
-
-    # Verify ownership via psc_checklists (will fail silently if missing)
     result = await pool.execute(
         """
         UPDATE psc_checklists
         SET checked_indices = $1::integer[]
         WHERE user_id = $2 AND vessel_id = $3
         """,
-        list(set(body.checked_indices)),  # dedupe
+        list(set(body.checked_indices)),
         user_id, vessel_id,
     )
     if result == "UPDATE 0":
@@ -461,7 +581,6 @@ async def delete_saved_checklist(
     vessel_id: _uuid.UUID,
     user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> None:
-    """Discard a saved checklist."""
     pool = await get_pool()
     user_id = _uuid.UUID(user.user_id)
     result = await pool.execute(
@@ -470,3 +589,154 @@ async def delete_saved_checklist(
     )
     if result == "DELETE 0":
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No saved checklist")
+
+
+@router.patch("/psc/{vessel_id}/items/{index}", response_model=PSCChecklist)
+async def edit_item(
+    vessel_id: _uuid.UUID,
+    index: int,
+    body: ItemUpdate,
+    user: Annotated[CurrentUser, Depends(get_current_user)],
+) -> PSCChecklist:
+    pool = await get_pool()
+    user_id = _uuid.UUID(user.user_id)
+    vessel = await _verify_vessel_ownership(pool, vessel_id, user_id)
+
+    row = await _load_checklist_row(pool, user_id, vessel_id)
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No saved checklist")
+
+    items = row["items"]
+    if isinstance(items, str):
+        items = json.loads(items)
+    items = list(items)
+
+    if index < 0 or index >= len(items):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item index out of range")
+
+    original = dict(items[index])
+    updates = body.model_dump(exclude_unset=True)
+    for key in ("item", "regulation", "notes"):
+        if key in updates and updates[key] is not None:
+            items[index][key] = updates[key]
+
+    await pool.execute(
+        "UPDATE psc_checklists SET items = $1::jsonb WHERE user_id = $2 AND vessel_id = $3",
+        json.dumps(items), user_id, vessel_id,
+    )
+
+    await _log_feedback(
+        pool, user_id, vessel_id, row["id"], "edit",
+        original_item=original,
+        final_item=items[index],
+        item_index=index,
+    )
+
+    updated = await _load_checklist_row(pool, user_id, vessel_id)
+    return _row_to_checklist(updated, vessel["name"], vessel["vessel_type"])
+
+
+@router.delete("/psc/{vessel_id}/items/{index}", response_model=PSCChecklist)
+async def delete_item(
+    vessel_id: _uuid.UUID,
+    index: int,
+    user: Annotated[CurrentUser, Depends(get_current_user)],
+) -> PSCChecklist:
+    pool = await get_pool()
+    user_id = _uuid.UUID(user.user_id)
+    vessel = await _verify_vessel_ownership(pool, vessel_id, user_id)
+
+    row = await _load_checklist_row(pool, user_id, vessel_id)
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No saved checklist")
+
+    items = row["items"]
+    if isinstance(items, str):
+        items = json.loads(items)
+    items = list(items)
+
+    if index < 0 or index >= len(items):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item index out of range")
+
+    original = dict(items[index])
+    del items[index]
+
+    # Remap checked_indices: remove index, shift down higher indices by 1.
+    old_checks = list(row["checked_indices"] or [])
+    new_checks: list[int] = []
+    for c in old_checks:
+        if c == index:
+            continue
+        if c > index:
+            new_checks.append(c - 1)
+        else:
+            new_checks.append(c)
+
+    await pool.execute(
+        """
+        UPDATE psc_checklists
+        SET items = $1::jsonb, checked_indices = $2::integer[]
+        WHERE user_id = $3 AND vessel_id = $4
+        """,
+        json.dumps(items), new_checks, user_id, vessel_id,
+    )
+
+    await _log_feedback(
+        pool, user_id, vessel_id, row["id"], "delete",
+        original_item=original,
+        final_item=None,
+        item_index=index,
+    )
+
+    updated = await _load_checklist_row(pool, user_id, vessel_id)
+    return _row_to_checklist(updated, vessel["name"], vessel["vessel_type"])
+
+
+@router.post("/psc/{vessel_id}/items", response_model=PSCChecklist, status_code=status.HTTP_201_CREATED)
+async def add_item(
+    vessel_id: _uuid.UUID,
+    body: ItemAdd,
+    user: Annotated[CurrentUser, Depends(get_current_user)],
+) -> PSCChecklist:
+    pool = await get_pool()
+    user_id = _uuid.UUID(user.user_id)
+    vessel = await _verify_vessel_ownership(pool, vessel_id, user_id)
+
+    row = await _load_checklist_row(pool, user_id, vessel_id)
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No saved checklist")
+
+    if not body.category.strip() or not body.item.strip() or not body.regulation.strip():
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Category, item, and regulation are required",
+        )
+
+    items = row["items"]
+    if isinstance(items, str):
+        items = json.loads(items)
+    items = list(items)
+
+    new_item = {
+        "category": body.category.strip(),
+        "item": body.item.strip(),
+        "regulation": body.regulation.strip(),
+        "notes": (body.notes or "").strip() or None,
+        "user_added": True,
+    }
+    items.append(new_item)
+
+    await pool.execute(
+        "UPDATE psc_checklists SET items = $1::jsonb WHERE user_id = $2 AND vessel_id = $3",
+        json.dumps(items), user_id, vessel_id,
+    )
+
+    await _log_feedback(
+        pool, user_id, vessel_id, row["id"], "add",
+        original_item=None,
+        final_item=new_item,
+        item_index=len(items) - 1,
+    )
+
+    updated = await _load_checklist_row(pool, user_id, vessel_id)
+    return _row_to_checklist(updated, vessel["name"], vessel["vessel_type"])

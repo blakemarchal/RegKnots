@@ -18,11 +18,34 @@ const LOADING_MESSAGES = [
   'Finalizing citations...',
 ]
 
+const PSC_CATEGORIES = [
+  'Safety Equipment & LSA',
+  'Structural & Hull',
+  'Fire Safety',
+  'Navigation & Communications',
+  'Pollution Prevention',
+  'Manning & Certification',
+  'ISM / SMS Documentation',
+  'ISPS Security',
+  'Working & Living Conditions',
+]
+
 interface ChecklistItem {
   category: string
   item: string
   regulation: string
   notes: string | null
+  user_added?: boolean
+}
+
+interface OmittedCategory {
+  category: string
+  reason: string
+}
+
+interface CoverageInfo {
+  included_categories: string[]
+  omitted_categories: OmittedCategory[]
 }
 
 interface PSCChecklist {
@@ -30,6 +53,7 @@ interface PSCChecklist {
   vessel_type: string
   checklist: ChecklistItem[]
   checked_indices: number[]
+  coverage: CoverageInfo | null
   generated_at: string
 }
 
@@ -67,14 +91,16 @@ function PSCContent() {
   const [profileGap, setProfileGap] = useState<ProfileIncompleteError | null>(null)
   const [confirmRegen, setConfirmRegen] = useState(false)
   const [checked, setChecked] = useState<Set<number>>(new Set())
+  const [editingIdx, setEditingIdx] = useState<number | null>(null)
+  const [editItem, setEditItem] = useState({ item: '', regulation: '', notes: '' })
+  const [addingForCategory, setAddingForCategory] = useState<string | null>(null)
+  const [newItemState, setNewItemState] = useState({ item: '', regulation: '', notes: '' })
+  const [savingItem, setSavingItem] = useState(false)
+  const [coverageExpanded, setCoverageExpanded] = useState(false)
 
-  // Debounced check-state save
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  // Cancellation for in-flight generation
   const abortRef = useRef<AbortController | null>(null)
 
-  // Cycle loading messages every 3.5s and track elapsed time
   useEffect(() => {
     if (!loading || !loadingStartedAt) return
     const tick = setInterval(() => {
@@ -86,14 +112,10 @@ function PSCContent() {
     return () => { clearInterval(tick); clearInterval(rotate) }
   }, [loading, loadingStartedAt])
 
-  // Keep selectedVessel in sync when vessels hydrate after mount
   useEffect(() => {
-    if (!selectedVessel && activeVesselId) {
-      setSelectedVessel(activeVesselId)
-    }
+    if (!selectedVessel && activeVesselId) setSelectedVessel(activeVesselId)
   }, [activeVesselId, selectedVessel])
 
-  // Load saved checklist whenever selected vessel changes
   useEffect(() => {
     if (!selectedVessel) {
       setChecklist(null)
@@ -127,10 +149,7 @@ function PSCContent() {
   }, [selectedVessel])
 
   const doGenerate = useCallback(async () => {
-    if (!selectedVessel) {
-      setError('Select a vessel first')
-      return
-    }
+    if (!selectedVessel) { setError('Select a vessel first'); return }
     setConfirmRegen(false)
     setLoading(true)
     setLoadingStartedAt(Date.now())
@@ -153,12 +172,7 @@ function PSCContent() {
       setChecklist(result)
       setChecked(new Set(result.checked_indices || []))
     } catch (e) {
-      // User-initiated cancellation — reset silently
-      if (e instanceof DOMException && e.name === 'AbortError') {
-        return
-      }
-
-      // Structured 422 = profile completeness gap
+      if (e instanceof DOMException && e.name === 'AbortError') return
       if (e instanceof ApiError && e.status === 422) {
         const body = e.body as { detail?: unknown }
         const detail = body?.detail
@@ -167,8 +181,6 @@ function PSCContent() {
           return
         }
       }
-
-      // Everything else — show the cleaned error message
       const msg = e instanceof Error ? e.message : 'Failed to generate checklist'
       setError(msg)
     } finally {
@@ -177,6 +189,11 @@ function PSCContent() {
       setLoadingStartedAt(null)
     }
   }, [selectedVessel])
+
+  function handleGenerateClick() {
+    if (checklist) { setConfirmRegen(true); return }
+    doGenerate()
+  }
 
   function cancelGeneration() {
     if (abortRef.current) {
@@ -187,14 +204,6 @@ function PSCContent() {
     setLoadingStartedAt(null)
   }
 
-  function handleGenerateClick() {
-    if (checklist) {
-      setConfirmRegen(true)
-      return
-    }
-    doGenerate()
-  }
-
   function saveChecks(next: Set<number>) {
     if (!selectedVessel) return
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
@@ -202,9 +211,7 @@ function PSCContent() {
       apiRequest(`/checklists/psc/${selectedVessel}/checks`, {
         method: 'PATCH',
         body: JSON.stringify({ checked_indices: Array.from(next) }),
-      }).catch(() => {
-        // Silent — state stays local even if save fails
-      })
+      }).catch(() => {})
     }, 600)
   }
 
@@ -218,7 +225,78 @@ function PSCContent() {
     })
   }
 
-  // Group items by category
+  function startEdit(idx: number, item: ChecklistItem) {
+    setEditingIdx(idx)
+    setEditItem({
+      item: item.item,
+      regulation: item.regulation,
+      notes: item.notes ?? '',
+    })
+  }
+
+  async function saveEdit(idx: number) {
+    if (!selectedVessel || !editItem.item.trim() || !editItem.regulation.trim()) return
+    setSavingItem(true)
+    try {
+      const updated = await apiRequest<PSCChecklist>(`/checklists/psc/${selectedVessel}/items/${idx}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          item: editItem.item.trim(),
+          regulation: editItem.regulation.trim(),
+          notes: editItem.notes.trim() || null,
+        }),
+      })
+      setChecklist(updated)
+      setChecked(new Set(updated.checked_indices || []))
+      setEditingIdx(null)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to save item')
+    } finally {
+      setSavingItem(false)
+    }
+  }
+
+  async function deleteItem(idx: number) {
+    if (!selectedVessel) return
+    setSavingItem(true)
+    try {
+      const updated = await apiRequest<PSCChecklist>(`/checklists/psc/${selectedVessel}/items/${idx}`, {
+        method: 'DELETE',
+      })
+      setChecklist(updated)
+      setChecked(new Set(updated.checked_indices || []))
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to delete item')
+    } finally {
+      setSavingItem(false)
+    }
+  }
+
+  async function addItem(category: string) {
+    if (!selectedVessel || !newItemState.item.trim() || !newItemState.regulation.trim()) return
+    setSavingItem(true)
+    try {
+      const updated = await apiRequest<PSCChecklist>(`/checklists/psc/${selectedVessel}/items`, {
+        method: 'POST',
+        body: JSON.stringify({
+          category,
+          item: newItemState.item.trim(),
+          regulation: newItemState.regulation.trim(),
+          notes: newItemState.notes.trim() || null,
+        }),
+      })
+      setChecklist(updated)
+      setChecked(new Set(updated.checked_indices || []))
+      setNewItemState({ item: '', regulation: '', notes: '' })
+      setAddingForCategory(null)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to add item')
+    } finally {
+      setSavingItem(false)
+    }
+  }
+
+  // Group items by category, preserving AI-chosen order from `included_categories`
   const grouped: Record<string, { item: ChecklistItem; idx: number }[]> = {}
   if (checklist) {
     checklist.checklist.forEach((item, idx) => {
@@ -226,6 +304,17 @@ function PSCContent() {
       grouped[item.category].push({ item, idx })
     })
   }
+
+  // Order: AI's included_categories first, then any user-added categories not in that list
+  const orderedCategories: string[] = []
+  if (checklist?.coverage?.included_categories) {
+    checklist.coverage.included_categories.forEach((c) => {
+      if (grouped[c]) orderedCategories.push(c)
+    })
+  }
+  Object.keys(grouped).forEach((c) => {
+    if (!orderedCategories.includes(c)) orderedCategories.push(c)
+  })
 
   const totalItems = checklist?.checklist.length ?? 0
   const checkedCount = checked.size
@@ -266,7 +355,6 @@ function PSCContent() {
                     </option>
                   ))}
                 </select>
-                {/* Custom chevron — positioned with enough inset from edge */}
                 <svg
                   className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#6b7594] pointer-events-none"
                   viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
@@ -299,7 +387,7 @@ function PSCContent() {
             <section className="bg-amber-950/40 border border-amber-500/30 rounded-xl p-5 flex flex-col gap-3 print:hidden">
               <p className="font-mono text-xs text-amber-400 uppercase tracking-wider">Replace existing checklist?</p>
               <p className="font-mono text-xs text-[#f0ece4]/80 leading-relaxed">
-                This will generate a new checklist and reset your current progress ({checkedCount}/{totalItems} items checked).
+                This will generate a new checklist and reset your current progress ({checkedCount}/{totalItems} items checked). Any custom items you added will be lost.
               </p>
               <div className="flex items-center gap-2">
                 <button
@@ -408,6 +496,48 @@ function PSCContent() {
                 </div>
               </div>
 
+              {/* Coverage statement (transparency) */}
+              {checklist.coverage && (
+                <div className="bg-[#111827] border border-white/8 rounded-xl p-4 flex flex-col gap-2 print:bg-white print:border-gray-300">
+                  <button
+                    onClick={() => setCoverageExpanded((v) => !v)}
+                    className="flex items-center justify-between w-full text-left
+                      hover:opacity-90 transition-opacity print:cursor-default"
+                  >
+                    <p className="font-mono text-xs text-[#2dd4bf] uppercase tracking-wider print:text-black">
+                      Coverage
+                    </p>
+                    <svg
+                      className={`w-3.5 h-3.5 text-[#6b7594] transition-transform duration-150 print:hidden ${coverageExpanded ? 'rotate-180' : ''}`}
+                      viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                    >
+                      <polyline points="6 9 12 15 18 9" />
+                    </svg>
+                  </button>
+                  <p className="font-mono text-xs text-[#f0ece4]/80 leading-relaxed print:text-black">
+                    This checklist covers <strong className="text-[#2dd4bf] print:text-black">
+                    {checklist.coverage.included_categories.length} of {PSC_CATEGORIES.length}</strong> PSC categories applicable to your vessel.
+                    {checklist.coverage.omitted_categories.length > 0 && !coverageExpanded && (
+                      <> <span className="text-[#6b7594]">Tap to see what was omitted and why.</span></>
+                    )}
+                  </p>
+                  {(coverageExpanded || typeof window !== 'undefined' && window.matchMedia?.('print').matches) &&
+                    checklist.coverage.omitted_categories.length > 0 && (
+                    <div className="bg-[#0d1225] border border-white/10 rounded-lg p-3 mt-1 print:bg-white print:border-gray-300">
+                      <p className="font-mono text-xs text-[#6b7594] uppercase tracking-wider mb-2 print:text-gray-600">Omitted categories</p>
+                      <ul className="flex flex-col gap-2">
+                        {checklist.coverage.omitted_categories.map((o) => (
+                          <li key={o.category} className="font-mono text-xs leading-relaxed">
+                            <span className="text-[#f0ece4] print:text-black">{o.category}</span>
+                            <span className="text-[#6b7594] print:text-gray-600"> — {o.reason}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Print header */}
               <div className="hidden print:block mb-4">
                 <h1 className="text-xl font-bold">PSC Inspection Readiness Checklist</h1>
@@ -417,48 +547,177 @@ function PSCContent() {
               </div>
 
               {/* Grouped checklist items */}
-              {Object.entries(grouped).map(([category, items]) => (
-                <section key={category} className="bg-[#111827] border border-white/8 rounded-xl p-4 flex flex-col gap-2
-                  print:bg-white print:border-gray-300 print:text-black">
-                  <p className="font-mono text-xs text-[#2dd4bf] uppercase tracking-wider font-bold
-                    print:text-black">
-                    {category}
-                  </p>
-                  {items.map(({ item, idx }) => (
-                    <label
-                      key={idx}
-                      className={`flex items-start gap-3 py-2 px-2 rounded-lg cursor-pointer
-                        hover:bg-white/3 transition-colors duration-100
-                        ${checked.has(idx) ? 'opacity-60' : ''}`}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={checked.has(idx)}
-                        onChange={() => toggleCheck(idx)}
-                        className="mt-0.5 w-4 h-4 rounded border-white/20 bg-[#0d1225]
-                          accent-[#2dd4bf] shrink-0
-                          print:accent-black"
-                      />
-                      <div className="min-w-0 flex-1">
-                        <p className={`font-mono text-sm text-[#f0ece4] leading-relaxed
-                          print:text-black ${checked.has(idx) ? 'line-through' : ''}`}>
-                          {item.item}
-                        </p>
-                        <p className="font-mono text-xs text-[#2dd4bf]/70 mt-0.5
-                          print:text-gray-600">
-                          {item.regulation}
-                        </p>
-                        {item.notes && (
-                          <p className="font-mono text-xs text-[#6b7594] mt-0.5
-                            print:text-gray-500">
-                            {item.notes}
-                          </p>
+              {orderedCategories.map((category) => {
+                const items = grouped[category] || []
+                return (
+                  <section key={category} className="bg-[#111827] border border-white/8 rounded-xl p-4 flex flex-col gap-2
+                    print:bg-white print:border-gray-300 print:text-black">
+                    <p className="font-mono text-xs text-[#2dd4bf] uppercase tracking-wider font-bold
+                      print:text-black">
+                      {category}
+                    </p>
+                    {items.map(({ item, idx }) => (
+                      <div key={idx}>
+                        {editingIdx === idx ? (
+                          <div className="flex flex-col gap-2 bg-[#0d1225] border border-[#2dd4bf]/30 rounded-lg p-3">
+                            <input
+                              type="text"
+                              value={editItem.item}
+                              onChange={(e) => setEditItem({ ...editItem, item: e.target.value })}
+                              placeholder="Item text"
+                              className="font-mono w-full bg-[#0a0e1a] border border-white/10 rounded-lg px-2 py-1.5 text-sm
+                                text-[#f0ece4] outline-none focus:border-[#2dd4bf] transition-colors"
+                            />
+                            <input
+                              type="text"
+                              value={editItem.regulation}
+                              onChange={(e) => setEditItem({ ...editItem, regulation: e.target.value })}
+                              placeholder="Regulation (e.g. 46 CFR 181.400)"
+                              className="font-mono w-full bg-[#0a0e1a] border border-white/10 rounded-lg px-2 py-1.5 text-xs
+                                text-[#2dd4bf]/80 outline-none focus:border-[#2dd4bf] transition-colors"
+                            />
+                            <textarea
+                              value={editItem.notes}
+                              onChange={(e) => setEditItem({ ...editItem, notes: e.target.value })}
+                              placeholder="Notes (optional)"
+                              rows={2}
+                              className="font-mono w-full bg-[#0a0e1a] border border-white/10 rounded-lg px-2 py-1.5 text-xs
+                                text-[#f0ece4]/80 outline-none focus:border-[#2dd4bf] transition-colors resize-none"
+                            />
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => saveEdit(idx)}
+                                disabled={savingItem || !editItem.item.trim() || !editItem.regulation.trim()}
+                                className="font-mono text-xs font-bold text-[#0a0e1a] bg-[#2dd4bf]
+                                  hover:brightness-110 disabled:opacity-50 rounded-md px-3 py-1
+                                  transition-[filter] duration-150"
+                              >
+                                {savingItem ? 'Saving…' : 'Save'}
+                              </button>
+                              <button
+                                onClick={() => setEditingIdx(null)}
+                                className="font-mono text-xs text-[#6b7594] hover:text-[#f0ece4] px-2 py-1"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className={`flex items-start gap-3 py-2 px-2 rounded-lg
+                            hover:bg-white/3 transition-colors duration-100 group
+                            ${checked.has(idx) ? 'opacity-60' : ''}`}>
+                            <label className="flex items-start gap-3 flex-1 cursor-pointer min-w-0">
+                              <input
+                                type="checkbox"
+                                checked={checked.has(idx)}
+                                onChange={() => toggleCheck(idx)}
+                                className="mt-0.5 w-4 h-4 rounded border-white/20 bg-[#0d1225]
+                                  accent-[#2dd4bf] shrink-0
+                                  print:accent-black"
+                              />
+                              <div className="min-w-0 flex-1">
+                                <p className={`font-mono text-sm text-[#f0ece4] leading-relaxed
+                                  print:text-black ${checked.has(idx) ? 'line-through' : ''}`}>
+                                  {item.item}
+                                  {item.user_added && (
+                                    <span className="ml-1.5 inline-block font-mono text-[9px] uppercase tracking-wider text-[#2dd4bf]/70 border border-[#2dd4bf]/30 rounded px-1 py-0 align-middle print:hidden">
+                                      Custom
+                                    </span>
+                                  )}
+                                </p>
+                                <p className="font-mono text-xs text-[#2dd4bf]/70 mt-0.5
+                                  print:text-gray-600">
+                                  {item.regulation}
+                                </p>
+                                {item.notes && (
+                                  <p className="font-mono text-xs text-[#6b7594] mt-0.5
+                                    print:text-gray-500">
+                                    {item.notes}
+                                  </p>
+                                )}
+                              </div>
+                            </label>
+                            <div className="flex flex-col gap-1 shrink-0 opacity-0 group-hover:opacity-100
+                              transition-opacity duration-100 print:hidden">
+                              <button
+                                onClick={() => startEdit(idx, item)}
+                                className="font-mono text-[10px] text-[#6b7594] hover:text-[#2dd4bf] px-1"
+                                aria-label="Edit item"
+                              >
+                                Edit
+                              </button>
+                              <button
+                                onClick={() => deleteItem(idx)}
+                                disabled={savingItem}
+                                className="font-mono text-[10px] text-[#6b7594] hover:text-red-400 px-1"
+                                aria-label="Delete item"
+                              >
+                                Delete
+                              </button>
+                            </div>
+                          </div>
                         )}
                       </div>
-                    </label>
-                  ))}
-                </section>
-              ))}
+                    ))}
+
+                    {/* Add custom item UI */}
+                    {addingForCategory === category ? (
+                      <div className="flex flex-col gap-2 bg-[#0d1225] border border-[#2dd4bf]/30 rounded-lg p-3 mt-1">
+                        <input
+                          type="text"
+                          value={newItemState.item}
+                          onChange={(e) => setNewItemState({ ...newItemState, item: e.target.value })}
+                          placeholder="What to check"
+                          className="font-mono w-full bg-[#0a0e1a] border border-white/10 rounded-lg px-2 py-1.5 text-sm
+                            text-[#f0ece4] outline-none focus:border-[#2dd4bf] transition-colors"
+                        />
+                        <input
+                          type="text"
+                          value={newItemState.regulation}
+                          onChange={(e) => setNewItemState({ ...newItemState, regulation: e.target.value })}
+                          placeholder="Regulation reference (e.g. 46 CFR 185.500)"
+                          className="font-mono w-full bg-[#0a0e1a] border border-white/10 rounded-lg px-2 py-1.5 text-xs
+                            text-[#2dd4bf]/80 outline-none focus:border-[#2dd4bf] transition-colors"
+                        />
+                        <textarea
+                          value={newItemState.notes}
+                          onChange={(e) => setNewItemState({ ...newItemState, notes: e.target.value })}
+                          placeholder="Notes (optional)"
+                          rows={2}
+                          className="font-mono w-full bg-[#0a0e1a] border border-white/10 rounded-lg px-2 py-1.5 text-xs
+                            text-[#f0ece4]/80 outline-none focus:border-[#2dd4bf] transition-colors resize-none"
+                        />
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => addItem(category)}
+                            disabled={savingItem || !newItemState.item.trim() || !newItemState.regulation.trim()}
+                            className="font-mono text-xs font-bold text-[#0a0e1a] bg-[#2dd4bf]
+                              hover:brightness-110 disabled:opacity-50 rounded-md px-3 py-1
+                              transition-[filter] duration-150"
+                          >
+                            {savingItem ? 'Adding…' : 'Add'}
+                          </button>
+                          <button
+                            onClick={() => { setAddingForCategory(null); setNewItemState({ item: '', regulation: '', notes: '' }) }}
+                            className="font-mono text-xs text-[#6b7594] hover:text-[#f0ece4] px-2 py-1"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => { setAddingForCategory(category); setNewItemState({ item: '', regulation: '', notes: '' }) }}
+                        className="font-mono text-xs text-[#6b7594] hover:text-[#2dd4bf]
+                          border border-dashed border-white/10 hover:border-[#2dd4bf]/30
+                          rounded-lg py-1.5 mt-1 transition-colors duration-150 print:hidden"
+                      >
+                        + Add item
+                      </button>
+                    )}
+                  </section>
+                )
+              })}
 
               <p className="font-mono text-[10px] text-[#6b7594]/50 text-center print:text-gray-400">
                 Generated by RegKnot — Navigation aid only, not legal advice
