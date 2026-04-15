@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import AuthGuard from '@/components/AuthGuard'
 import { AppHeader } from '@/components/AppHeader'
-import { apiRequest } from '@/lib/api'
+import { apiRequest, ApiError } from '@/lib/api'
 import { useAuthStore } from '@/lib/auth'
 
 const LOADING_MESSAGES = [
@@ -70,6 +70,9 @@ function PSCContent() {
 
   // Debounced check-state save
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Cancellation for in-flight generation
+  const abortRef = useRef<AbortController | null>(null)
 
   // Cycle loading messages every 3.5s and track elapsed time
   useEffect(() => {
@@ -137,34 +140,52 @@ function PSCContent() {
     setProfileGap(null)
     setChecklist(null)
     setChecked(new Set())
+
+    const controller = new AbortController()
+    abortRef.current = controller
+
     try {
       const result = await apiRequest<PSCChecklist>('/checklists/psc', {
         method: 'POST',
         body: JSON.stringify({ vessel_id: selectedVessel }),
+        signal: controller.signal,
       })
       setChecklist(result)
       setChecked(new Set(result.checked_indices || []))
     } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Failed to generate checklist'
-      // Try to detect the 422 profile incomplete error
-      try {
-        // apiRequest throws an Error whose message is the JSON body for most error codes.
-        const parsed = JSON.parse(msg)
-        if (parsed?.detail && typeof parsed.detail === 'object' && parsed.detail.missing_fields) {
-          setProfileGap(parsed.detail as ProfileIncompleteError)
-        } else if (parsed?.detail?.missing_fields) {
-          setProfileGap(parsed.detail as ProfileIncompleteError)
-        } else {
-          setError(typeof parsed?.detail === 'string' ? parsed.detail : msg)
-        }
-      } catch {
-        setError(msg)
+      // User-initiated cancellation — reset silently
+      if (e instanceof DOMException && e.name === 'AbortError') {
+        return
       }
+
+      // Structured 422 = profile completeness gap
+      if (e instanceof ApiError && e.status === 422) {
+        const body = e.body as { detail?: unknown }
+        const detail = body?.detail
+        if (detail && typeof detail === 'object' && 'missing_fields' in (detail as Record<string, unknown>)) {
+          setProfileGap(detail as ProfileIncompleteError)
+          return
+        }
+      }
+
+      // Everything else — show the cleaned error message
+      const msg = e instanceof Error ? e.message : 'Failed to generate checklist'
+      setError(msg)
     } finally {
+      abortRef.current = null
       setLoading(false)
       setLoadingStartedAt(null)
     }
   }, [selectedVessel])
+
+  function cancelGeneration() {
+    if (abortRef.current) {
+      abortRef.current.abort()
+      abortRef.current = null
+    }
+    setLoading(false)
+    setLoadingStartedAt(null)
+  }
 
   function handleGenerateClick() {
     if (checklist) {
@@ -345,6 +366,14 @@ function PSCContent() {
                 <br />
                 Please keep this page open.
               </p>
+              <button
+                onClick={cancelGeneration}
+                className="font-mono text-xs text-[#6b7594] hover:text-red-400
+                  border border-white/10 hover:border-red-400/40
+                  rounded-lg px-4 py-2 mt-1 transition-colors duration-150"
+              >
+                Cancel
+              </button>
             </section>
           )}
 

@@ -3,7 +3,43 @@ import { diagnoseNetworkError, getNetworkErrorMessage } from './networkError'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'
 
-async function doFetch(path: string, init: RequestInit, token: string | null): Promise<Response> {
+/**
+ * Thrown when the API returns a non-2xx response. Preserves status code and
+ * parsed body (if JSON) so callers can branch on structured error detail
+ * without string-parsing the message.
+ */
+export class ApiError extends Error {
+  status: number
+  body: unknown          // parsed JSON if available, otherwise the raw text
+  bodyText: string       // raw text body for fallback
+
+  constructor(status: number, bodyText: string, body: unknown) {
+    // Prefer a human-readable message from body.detail when available.
+    let message: string = `API error ${status}`
+    if (body && typeof body === 'object' && 'detail' in (body as Record<string, unknown>)) {
+      const d = (body as { detail: unknown }).detail
+      if (typeof d === 'string') {
+        message = d
+      } else if (d && typeof d === 'object' && 'detail' in (d as Record<string, unknown>)) {
+        const inner = (d as { detail: unknown }).detail
+        if (typeof inner === 'string') message = inner
+      }
+    } else if (bodyText) {
+      message = `${message}: ${bodyText}`
+    }
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
+    this.body = body
+    this.bodyText = bodyText
+  }
+}
+
+async function doFetch(
+  path: string,
+  init: RequestInit,
+  token: string | null,
+): Promise<Response> {
   return fetch(`${API_URL}${path}`, {
     ...init,
     credentials: 'include',
@@ -20,6 +56,8 @@ async function doFetch(path: string, init: RequestInit, token: string | null): P
  * - Attaches Bearer token from auth store
  * - On 401: calls POST /auth/refresh, retries once
  * - On second 401: redirects to /login
+ * - On non-2xx: throws `ApiError` with `status` and parsed `body`
+ * - Supports AbortSignal via init.signal for cancellation
  */
 export async function apiRequest<T = unknown>(
   path: string,
@@ -32,6 +70,10 @@ export async function apiRequest<T = unknown>(
   try {
     res = await doFetch(path, init, token)
   } catch (err) {
+    // Preserve AbortError so callers can distinguish cancellation.
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      throw err
+    }
     if (err instanceof TypeError) {
       const diag = await diagnoseNetworkError()
       const msg = getNetworkErrorMessage(diag)
@@ -51,8 +93,14 @@ export async function apiRequest<T = unknown>(
   }
 
   if (!res.ok) {
-    const detail = await res.text().catch(() => res.statusText)
-    throw new Error(`API error ${res.status}: ${detail}`)
+    const bodyText = await res.text().catch(() => res.statusText)
+    let parsed: unknown = bodyText
+    try {
+      parsed = JSON.parse(bodyText)
+    } catch {
+      // leave as text
+    }
+    throw new ApiError(res.status, bodyText, parsed)
   }
 
   if (res.status === 204) return undefined as T
@@ -92,8 +140,14 @@ export async function apiUpload<T = unknown>(
   }
 
   if (!res.ok) {
-    const detail = await res.text().catch(() => res.statusText)
-    throw new Error(`API error ${res.status}: ${detail}`)
+    const bodyText = await res.text().catch(() => res.statusText)
+    let parsed: unknown = bodyText
+    try {
+      parsed = JSON.parse(bodyText)
+    } catch {
+      // leave as text
+    }
+    throw new ApiError(res.status, bodyText, parsed)
   }
 
   return res.json() as Promise<T>
