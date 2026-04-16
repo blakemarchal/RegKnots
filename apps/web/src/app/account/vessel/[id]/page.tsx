@@ -85,6 +85,10 @@ interface VesselData {
   route_types: string[]
   cargo_types: string[]
   gross_tonnage: number | null
+  subchapter: string | null
+  inspection_certificate_type: string | null
+  manning_requirement: string | null
+  route_limitations: string | null
 }
 
 interface DocumentData {
@@ -379,6 +383,12 @@ function VesselEditContent() {
   const [routeTypes, setRouteTypes] = useState<string[]>([])
   const [cargoTypes, setCargoTypes] = useState<string[]>([])
 
+  // Extended profile fields (also populated via COI extraction)
+  const [subchapter, setSubchapter] = useState('')
+  const [certType, setCertType] = useState('')
+  const [manning, setManning] = useState('')
+  const [routeLimitations, setRouteLimitations] = useState('')
+
   // Document state
   const [documents, setDocuments] = useState<DocumentData[]>([])
   const [extractionPhase, setExtractionPhase] = useState<ExtractionPhase>('idle')
@@ -419,6 +429,10 @@ function VesselEditContent() {
           setGrossTonnage(v.gross_tonnage ? String(v.gross_tonnage) : '')
           setRouteTypes(v.route_types)
           setCargoTypes(v.cargo_types)
+          setSubchapter(v.subchapter ?? '')
+          setCertType(v.inspection_certificate_type ?? '')
+          setManning(v.manning_requirement ?? '')
+          setRouteLimitations(v.route_limitations ?? '')
         } else {
           setError('Vessel not found')
         }
@@ -459,6 +473,10 @@ function VesselEditContent() {
           gross_tonnage: grossTonnage ? parseFloat(grossTonnage) : null,
           route_types: routeTypes,
           cargo_types: cargoTypes,
+          subchapter: subchapter.trim() || null,
+          inspection_certificate_type: certType.trim() || null,
+          manning_requirement: manning.trim() || null,
+          route_limitations: routeLimitations.trim() || null,
         }),
       })
       setSuccess(true)
@@ -706,6 +724,72 @@ function VesselEditContent() {
               Vessel updated. Redirecting...
             </p>
           )}
+
+          {/* ── Extended Profile (for PSC Checklist + compliance) ── */}
+          <div className="mt-2 pt-4 border-t border-white/8">
+            <p className="font-mono text-xs text-[#6b7594] uppercase tracking-wider mb-3">
+              Compliance Details
+              <span className="normal-case tracking-normal ml-2 text-[#6b7594]/60">
+                (also populated via COI upload)
+              </span>
+            </p>
+
+            <div className="flex flex-col gap-3">
+              <div className="flex flex-col gap-1">
+                <label className="font-mono text-xs text-[#6b7594]">USCG Subchapter</label>
+                <select
+                  value={subchapter}
+                  onChange={(e) => setSubchapter(e.target.value)}
+                  className="font-mono w-full border border-white/10 rounded-lg px-3 py-2 text-sm
+                    outline-none focus:border-[#2dd4bf] transition-colors appearance-none"
+                  style={{ backgroundColor: '#0d1225', color: '#f0ece4' }}
+                >
+                  <option value="" style={{ backgroundColor: '#111827', color: '#f0ece4' }}>Not set</option>
+                  {['T', 'K', 'H', 'I', 'R', 'C', 'D', 'L', 'O', 'S', 'U'].map((s) => (
+                    <option key={s} value={s} style={{ backgroundColor: '#111827', color: '#f0ece4' }}>
+                      Subchapter {s}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex flex-col gap-1">
+                <label className="font-mono text-xs text-[#6b7594]">Inspection Certificate Type</label>
+                <input
+                  type="text"
+                  value={certType}
+                  onChange={(e) => setCertType(e.target.value)}
+                  placeholder="e.g. COI, SOLAS Safety, IOPP"
+                  className="font-mono w-full bg-[#0d1225] border border-white/10 rounded-lg px-3 py-2 text-sm
+                    text-[#f0ece4] outline-none focus:border-[#2dd4bf] transition-colors"
+                />
+              </div>
+
+              <div className="flex flex-col gap-1">
+                <label className="font-mono text-xs text-[#6b7594]">Manning Requirement</label>
+                <input
+                  type="text"
+                  value={manning}
+                  onChange={(e) => setManning(e.target.value)}
+                  placeholder="e.g. Master, 1 crew when > 36 passengers"
+                  className="font-mono w-full bg-[#0d1225] border border-white/10 rounded-lg px-3 py-2 text-sm
+                    text-[#f0ece4] outline-none focus:border-[#2dd4bf] transition-colors"
+                />
+              </div>
+
+              <div className="flex flex-col gap-1">
+                <label className="font-mono text-xs text-[#6b7594]">Route Limitations</label>
+                <textarea
+                  value={routeLimitations}
+                  onChange={(e) => setRouteLimitations(e.target.value)}
+                  rows={2}
+                  placeholder="e.g. Limited to Table Rock Lake, not more than 1000 ft from shore without VHF"
+                  className="font-mono w-full bg-[#0d1225] border border-white/10 rounded-lg px-3 py-2 text-sm
+                    text-[#f0ece4] outline-none focus:border-[#2dd4bf] transition-colors resize-none"
+                />
+              </div>
+            </div>
+          </div>
 
           {/* Save */}
           <button

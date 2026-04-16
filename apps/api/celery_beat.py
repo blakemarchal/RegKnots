@@ -45,4 +45,10 @@ celery.conf.beat_schedule = {
         # ERG updates every ~4 years; monthly cadence is plenty with low noise.
         "schedule": crontab(hour=11, minute=0, day_of_month="2"),
     },
+    "check-nmc-updates-weekly": {
+        "task": "app.tasks.check_nmc_updates",
+        # Every Wednesday at 12:00 UTC — checks NMC for new policy letters,
+        # memos, and credentialing guidance PDFs.
+        "schedule": crontab(hour=12, minute=0, day_of_week="wednesday"),
+    },
 }

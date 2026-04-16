@@ -2271,6 +2271,22 @@ async def trigger_imo_check(
         return JobRunResult(ok=False, details=str(exc)[:200])
 
 
+@router.post("/jobs/nmc-check", response_model=JobRunResult)
+async def trigger_nmc_check(
+    admin: Annotated[CurrentUser, Depends(require_write_admin)],
+) -> JobRunResult:
+    """Run the NMC memo/policy document scraper on demand."""
+    from app.tasks import _check_nmc_updates_async
+    logger.info("Admin %s triggered NMC document check", admin.email)
+    await audit_log(await get_pool(), admin, "trigger_nmc_check")
+    try:
+        await _check_nmc_updates_async()
+        return JobRunResult(ok=True, details="NMC check complete. If new documents found, an alert email was sent to hello@regknots.com.")
+    except Exception as exc:
+        logger.exception("NMC document check failed")
+        return JobRunResult(ok=False, details=str(exc)[:200])
+
+
 @router.get("/jobs/beat-schedule")
 async def beat_schedule(
     _admin: Annotated[CurrentUser, Depends(require_admin)],

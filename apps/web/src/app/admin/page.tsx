@@ -2546,6 +2546,14 @@ function JobsTab() {
           loadingKey={loadingKey}
           run={run}
         />
+        <JobRow
+          label="NMC document check"
+          description="Scrapes NMC for new policy letters, memos, credentialing guidance"
+          previewPath={null}
+          sendPath="/admin/jobs/nmc-check"
+          loadingKey={loadingKey}
+          run={run}
+        />
       </div>
 
       {/* Beat schedule */}

@@ -24,6 +24,10 @@ class VesselListItem(BaseModel):
     route_types: list[str]
     cargo_types: list[str]
     gross_tonnage: float | None
+    subchapter: str | None = None
+    inspection_certificate_type: str | None = None
+    manning_requirement: str | None = None
+    route_limitations: str | None = None
 
 
 @router.get("", response_model=list[VesselListItem])
@@ -34,7 +38,9 @@ async def list_vessels(
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             """
-            SELECT id, name, vessel_type, route_types, cargo_types, gross_tonnage
+            SELECT id, name, vessel_type, route_types, cargo_types, gross_tonnage,
+                   subchapter, inspection_certificate_type, manning_requirement,
+                   route_limitations
             FROM vessels
             WHERE user_id = $1
             ORDER BY created_at ASC
@@ -49,6 +55,10 @@ async def list_vessels(
             route_types=list(r["route_types"] or []),
             cargo_types=list(r["cargo_types"] or []),
             gross_tonnage=float(r["gross_tonnage"]) if r["gross_tonnage"] is not None else None,
+            subchapter=r["subchapter"],
+            inspection_certificate_type=r["inspection_certificate_type"],
+            manning_requirement=r["manning_requirement"],
+            route_limitations=r["route_limitations"],
         )
         for r in rows
     ]
@@ -129,6 +139,11 @@ class VesselUpdate(BaseModel):
     gross_tonnage: float | None = None
     route_types: list[str] | None = None
     cargo_types: list[str] | None = None
+    # Extended profile fields (also populated via COI extraction)
+    subchapter: str | None = None
+    inspection_certificate_type: str | None = None
+    manning_requirement: str | None = None
+    route_limitations: str | None = None
 
 
 @router.put("/{vessel_id}", response_model=VesselResponse)
@@ -150,6 +165,10 @@ async def update_vessel(
         ("gross_tonnage", body.gross_tonnage),
         ("route_types", body.route_types),
         ("cargo_types", body.cargo_types),
+        ("subchapter", body.subchapter),
+        ("inspection_certificate_type", body.inspection_certificate_type),
+        ("manning_requirement", body.manning_requirement),
+        ("route_limitations", body.route_limitations),
     ]:
         if value is not None:
             sets.append(f"{field} = ${idx}")

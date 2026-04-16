@@ -51,6 +51,7 @@ _SOURCE_LABELS: dict[str, tuple[str, str]] = {
     ),
     "ism":    ("ISM Code Updated", "ISM Code (Safe Operation of Ships)"),
     "erg":    ("ERG Updated", "ERG (Emergency Response Guidebook)"),
+    "nmc_memo": ("NMC Policy Update", "NMC (National Maritime Center credentialing guidance)"),
 }
 
 

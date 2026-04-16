@@ -688,3 +688,165 @@ def _send_erg_release_alert(db_year: int, hits: list[tuple[str, str, int]]):
         logger.info("Sent ERG release alert: db_year=%s newest_found=%s", db_year, newest)
     except Exception as exc:
         logger.error("Failed to send ERG release alert email: %s", exc)
+
+
+# ── NMC memo / credentialing policy monitor ──────────────────────────────
+#
+# The USCG National Maritime Center publishes policy letters, memos, and
+# credentialing guidance at dco.uscg.mil/nmc/. These cover medical certificate
+# extensions, MMC processing time changes, and endorsement policy updates.
+#
+# This task scrapes the NMC announcements and policy pages weekly for new
+# PDF links, compares against previously-seen URLs stored in a DB table
+# (notifications), and emails hello@regknots.com when new documents appear.
+# Unlike regulation sources, NMC memos are not auto-ingested — they require
+# manual review and ingestion via the CLI.
+
+_NMC_SOURCES = [
+    {
+        "name": "NMC Announcements",
+        "url": "https://www.dco.uscg.mil/nmc/announcements/",
+    },
+    {
+        "name": "NMC Policy & Regulations",
+        "url": "https://www.dco.uscg.mil/nmc/policy_regulations/",
+    },
+    {
+        "name": "NMC Medical/Physical Guidelines",
+        "url": "https://www.dco.uscg.mil/nmc/medical/",
+    },
+]
+
+# Matches links to PDFs on the NMC site
+_NMC_PDF_RE = re.compile(
+    r'href=["\']([^"\']*?/Portals/9/NMC/[^"\']*?\.pdf)["\']',
+    re.IGNORECASE,
+)
+
+
+@celery.task(name="app.tasks.check_nmc_updates")
+def check_nmc_updates():
+    """Check NMC website for new policy letters, memos, and credentialing guidance."""
+    _run_async(_check_nmc_updates_async())
+
+
+async def _check_nmc_updates_async():
+    import asyncpg
+    from app.config import settings
+
+    dsn = settings.database_url.replace("postgresql+asyncpg://", "postgresql://")
+    conn = await asyncpg.connect(dsn)
+
+    try:
+        # Get previously-seen NMC PDF URLs from notifications
+        seen_rows = await conn.fetch(
+            """
+            SELECT DISTINCT link_url FROM notifications
+            WHERE notification_type = 'nmc_memo' AND link_url IS NOT NULL
+            """
+        )
+        seen_urls: set[str] = {r["link_url"] for r in seen_rows}
+
+        new_findings: list[dict] = []
+
+        for source in _NMC_SOURCES:
+            try:
+                resp = requests.get(
+                    source["url"],
+                    timeout=30,
+                    headers={"User-Agent": "RegKnot NMC Monitor/1.0"},
+                )
+                resp.raise_for_status()
+
+                for match in _NMC_PDF_RE.finditer(resp.text):
+                    pdf_path = match.group(1)
+                    # Resolve relative URLs
+                    if pdf_path.startswith("/"):
+                        pdf_url = f"https://www.dco.uscg.mil{pdf_path}"
+                    elif not pdf_path.startswith("http"):
+                        pdf_url = f"https://www.dco.uscg.mil/{pdf_path}"
+                    else:
+                        pdf_url = pdf_path
+
+                    if pdf_url in seen_urls:
+                        continue
+
+                    # Extract a human-readable name from the filename
+                    filename = pdf_url.rsplit("/", 1)[-1].replace("%20", " ").replace("_", " ")
+                    if filename.lower().endswith(".pdf"):
+                        filename = filename[:-4]
+
+                    new_findings.append({
+                        "url": pdf_url,
+                        "filename": filename,
+                        "source_name": source["name"],
+                        "source_url": source["url"],
+                    })
+                    seen_urls.add(pdf_url)  # prevent duplicates across sources
+
+            except Exception as exc:
+                logger.warning("NMC monitor: failed to scrape %s: %s", source["name"], exc)
+
+        if not new_findings:
+            logger.info("NMC monitor: no new documents found")
+            return
+
+        logger.info("NMC monitor: found %d new document(s)", len(new_findings))
+
+        # Record each new document as a notification for tracking
+        for doc in new_findings:
+            try:
+                await conn.execute(
+                    """
+                    INSERT INTO notifications
+                        (title, body, notification_type, source, link_url, is_active)
+                    VALUES ($1, $2, 'nmc_memo', 'nmc', $3, true)
+                    """,
+                    f"New NMC Document: {doc['filename'][:80]}",
+                    f"New document found on {doc['source_name']}: {doc['filename']}",
+                    doc["url"],
+                )
+            except Exception:
+                logger.debug("Failed to insert NMC notification for %s", doc["url"])
+
+        # Alert admin
+        _send_nmc_alert(new_findings)
+
+    finally:
+        await conn.close()
+
+
+def _send_nmc_alert(findings: list[dict]):
+    """Send alert email about new NMC documents."""
+    try:
+        import resend
+        from app.config import settings
+        resend.api_key = settings.resend_api_key
+
+        items_html = ""
+        for f in findings:
+            items_html += (
+                f"<li><a href='{f['url']}'>{f['filename']}</a> "
+                f"<em>(via {f['source_name']})</em></li>"
+            )
+
+        resend.Emails.send({
+            "from": "RegKnot <hello@mail.regknots.com>",
+            "to": ["hello@regknots.com"],
+            "subject": f"{len(findings)} new NMC document(s) detected — RegKnot",
+            "html": (
+                f"<h2>New NMC Documents Detected</h2>"
+                f"<p>The following new documents were found on the USCG National "
+                f"Maritime Center website:</p>"
+                f"<ul>{items_html}</ul>"
+                f"<p><strong>Action required:</strong> Review for relevance to "
+                f"credentialing policy, medical certificate guidance, or MMC "
+                f"processing updates. If relevant, download the PDF and ingest "
+                f"manually as an NMC policy source.</p>"
+                f"<p>These documents are tracked in the notifications table for "
+                f"deduplication — the monitor won't re-alert on the same URLs.</p>"
+            ),
+        })
+        logger.info("Sent NMC document alert for %d documents", len(findings))
+    except Exception as exc:
+        logger.error("Failed to send NMC document alert: %s", exc)
