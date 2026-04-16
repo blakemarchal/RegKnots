@@ -531,6 +531,7 @@ function AccountContent() {
                       { key: 'stcw', label: 'STCW' },
                       { key: 'ism', label: 'ISM' },
                       { key: 'erg', label: 'ERG' },
+                      { key: 'nmc_memo', label: 'NMC' },
                     ].map((s) => (
                       <button
                         key={s.key}

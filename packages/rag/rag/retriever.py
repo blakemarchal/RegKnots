@@ -48,6 +48,7 @@ SOURCE_GROUPS: dict[str, tuple[str, ...]] = {
     "stcw": ("stcw", "stcw_supplement"),
     "ism": ("ism", "ism_supplement"),
     "erg": ("erg",),
+    "nmc": ("nmc_memo",),
 }
 
 # Per-group candidate pool sizes. CFR is larger because it covers three
@@ -162,6 +163,23 @@ _ERG_TERMS: tuple[str, ...] = (
 )
 _ERG_ABBR_RE = re.compile(r"\berg\b", re.IGNORECASE)
 
+# NMC (National Maritime Center) — credentialing, medical certificates,
+# MMC processing, endorsements. These terms boost nmc_memo results.
+_NMC_TERMS: tuple[str, ...] = (
+    "nmc", "national maritime center",
+    "merchant mariner credential", "mmc renewal", "mmc application",
+    "medical certificate", "medical waiver", "cg-719", "cg719",
+    "credential renewal", "credential application", "credential upgrade",
+    "endorsement", "sea service", "sea time",
+    "processing time", "evaluation time",
+    "twic", "transportation worker",
+    "mariner credential", "mariner license",
+    "drug test", "physical exam",
+    "stcw endorsement", "officer endorsement",
+    "raise of grade", "raise in grade",
+)
+_NMC_ABBR_RE = re.compile(r"\b(?:nmc|mmc|twic|cg-?719)\b", re.IGNORECASE)
+
 
 def _source_affinity(query: str) -> dict[str, float]:
     """Return a boost value per source group based on query keywords.
@@ -193,6 +211,11 @@ def _source_affinity(query: str) -> dict[str, float]:
 
     if any(t in q for t in _ERG_TERMS) or _ERG_ABBR_RE.search(q):
         boosts["erg"] = 0.20
+
+    if any(t in q for t in _NMC_TERMS) or _NMC_ABBR_RE.search(q):
+        boosts["nmc"] = 0.20
+        # Credentialing queries also benefit from CFR Parts 10-16
+        boosts.setdefault("cfr", 0.10)
 
     if "cfr" in q or "code of federal" in q:
         boosts["cfr"] = 0.15

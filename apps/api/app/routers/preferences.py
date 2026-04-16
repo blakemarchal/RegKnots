@@ -20,7 +20,7 @@ router = APIRouter(prefix="/preferences", tags=["preferences"])
 # All regulation sources that can trigger alerts.
 ALL_REG_SOURCES = [
     "cfr_33", "cfr_46", "cfr_49", "nvic",
-    "colregs", "solas", "stcw", "ism", "erg",
+    "colregs", "solas", "stcw", "ism", "erg", "nmc_memo",
 ]
 
 
