@@ -72,6 +72,7 @@ class BillingStatus(BaseModel):
     current_period_end: str | None
     billing_interval: str | None  # "month" or "year"
     price_amount: int | None  # cents, e.g. 3900
+    unlimited: bool = False      # True for admin/internal accounts (bypass all limits)
 
 
 _FREE_MESSAGE_LIMIT = 50
@@ -87,7 +88,8 @@ async def billing_status(
         SELECT subscription_tier, subscription_status,
                trial_ends_at, message_count,
                cancel_at_period_end, current_period_end, billing_interval,
-               stripe_subscription_id
+               stripe_subscription_id,
+               is_admin, is_internal
         FROM users WHERE id = $1
         """,
         uuid.UUID(user.user_id),
@@ -99,8 +101,14 @@ async def billing_status(
     trial_ends_at = row["trial_ends_at"]
     message_count = row["message_count"]
     trial_active = tier == "free" and trial_ends_at is not None and trial_ends_at > now
+    is_privileged = bool(row["is_admin"]) or bool(row["is_internal"])
 
-    if tier != "free":
+    if is_privileged:
+        # Admin / internal accounts bypass the subscription gate entirely.
+        # See chat.py for the matching enforcement bypass.
+        needs_subscription = False
+        messages_remaining = None
+    elif tier != "free":
         needs_subscription = False
         messages_remaining = None
     elif trial_active:
@@ -110,8 +118,8 @@ async def billing_status(
         needs_subscription = True
         messages_remaining = 0
 
-    # Paused = full lockout
-    if sub_status == "paused":
+    # Paused = full lockout — but still let privileged users through.
+    if sub_status == "paused" and not is_privileged:
         needs_subscription = True
         messages_remaining = 0
 
@@ -140,6 +148,7 @@ async def billing_status(
         current_period_end=row["current_period_end"].isoformat() if row["current_period_end"] else None,
         billing_interval=row["billing_interval"],
         price_amount=price_amount,
+        unlimited=is_privileged,
     )
 
 

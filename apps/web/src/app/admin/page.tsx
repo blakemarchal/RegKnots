@@ -256,6 +256,19 @@ function AdminContent() {
     if (stored === 'false') setExcludeInternal(false)
   }, [])
 
+  // ── Tab state ───────────────────────────────────────────────────────────
+  type AdminTab = 'overview' | 'users' | 'content' | 'email' | 'data' | 'jobs' | 'system'
+  const [activeTab, setActiveTab] = useState<AdminTab>(() => {
+    if (typeof window === 'undefined') return 'overview'
+    const stored = window.localStorage.getItem('admin_active_tab') as AdminTab | null
+    return stored || 'overview'
+  })
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem('admin_active_tab', activeTab)
+    }
+  }, [activeTab])
+
   // Analytics state
   const [messagesPerDay, setMessagesPerDay] = useState<DayMessageCount[]>([])
   const [topCitations, setTopCitations] = useState<TopCitation[]>([])
@@ -763,6 +776,34 @@ function AdminContent() {
             </div>
           </div>
 
+          {/* ── Tab bar ──────────────────────────────────────────────── */}
+          <div className="flex gap-1 mb-6 overflow-x-auto border-b border-white/8 -mx-4 px-4 pb-0">
+            {([
+              { key: 'overview', label: 'Overview' },
+              { key: 'users', label: 'Users' },
+              { key: 'data', label: 'Data' },
+              { key: 'jobs', label: 'Jobs' },
+              { key: 'email', label: 'Email' },
+              { key: 'system', label: 'System' },
+              { key: 'content', label: 'Content' },
+            ] as const).map((t) => (
+              <button
+                key={t.key}
+                onClick={() => setActiveTab(t.key)}
+                className={`font-mono text-xs uppercase tracking-wider px-3 py-2 rounded-t-md
+                  transition-colors duration-150 whitespace-nowrap
+                  ${activeTab === t.key
+                    ? 'text-[#2dd4bf] bg-[#2dd4bf]/5 border-b-2 border-[#2dd4bf]'
+                    : 'text-[#6b7594] hover:text-[#f0ece4] border-b-2 border-transparent'
+                  }`}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+
+          {activeTab === 'overview' && (
+          <>
           {/* ── Stats grid ───────────────────────────────────────────── */}
           {!stats && !statsError && (
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-8">
@@ -843,6 +884,11 @@ function AdminContent() {
             </div>
           )}
 
+          </>
+          )}
+
+          {activeTab === 'content' && (
+          <>
           {/* ── System Errors (Sentry) ─────────────────────────────────── */}
           <div className="mb-8">
             <h2 className="font-display text-lg font-bold text-[#f0ece4] tracking-wide mb-3">System Errors</h2>
@@ -1147,7 +1193,27 @@ function AdminContent() {
 
           {/* ── Citation Errors ──────────────────────────────────────────── */}
           <div className="mb-8">
-            <h2 className="font-display text-lg font-bold text-[#f0ece4] tracking-wide mb-3">Citation Errors</h2>
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="font-display text-lg font-bold text-[#f0ece4] tracking-wide">Citation Errors</h2>
+              {!isReadOnly && citationErrors.length > 0 && (
+                <button
+                  onClick={async () => {
+                    if (!confirm(`Permanently delete all ${citationErrors.length} citation error(s)?\n\nThis action cannot be undone.`)) return
+                    try {
+                      await apiRequest('/admin/citation-errors/purge', { method: 'DELETE' })
+                      setCitationErrors([])
+                    } catch {
+                      alert('Failed to purge citation errors')
+                    }
+                  }}
+                  className="font-mono text-[10px] font-bold uppercase tracking-wider
+                    text-red-400/80 hover:text-red-400 border border-red-400/30 hover:border-red-400/60
+                    rounded px-2.5 py-1 transition-colors"
+                >
+                  Purge All
+                </button>
+              )}
+            </div>
             {citationLoading ? (
               <div className="bg-[#111827] rounded-xl border border-white/8 px-4 py-6 h-[72px] animate-pulse" />
             ) : citationErrors.length === 0 ? (
@@ -1361,6 +1427,11 @@ function AdminContent() {
             })()}
           </div>
 
+          </>
+          )}
+
+          {activeTab === 'overview' && (
+          <>
           {/* ── Analytics Charts ─────────────────────────────────────── */}
           <div className="mb-8">
             <h2 className="font-display text-lg font-bold text-[#f0ece4] tracking-wide mb-3">Analytics</h2>
@@ -1405,20 +1476,54 @@ function AdminContent() {
                 <div className="bg-[#111827] rounded-xl border border-white/8 p-4">
                   <p className="font-mono text-[10px] text-[#6b7594] uppercase tracking-wider mb-3">Top Cited Regulations</p>
                   {topCitations.length > 0 ? (
-                    <ResponsiveContainer width="100%" height={220}>
-                      <BarChart data={topCitations.slice(0, 10)} layout="vertical" margin={{ left: 80 }}>
+                    <ResponsiveContainer width="100%" height={Math.max(220, topCitations.slice(0, 10).length * 28)}>
+                      <BarChart
+                        data={topCitations.slice(0, 10)}
+                        layout="vertical"
+                        margin={{ top: 4, right: 12, bottom: 4, left: 4 }}
+                      >
                         <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
                         <XAxis type="number" tick={{ fontSize: 10, fill: '#6b7594' }} allowDecimals={false} />
                         <YAxis
                           type="category"
                           dataKey="section_number"
-                          tick={{ fontSize: 9, fill: '#6b7594' }}
-                          width={80}
+                          tick={{ fontSize: 10, fill: '#6b7594' }}
+                          width={Math.min(
+                            140,
+                            Math.max(
+                              64,
+                              topCitations.slice(0, 10).reduce((m, c) => Math.max(m, (c.section_number || '').length), 0) * 7,
+                            ),
+                          )}
+                          tickFormatter={(v: string) => (v.length > 18 ? v.slice(0, 17) + '…' : v)}
                         />
                         <Tooltip
-                          contentStyle={{ backgroundColor: '#1a2332', border: '1px solid #2dd4bf33', borderRadius: '8px', fontSize: '11px', fontFamily: 'monospace' }}
-                          labelStyle={{ color: '#f0ece4' }}
-                          itemStyle={{ color: '#2dd4bf' }}
+                          content={(props: { active?: boolean; payload?: ReadonlyArray<{ payload?: unknown; value?: unknown }> }) => {
+                            if (!props.active || !props.payload || !props.payload[0]) return null
+                            const entry = props.payload[0]
+                            const row = entry.payload as TopCitation | undefined
+                            if (!row) return null
+                            const count = typeof entry.value === 'number' ? entry.value : Number(entry.value) || 0
+                            return (
+                              <div style={{
+                                backgroundColor: '#1a2332',
+                                border: '1px solid #2dd4bf33',
+                                borderRadius: '8px',
+                                padding: '8px 12px',
+                                fontSize: '11px',
+                                fontFamily: 'monospace',
+                                maxWidth: 320,
+                              }}>
+                                <div style={{ color: '#f0ece4', fontWeight: 700 }}>{row.section_number}</div>
+                                {row.section_title && (
+                                  <div style={{ color: '#6b7594', marginTop: 2 }}>{row.section_title}</div>
+                                )}
+                                <div style={{ color: '#2dd4bf', marginTop: 4 }}>
+                                  {count} citation{count === 1 ? '' : 's'}
+                                </div>
+                              </div>
+                            )
+                          }}
                         />
                         <Bar dataKey="cite_count" fill="#2dd4bf" radius={[0, 4, 4, 0]} />
                       </BarChart>
@@ -1500,43 +1605,18 @@ function AdminContent() {
             )}
           </div>
 
+          </>
+          )}
+
+          {activeTab === 'email' && (
+          <>
           {/* ── Email Testing ─────────────────────────────────────────── */}
           {!isReadOnly && (
-          <div className="mb-8">
-            <h2 className="font-display text-lg font-bold text-[#f0ece4] tracking-wide mb-3">Email Testing</h2>
-            <p className="font-mono text-xs text-[#6b7594] mb-3">Send test emails to your admin address.</p>
-            <div className="max-h-48 overflow-y-auto scrollbar-thin scrollbar-track-transparent scrollbar-thumb-[#2dd4bf]/30">
-              <div className="flex flex-wrap gap-2">
-                {([
-                  ['welcome', 'Welcome Email'],
-                  ['password_reset', 'Password Reset'],
-                  ['trial_expiry', 'Trial Expiry'],
-                  ['pilot_ended', 'Pilot Ended'],
-                  ['waitlist_confirmed', 'Waitlist Confirmed'],
-                ] as const).map(([type, label]) => (
-                  <button
-                    key={type}
-                    onClick={() => sendTestEmail(type)}
-                    disabled={emailSending === type}
-                    className="font-mono text-xs font-bold px-4 py-2 rounded-lg border border-[#2dd4bf]/30
-                      text-[#2dd4bf] hover:bg-[#2dd4bf]/10 disabled:opacity-50
-                      disabled:cursor-not-allowed transition-colors"
-                  >
-                    {emailSending === type ? 'Sending...' : label}
-                  </button>
-                ))}
-              </div>
-            </div>
-            {emailToast && (
-              <div className={`mt-3 font-mono text-xs px-3 py-2 rounded-lg border ${
-                emailToast.ok
-                  ? 'bg-[#2dd4bf]/10 border-[#2dd4bf]/30 text-[#2dd4bf]'
-                  : 'bg-red-500/10 border-red-500/30 text-red-400'
-              }`}>
-                {emailToast.msg}
-              </div>
-            )}
-          </div>
+          <EmailCatalogSection
+            emailSending={emailSending}
+            emailToast={emailToast}
+            sendTestEmail={sendTestEmail}
+          />
           )}
 
           {/* ── Custom Email Sender ──────────────────────────────────── */}
@@ -1623,6 +1703,11 @@ function AdminContent() {
           </div>
           )}
 
+          </>
+          )}
+
+          {activeTab === 'users' && (
+          <>
           {/* ── Users table ──────────────────────────────────────────── */}
           <div className="flex items-center justify-between mb-3">
             <h2 className="font-display text-lg font-bold text-[#f0ece4] tracking-wide">
@@ -1926,12 +2011,678 @@ function AdminContent() {
               </button>
             </div>
           )}
+          </>
+          )}
+
+          {activeTab === 'data' && <DataTab />}
+          {activeTab === 'jobs' && <JobsTab />}
+          {activeTab === 'system' && <SystemTab />}
+
         </div>
       </main>
 
       {/* Survey preview modal (admin-only, no save) */}
       {surveyPreview && (
         <PilotSurveyModal forceOpen preview onClose={() => setSurveyPreview(false)} />
+      )}
+    </div>
+  )
+}
+
+// ── Email catalog section (inside Email tab) ────────────────────────────────
+
+interface EmailCatalogEntry { type: string; label: string }
+type EmailCatalog = Record<string, EmailCatalogEntry[]>
+
+interface EmailCatalogProps {
+  emailSending: string | null
+  emailToast: { msg: string; ok: boolean } | null
+  sendTestEmail: (type: string) => Promise<void>
+}
+
+function EmailCatalogSection({ emailSending, emailToast, sendTestEmail }: EmailCatalogProps) {
+  const [catalog, setCatalog] = useState<EmailCatalog>({})
+
+  useEffect(() => {
+    apiRequest<EmailCatalog>('/admin/test-email/catalog')
+      .then(setCatalog)
+      .catch(() => setCatalog({}))
+  }, [])
+
+  return (
+    <div className="mb-8">
+      <h2 className="font-display text-lg font-bold text-[#f0ece4] tracking-wide mb-3">Email Testing</h2>
+      <p className="font-mono text-xs text-[#6b7594] mb-4">
+        Send test emails to your admin address. Covers all {Object.values(catalog).reduce((n, arr) => n + arr.length, 0)} wired email templates.
+      </p>
+
+      <div className="flex flex-col gap-4">
+        {Object.entries(catalog).map(([category, entries]) => (
+          <div key={category} className="bg-[#111827] rounded-xl border border-white/8 p-4">
+            <p className="font-mono text-[10px] text-[#6b7594] uppercase tracking-wider mb-3">{category}</p>
+            <div className="flex flex-wrap gap-2">
+              {entries.map(({ type, label }) => (
+                <button
+                  key={type}
+                  onClick={() => sendTestEmail(type)}
+                  disabled={emailSending === type}
+                  className="font-mono text-xs font-bold px-3 py-1.5 rounded-md border border-[#2dd4bf]/30
+                    text-[#2dd4bf] hover:bg-[#2dd4bf]/10 disabled:opacity-50
+                    disabled:cursor-not-allowed transition-colors"
+                >
+                  {emailSending === type ? 'Sending…' : label}
+                </button>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {emailToast && (
+        <div className={`mt-3 font-mono text-xs px-3 py-2 rounded-lg border ${
+          emailToast.ok
+            ? 'bg-[#2dd4bf]/10 border-[#2dd4bf]/30 text-[#2dd4bf]'
+            : 'bg-red-500/10 border-red-500/30 text-red-400'
+        }`}>
+          {emailToast.msg}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Data tab: universal table browser ────────────────────────────────────────
+
+interface TableInfo { name: string; columns: string[] }
+interface TableRowsResponse {
+  name: string
+  columns: string[]
+  rows: Record<string, unknown>[]
+  total: number
+  limit: number
+  offset: number
+}
+
+function DataTab() {
+  const [tables, setTables] = useState<TableInfo[]>([])
+  const [selectedTable, setSelectedTable] = useState<string>('users')
+  const [data, setData] = useState<TableRowsResponse | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [userIdFilter, setUserIdFilter] = useState('')
+  const [vesselIdFilter, setVesselIdFilter] = useState('')
+  const [search, setSearch] = useState('')
+  const [offset, setOffset] = useState(0)
+  const [expandedRow, setExpandedRow] = useState<number | null>(null)
+  const limit = 50
+
+  useEffect(() => {
+    apiRequest<TableInfo[]>('/admin/data/tables')
+      .then(setTables)
+      .catch(() => setError('Failed to load tables'))
+  }, [])
+
+  const fetchData = useCallback(async () => {
+    if (!selectedTable) return
+    setLoading(true)
+    setError(null)
+    try {
+      const params = new URLSearchParams({
+        limit: String(limit),
+        offset: String(offset),
+      })
+      if (userIdFilter.trim()) params.set('user_id', userIdFilter.trim())
+      if (vesselIdFilter.trim()) params.set('vessel_id', vesselIdFilter.trim())
+      if (search.trim()) params.set('search', search.trim())
+      const result = await apiRequest<TableRowsResponse>(
+        `/admin/data/table/${selectedTable}?${params}`,
+      )
+      setData(result)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to load data')
+      setData(null)
+    } finally {
+      setLoading(false)
+    }
+  }, [selectedTable, offset, userIdFilter, vesselIdFilter, search])
+
+  useEffect(() => {
+    fetchData()
+  }, [fetchData])
+
+  function handleTableChange(name: string) {
+    setSelectedTable(name)
+    setOffset(0)
+    setExpandedRow(null)
+  }
+
+  function downloadJson() {
+    if (!data) return
+    const blob = new Blob([JSON.stringify(data.rows, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${data.name}_${new Date().toISOString().slice(0, 10)}.json`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  return (
+    <div className="mb-8 flex flex-col gap-4">
+      <h2 className="font-display text-lg font-bold text-[#f0ece4] tracking-wide">Data Browser</h2>
+      <p className="font-mono text-xs text-[#6b7594]">
+        Read-only access to whitelisted tables. Sensitive columns (hashed passwords, tokens) are excluded.
+      </p>
+
+      {/* Controls */}
+      <div className="bg-[#111827] rounded-xl border border-white/8 p-4 flex flex-col gap-3">
+        <div className="flex items-center gap-2 flex-wrap">
+          <label className="font-mono text-[10px] text-[#6b7594] uppercase tracking-wider">Table</label>
+          <select
+            value={selectedTable}
+            onChange={(e) => handleTableChange(e.target.value)}
+            className="font-mono text-xs border border-white/10 rounded-lg px-3 py-1.5
+              outline-none focus:border-[#2dd4bf] transition-colors"
+            style={{ backgroundColor: '#0d1225', color: '#f0ece4' }}
+          >
+            {tables.map((t) => (
+              <option key={t.name} value={t.name} style={{ backgroundColor: '#111827' }}>
+                {t.name}
+              </option>
+            ))}
+          </select>
+          {data && (
+            <span className="font-mono text-[10px] text-[#6b7594] ml-2">
+              {data.total} total
+            </span>
+          )}
+          <button
+            onClick={fetchData}
+            className="font-mono text-[10px] text-[#2dd4bf] hover:underline ml-auto"
+          >
+            Refresh
+          </button>
+          <button
+            onClick={downloadJson}
+            disabled={!data}
+            className="font-mono text-[10px] text-[#2dd4bf] hover:underline disabled:opacity-40"
+          >
+            Export JSON
+          </button>
+        </div>
+
+        <div className="flex items-center gap-2 flex-wrap">
+          <input
+            value={userIdFilter}
+            onChange={(e) => { setUserIdFilter(e.target.value); setOffset(0) }}
+            placeholder="Filter: user_id (UUID)"
+            className="font-mono text-xs bg-[#0d1225] border border-white/10 rounded-lg px-3 py-1.5
+              text-[#f0ece4] outline-none focus:border-[#2dd4bf] transition-colors flex-1 min-w-[200px]"
+          />
+          <input
+            value={vesselIdFilter}
+            onChange={(e) => { setVesselIdFilter(e.target.value); setOffset(0) }}
+            placeholder="Filter: vessel_id (UUID)"
+            className="font-mono text-xs bg-[#0d1225] border border-white/10 rounded-lg px-3 py-1.5
+              text-[#f0ece4] outline-none focus:border-[#2dd4bf] transition-colors flex-1 min-w-[200px]"
+          />
+          <input
+            value={search}
+            onChange={(e) => { setSearch(e.target.value); setOffset(0) }}
+            placeholder="Search text columns"
+            className="font-mono text-xs bg-[#0d1225] border border-white/10 rounded-lg px-3 py-1.5
+              text-[#f0ece4] outline-none focus:border-[#2dd4bf] transition-colors flex-1 min-w-[200px]"
+          />
+        </div>
+      </div>
+
+      {error && (
+        <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-3">
+          <p className="font-mono text-xs text-red-400">{error}</p>
+        </div>
+      )}
+
+      {loading && !data && (
+        <div className="bg-[#111827] rounded-xl border border-white/8 h-32 animate-pulse" />
+      )}
+
+      {/* Rows */}
+      {data && (
+        <div className="bg-[#111827] rounded-xl border border-white/8 overflow-x-auto">
+          <table className="w-full font-mono text-xs">
+            <thead>
+              <tr className="border-b border-white/8">
+                {data.columns.map((c) => (
+                  <th key={c} className="text-left px-3 py-2 text-[10px] uppercase tracking-wider text-[#6b7594] whitespace-nowrap">
+                    {c}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {data.rows.length === 0 && (
+                <tr>
+                  <td colSpan={data.columns.length} className="px-3 py-6 text-center text-[#6b7594]">
+                    No rows
+                  </td>
+                </tr>
+              )}
+              {data.rows.map((row, idx) => {
+                const isExpanded = expandedRow === idx
+                return (
+                  <>
+                    <tr
+                      key={idx}
+                      onClick={() => setExpandedRow(isExpanded ? null : idx)}
+                      className="border-b border-white/5 hover:bg-white/2 cursor-pointer transition-colors"
+                    >
+                      {data.columns.map((c) => {
+                        const v = row[c]
+                        const display =
+                          v === null || v === undefined
+                            ? <span className="text-[#6b7594]/50">—</span>
+                            : typeof v === 'object'
+                              ? <span className="text-[#2dd4bf]/70">{'{…}'}</span>
+                              : String(v).length > 40
+                                ? String(v).slice(0, 38) + '…'
+                                : String(v)
+                        return (
+                          <td key={c} className="px-3 py-2 text-[#f0ece4]/80 whitespace-nowrap">
+                            {display}
+                          </td>
+                        )
+                      })}
+                    </tr>
+                    {isExpanded && (
+                      <tr key={`${idx}-detail`} className="bg-[#0d1225]">
+                        <td colSpan={data.columns.length} className="px-3 py-3">
+                          <pre className="font-mono text-[10px] text-[#f0ece4]/80 whitespace-pre-wrap break-all">
+                            {JSON.stringify(row, null, 2)}
+                          </pre>
+                        </td>
+                      </tr>
+                    )}
+                  </>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Pagination */}
+      {data && data.total > limit && (
+        <div className="flex items-center justify-between">
+          <button
+            onClick={() => setOffset(Math.max(0, offset - limit))}
+            disabled={offset === 0}
+            className="font-mono text-xs text-[#2dd4bf] hover:underline disabled:opacity-40"
+          >
+            ← Previous
+          </button>
+          <p className="font-mono text-[10px] text-[#6b7594]">
+            Rows {offset + 1}–{Math.min(offset + limit, data.total)} of {data.total}
+          </p>
+          <button
+            onClick={() => setOffset(offset + limit)}
+            disabled={offset + limit >= data.total}
+            className="font-mono text-xs text-[#2dd4bf] hover:underline disabled:opacity-40"
+          >
+            Next →
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Jobs tab: one-click Celery triggers ─────────────────────────────────────
+
+function JobsTab() {
+  const [result, setResult] = useState<{ msg: string; ok: boolean } | null>(null)
+  const [loadingKey, setLoadingKey] = useState<string | null>(null)
+  const [ingestSource, setIngestSource] = useState('cfr_46')
+  const [noNotify, setNoNotify] = useState(true)
+  const [beatSchedule, setBeatSchedule] = useState<Record<string, { task: string; schedule: string }>>({})
+
+  useEffect(() => {
+    apiRequest<{ beat_schedule: typeof beatSchedule }>('/admin/jobs/beat-schedule')
+      .then((r) => setBeatSchedule(r.beat_schedule || {}))
+      .catch(() => {})
+  }, [])
+
+  async function run(key: string, path: string, method: string = 'POST') {
+    setLoadingKey(key)
+    setResult(null)
+    try {
+      const r = await apiRequest<{ ok: boolean; details?: string; sent?: number }>(path, { method })
+      setResult({ msg: r.details || `Sent: ${r.sent ?? ''}`, ok: r.ok !== false })
+    } catch (e) {
+      setResult({ msg: e instanceof Error ? e.message : 'Failed', ok: false })
+    } finally {
+      setLoadingKey(null)
+    }
+  }
+
+  return (
+    <div className="mb-8 flex flex-col gap-4">
+      <h2 className="font-display text-lg font-bold text-[#f0ece4] tracking-wide">Jobs</h2>
+
+      {result && (
+        <div className={`rounded-xl border p-3 ${result.ok ? 'bg-[#2dd4bf]/5 border-[#2dd4bf]/30' : 'bg-red-500/10 border-red-500/30'}`}>
+          <p className={`font-mono text-xs ${result.ok ? 'text-[#2dd4bf]' : 'text-red-400'}`}>{result.msg}</p>
+        </div>
+      )}
+
+      {/* Ingest controls */}
+      <div className="bg-[#111827] rounded-xl border border-white/8 p-4 flex flex-col gap-3">
+        <p className="font-mono text-[10px] text-[#6b7594] uppercase tracking-wider">Manual Ingest</p>
+        <div className="flex items-center gap-2 flex-wrap">
+          <select
+            value={ingestSource}
+            onChange={(e) => setIngestSource(e.target.value)}
+            className="font-mono text-xs border border-white/10 rounded-lg px-3 py-1.5
+              outline-none focus:border-[#2dd4bf] transition-colors"
+            style={{ backgroundColor: '#0d1225', color: '#f0ece4' }}
+          >
+            {['cfr_33', 'cfr_46', 'cfr_49', 'nvic', 'colregs', 'solas', 'stcw', 'ism', 'erg'].map((s) => (
+              <option key={s} value={s} style={{ backgroundColor: '#111827' }}>{s}</option>
+            ))}
+          </select>
+          <label className="flex items-center gap-2 font-mono text-xs text-[#f0ece4]/80">
+            <input
+              type="checkbox"
+              checked={noNotify}
+              onChange={(e) => setNoNotify(e.target.checked)}
+              className="accent-[#2dd4bf]"
+            />
+            --no-notify (safe)
+          </label>
+          <button
+            onClick={() => run(
+              `ingest-${ingestSource}`,
+              `/admin/jobs/ingest?source=${ingestSource}&no_notify=${noNotify}`,
+            )}
+            disabled={loadingKey === `ingest-${ingestSource}`}
+            className="font-mono text-xs font-bold text-[#0a0e1a] bg-[#2dd4bf]
+              hover:brightness-110 disabled:opacity-50 rounded-lg px-4 py-1.5
+              transition-[filter] duration-150"
+          >
+            {loadingKey === `ingest-${ingestSource}` ? 'Starting…' : 'Run Ingest'}
+          </button>
+        </div>
+        <p className="font-mono text-[10px] text-[#6b7594]">
+          Spawns a background subprocess. Watch <code>journalctl -u regknots-api</code> for progress.
+        </p>
+      </div>
+
+      {/* Celery job triggers */}
+      <div className="bg-[#111827] rounded-xl border border-white/8 p-4 flex flex-col gap-2">
+        <p className="font-mono text-[10px] text-[#6b7594] uppercase tracking-wider">Scheduled Jobs (manual trigger)</p>
+        <JobRow
+          label="Credential expiry reminders"
+          description="Runs for admin's own credentials only"
+          previewPath="/admin/test-job/preview-credential-reminders"
+          sendPath="/admin/test-job/credential-reminders"
+          loadingKey={loadingKey}
+          run={run}
+          previewRender={(data: { pending_reminders?: unknown[]; total?: number }) => (
+            <p className="font-mono text-[10px] text-[#6b7594]">
+              {data.total ?? 0} pending reminders across all users
+            </p>
+          )}
+        />
+        <JobRow
+          label="Regulation digest"
+          description="Sends a digest to admin only"
+          previewPath="/admin/test-job/preview-digest"
+          sendPath="/admin/test-job/regulation-digest"
+          loadingKey={loadingKey}
+          run={run}
+          previewRender={(data: { notification_count?: number; recipient_count?: number }) => (
+            <p className="font-mono text-[10px] text-[#6b7594]">
+              {data.notification_count ?? 0} notifications, {data.recipient_count ?? 0} eligible users
+            </p>
+          )}
+        />
+        <JobRow
+          label="IMO amendment check"
+          description="Scrapes IMO sources for new MSC refs"
+          previewPath={null}
+          sendPath="/admin/jobs/imo-amendment-check"
+          loadingKey={loadingKey}
+          run={run}
+        />
+      </div>
+
+      {/* Beat schedule */}
+      <div className="bg-[#111827] rounded-xl border border-white/8 p-4 flex flex-col gap-2">
+        <p className="font-mono text-[10px] text-[#6b7594] uppercase tracking-wider">Celery Beat Schedule</p>
+        {Object.keys(beatSchedule).length === 0 ? (
+          <p className="font-mono text-[10px] text-[#6b7594]">No schedule info available.</p>
+        ) : (
+          <table className="w-full font-mono text-[10px]">
+            <thead>
+              <tr className="border-b border-white/8">
+                <th className="text-left py-1 text-[#6b7594]">Name</th>
+                <th className="text-left py-1 text-[#6b7594]">Task</th>
+                <th className="text-left py-1 text-[#6b7594]">Schedule</th>
+              </tr>
+            </thead>
+            <tbody>
+              {Object.entries(beatSchedule).map(([name, entry]) => (
+                <tr key={name} className="border-b border-white/5">
+                  <td className="py-1 text-[#f0ece4]/80">{name}</td>
+                  <td className="py-1 text-[#2dd4bf]/70">{entry.task}</td>
+                  <td className="py-1 text-[#6b7594]">{entry.schedule}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  )
+}
+
+interface JobRowProps {
+  label: string
+  description: string
+  previewPath: string | null
+  sendPath: string
+  loadingKey: string | null
+  run: (key: string, path: string, method?: string) => Promise<void>
+  previewRender?: (data: Record<string, unknown>) => React.ReactNode
+}
+
+function JobRow({ label, description, previewPath, sendPath, loadingKey, run, previewRender }: JobRowProps) {
+  const [preview, setPreview] = useState<Record<string, unknown> | null>(null)
+  const [previewLoading, setPreviewLoading] = useState(false)
+
+  async function fetchPreview() {
+    if (!previewPath) return
+    setPreviewLoading(true)
+    try {
+      const r = await apiRequest<Record<string, unknown>>(previewPath)
+      setPreview(r)
+    } catch {
+      // ignore
+    } finally {
+      setPreviewLoading(false)
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-1 py-2 border-b border-white/5 last:border-0">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex flex-col min-w-0 flex-1">
+          <p className="font-mono text-sm text-[#f0ece4]">{label}</p>
+          <p className="font-mono text-[10px] text-[#6b7594]">{description}</p>
+          {preview && previewRender && (
+            <div className="mt-1">{previewRender(preview)}</div>
+          )}
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          {previewPath && (
+            <button
+              onClick={fetchPreview}
+              disabled={previewLoading}
+              className="font-mono text-[10px] text-[#6b7594] hover:text-[#2dd4bf] disabled:opacity-40"
+            >
+              {previewLoading ? '…' : 'Preview'}
+            </button>
+          )}
+          <button
+            onClick={() => run(sendPath, sendPath)}
+            disabled={loadingKey === sendPath}
+            className="font-mono text-[10px] font-bold text-[#2dd4bf]
+              border border-[#2dd4bf]/40 hover:bg-[#2dd4bf]/10
+              disabled:opacity-50 rounded px-3 py-1 transition-colors duration-150"
+          >
+            {loadingKey === sendPath ? 'Running…' : 'Run'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── System tab: health panel ────────────────────────────────────────────────
+
+interface SystemHealth {
+  timestamp: string
+  environment: string
+  database?: { ok: boolean; size?: string; active_connections?: number; pool_size?: number; pool_free?: number; latest_migration?: string; error?: string }
+  redis?: { ok: boolean; used_memory_human?: string; error?: string }
+  uploads?: { ok: boolean; path?: string; total_bytes?: number; file_count?: number; disk_free?: number; disk_total?: number; error?: string }
+  sentry?: { ok: boolean; org?: string | null }
+  api_keys?: { anthropic: boolean; openai: boolean; resend: boolean; stripe: boolean }
+}
+
+function SystemTab() {
+  const [health, setHealth] = useState<SystemHealth | null>(null)
+  const [loading, setLoading] = useState(false)
+
+  const fetchHealth = useCallback(async () => {
+    setLoading(true)
+    try {
+      const r = await apiRequest<SystemHealth>('/admin/system/health')
+      setHealth(r)
+    } catch {
+      setHealth(null)
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => { fetchHealth() }, [fetchHealth])
+
+  function formatBytes(b: number | undefined): string {
+    if (b === undefined || b === null) return '—'
+    const units = ['B', 'KB', 'MB', 'GB', 'TB']
+    let i = 0
+    let n = b
+    while (n >= 1024 && i < units.length - 1) { n /= 1024; i++ }
+    return `${n.toFixed(1)} ${units[i]}`
+  }
+
+  function Status({ ok }: { ok: boolean | undefined }) {
+    return (
+      <span className={`inline-block w-2 h-2 rounded-full ${ok ? 'bg-[#2dd4bf]' : 'bg-red-400'}`} />
+    )
+  }
+
+  return (
+    <div className="mb-8 flex flex-col gap-4">
+      <div className="flex items-center justify-between">
+        <h2 className="font-display text-lg font-bold text-[#f0ece4] tracking-wide">System Health</h2>
+        <button
+          onClick={fetchHealth}
+          disabled={loading}
+          className="font-mono text-xs text-[#2dd4bf] hover:underline disabled:opacity-50"
+        >
+          {loading ? 'Refreshing…' : 'Refresh'}
+        </button>
+      </div>
+
+      {!health && !loading && (
+        <p className="font-mono text-xs text-red-400">Failed to load health</p>
+      )}
+      {!health && loading && (
+        <div className="bg-[#111827] rounded-xl border border-white/8 h-32 animate-pulse" />
+      )}
+
+      {health && (
+        <>
+          <p className="font-mono text-[10px] text-[#6b7594]">
+            Snapshot taken {new Date(health.timestamp).toLocaleString()} · env: <strong className="text-[#f0ece4]">{health.environment}</strong>
+          </p>
+
+          {/* Database */}
+          <div className="bg-[#111827] rounded-xl border border-white/8 p-4 flex flex-col gap-2">
+            <div className="flex items-center gap-2">
+              <Status ok={health.database?.ok} />
+              <p className="font-mono text-xs text-[#f0ece4] uppercase tracking-wider">Database</p>
+            </div>
+            {health.database?.ok ? (
+              <div className="grid grid-cols-2 gap-2 font-mono text-[10px] text-[#f0ece4]/80">
+                <div><span className="text-[#6b7594]">Size:</span> {health.database.size}</div>
+                <div><span className="text-[#6b7594]">Active connections:</span> {health.database.active_connections}</div>
+                <div><span className="text-[#6b7594]">Pool size:</span> {health.database.pool_size}</div>
+                <div><span className="text-[#6b7594]">Pool free:</span> {health.database.pool_free}</div>
+                <div className="col-span-2"><span className="text-[#6b7594]">Latest migration:</span> {health.database.latest_migration}</div>
+              </div>
+            ) : (
+              <p className="font-mono text-[10px] text-red-400">{health.database?.error || 'unreachable'}</p>
+            )}
+          </div>
+
+          {/* Redis */}
+          <div className="bg-[#111827] rounded-xl border border-white/8 p-4 flex flex-col gap-2">
+            <div className="flex items-center gap-2">
+              <Status ok={health.redis?.ok} />
+              <p className="font-mono text-xs text-[#f0ece4] uppercase tracking-wider">Redis</p>
+            </div>
+            {health.redis?.ok ? (
+              <p className="font-mono text-[10px] text-[#f0ece4]/80">
+                <span className="text-[#6b7594]">Memory:</span> {health.redis.used_memory_human}
+              </p>
+            ) : (
+              <p className="font-mono text-[10px] text-red-400">{health.redis?.error || 'unreachable'}</p>
+            )}
+          </div>
+
+          {/* Uploads / disk */}
+          <div className="bg-[#111827] rounded-xl border border-white/8 p-4 flex flex-col gap-2">
+            <div className="flex items-center gap-2">
+              <Status ok={health.uploads?.ok} />
+              <p className="font-mono text-xs text-[#f0ece4] uppercase tracking-wider">Uploads / Disk</p>
+            </div>
+            {health.uploads?.ok ? (
+              <div className="grid grid-cols-2 gap-2 font-mono text-[10px] text-[#f0ece4]/80">
+                <div className="col-span-2"><span className="text-[#6b7594]">Path:</span> {health.uploads.path}</div>
+                <div><span className="text-[#6b7594]">Upload size:</span> {formatBytes(health.uploads.total_bytes)}</div>
+                <div><span className="text-[#6b7594]">Files:</span> {health.uploads.file_count}</div>
+                <div><span className="text-[#6b7594]">Disk free:</span> {formatBytes(health.uploads.disk_free)}</div>
+                <div><span className="text-[#6b7594]">Disk total:</span> {formatBytes(health.uploads.disk_total)}</div>
+              </div>
+            ) : (
+              <p className="font-mono text-[10px] text-red-400">{health.uploads?.error || 'unreachable'}</p>
+            )}
+          </div>
+
+          {/* External services */}
+          <div className="bg-[#111827] rounded-xl border border-white/8 p-4 flex flex-col gap-2">
+            <p className="font-mono text-xs text-[#f0ece4] uppercase tracking-wider">External Services</p>
+            <div className="grid grid-cols-2 gap-2 font-mono text-[10px] text-[#f0ece4]/80">
+              <div className="flex items-center gap-2"><Status ok={health.sentry?.ok} /> Sentry {health.sentry?.org ? `(${health.sentry.org})` : ''}</div>
+              <div className="flex items-center gap-2"><Status ok={health.api_keys?.anthropic} /> Anthropic API key</div>
+              <div className="flex items-center gap-2"><Status ok={health.api_keys?.openai} /> OpenAI API key</div>
+              <div className="flex items-center gap-2"><Status ok={health.api_keys?.resend} /> Resend API key</div>
+              <div className="flex items-center gap-2"><Status ok={health.api_keys?.stripe} /> Stripe API key</div>
+            </div>
+          </div>
+        </>
       )}
     </div>
   )

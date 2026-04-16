@@ -395,7 +395,19 @@ function AccountContent() {
             </section>
           )}
 
-          {!billingLoading && !billingError && billing && billing.tier === 'free' && (
+          {!billingLoading && !billingError && billing && billing.tier === 'free' && billing.unlimited && (
+            <section className="bg-[#111827] border border-white/8 rounded-xl p-5 flex flex-col gap-3">
+              <p className="font-mono text-xs text-[#6b7594] uppercase tracking-wider">Subscription</p>
+              <p className="font-mono text-sm text-[#f0ece4]/80">
+                <span className="text-[#2dd4bf] font-bold">Unlimited</span> — admin account
+              </p>
+              <p className="font-mono text-xs text-[#6b7594] leading-relaxed">
+                All message limits and trial restrictions are bypassed for admin/internal accounts.
+              </p>
+            </section>
+          )}
+
+          {!billingLoading && !billingError && billing && billing.tier === 'free' && !billing.unlimited && (
             <section className="bg-[#111827] border border-white/8 rounded-xl p-5 flex flex-col gap-3">
               <p className="font-mono text-xs text-[#6b7594] uppercase tracking-wider">Subscription</p>
               <p className="font-mono text-sm text-[#f0ece4]/80">

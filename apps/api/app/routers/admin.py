@@ -70,10 +70,14 @@ async def get_stats(
     exclude_internal: bool = Query(default=False),
 ) -> AdminStats:
     pool = await get_pool()
-    # When filtering, exclude users where is_internal = TRUE and their data
-    uf = " AND u.is_internal IS NOT TRUE" if exclude_internal else ""
+    # When filtering, exclude users where is_internal = TRUE OR is_admin = TRUE.
+    # "exclude_internal" is a historical flag name; it also covers admins now
+    # since admin test activity is the biggest source of noise in metrics.
+    uf = " AND u.is_internal IS NOT TRUE AND u.is_admin IS NOT TRUE" if exclude_internal else ""
     muf = (
-        " AND m.conversation_id IN (SELECT c2.id FROM conversations c2 JOIN users u2 ON u2.id = c2.user_id WHERE u2.is_internal IS NOT TRUE)"
+        " AND m.conversation_id IN ("
+        " SELECT c2.id FROM conversations c2 JOIN users u2 ON u2.id = c2.user_id"
+        " WHERE u2.is_internal IS NOT TRUE AND u2.is_admin IS NOT TRUE)"
         if exclude_internal else ""
     )
     async with pool.acquire() as conn:
@@ -680,7 +684,7 @@ async def list_citation_errors(
             FROM citation_errors ce
             JOIN conversations c ON c.id = ce.conversation_id
             JOIN users u ON u.id = c.user_id
-            WHERE u.is_internal IS NOT TRUE
+            WHERE u.is_internal IS NOT TRUE AND u.is_admin IS NOT TRUE
             ORDER BY ce.created_at DESC
             LIMIT $1
             """,
@@ -712,7 +716,53 @@ async def list_citation_errors(
 
 # ── Email testing ─────────────────────────────────────────────────────────────
 
-EmailType = Literal["welcome", "password_reset", "trial_expiry", "pilot_ended", "waitlist_confirmed"]
+EmailType = Literal[
+    # Auth & account
+    "welcome", "verification", "password_reset", "password_changed",
+    # Subscription & trial
+    "trial_expiry", "pilot_ended", "subscription_confirmed", "payment_failed",
+    "subscription_cancelled", "subscription_paused", "subscription_resumed",
+    # Support & inquiry
+    "support_confirmation", "support_reply", "contact_inquiry",
+    # Waitlist / launch
+    "waitlist_confirmed", "founding_member", "charity_suggestion",
+    # Scheduled / product
+    "credential_expiry", "regulation_digest", "regulation_alert",
+]
+
+# Shown in the admin UI as a categorized dropdown.
+EMAIL_CATEGORIES: dict[str, list[dict]] = {
+    "Auth & Account": [
+        {"type": "welcome", "label": "Welcome"},
+        {"type": "verification", "label": "Email Verification"},
+        {"type": "password_reset", "label": "Password Reset"},
+        {"type": "password_changed", "label": "Password Changed"},
+    ],
+    "Subscription & Trial": [
+        {"type": "trial_expiry", "label": "Trial Expiring"},
+        {"type": "pilot_ended", "label": "Pilot Ended"},
+        {"type": "subscription_confirmed", "label": "Subscription Confirmed"},
+        {"type": "payment_failed", "label": "Payment Failed"},
+        {"type": "subscription_cancelled", "label": "Subscription Cancelled"},
+        {"type": "subscription_paused", "label": "Subscription Paused"},
+        {"type": "subscription_resumed", "label": "Subscription Resumed"},
+    ],
+    "Support & Inquiry": [
+        {"type": "support_confirmation", "label": "Support Confirmation"},
+        {"type": "support_reply", "label": "Support Captain Reply"},
+        {"type": "contact_inquiry", "label": "Contact Form Forward"},
+    ],
+    "Waitlist & Launch": [
+        {"type": "waitlist_confirmed", "label": "Waitlist Confirmed"},
+        {"type": "founding_member", "label": "Founding Member"},
+        {"type": "charity_suggestion", "label": "Charity Suggestion"},
+    ],
+    "Product Notifications": [
+        {"type": "credential_expiry", "label": "Credential Expiry Reminder"},
+        {"type": "regulation_digest", "label": "Regulation Digest"},
+        {"type": "regulation_alert", "label": "Regulation Alert (Immediate)"},
+    ],
+}
 
 
 class TestEmailRequest(BaseModel):
@@ -726,6 +776,14 @@ class TestEmailResult(BaseModel):
     recipient: str
 
 
+@router.get("/test-email/catalog")
+async def test_email_catalog(
+    _admin: Annotated[CurrentUser, Depends(require_admin)],
+) -> dict:
+    """Return the categorized list of email types the admin UI can send."""
+    return EMAIL_CATEGORIES
+
+
 @router.post("/test-email", response_model=TestEmailResult)
 async def send_test_email(
     body: TestEmailRequest,
@@ -734,28 +792,107 @@ async def send_test_email(
     """Send a test email of any type to the admin's own address (or a specified recipient)."""
     from app.email import (
         send_welcome_email,
+        send_verification_email,
         send_password_reset_email,
+        send_password_changed_email,
         send_trial_expiring_email,
         send_pilot_ended_email,
+        send_subscription_confirmed_email,
+        send_payment_failed_email,
+        send_subscription_cancelled_email,
+        send_subscription_paused_email,
+        send_subscription_resumed_email,
+        send_support_confirmation_email,
+        send_support_reply_email,
+        send_contact_inquiry_email,
         send_waitlist_confirmed_email,
+        send_founding_member_email,
+        send_charity_suggestion_email,
+        send_credential_expiry_email,
+        send_regulation_digest_email,
+        send_regulation_alert_email,
     )
 
     recipient = body.recipient or admin.email
+    test_name = "Test Mariner"
 
     try:
         if body.type == "welcome":
-            await send_welcome_email(recipient, "Test Mariner")
+            await send_welcome_email(recipient, test_name)
+        elif body.type == "verification":
+            await send_verification_email(recipient, test_name, "test-verify-token-xyz789")
         elif body.type == "password_reset":
             await send_password_reset_email(recipient, "test-reset-token-abc123")
+        elif body.type == "password_changed":
+            await send_password_changed_email(recipient, test_name)
         elif body.type == "trial_expiry":
-            await send_trial_expiring_email(recipient, "Test Mariner", 37)
+            await send_trial_expiring_email(recipient, test_name, 37)
         elif body.type == "pilot_ended":
-            await send_pilot_ended_email(recipient, "Test Mariner")
+            await send_pilot_ended_email(recipient, test_name)
+        elif body.type == "subscription_confirmed":
+            await send_subscription_confirmed_email(recipient, test_name)
+        elif body.type == "payment_failed":
+            await send_payment_failed_email(recipient, test_name)
+        elif body.type == "subscription_cancelled":
+            await send_subscription_cancelled_email(recipient, test_name)
+        elif body.type == "subscription_paused":
+            await send_subscription_paused_email(recipient, test_name)
+        elif body.type == "subscription_resumed":
+            await send_subscription_resumed_email(recipient, test_name)
+        elif body.type == "support_confirmation":
+            await send_support_confirmation_email(recipient, test_name, "Test Support Request")
+        elif body.type == "support_reply":
+            await send_support_reply_email(
+                recipient, test_name,
+                "Test Support Request",
+                "Thanks for reaching out. Here is our reply to your test question.",
+                "Hi, I had a question about PSC inspection prep for my vessel.",
+            )
+        elif body.type == "contact_inquiry":
+            # contact_inquiry forwards to hello@regknots.com regardless of recipient
+            await send_contact_inquiry_email(
+                from_name=test_name,
+                from_email="inquirer@example.com",
+                company="Acme Maritime",
+                message="This is a test inquiry from the admin email catalog.",
+            )
         elif body.type == "waitlist_confirmed":
-            await send_waitlist_confirmed_email(recipient, "Test Mariner")
+            await send_waitlist_confirmed_email(recipient, test_name)
+        elif body.type == "founding_member":
+            await send_founding_member_email(recipient, test_name)
+        elif body.type == "charity_suggestion":
+            # charity_suggestion is routed to hello@regknots.com (admin inbox)
+            await send_charity_suggestion_email(
+                user_email="suggester@example.com",
+                org_name="Test Charity — Maritime Relief",
+                website="https://example.org",
+                reason="Test submission from admin email catalog",
+            )
+        elif body.type == "credential_expiry":
+            await send_credential_expiry_email(
+                recipient, test_name,
+                "Master 1600 GRT MMC (test)",
+                7,
+            )
+        elif body.type == "regulation_digest":
+            await send_regulation_digest_email(
+                recipient, test_name,
+                [
+                    {"title": "CFR Title 46 Updated", "body": "3 sections updated as of today.",
+                     "source": "cfr_46", "created_at": datetime.now(timezone.utc).isoformat()},
+                    {"title": "New USCG NVIC Published", "body": "1 new section added as of today.",
+                     "source": "nvic", "created_at": datetime.now(timezone.utc).isoformat()},
+                ],
+            )
+        elif body.type == "regulation_alert":
+            await send_regulation_alert_email(
+                recipient, test_name,
+                "CFR Title 46 Updated",
+                "3 sections updated as of today. Ask me about the latest requirements.",
+            )
     except Exception as exc:
-        logger.error("Test email failed type=%s: %s", body.type, exc)
-        raise HTTPException(status_code=502, detail=str(exc))
+        logger.exception("Test email failed type=%s: %s", body.type, exc)
+        raise HTTPException(status_code=502, detail=str(exc)[:200])
 
     logger.info("Admin %s sent test email type=%s to=%s", admin.email, body.type, recipient)
     return TestEmailResult(success=True, type=body.type, recipient=recipient)
@@ -1201,7 +1338,7 @@ async def top_topics(
         FROM conversations c
         JOIN users u ON c.user_id = u.id
         WHERE c.title IS NOT NULL
-          AND ($1 = FALSE OR u.is_internal IS NOT TRUE)
+          AND ($1 = FALSE OR (u.is_internal IS NOT TRUE AND u.is_admin IS NOT TRUE))
         GROUP BY c.title
         ORDER BY conversation_count DESC
         LIMIT 20
@@ -1241,10 +1378,10 @@ async def top_citations(
         JOIN users u ON c.user_id = u.id
         WHERE m.role = 'assistant'
           AND m.cited_regulation_ids IS NOT NULL
-          AND ($1 = FALSE OR u.is_internal IS NOT TRUE)
+          AND ($1 = FALSE OR (u.is_internal IS NOT TRUE AND u.is_admin IS NOT TRUE))
         GROUP BY r.source, r.section_number, r.section_title
         ORDER BY cite_count DESC
-        LIMIT 20
+        LIMIT 10
         """,
         exclude_internal,
     )
@@ -1280,7 +1417,7 @@ async def usage_by_vessel_type(
         JOIN vessels v ON c.vessel_id = v.id
         JOIN users u ON c.user_id = u.id
         WHERE m.role = 'user'
-          AND ($1 = FALSE OR u.is_internal IS NOT TRUE)
+          AND ($1 = FALSE OR (u.is_internal IS NOT TRUE AND u.is_admin IS NOT TRUE))
         GROUP BY v.vessel_type
         ORDER BY message_count DESC
         """,
@@ -1307,17 +1444,32 @@ async def messages_per_day(
     exclude_internal: bool = Query(default=False),
 ) -> list[DayMessageCount]:
     pool = await get_pool()
+    # LEFT JOIN a generated day series so every day in the 30-day window has
+    # a data point, even if zero messages were sent — the chart should never
+    # look "stale" because the current day has no messages yet.
     rows = await pool.fetch(
         """
-        SELECT DATE(m.created_at) AS day, COUNT(*) AS message_count
-        FROM messages m
-        JOIN conversations c ON m.conversation_id = c.id
-        JOIN users u ON c.user_id = u.id
-        WHERE m.created_at > NOW() - INTERVAL '30 days'
-          AND m.role = 'user'
-          AND ($1 = FALSE OR u.is_internal IS NOT TRUE)
-        GROUP BY DATE(m.created_at)
-        ORDER BY day
+        WITH days AS (
+            SELECT generate_series(
+                CURRENT_DATE - INTERVAL '29 days',
+                CURRENT_DATE,
+                '1 day'::interval
+            )::date AS day
+        ),
+        daily_counts AS (
+            SELECT DATE(m.created_at) AS day, COUNT(*) AS message_count
+            FROM messages m
+            JOIN conversations c ON m.conversation_id = c.id
+            JOIN users u ON c.user_id = u.id
+            WHERE m.created_at > NOW() - INTERVAL '30 days'
+              AND m.role = 'user'
+              AND ($1 = FALSE OR (u.is_internal IS NOT TRUE AND u.is_admin IS NOT TRUE))
+            GROUP BY DATE(m.created_at)
+        )
+        SELECT days.day, COALESCE(dc.message_count, 0) AS message_count
+        FROM days
+        LEFT JOIN daily_counts dc ON dc.day = days.day
+        ORDER BY days.day
         """,
         exclude_internal,
     )
@@ -1721,3 +1873,452 @@ async def preview_credential_reminders(
             break
 
     return CredentialReminderPreview(pending_reminders=pending, total=len(pending))
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# ADMIN SPRINT ADDITIONS — data browser, citation purge, Sentry link,
+# job triggers, and system health.
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+# ── Citation error purge ─────────────────────────────────────────────────────
+
+
+class PurgeResult(BaseModel):
+    ok: bool
+    deleted: int
+
+
+@router.delete("/citation-errors/purge", response_model=PurgeResult)
+async def purge_citation_errors(
+    admin: Annotated[CurrentUser, Depends(require_write_admin)],
+    before: str | None = Query(default=None, description="Optional ISO date — only delete errors older than this"),
+) -> PurgeResult:
+    """Delete citation error rows. Without 'before', deletes all."""
+    pool = await get_pool()
+    if before:
+        try:
+            cutoff = datetime.fromisoformat(before)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid 'before' ISO date")
+        result = await pool.execute(
+            "DELETE FROM citation_errors WHERE created_at < $1", cutoff,
+        )
+    else:
+        result = await pool.execute("DELETE FROM citation_errors")
+
+    # asyncpg returns e.g. "DELETE 42" — parse the count
+    deleted = int(result.split(" ")[-1]) if result.startswith("DELETE") else 0
+    logger.info("Admin %s purged %d citation errors (before=%s)", admin.email, deleted, before)
+    return PurgeResult(ok=True, deleted=deleted)
+
+
+# ── Sentry direct link helper ────────────────────────────────────────────────
+
+
+@router.get("/sentry-link/{issue_id}")
+async def sentry_issue_link(
+    issue_id: str,
+    _admin: Annotated[CurrentUser, Depends(require_admin)],
+) -> dict:
+    """Build the web URL for a Sentry issue. Front-end uses this for deep links."""
+    org = settings.sentry_org
+    if not org:
+        return {"url": None}
+    return {"url": f"https://sentry.io/organizations/{org}/issues/{issue_id}/"}
+
+
+# ── Universal table browser ──────────────────────────────────────────────────
+#
+# Exposes read-only row access to a whitelist of tables with basic filters.
+# Sensitive columns (password hashes, tokens, Stripe secrets) are redacted.
+# Write operations are intentionally not supported here.
+
+_BROWSABLE_TABLES: dict[str, dict] = {
+    "users": {
+        "columns": [
+            "id", "email", "full_name", "role", "is_admin", "is_internal",
+            "subscription_tier", "subscription_status", "message_count",
+            "trial_ends_at", "email_verified", "created_at", "updated_at",
+        ],
+        "order_by": "created_at DESC",
+    },
+    "vessels": {
+        "columns": [
+            "id", "user_id", "name", "vessel_type", "gross_tonnage",
+            "route_types", "flag_state", "subchapter", "manning_requirement",
+            "inspection_certificate_type", "created_at", "updated_at",
+        ],
+        "order_by": "created_at DESC",
+    },
+    "vessel_documents": {
+        "columns": [
+            "id", "vessel_id", "user_id", "document_type", "filename",
+            "file_size", "mime_type", "extraction_status", "created_at",
+        ],
+        "order_by": "created_at DESC",
+    },
+    "user_credentials": {
+        "columns": [
+            "id", "user_id", "credential_type", "title", "credential_number",
+            "issuing_authority", "issue_date", "expiry_date",
+            "reminder_sent_90", "reminder_sent_30", "reminder_sent_7",
+            "created_at", "updated_at",
+        ],
+        "order_by": "expiry_date ASC NULLS LAST, created_at DESC",
+    },
+    "compliance_logs": {
+        "columns": [
+            "id", "user_id", "vessel_id", "entry_date", "category",
+            "entry", "created_at", "updated_at",
+        ],
+        "order_by": "entry_date DESC, created_at DESC",
+    },
+    "psc_checklists": {
+        "columns": [
+            "id", "user_id", "vessel_id", "generated_at", "updated_at",
+            "checked_indices",
+        ],
+        "order_by": "generated_at DESC",
+    },
+    "checklist_feedback": {
+        "columns": [
+            "id", "user_id", "vessel_id", "checklist_id", "action_type",
+            "item_index", "original_item", "final_item", "created_at",
+        ],
+        "order_by": "created_at DESC",
+    },
+    "conversations": {
+        "columns": [
+            "id", "user_id", "vessel_id", "title", "created_at", "updated_at",
+        ],
+        "order_by": "created_at DESC",
+    },
+    "support_tickets": {
+        "columns": [
+            "id", "user_id", "user_email", "user_name", "subject", "status",
+            "created_at", "replied_at",
+        ],
+        "order_by": "created_at DESC",
+    },
+    "notifications": {
+        "columns": [
+            "id", "title", "body", "notification_type", "source",
+            "is_active", "created_at",
+        ],
+        "order_by": "created_at DESC",
+    },
+    "waitlist": {
+        "columns": ["email", "created_at"],
+        "order_by": "created_at DESC",
+    },
+    "citation_errors": {
+        "columns": [
+            "id", "conversation_id", "unverified_citation", "model_used",
+            "created_at",
+        ],
+        "order_by": "created_at DESC",
+    },
+}
+
+
+class TableInfo(BaseModel):
+    name: str
+    columns: list[str]
+
+
+class TableRows(BaseModel):
+    name: str
+    columns: list[str]
+    rows: list[dict]
+    total: int
+    limit: int
+    offset: int
+
+
+@router.get("/data/tables", response_model=list[TableInfo])
+async def list_browsable_tables(
+    _admin: Annotated[CurrentUser, Depends(require_admin)],
+) -> list[TableInfo]:
+    """Return the whitelist of tables the universal browser can query."""
+    return [TableInfo(name=name, columns=meta["columns"]) for name, meta in _BROWSABLE_TABLES.items()]
+
+
+@router.get("/data/table/{name}", response_model=TableRows)
+async def browse_table(
+    name: str,
+    _admin: Annotated[CurrentUser, Depends(require_admin)],
+    limit: int = Query(default=50, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    user_id: str | None = Query(default=None),
+    vessel_id: str | None = Query(default=None),
+    search: str | None = Query(default=None, description="Substring search on text-ish columns"),
+) -> TableRows:
+    """Return paginated rows from a whitelisted table, with optional filters.
+
+    Filters auto-apply only to columns that exist on the table.
+    `search` performs a case-insensitive ILIKE on a small set of text columns.
+    """
+    if name not in _BROWSABLE_TABLES:
+        raise HTTPException(status_code=404, detail=f"Unknown table '{name}'")
+
+    meta = _BROWSABLE_TABLES[name]
+    columns = meta["columns"]
+    order_by = meta["order_by"]
+
+    pool = await get_pool()
+
+    conditions: list[str] = []
+    params: list = []
+    idx = 1
+
+    if user_id and "user_id" in columns:
+        conditions.append(f"user_id = ${idx}")
+        try:
+            params.append(uuid.UUID(user_id))
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid user_id UUID")
+        idx += 1
+
+    if vessel_id and "vessel_id" in columns:
+        conditions.append(f"vessel_id = ${idx}")
+        try:
+            params.append(uuid.UUID(vessel_id))
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid vessel_id UUID")
+        idx += 1
+
+    if search:
+        # Only ILIKE against non-UUID text-ish columns the table exposes.
+        text_candidates = [
+            c for c in columns
+            if c in (
+                "email", "full_name", "title", "name", "subject", "filename",
+                "entry", "item", "body", "user_email", "user_name",
+                "unverified_citation", "credential_number", "issuing_authority",
+            )
+        ]
+        if text_candidates:
+            clauses = [f"{c}::text ILIKE ${idx}" for c in text_candidates]
+            conditions.append("(" + " OR ".join(clauses) + ")")
+            params.append(f"%{search}%")
+            idx += 1
+
+    where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+
+    total = await pool.fetchval(
+        f"SELECT COUNT(*) FROM {name} {where_clause}",
+        *params,
+    )
+
+    col_list = ", ".join(columns)
+    params.append(limit)
+    params.append(offset)
+    rows_raw = await pool.fetch(
+        f"SELECT {col_list} FROM {name} {where_clause} ORDER BY {order_by} LIMIT ${idx} OFFSET ${idx + 1}",
+        *params,
+    )
+
+    def _to_jsonable(v):
+        if v is None:
+            return None
+        if isinstance(v, (str, int, float, bool)):
+            return v
+        if isinstance(v, (list, dict)):
+            return v
+        # datetime / date / uuid / jsonb-as-string etc.
+        try:
+            return v.isoformat()
+        except AttributeError:
+            return str(v)
+
+    rows = [
+        {c: _to_jsonable(r[c]) for c in columns}
+        for r in rows_raw
+    ]
+
+    return TableRows(
+        name=name,
+        columns=columns,
+        rows=rows,
+        total=total or 0,
+        limit=limit,
+        offset=offset,
+    )
+
+
+# ── Job triggers ─────────────────────────────────────────────────────────────
+
+
+class JobRunResult(BaseModel):
+    ok: bool
+    details: str
+
+
+@router.post("/jobs/ingest", response_model=JobRunResult)
+async def trigger_ingest(
+    admin: Annotated[CurrentUser, Depends(require_write_admin)],
+    source: str = Query(..., description="Regulation source to update"),
+    no_notify: bool = Query(default=False, description="Suppress notifications (dev/maintenance)"),
+) -> JobRunResult:
+    """Trigger a scheduled ingest subprocess for a single source from the admin UI.
+
+    Fires in the background (non-blocking). Observe progress via systemd/app logs.
+    Returns immediately after spawning the subprocess.
+    """
+    import asyncio as _asyncio
+    import subprocess
+    from pathlib import Path
+
+    allowed = {"cfr_33", "cfr_46", "cfr_49", "nvic", "colregs", "solas", "stcw", "ism", "erg"}
+    if source not in allowed:
+        raise HTTPException(status_code=400, detail=f"Unknown source. Allowed: {', '.join(sorted(allowed))}")
+
+    ingest_dir = Path(__file__).resolve().parents[3] / "packages" / "ingest"
+    cmd = ["uv", "run", "python", "-m", "ingest.cli", "--source", source, "--update"]
+    if no_notify:
+        cmd.append("--no-notify")
+
+    async def _run():
+        def _spawn():
+            subprocess.Popen(cmd, cwd=str(ingest_dir))
+        await _asyncio.to_thread(_spawn)
+
+    _asyncio.create_task(_run())
+
+    logger.info("Admin %s triggered ingest source=%s no_notify=%s", admin.email, source, no_notify)
+    return JobRunResult(ok=True, details=f"Ingest for '{source}' started in background. Watch logs for progress.")
+
+
+@router.post("/jobs/imo-amendment-check", response_model=JobRunResult)
+async def trigger_imo_check(
+    admin: Annotated[CurrentUser, Depends(require_write_admin)],
+) -> JobRunResult:
+    """Run the weekly IMO amendment scraper on demand."""
+    from app.tasks import _check_imo_amendments_async
+    logger.info("Admin %s triggered IMO amendment check", admin.email)
+    try:
+        await _check_imo_amendments_async()
+        return JobRunResult(ok=True, details="IMO check complete. If new refs found, an alert email was sent to hello@regknots.com.")
+    except Exception as exc:
+        logger.exception("IMO amendment check failed")
+        return JobRunResult(ok=False, details=str(exc)[:200])
+
+
+@router.get("/jobs/beat-schedule")
+async def beat_schedule(
+    _admin: Annotated[CurrentUser, Depends(require_admin)],
+) -> dict:
+    """Return the Celery beat schedule as-configured (for visibility; not live state)."""
+    try:
+        from celery_beat import celery  # module imports the schedule
+        schedule = celery.conf.beat_schedule or {}
+        out = {}
+        for name, entry in schedule.items():
+            sched = entry.get("schedule")
+            out[name] = {
+                "task": entry.get("task"),
+                "schedule": str(sched),
+            }
+        return {"beat_schedule": out}
+    except Exception as exc:
+        return {"error": str(exc)[:200], "beat_schedule": {}}
+
+
+# ── System health ────────────────────────────────────────────────────────────
+
+
+@router.get("/system/health")
+async def system_health(
+    _admin: Annotated[CurrentUser, Depends(require_admin)],
+) -> dict:
+    """Comprehensive system health snapshot for the admin dashboard."""
+    from app.db import get_redis
+    import os
+    import shutil
+
+    results: dict[str, Any] = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "environment": settings.environment,
+    }
+
+    # Database
+    try:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            await conn.fetchval("SELECT 1")
+            db_size = await conn.fetchval(
+                "SELECT pg_size_pretty(pg_database_size(current_database()))"
+            )
+            active_conns = await conn.fetchval(
+                "SELECT COUNT(*) FROM pg_stat_activity WHERE state = 'active'"
+            )
+            latest_migration = await conn.fetchval(
+                "SELECT version_num FROM alembic_version LIMIT 1"
+            )
+        results["database"] = {
+            "ok": True,
+            "size": db_size,
+            "active_connections": active_conns,
+            "pool_size": pool.get_size(),
+            "pool_free": pool.get_idle_size(),
+            "latest_migration": latest_migration,
+        }
+    except Exception as exc:
+        results["database"] = {"ok": False, "error": str(exc)[:200]}
+
+    # Redis
+    try:
+        redis = await get_redis()
+        pong = await redis.ping()
+        info = await redis.info("memory")
+        results["redis"] = {
+            "ok": bool(pong),
+            "used_memory_human": info.get("used_memory_human"),
+        }
+    except Exception as exc:
+        results["redis"] = {"ok": False, "error": str(exc)[:200]}
+
+    # Upload dir disk usage
+    try:
+        upload_dir = settings.upload_dir
+        if os.path.isdir(upload_dir):
+            total_size = 0
+            file_count = 0
+            for dirpath, _dirs, files in os.walk(upload_dir):
+                for f in files:
+                    fp = os.path.join(dirpath, f)
+                    try:
+                        total_size += os.path.getsize(fp)
+                        file_count += 1
+                    except OSError:
+                        pass
+            usage = shutil.disk_usage(upload_dir)
+            results["uploads"] = {
+                "ok": True,
+                "path": upload_dir,
+                "total_bytes": total_size,
+                "file_count": file_count,
+                "disk_free": usage.free,
+                "disk_total": usage.total,
+            }
+        else:
+            results["uploads"] = {"ok": False, "error": f"Directory does not exist: {upload_dir}"}
+    except Exception as exc:
+        results["uploads"] = {"ok": False, "error": str(exc)[:200]}
+
+    # Sentry config
+    results["sentry"] = {
+        "ok": bool(settings.sentry_dsn),
+        "org": settings.sentry_org or None,
+    }
+
+    # External API keys present (boolean only, never values)
+    results["api_keys"] = {
+        "anthropic": bool(settings.anthropic_api_key),
+        "openai": bool(settings.openai_api_key),
+        "resend": bool(settings.resend_api_key),
+        "stripe": bool(settings.stripe_secret_key),
+    }
+
+    return results

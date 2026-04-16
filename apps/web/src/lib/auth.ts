@@ -41,6 +41,7 @@ export interface BillingStatus {
   current_period_end: string | null
   billing_interval: string | null
   price_amount: number | null
+  unlimited?: boolean  // True for admin/internal — bypass all limits/banners
 }
 
 export interface VesselSummary {

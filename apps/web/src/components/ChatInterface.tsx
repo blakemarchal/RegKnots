@@ -328,7 +328,7 @@ function ChatInterfaceInner({ initialConversationId }: Props) {
       <NotificationBanner />
 
       {/* ── Trial banner ─────────────────────────────────────────── */}
-      {billing && billing.tier === 'free' && billing.trial_active && (
+      {billing && billing.tier === 'free' && billing.trial_active && !billing.unlimited && (
         <div className="flex-shrink-0 flex items-center justify-between gap-3 px-4 py-2
           bg-amber-950/40 border-b border-amber-800/30">
           <p className="font-mono text-xs text-amber-400">
