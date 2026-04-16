@@ -19,6 +19,7 @@ import { PilotEndedModal } from './PilotEndedModal'
 import { PilotSurveyModal } from './PilotSurveyModal'
 import { NotificationBanner } from './NotificationBanner'
 import { VerificationBanner } from './VerificationBanner'
+import { ComingUpWidget } from './ComingUpWidget'
 
 interface ConversationMessage {
   role: string
@@ -366,14 +367,18 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
             ))}
           </div>
         ) : (
-          <ChatThread
-            messages={messages}
-            loading={loading}
-            progressMsg={progressMsg}
-            onPrompt={handlePrompt}
-            onCitationTap={handleCitationTap}
-            isNewConversation={initialConversationId === null}
-          />
+          <>
+            {/* Coming Up widget: fresh chat only, dismissible per session */}
+            <ComingUpWidget visible={messages.length === 0 && !loading} />
+            <ChatThread
+              messages={messages}
+              loading={loading}
+              progressMsg={progressMsg}
+              onPrompt={handlePrompt}
+              onCitationTap={handleCitationTap}
+              isNewConversation={initialConversationId === null}
+            />
+          </>
         )}
       </main>
 
