@@ -579,11 +579,13 @@ def _build_chat_messages(
     conversation_history: list[ChatMessage],
     vessel_profile: dict | None,
     context_str: str,
+    credential_context: str | None = None,
 ) -> list[dict]:
     """Construct the Claude API message list for a chat turn.
 
-    Handles history truncation, vessel profile block construction, document
-    extraction inclusion, and the final user message with retrieval context.
+    Handles history truncation, vessel profile block construction, credential
+    context injection, document extraction inclusion, and the final user
+    message with retrieval context.
     """
     history = conversation_history[-_MAX_HISTORY:]
     messages = [{"role": msg.role, "content": msg.content} for msg in history]
@@ -648,9 +650,18 @@ def _build_chat_messages(
         )
         logger.info("Including vessel context in prompt: %d fields", len(lines))
 
+    credential_block = ""
+    if credential_context:
+        credential_block = (
+            f"{credential_context}\n"
+            "When relevant, tailor your answer to the user's credential situation.\n\n"
+        )
+        logger.info("Including credential context in prompt")
+
     user_content = (
         f"{NAVIGATION_AID_REMINDER}\n\n"
         f"{vessel_block}"
+        f"{credential_block}"
         f"Regulation context:\n{context_str}\n\n"
         f"Question: {query}"
     )
@@ -960,6 +971,7 @@ async def chat(
     anthropic_client: AsyncAnthropic,
     openai_api_key: str,
     conversation_id: UUID,
+    credential_context: str | None = None,
 ) -> ChatResponse:
     """Run the full RAG pipeline and return a ChatResponse.
 
@@ -990,7 +1002,7 @@ async def chat(
     context_str, cited = build_context(chunks)
 
     # 4. Construct messages
-    messages = _build_chat_messages(query, conversation_history, vessel_profile, context_str)
+    messages = _build_chat_messages(query, conversation_history, vessel_profile, context_str, credential_context)
 
     # 5. Call Claude — fall back to OpenAI GPT-4o on Anthropic API failures.
     model_used = route.model
@@ -1071,6 +1083,7 @@ async def chat_with_progress(
     anthropic_client: AsyncAnthropic,
     openai_api_key: str,
     conversation_id: UUID,
+    credential_context: str | None = None,
 ) -> AsyncIterator[dict]:
     """Same RAG pipeline as chat() but yields lightweight progress events.
 
@@ -1114,7 +1127,7 @@ async def chat_with_progress(
         }
 
     # Stage 4: Construct messages and call Claude
-    messages = _build_chat_messages(query, conversation_history, vessel_profile, context_str)
+    messages = _build_chat_messages(query, conversation_history, vessel_profile, context_str, credential_context)
 
     yield {"event": "status", "data": "Consulting compliance engine…"}
     model_used = route.model
