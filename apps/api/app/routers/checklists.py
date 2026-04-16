@@ -458,6 +458,51 @@ async def generate_psc_checklist(
             text_preview = (r["full_text"] or "")[:300]
             reg_context += f"\n[{r['section_number']} — {r['section_title']}]\n{text_preview}\n"
 
+    # ── Phase 2: per-vessel learning ────────────────────────────────────
+    # Query past user edits for this vessel and inject as preferences.
+    feedback_context = ""
+    feedback_rows = await pool.fetch(
+        """
+        SELECT action_type, original_item, final_item
+        FROM checklist_feedback
+        WHERE user_id = $1 AND vessel_id = $2
+        ORDER BY created_at DESC
+        LIMIT 30
+        """,
+        user_id, vessel_id,
+    )
+    if feedback_rows:
+        added_items: list[str] = []
+        deleted_items: list[str] = []
+        edited_items: list[str] = []
+        for fb in feedback_rows:
+            orig = fb["original_item"]
+            final = fb["final_item"]
+            if isinstance(orig, str):
+                orig = json.loads(orig) if orig else None
+            if isinstance(final, str):
+                final = json.loads(final) if final else None
+            if fb["action_type"] == "add" and final:
+                added_items.append(f"- {final.get('item', '')} ({final.get('regulation', '')})")
+            elif fb["action_type"] == "delete" and orig:
+                deleted_items.append(f"- {orig.get('item', '')} ({orig.get('category', '')})")
+            elif fb["action_type"] == "edit" and orig and final:
+                edited_items.append(f"- Changed \"{orig.get('item', '')}\" to \"{final.get('item', '')}\"")
+
+        parts: list[str] = []
+        if added_items:
+            parts.append("Items the user previously ADDED (include similar items):\n" + "\n".join(added_items[:10]))
+        if deleted_items:
+            parts.append("Items the user previously REMOVED (avoid similar items):\n" + "\n".join(deleted_items[:10]))
+        if edited_items:
+            parts.append("Items the user previously EDITED (use the corrected phrasing):\n" + "\n".join(edited_items[:10]))
+        if parts:
+            feedback_context = "\n\nUSER PREFERENCES FROM PRIOR CHECKLISTS:\n" + "\n\n".join(parts)
+            logger.info(
+                "Phase 2 learning: vessel=%s added=%d deleted=%d edited=%d",
+                vessel["name"], len(added_items), len(deleted_items), len(edited_items),
+            )
+
     try:
         anthropic_client: AsyncAnthropic = request.app.state.anthropic
         response = await anthropic_client.messages.create(
@@ -466,7 +511,12 @@ async def generate_psc_checklist(
             system=_PSC_SYSTEM_PROMPT,
             messages=[{
                 "role": "user",
-                "content": f"{vessel_context}{reg_context}\n\nGenerate a focused PSC inspection readiness checklist for this vessel. Exactly 5 items per category, 8 categories max, concise item and notes text. Include the coverage object explaining any applicable categories omitted.",
+                "content": (
+                    f"{vessel_context}{reg_context}{feedback_context}\n\n"
+                    "Generate a focused PSC inspection readiness checklist for this vessel. "
+                    "Exactly 5 items per category, 8 categories max, concise item and notes text. "
+                    "Include the coverage object explaining any applicable categories omitted."
+                ),
             }],
         )
 

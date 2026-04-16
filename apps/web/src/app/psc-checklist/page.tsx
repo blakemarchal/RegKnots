@@ -695,6 +695,16 @@ function PSCContent() {
                                 Edit
                               </button>
                               <button
+                                onClick={() => {
+                                  const q = `Tell me more about this PSC checklist item: "${item.item}" (${item.regulation})`
+                                  router.push(`/?conversation_id=&q=${encodeURIComponent(q)}`)
+                                }}
+                                className="font-mono text-[10px] text-[#6b7594] hover:text-[#2dd4bf] px-1"
+                                aria-label="Ask about this item"
+                              >
+                                Ask
+                              </button>
+                              <button
                                 onClick={() => deleteItem(idx)}
                                 disabled={savingItem}
                                 className="font-mono text-[10px] text-[#6b7594] hover:text-red-400 px-1"

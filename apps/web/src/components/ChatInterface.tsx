@@ -29,17 +29,18 @@ interface ConversationMessage {
 
 interface Props {
   initialConversationId: string | null
+  initialQuery?: string | null
 }
 
-export function ChatInterface({ initialConversationId }: Props) {
+export function ChatInterface({ initialConversationId, initialQuery }: Props) {
   return (
     <PwaProvider>
-      <ChatInterfaceInner initialConversationId={initialConversationId} />
+      <ChatInterfaceInner initialConversationId={initialConversationId} initialQuery={initialQuery} />
     </PwaProvider>
   )
 }
 
-function ChatInterfaceInner({ initialConversationId }: Props) {
+function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
@@ -122,6 +123,15 @@ function ChatInterfaceInner({ initialConversationId }: Props) {
 
     return () => { cancelled = true }
   }, [initialConversationId])
+
+  // Auto-send a pre-filled query from URL (e.g., ?q=... from PSC checklist "Ask" button)
+  useEffect(() => {
+    if (!initialQuery || initialConversationId) return
+    // Clean the URL param so it doesn't re-fire on navigation
+    window.history.replaceState({}, '', '/')
+    // Use handlePrompt which creates a fresh conversation with the query
+    handlePrompt(initialQuery)
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSend = useCallback(async () => {
     const query = input.trim()

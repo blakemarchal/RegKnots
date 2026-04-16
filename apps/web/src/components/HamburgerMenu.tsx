@@ -28,6 +28,7 @@ const BASE_MENU_ITEMS: MenuItem[] = [
   { icon: '\u2299', label: 'My Credentials', action: 'credentials', path: '/credentials' },
   { icon: '\u270E', label: 'Compliance Log', action: 'log', path: '/log' },
   { icon: '\u2611', label: 'PSC Checklist', action: 'psc-checklist', path: '/psc-checklist' },
+  { icon: '\u24D8', label: 'Vessel Dossier', action: 'vessel-dossier' },
   { icon: '\u2750', label: 'Reference', action: 'reference', path: '/reference' },
   { icon: '?', label: 'Help', action: 'help', path: '/support' },
   { icon: '\u2709', label: 'Give Feedback', action: 'feedback' },
@@ -42,6 +43,7 @@ export function HamburgerMenu({ open, onClose, onNewChat, onOpenVessels, onOpenS
   const pathname = usePathname()
   const logout = useAuthStore((s) => s.logout)
   const isAdmin = useAuthStore((s) => s.user?.is_admin ?? false)
+  const activeVesselId = useAuthStore((s) => s.activeVesselId)
 
   const [pendingAction, setPendingAction] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
@@ -99,6 +101,14 @@ export function HamburgerMenu({ open, onClose, onNewChat, onOpenVessels, onOpenS
     if (action === 'new') { onNewChat(); onClose(); return }
     if (action === 'vessels') { onOpenVessels(); return } // onOpenVessels handles its own close
     if (action === 'feedback') { onClose(); onOpenSurvey?.(); return }
+    if (action === 'vessel-dossier') {
+      if (activeVesselId) {
+        navigateTo(action, `/vessel-dossier/${activeVesselId}`)
+      } else {
+        onOpenVessels() // prompt to select a vessel first
+      }
+      return
+    }
     if (action === 'signout') {
       onClose()
       logout().then(() => router.replace('/login'))
