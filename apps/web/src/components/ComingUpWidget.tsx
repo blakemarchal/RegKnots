@@ -64,16 +64,24 @@ const TYPE_ICON: Record<ItemType, string> = {
 }
 
 interface Props {
-  /** When true, render the widget. Caller controls visibility (e.g., only on fresh chat). */
+  /** When true, render the widget. Caller controls visibility. */
   visible: boolean
+  /**
+   * When true, render as a single-line pill that expands on tap.
+   * When false (default), render the full widget. Used for active chats
+   * where vertical space is precious.
+   */
+  compact?: boolean
 }
 
-export function ComingUpWidget({ visible }: Props) {
+export function ComingUpWidget({ visible, compact = false }: Props) {
   const router = useRouter()
   const [items, setItems] = useState<ComingUpItem[]>([])
   const [loading, setLoading] = useState(true)
   const [dismissed, setDismissed] = useState(readDismissed())
   const [expanded, setExpanded] = useState(false)
+  // Compact-mode tap-to-expand. Independent of the "show more" expansion below.
+  const [pillExpanded, setPillExpanded] = useState(false)
 
   useEffect(() => {
     if (!visible || dismissed) return
@@ -96,6 +104,8 @@ export function ComingUpWidget({ visible }: Props) {
 
   if (!visible || dismissed) return null
   if (loading) {
+    // Skip the loading skeleton in compact mode — too noisy for active chats
+    if (compact) return null
     return (
       <div className="mx-4 mt-4 mb-2 bg-[#111827] border border-white/8 rounded-xl px-4 py-3 animate-pulse h-16" />
     )
@@ -109,6 +119,57 @@ export function ComingUpWidget({ visible }: Props) {
   const hiddenCount = items.length - visibleItems.length
   const highCount = items.filter((i) => i.urgency === 'high').length
 
+  // ── Compact pill mode (active chats) ───────────────────────────────────
+  // Single-line summary that expands inline on tap.
+  if (compact && !pillExpanded) {
+    return (
+      <div className="mx-4 mt-3 mb-1 flex items-center gap-2">
+        <button
+          onClick={() => setPillExpanded(true)}
+          className={`flex-1 flex items-center gap-2 px-3 py-1.5 rounded-full
+            border text-left transition-colors duration-150
+            ${highCount > 0
+              ? 'border-red-400/40 bg-red-500/5 hover:bg-red-500/10'
+              : 'border-[#2dd4bf]/30 bg-[#2dd4bf]/5 hover:bg-[#2dd4bf]/10'
+            }`}
+          aria-label="Show Coming Up items"
+        >
+          {highCount > 0 ? (
+            <span className="font-mono text-[10px] text-red-400 font-bold">⚠</span>
+          ) : (
+            <span className="font-mono text-[10px] text-[#2dd4bf] font-bold">●</span>
+          )}
+          <span className="font-mono text-[10px] uppercase tracking-wider text-[#2dd4bf]">
+            Coming Up
+          </span>
+          <span className="font-mono text-[10px] text-[#f0ece4]/80 truncate flex-1">
+            {highCount > 0 ? (
+              <>
+                <span className="text-red-400 font-bold">{highCount} urgent</span>
+                <span className="text-[#6b7594]"> · {items.length} total</span>
+              </>
+            ) : (
+              <span className="text-[#6b7594]">{items.length} item{items.length !== 1 ? 's' : ''}</span>
+            )}
+          </span>
+          <span className="font-mono text-[10px] text-[#6b7594]">tap</span>
+        </button>
+        <button
+          onClick={handleDismiss}
+          aria-label="Dismiss until next session"
+          className="w-6 h-6 flex items-center justify-center rounded-full
+            text-[#6b7594] hover:text-[#f0ece4] hover:bg-white/5 transition-colors shrink-0"
+        >
+          <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18" />
+            <line x1="6" y1="6" x2="18" y2="18" />
+          </svg>
+        </button>
+      </div>
+    )
+  }
+
+  // ── Full widget (fresh chat OR expanded compact) ──────────────────────
   return (
     <div className="mx-4 mt-4 mb-2 bg-[#111827] border border-[#2dd4bf]/20 rounded-xl overflow-hidden">
       {/* Header */}
@@ -124,17 +185,32 @@ export function ComingUpWidget({ visible }: Props) {
             )}
           </span>
         </div>
-        <button
-          onClick={handleDismiss}
-          aria-label="Dismiss until next session"
-          className="w-6 h-6 flex items-center justify-center rounded
-            text-[#6b7594] hover:text-[#f0ece4] hover:bg-white/5 transition-colors"
-        >
-          <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <line x1="18" y1="6" x2="6" y2="18" />
-            <line x1="6" y1="6" x2="18" y2="18" />
-          </svg>
-        </button>
+        <div className="flex items-center gap-1">
+          {compact && pillExpanded && (
+            <button
+              onClick={() => setPillExpanded(false)}
+              aria-label="Collapse"
+              className="w-6 h-6 flex items-center justify-center rounded
+                text-[#6b7594] hover:text-[#f0ece4] hover:bg-white/5 transition-colors"
+              title="Collapse to pill"
+            >
+              <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="18 15 12 9 6 15" />
+              </svg>
+            </button>
+          )}
+          <button
+            onClick={handleDismiss}
+            aria-label="Dismiss until next session"
+            className="w-6 h-6 flex items-center justify-center rounded
+              text-[#6b7594] hover:text-[#f0ece4] hover:bg-white/5 transition-colors"
+          >
+            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+        </div>
       </div>
 
       {/* Items */}

@@ -19,6 +19,11 @@ export function ChatThread({ messages, loading, progressMsg = null, onPrompt, on
   const bottomRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
+    // Don't auto-scroll on a fresh chat with no messages — the natural
+    // top-of-page content (Coming Up widget, welcome screen) should be
+    // visible without forcing a scroll. Only scroll when there's actually
+    // something at the bottom worth scrolling to.
+    if (messages.length === 0 && !loading) return
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, loading, progressMsg])
 

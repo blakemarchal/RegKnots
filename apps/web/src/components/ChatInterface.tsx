@@ -368,8 +368,10 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
           </div>
         ) : (
           <>
-            {/* Coming Up widget: fresh chat only, dismissible per session */}
-            <ComingUpWidget visible={messages.length === 0 && !loading} />
+            {/* Coming Up widget — full version on fresh chat, compact pill
+                on active chats (so power users with one mega-thread still
+                see DAU signals). Dismissible per session in either mode. */}
+            <ComingUpWidget visible={true} compact={messages.length > 0} />
             <ChatThread
               messages={messages}
               loading={loading}
