@@ -224,6 +224,14 @@ function AdminContent() {
   const isAdmin = user?.is_admin ?? false
   const isReadOnly = READONLY_ADMIN_EMAILS.has(user?.email ?? '')
   const hydrated = useAuthStore((s) => s.hydrated)
+  const [isOwner, setIsOwner] = useState(false)
+
+  // Fetch role from backend to determine owner vs admin
+  useEffect(() => {
+    apiRequest<{ is_owner: boolean }>('/admin/role')
+      .then((r) => setIsOwner(r.is_owner))
+      .catch(() => setIsOwner(false))
+  }, [])
 
   const [stats, setStats] = useState<AdminStats | null>(null)
   const [users, setUsers] = useState<AdminUser[]>([])
@@ -745,12 +753,22 @@ function AdminContent() {
 
   return (
     <div className="flex flex-col min-h-dvh bg-[#0a0e1a]">
-      <AppHeader title="Admin" trailing={isReadOnly ? (
-        <span className="font-mono text-[10px] font-bold px-2 py-0.5 rounded-full
-          bg-amber-500/20 text-amber-400 border border-amber-500/30">
-          Read Only
-        </span>
-      ) : undefined} />
+      <AppHeader title="Admin" trailing={
+        isReadOnly ? (
+          <span className="font-mono text-[10px] font-bold px-2 py-0.5 rounded-full
+            bg-amber-500/20 text-amber-400 border border-amber-500/30">
+            Read Only
+          </span>
+        ) : (
+          <span className={`font-mono text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+            isOwner
+              ? 'bg-[#2dd4bf]/20 text-[#2dd4bf] border-[#2dd4bf]/30'
+              : 'bg-purple-500/20 text-purple-400 border-purple-500/30'
+          }`}>
+            {isOwner ? 'Owner' : 'Admin'}
+          </span>
+        )
+      } />
 
       <main className="flex-1 overflow-y-auto">
         <div className="max-w-5xl mx-auto px-4 py-6">
@@ -1195,7 +1213,7 @@ function AdminContent() {
           <div className="mb-8">
             <div className="flex items-center justify-between mb-3">
               <h2 className="font-display text-lg font-bold text-[#f0ece4] tracking-wide">Citation Errors</h2>
-              {!isReadOnly && citationErrors.length > 0 && (
+              {isOwner && citationErrors.length > 0 && (
                 <button
                   onClick={async () => {
                     if (!confirm(`Permanently delete all ${citationErrors.length} citation error(s)?\n\nThis action cannot be undone.`)) return
@@ -1292,7 +1310,7 @@ function AdminContent() {
                     {f}
                   </button>
                 ))}
-                {!isReadOnly && (
+                {isOwner && (
                   <button
                     onClick={() => setNotifFormOpen(!notifFormOpen)}
                     className="font-mono text-[10px] font-bold uppercase tracking-wider
@@ -1305,7 +1323,7 @@ function AdminContent() {
                 )}
               </div>
             </div>
-            {!isReadOnly && notifFormOpen && (
+            {isOwner && notifFormOpen && (
               <div className="bg-[#111827] rounded-xl border border-white/8 px-5 py-4 mb-3">
                 <div className="flex flex-col gap-3">
                   <input
@@ -1409,7 +1427,7 @@ function AdminContent() {
                           {` · ${fmtDate(n.created_at)}`}
                         </p>
                       </div>
-                      {!isReadOnly && (
+                      {isOwner && (
                         <button
                           onClick={() => toggleNotification(n.id)}
                           className="font-mono text-[10px] font-bold uppercase tracking-wider
@@ -1426,6 +1444,9 @@ function AdminContent() {
               )
             })()}
           </div>
+
+          {/* ── Audit Log ──────────────────────────────────────────── */}
+          <AuditLogSection />
 
           </>
           )}
@@ -1620,7 +1641,7 @@ function AdminContent() {
           )}
 
           {/* ── Custom Email Sender ──────────────────────────────────── */}
-          {!isReadOnly && (
+          {isOwner && (
           <div className="mb-8">
             <h2 className="font-display text-lg font-bold text-[#f0ece4] tracking-wide mb-3">
               Send Custom Email
@@ -1930,6 +1951,8 @@ function AdminContent() {
                         </button>
                         {!isReadOnly && !u.is_admin && (
                           <>
+                            {isOwner && (
+                            <>
                             <button
                               onClick={() => adminAction(u.id, 'extend-trial', 'Extend trial 14 days')}
                               disabled={actionLoading === `${u.id}-extend-trial`}
@@ -1993,6 +2016,11 @@ function AdminContent() {
                             >
                               {deletingUser === u.id ? 'Deleting…' : 'Delete'}
                             </button>
+                            </>
+                            )}
+                            {!isOwner && (
+                              <span className="font-mono text-[10px] text-[#6b7594]">View only</span>
+                            )}
                           </>
                         )}
                       </div>
@@ -2024,6 +2052,71 @@ function AdminContent() {
       {/* Survey preview modal (admin-only, no save) */}
       {surveyPreview && (
         <PilotSurveyModal forceOpen preview onClose={() => setSurveyPreview(false)} />
+      )}
+    </div>
+  )
+}
+
+// ── Audit log section ────────────────────────────────────────────────────────
+
+interface AuditEntry {
+  id: string
+  admin_email: string
+  action: string
+  target_id: string | null
+  details: Record<string, unknown> | null
+  created_at: string
+}
+
+function AuditLogSection() {
+  const [entries, setEntries] = useState<AuditEntry[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    apiRequest<AuditEntry[]>('/admin/audit-log?limit=100')
+      .then(setEntries)
+      .catch(() => setEntries([]))
+      .finally(() => setLoading(false))
+  }, [])
+
+  return (
+    <div className="mb-8">
+      <h2 className="font-display text-lg font-bold text-[#f0ece4] tracking-wide mb-3">Audit Log</h2>
+      {loading ? (
+        <div className="bg-[#111827] rounded-xl border border-white/8 h-[72px] animate-pulse" />
+      ) : entries.length === 0 ? (
+        <div className="bg-[#111827] rounded-xl border border-white/8 px-4 py-4 text-center">
+          <p className="font-mono text-sm text-[#6b7594]">No admin actions recorded yet</p>
+        </div>
+      ) : (
+        <div className="rounded-xl border border-white/8 overflow-auto max-h-[320px]">
+          <table className="w-full text-left font-mono text-xs" style={{ minWidth: '600px' }}>
+            <thead className="sticky top-0 z-10">
+              <tr className="bg-[#111827] text-[#6b7594]">
+                <th className="px-3 py-2.5 font-medium bg-[#111827]">Time</th>
+                <th className="px-3 py-2.5 font-medium bg-[#111827]">Admin</th>
+                <th className="px-3 py-2.5 font-medium bg-[#111827]">Action</th>
+                <th className="px-3 py-2.5 font-medium bg-[#111827]">Target</th>
+                <th className="px-3 py-2.5 font-medium bg-[#111827]">Details</th>
+              </tr>
+            </thead>
+            <tbody>
+              {entries.map((e, i) => (
+                <tr key={e.id} className={`border-t border-white/5 ${i % 2 === 0 ? 'bg-[#111827]' : 'bg-[#0f1629]'}`}>
+                  <td className="px-3 py-2 text-[#6b7594] whitespace-nowrap">{fmtRelative(e.created_at)}</td>
+                  <td className="px-3 py-2 text-[#f0ece4]/80">{e.admin_email.split('@')[0]}</td>
+                  <td className="px-3 py-2">
+                    <span className="text-[#2dd4bf] font-bold">{e.action}</span>
+                  </td>
+                  <td className="px-3 py-2 text-[#f0ece4]/60 truncate max-w-[120px]">{e.target_id ?? '—'}</td>
+                  <td className="px-3 py-2 text-[#6b7594] truncate max-w-[200px]">
+                    {e.details ? JSON.stringify(e.details) : '—'}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   )

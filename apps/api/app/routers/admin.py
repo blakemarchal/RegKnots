@@ -24,6 +24,11 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 # (Karynn promoted to full admin 2026-04-12)
 READONLY_ADMIN_EMAILS: set[str] = set()
 
+# Owner: the only person who can perform destructive operations (delete user,
+# mass-email blast, purge data, run ingest, manage billing state, etc.).
+# All other admins get read + support + self-only operations.
+OWNER_EMAIL = "blakemarchal@gmail.com"
+
 
 async def require_admin(
     user: Annotated[CurrentUser, Depends(get_current_user)],
@@ -39,6 +44,43 @@ async def require_write_admin(
     if user.email in READONLY_ADMIN_EMAILS:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Read-only admin access")
     return user
+
+
+async def require_owner(
+    user: Annotated[CurrentUser, Depends(require_write_admin)],
+) -> CurrentUser:
+    """Only the product owner can perform destructive operations."""
+    if user.email != OWNER_EMAIL:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Owner access required for this operation",
+        )
+    return user
+
+
+async def audit_log(
+    pool: asyncpg.Pool,
+    admin: CurrentUser,
+    action: str,
+    target_id: str | None = None,
+    details: dict | None = None,
+) -> None:
+    """Record an admin action for accountability. Never raises."""
+    try:
+        import json as _json
+        await pool.execute(
+            """
+            INSERT INTO admin_audit_log (admin_user_id, admin_email, action, target_id, details)
+            VALUES ($1, $2, $3, $4, $5::jsonb)
+            """,
+            uuid.UUID(admin.user_id),
+            admin.email,
+            action,
+            target_id,
+            _json.dumps(details) if details else None,
+        )
+    except Exception:
+        logger.exception("Failed to write audit log entry: %s %s", action, target_id)
 
 
 # ── Stats ────────────────────────────────────────────────────────────────────────
@@ -62,6 +104,21 @@ class AdminStats(BaseModel):
     subs_monthly: int
     subs_annual: int
     subs_paused: int
+
+
+@router.get("/role")
+async def get_admin_role(
+    admin: Annotated[CurrentUser, Depends(require_admin)],
+) -> dict:
+    """Return the admin's role level so the frontend can gate UI accordingly."""
+    is_readonly = admin.email in READONLY_ADMIN_EMAILS
+    is_owner = admin.email == OWNER_EMAIL
+    return {
+        "email": admin.email,
+        "role": "owner" if is_owner else ("readonly" if is_readonly else "admin"),
+        "is_owner": is_owner,
+        "is_readonly": is_readonly,
+    }
 
 
 @router.get("/stats", response_model=AdminStats)
@@ -306,10 +363,11 @@ class ResetResult(BaseModel):
 @router.post("/reset-user/{user_id}", response_model=ResetResult)
 async def reset_user(
     user_id: str,
-    admin: Annotated[CurrentUser, Depends(require_write_admin)],
+    admin: Annotated[CurrentUser, Depends(require_owner)],
 ) -> ResetResult:
     """Reset a single user's pilot state: zero message_count, restart trial, delete conversations."""
     pool = await get_pool()
+    await audit_log(pool, admin, "reset_user", target_id=user_id)
     async with pool.acquire() as conn:
         async with conn.transaction():
             row = await conn.fetchrow("SELECT id, email FROM users WHERE id = $1", user_id)
@@ -343,10 +401,11 @@ async def reset_user(
 
 @router.post("/reset-all-pilots", response_model=ResetResult)
 async def reset_all_pilots(
-    admin: Annotated[CurrentUser, Depends(require_write_admin)],
+    admin: Annotated[CurrentUser, Depends(require_owner)],
 ) -> ResetResult:
     """Reset ALL non-admin users: zero message_count, restart trial, delete conversations."""
     pool = await get_pool()
+    await audit_log(pool, admin, "reset_all_pilots")
     async with pool.acquire() as conn:
         async with conn.transaction():
             rows = await conn.fetch("SELECT id FROM users WHERE is_admin = false")
@@ -391,10 +450,11 @@ class ExtendTrialResult(BaseModel):
 @router.post("/extend-trial/{user_id}", response_model=ExtendTrialResult)
 async def extend_trial(
     user_id: str,
-    admin: Annotated[CurrentUser, Depends(require_write_admin)],
+    admin: Annotated[CurrentUser, Depends(require_owner)],
 ) -> ExtendTrialResult:
     """Extend a user's trial by 14 days from now."""
     pool = await get_pool()
+    await audit_log(pool, admin, "extend_trial", target_id=user_id)
     row = await pool.fetchrow(
         """
         UPDATE users
@@ -418,10 +478,11 @@ class AdminActionResult(BaseModel):
 @router.post("/grant-pro/{user_id}", response_model=AdminActionResult)
 async def grant_pro(
     user_id: str,
-    admin: Annotated[CurrentUser, Depends(require_write_admin)],
+    admin: Annotated[CurrentUser, Depends(require_owner)],
 ) -> AdminActionResult:
     """Manually grant pro tier to a user."""
     pool = await get_pool()
+    await audit_log(pool, admin, "grant_pro", target_id=user_id)
     result = await pool.execute(
         """
         UPDATE users
@@ -445,7 +506,7 @@ class DeleteUserResult(BaseModel):
 @router.delete("/users/{user_id}", response_model=DeleteUserResult)
 async def delete_user(
     user_id: str,
-    admin: Annotated[CurrentUser, Depends(require_write_admin)],
+    admin: Annotated[CurrentUser, Depends(require_owner)],
 ) -> DeleteUserResult:
     """Permanently delete a user and all cascading data (conversations, messages,
     vessels, refresh_tokens, support_tickets, etc.). Admin users cannot be deleted."""
@@ -476,6 +537,7 @@ async def delete_user(
                 "A referencing table is missing ON DELETE CASCADE."
             ),
         ) from exc
+    await audit_log(pool, admin, "delete_user", target_id=user_id, details={"email": row["email"]})
     logger.warning("Admin %s deleted user %s (%s)", admin.email, row["email"], user_id)
     return DeleteUserResult(deleted=True, email=row["email"])
 
@@ -483,10 +545,11 @@ async def delete_user(
 @router.post("/revoke-pro/{user_id}", response_model=AdminActionResult)
 async def revoke_pro(
     user_id: str,
-    admin: Annotated[CurrentUser, Depends(require_write_admin)],
+    admin: Annotated[CurrentUser, Depends(require_owner)],
 ) -> AdminActionResult:
     """Revoke pro tier and revert to free."""
     pool = await get_pool()
+    await audit_log(pool, admin, "revoke_pro", target_id=user_id)
     result = await pool.execute(
         """
         UPDATE users
@@ -543,9 +606,10 @@ async def list_all_notifications(
 @router.post("/notifications")
 async def create_notification(
     body: CreateNotificationRequest,
-    admin: Annotated[CurrentUser, Depends(require_write_admin)],
+    admin: Annotated[CurrentUser, Depends(require_owner)],
 ) -> dict[str, str]:
     pool = await get_pool()
+    await audit_log(pool, admin, "create_notification", details={"title": body.title})
     row = await pool.fetchrow(
         """
         INSERT INTO notifications (title, body, notification_type, source, link_url)
@@ -565,7 +629,7 @@ async def create_notification(
 @router.patch("/notifications/{notification_id}")
 async def toggle_notification(
     notification_id: str,
-    admin: Annotated[CurrentUser, Depends(require_write_admin)],
+    admin: Annotated[CurrentUser, Depends(require_owner)],
 ) -> dict[str, str]:
     try:
         nid = uuid.UUID(notification_id)
@@ -638,7 +702,7 @@ async def subscription_audit(
 @router.post("/simulate-expiry/{user_id}", response_model=AdminActionResult)
 async def simulate_expiry(
     user_id: str,
-    admin: Annotated[CurrentUser, Depends(require_write_admin)],
+    admin: Annotated[CurrentUser, Depends(require_owner)],
 ) -> AdminActionResult:
     """Set a user's trial_ends_at to yesterday to simulate trial expiration."""
     pool = await get_pool()
@@ -939,7 +1003,7 @@ class CustomEmailResult(BaseModel):
 @router.post("/send-custom-email", response_model=CustomEmailResult)
 async def send_custom_email_blast(
     body: CustomEmailRequest,
-    admin: Annotated[CurrentUser, Depends(require_write_admin)],
+    admin: Annotated[CurrentUser, Depends(require_owner)],
     pool: Annotated[asyncpg.Pool, Depends(get_pool)],
 ) -> CustomEmailResult:
     """Send a custom admin-composed email to filtered recipients."""
@@ -1071,7 +1135,7 @@ async def founding_email_test(
 
 @router.post("/founding-email/send", response_model=FoundingEmailSendResult)
 async def founding_email_send(
-    admin: Annotated[CurrentUser, Depends(require_write_admin)],
+    admin: Annotated[CurrentUser, Depends(require_owner)],
     force: bool = Query(default=False),
 ) -> FoundingEmailSendResult:
     """Send the founding member email to all non-admin users who haven't received it.
@@ -1579,6 +1643,8 @@ async def reply_to_ticket(
         body.reply,
         ticket_uuid,
     )
+    pool2 = await get_pool()
+    await audit_log(pool2, admin, "reply_to_ticket", target_id=ticket_id, details={"reply_length": len(body.reply)})
     logger.info("Admin %s replied to ticket %s", admin.email, ticket_id)
     return AdminActionResult(ok=True)
 
@@ -1891,7 +1957,7 @@ class PurgeResult(BaseModel):
 
 @router.delete("/citation-errors/purge", response_model=PurgeResult)
 async def purge_citation_errors(
-    admin: Annotated[CurrentUser, Depends(require_write_admin)],
+    admin: Annotated[CurrentUser, Depends(require_owner)],
     before: str | None = Query(default=None, description="Optional ISO date — only delete errors older than this"),
 ) -> PurgeResult:
     """Delete citation error rows. Without 'before', deletes all."""
@@ -2157,7 +2223,7 @@ class JobRunResult(BaseModel):
 
 @router.post("/jobs/ingest", response_model=JobRunResult)
 async def trigger_ingest(
-    admin: Annotated[CurrentUser, Depends(require_write_admin)],
+    admin: Annotated[CurrentUser, Depends(require_owner)],
     source: str = Query(..., description="Regulation source to update"),
     no_notify: bool = Query(default=False, description="Suppress notifications (dev/maintenance)"),
 ) -> JobRunResult:
@@ -2322,3 +2388,44 @@ async def system_health(
     }
 
     return results
+
+
+# ── Audit log viewer ─────────────────────────────────────────────────────────
+
+
+class AuditLogEntry(BaseModel):
+    id: str
+    admin_email: str
+    action: str
+    target_id: str | None
+    details: dict | None
+    created_at: str
+
+
+@router.get("/audit-log", response_model=list[AuditLogEntry])
+async def get_audit_log(
+    _admin: Annotated[CurrentUser, Depends(require_admin)],
+    limit: int = Query(default=100, ge=1, le=500),
+) -> list[AuditLogEntry]:
+    """Return the most recent admin audit log entries."""
+    pool = await get_pool()
+    rows = await pool.fetch(
+        """
+        SELECT id, admin_email, action, target_id, details, created_at
+        FROM admin_audit_log
+        ORDER BY created_at DESC
+        LIMIT $1
+        """,
+        limit,
+    )
+    return [
+        AuditLogEntry(
+            id=str(r["id"]),
+            admin_email=r["admin_email"],
+            action=r["action"],
+            target_id=r["target_id"],
+            details=r["details"] if isinstance(r["details"], dict) else None,
+            created_at=r["created_at"].isoformat(),
+        )
+        for r in rows
+    ]
