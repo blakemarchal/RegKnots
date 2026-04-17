@@ -71,6 +71,11 @@ class VesselCreate(BaseModel):
     gross_tonnage: float | None = None
     route_types: list[str]
     cargo_types: list[str] = []
+    # Extended profile fields (optional — wizard may populate via COI extraction)
+    subchapter: str | None = None
+    inspection_certificate_type: str | None = None
+    manning_requirement: str | None = None
+    route_limitations: str | None = None
 
 
 class VesselResponse(BaseModel):
@@ -109,8 +114,10 @@ async def create_vessel(
             """
             INSERT INTO vessels
                 (user_id, name, imo_mmsi, vessel_type, gross_tonnage,
-                 flag_state, route_types, cargo_types)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                 flag_state, route_types, cargo_types,
+                 subchapter, inspection_certificate_type, manning_requirement,
+                 route_limitations)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
             RETURNING id, name, vessel_type, gross_tonnage, route_types, cargo_types
             """,
             uuid.UUID(user.user_id),
@@ -121,6 +128,10 @@ async def create_vessel(
             "Unknown",
             body.route_types,
             body.cargo_types,
+            body.subchapter,
+            body.inspection_certificate_type,
+            body.manning_requirement,
+            body.route_limitations,
         )
 
     return VesselResponse(

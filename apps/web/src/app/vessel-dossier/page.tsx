@@ -186,7 +186,7 @@ function DossierContent() {
                 {profileFields.map(([label, value]) => (
                   <div key={label} className="flex items-baseline gap-2">
                     <span className="font-mono text-[10px] text-[#6b7594] shrink-0 w-32">{label}</span>
-                    <span className={`font-mono text-xs ${value ? 'text-[#f0ece4]' : 'text-[#6b7594]/40 italic'}`}>{value ? String(value) : 'Not set'}</span>
+                    <span className={`font-mono text-xs whitespace-pre-line ${value ? 'text-[#f0ece4]' : 'text-[#6b7594]/40 italic'}`}>{value ? String(value) : 'Not set'}</span>
                   </div>
                 ))}
                 {(p.lifesaving_equipment || p.fire_equipment) && (

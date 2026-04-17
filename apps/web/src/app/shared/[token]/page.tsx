@@ -109,7 +109,7 @@ export default function SharedProfilePage() {
               return (
                 <div key={label} className="flex items-baseline gap-2">
                   <span className="font-mono text-xs text-[#6b7594] shrink-0 w-36">{label}</span>
-                  <span className="font-mono text-sm text-[#f0ece4]">{String(value)}</span>
+                  <span className="font-mono text-sm text-[#f0ece4] whitespace-pre-line">{String(value)}</span>
                 </div>
               )
             })}

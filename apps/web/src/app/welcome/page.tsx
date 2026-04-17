@@ -6,6 +6,7 @@ import AuthGuard from '@/components/AuthGuard'
 import { apiRequest, apiUpload } from '@/lib/api'
 import { useAuthStore } from '@/lib/auth'
 import { ComingUpWidget } from '@/components/ComingUpWidget'
+import { ExtractionProgress, useExtractionPhase } from '@/components/ExtractionProgress'
 
 // ── Constants ─────────────────────────────────────────────────────────────
 
@@ -22,6 +23,14 @@ const ROUTE_OPTIONS = [
   { value: 'international', label: 'International', desc: 'Offshore, international voyages' },
 ]
 
+const CARGO_OPTIONS = [
+  'Containers', 'Petroleum / Oil', 'Chemicals', 'Liquefied Gas', 'Dry Bulk',
+  'Passengers', 'Hazardous Materials', 'Vehicles', 'General Cargo',
+  'None / Not Applicable',
+]
+
+const SUBCHAPTERS = ['T', 'K', 'H', 'I', 'R', 'C', 'D', 'L', 'O', 'S', 'U']
+
 const CREDENTIAL_TYPES = [
   { value: 'mmc', label: 'MMC' },
   { value: 'stcw', label: 'STCW Endorsement' },
@@ -31,6 +40,7 @@ const CREDENTIAL_TYPES = [
 ]
 
 type Step = 1 | 2 | 3 | 4  // 4 = success
+type Path = 'unchosen' | 'coi' | 'manual'
 
 interface CompletedSteps {
   vessel: boolean
@@ -45,6 +55,66 @@ interface PreviewExtraction {
   extracted_data: Record<string, unknown>
 }
 
+// Tracks which fields were auto-populated from a COI (for the ✓ badge).
+type PrefilledSet = Record<string, boolean>
+
+// ── Helpers ──────────────────────────────────────────────────────────────
+
+function asString(v: unknown): string {
+  if (v === null || v === undefined) return ''
+  if (typeof v === 'string') return v.toLowerCase() === 'null' ? '' : v
+  if (Array.isArray(v)) return v.map(asString).filter(Boolean).join('\n')
+  if (typeof v === 'object') {
+    return Object.entries(v as Record<string, unknown>)
+      .filter(([, val]) => val !== null && val !== undefined && String(val).toLowerCase() !== 'null')
+      .map(([k, val]) => `${k.replace(/_/g, ' ')}: ${asString(val)}`)
+      .join('; ')
+  }
+  return String(v)
+}
+
+function deriveRouteTypes(route: unknown): string[] {
+  const s = asString(route).toLowerCase()
+  if (!s) return []
+  const types: string[] = []
+  if (/inland|river|lake|great lakes/.test(s)) types.push('inland')
+  if (/coast|near-coastal|coastwise/.test(s)) types.push('coastal')
+  if (/ocean|international|unlimited/.test(s)) types.push('international')
+  return types
+}
+
+function matchVesselType(raw: unknown): string | null {
+  const s = asString(raw)
+  if (!s) return null
+  const lc = s.toLowerCase()
+  const hit = VESSEL_TYPES.find((t) => t.toLowerCase() === lc)
+  if (hit) return hit
+  // Soft match common variants just in case Claude drifts.
+  if (/passenger/.test(lc)) return 'Passenger Vessel'
+  if (/tank/.test(lc)) return 'Tanker'
+  if (/container/.test(lc)) return 'Containership'
+  if (/bulk/.test(lc)) return 'Bulk Carrier'
+  if (/tow|tug/.test(lc)) return 'Towing / Tugboat'
+  if (/osv|offshore/.test(lc)) return 'OSV / Offshore Support'
+  if (/ferry/.test(lc)) return 'Ferry'
+  if (/fish/.test(lc)) return 'Fish Processing'
+  if (/research/.test(lc)) return 'Research Vessel'
+  return null
+}
+
+function filterCargoTypes(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return []
+  return raw.filter((c): c is string => typeof c === 'string' && CARGO_OPTIONS.includes(c))
+}
+
+function parseGrossTonnage(raw: unknown): string {
+  const s = asString(raw).replace(/,/g, '').trim()
+  if (!s) return ''
+  const n = parseFloat(s)
+  // Reject regulatory formats like "R-4"
+  return Number.isFinite(n) && !/[a-z]/i.test(s) ? String(n) : ''
+}
+
 // ── Component ─────────────────────────────────────────────────────────────
 
 function WelcomeContent() {
@@ -52,26 +122,35 @@ function WelcomeContent() {
   const { addVessel, setActiveVessel } = useAuthStore()
 
   const [step, setStep] = useState<Step>(1)
+  const [path, setPath] = useState<Path>('unchosen')
   const [completed, setCompleted] = useState<CompletedSteps>({
     vessel: false, coi: false, credential: false,
   })
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
 
-  // ── Step 1: Vessel ──────────────────────────────────────────────────
-  const [vesselName, setVesselName] = useState('')
+  // ── Step 1 (COI upload) ─────────────────────────────────────────────
+  const [coiPreview, setCoiPreview] = useState<PreviewExtraction | null>(null)
+  const [coiRetryUsed, setCoiRetryUsed] = useState(false)
+  const { phase: extractionPhase, start: startPhase, finish: finishPhase, reset: resetPhase } = useExtractionPhase()
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // ── Step 2 (unified vessel form) ────────────────────────────────────
+  const [name, setName] = useState('')
   const [vesselType, setVesselType] = useState('Containership')
   const [grossTonnage, setGrossTonnage] = useState('')
   const [routeTypes, setRouteTypes] = useState<string[]>([])
+  const [cargoTypes, setCargoTypes] = useState<string[]>([])
+  const [subchapter, setSubchapter] = useState('')
+  const [certType, setCertType] = useState('')
+  const [manning, setManning] = useState('')
+  const [routeLimitations, setRouteLimitations] = useState('')
+  const [prefilled, setPrefilled] = useState<PrefilledSet>({})
+
   const [createdVesselId, setCreatedVesselId] = useState<string | null>(null)
   const [createdVesselName, setCreatedVesselName] = useState<string | null>(null)
 
-  // ── Step 2: COI upload ──────────────────────────────────────────────
-  const [coiUploading, setCoiUploading] = useState(false)
-  const [coiPreview, setCoiPreview] = useState<PreviewExtraction | null>(null)
-  const fileInputRef = useRef<HTMLInputElement>(null)
-
-  // ── Step 3: Credential ──────────────────────────────────────────────
+  // ── Step 3 (credential) ─────────────────────────────────────────────
   const [credType, setCredType] = useState('mmc')
   const [credTitle, setCredTitle] = useState('')
   const [credExpiry, setCredExpiry] = useState('')
@@ -82,10 +161,89 @@ function WelcomeContent() {
   function toggleRoute(r: string) {
     setRouteTypes((prev) => prev.includes(r) ? prev.filter((x) => x !== r) : [...prev, r])
   }
+  function toggleCargo(c: string) {
+    setCargoTypes((prev) => prev.includes(c) ? prev.filter((x) => x !== c) : [...prev, c])
+  }
 
   // ── Step 1 actions ──────────────────────────────────────────────────
-  async function saveVessel() {
-    if (!vesselName.trim()) { setError('Vessel name is required'); return }
+
+  async function uploadCoi(file: File) {
+    setError(null)
+    startPhase()
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      const result = await apiUpload<PreviewExtraction>('/documents/extract-preview', formData)
+      finishPhase(true)
+      setCoiPreview(result)
+      // Pre-fill Step 2 form from extraction
+      applyExtractionToForm(result.extracted_data)
+      // Advance to Step 2 review
+      setPath('coi')
+      setStep(2)
+    } catch (e) {
+      finishPhase(false)
+      setError(e instanceof Error ? e.message : 'Could not read the document.')
+    }
+  }
+
+  function applyExtractionToForm(data: Record<string, unknown>) {
+    const next: PrefilledSet = {}
+
+    const n = asString(data.vessel_name).trim()
+    if (n) { setName(n); next.name = true }
+
+    const vt = matchVesselType(data.vessel_type)
+    if (vt) { setVesselType(vt); next.vesselType = true }
+
+    const gt = parseGrossTonnage(data.gross_tonnage)
+    if (gt) { setGrossTonnage(gt); next.grossTonnage = true }
+
+    const rts = deriveRouteTypes(data.route)
+    if (rts.length) { setRouteTypes(rts); next.routeTypes = true }
+
+    const cargo = filterCargoTypes(data.cargo_types)
+    if (cargo.length) { setCargoTypes(cargo); next.cargoTypes = true }
+
+    const sub = asString(data.subchapter).trim().toUpperCase()
+    if (sub && SUBCHAPTERS.includes(sub)) { setSubchapter(sub); next.subchapter = true }
+
+    const manReq = asString(data.manning_requirement).trim()
+    if (manReq) { setManning(manReq); next.manning = true }
+
+    const rlim = asString(data.route_limitations).trim()
+    if (rlim) { setRouteLimitations(rlim); next.routeLimitations = true }
+
+    // Default cert type to "COI" when the user came through the COI path.
+    setCertType('COI')
+    next.certType = true
+
+    setPrefilled(next)
+  }
+
+  function retryCoi() {
+    setCoiRetryUsed(true)
+    setError(null)
+    resetPhase()
+    fileInputRef.current?.click()
+  }
+
+  function fallbackToManual() {
+    setPath('manual')
+    setStep(2)
+    setError(null)
+    resetPhase()
+  }
+
+  function chooseManualFromStep1() {
+    setPath('manual')
+    setStep(2)
+  }
+
+  // ── Step 2 actions ──────────────────────────────────────────────────
+
+  async function saveVesselAndContinue() {
+    if (!name.trim()) { setError('Vessel name is required'); return }
     if (routeTypes.length === 0) { setError('Pick at least one route type'); return }
     setSubmitting(true)
     setError(null)
@@ -93,19 +251,44 @@ function WelcomeContent() {
       const created = await apiRequest<{ id: string; name: string }>('/vessels', {
         method: 'POST',
         body: JSON.stringify({
-          name: vesselName.trim(),
+          name: name.trim(),
           vessel_type: vesselType,
           gross_tonnage: grossTonnage ? parseFloat(grossTonnage) : null,
           route_types: routeTypes,
-          cargo_types: [],
+          cargo_types: cargoTypes,
+          subchapter: subchapter || null,
+          inspection_certificate_type: certType.trim() || null,
+          manning_requirement: manning.trim() || null,
+          route_limitations: routeLimitations.trim() || null,
         }),
       })
       addVessel({ id: created.id, name: created.name })
       setActiveVessel(created.id)
       setCreatedVesselId(created.id)
       setCreatedVesselName(created.name)
-      setCompleted((c) => ({ ...c, vessel: true }))
-      setStep(2)
+
+      // If the user came via COI path, attach the document as a snapshot.
+      // apply_to_vessel=false because we just wrote the user-confirmed values.
+      if (path === 'coi' && coiPreview) {
+        try {
+          await apiRequest(`/vessels/${created.id}/documents/from-preview`, {
+            method: 'POST',
+            body: JSON.stringify({
+              preview_id: coiPreview.preview_id,
+              document_type: 'coi',
+              extracted_data: coiPreview.extracted_data,
+              apply_to_vessel: false,
+            }),
+          })
+          setCompleted((c) => ({ ...c, vessel: true, coi: true }))
+        } catch {
+          // Don't block wizard on attach failure; vessel is saved.
+          setCompleted((c) => ({ ...c, vessel: true }))
+        }
+      } else {
+        setCompleted((c) => ({ ...c, vessel: true }))
+      }
+      setStep(3)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to save vessel')
     } finally {
@@ -113,52 +296,13 @@ function WelcomeContent() {
     }
   }
 
-  function skipVessel() {
-    // No vessel = skip COI step too (nothing to attach to)
+  function skipStep2() {
+    // User doesn't want a vessel at all — skip straight to credential step.
     setStep(3)
   }
 
-  // ── Step 2 actions ──────────────────────────────────────────────────
-  async function uploadCoi(file: File) {
-    setCoiUploading(true)
-    setError(null)
-    try {
-      const formData = new FormData()
-      formData.append('file', file)
-      const result = await apiUpload<PreviewExtraction>('/documents/extract-preview', formData)
-      setCoiPreview(result)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'COI extraction failed — you can skip and add later')
-    } finally {
-      setCoiUploading(false)
-    }
-  }
-
-  async function attachCoi() {
-    if (!createdVesselId || !coiPreview) return
-    setSubmitting(true)
-    setError(null)
-    try {
-      await apiRequest(`/vessels/${createdVesselId}/documents/from-preview`, {
-        method: 'POST',
-        body: JSON.stringify({
-          preview_id: coiPreview.preview_id,
-          document_type: 'coi',
-          extracted_data: coiPreview.extracted_data,
-        }),
-      })
-      setCompleted((c) => ({ ...c, coi: true }))
-      setStep(3)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to attach COI')
-    } finally {
-      setSubmitting(false)
-    }
-  }
-
-  function skipCoi() { setStep(3) }
-
   // ── Step 3 actions ──────────────────────────────────────────────────
+
   async function scanCredentialPhoto(file: File) {
     setCredScanning(true)
     setError(null)
@@ -203,9 +347,7 @@ function WelcomeContent() {
     }
   }
 
-  async function skipCredential() {
-    await finishOnboarding()
-  }
+  async function skipCredential() { await finishOnboarding() }
 
   async function finishOnboarding() {
     setSubmitting(true)
@@ -223,7 +365,6 @@ function WelcomeContent() {
       })
       setStep(4)
     } catch (e) {
-      // Don't block the user on a flag-write failure
       console.error('Failed to record onboarding completion', e)
       setStep(4)
     } finally {
@@ -267,35 +408,120 @@ function WelcomeContent() {
       <main className="flex-1 overflow-y-auto px-4 py-6">
         <div className="max-w-md mx-auto flex flex-col gap-5">
 
-          {/* ── Step 1: Vessel ──────────────────────────────────────── */}
+          {/* ── Step 1: Path chooser ───────────────────────────────── */}
           {step === 1 && (
             <>
               <div className="flex flex-col gap-1">
                 <h1 className="font-display text-2xl font-bold text-[#f0ece4]">Welcome aboard</h1>
                 <p className="font-mono text-xs text-[#6b7594] leading-relaxed">
-                  Let&apos;s set you up so RegKnot can give you vessel-specific compliance answers.
+                  Let&apos;s set up your vessel so RegKnot can give you compliance answers tailored to it.
                   This takes about 90 seconds.
                 </p>
               </div>
 
-              <section className="bg-[#111827] border border-white/8 rounded-xl p-5 flex flex-col gap-4">
-                <p className="font-mono text-xs text-[#2dd4bf] uppercase tracking-wider">Add a vessel</p>
+              {extractionPhase !== 'idle' && !error ? (
+                <section className="bg-[#111827] border border-[#2dd4bf]/30 rounded-xl p-5 flex flex-col gap-4">
+                  <div className="w-8 h-8 border-2 border-[#2dd4bf] border-t-transparent rounded-full animate-spin mx-auto" />
+                  <ExtractionProgress phase={extractionPhase} />
+                </section>
+              ) : (
+                <section className="bg-[#111827] border border-white/8 rounded-xl p-5 flex flex-col gap-4">
+                  <div>
+                    <p className="font-mono text-xs text-[#2dd4bf] uppercase tracking-wider mb-1">Do you have a COI?</p>
+                    <p className="font-mono text-[11px] text-[#6b7594] leading-relaxed">
+                      A Certificate of Inspection is the fastest way to set up — we&apos;ll auto-fill
+                      vessel type, subchapter, manning, routes, and more.
+                    </p>
+                  </div>
 
-                <Field label="Vessel Name" required>
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    className="border-2 border-dashed border-[#2dd4bf]/40 hover:border-[#2dd4bf] bg-[#2dd4bf]/5 hover:bg-[#2dd4bf]/10
+                      rounded-xl py-6 px-4 flex flex-col items-center gap-2 transition-colors"
+                  >
+                    <svg className="w-8 h-8 text-[#2dd4bf]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                      <polyline points="17 8 12 3 7 8" />
+                      <line x1="12" y1="3" x2="12" y2="15" />
+                    </svg>
+                    <p className="font-mono text-sm font-bold text-[#2dd4bf]">Upload COI</p>
+                    <p className="font-mono text-[10px] text-[#6b7594]">PDF, JPG, or PNG · max 10MB</p>
+                  </button>
+
                   <input
-                    type="text" value={vesselName}
-                    onChange={(e) => setVesselName(e.target.value)}
+                    ref={fileInputRef} type="file"
+                    accept="image/jpeg,image/png,image/webp,application/pdf"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0]
+                      if (file) uploadCoi(file)
+                      e.target.value = ''
+                    }}
+                  />
+
+                  <div className="flex items-center gap-3">
+                    <div className="flex-1 h-px bg-white/8" />
+                    <p className="font-mono text-[10px] text-[#6b7594] uppercase tracking-wider">or</p>
+                    <div className="flex-1 h-px bg-white/8" />
+                  </div>
+
+                  <button
+                    onClick={chooseManualFromStep1}
+                    className="border border-white/10 hover:border-white/25 bg-[#0d1225] hover:bg-white/5
+                      rounded-xl py-3 px-4 transition-colors"
+                  >
+                    <p className="font-mono text-sm text-[#f0ece4]">Enter vessel details manually</p>
+                    <p className="font-mono text-[10px] text-[#6b7594] mt-0.5">Takes ~60 seconds</p>
+                  </button>
+                </section>
+              )}
+
+              {error && (
+                <>
+                  <ErrorBox msg={error} />
+                  <div className="flex items-center gap-3">
+                    {!coiRetryUsed && (
+                      <button onClick={retryCoi} className={primaryBtn}>Try Again</button>
+                    )}
+                    <button onClick={fallbackToManual} className={coiRetryUsed ? primaryBtn : ghostBtn}>
+                      Enter manually instead
+                    </button>
+                  </div>
+                </>
+              )}
+            </>
+          )}
+
+          {/* ── Step 2: Unified vessel form ────────────────────────── */}
+          {step === 2 && (
+            <>
+              <div className="flex flex-col gap-1">
+                <h1 className="font-display text-2xl font-bold text-[#f0ece4]">
+                  {path === 'coi' ? 'Review your vessel' : 'Add your vessel'}
+                </h1>
+                <p className="font-mono text-xs text-[#6b7594] leading-relaxed">
+                  {path === 'coi'
+                    ? "We pulled these from your COI — edit anything that's off, then save."
+                    : 'Fill in the basics. You can add a COI later from the vessel edit page.'}
+                </p>
+              </div>
+
+              <section className="bg-[#111827] border border-white/8 rounded-xl p-5 flex flex-col gap-4">
+                <Field label="Vessel Name" required prefilled={prefilled.name}>
+                  <input
+                    type="text" value={name}
+                    onChange={(e) => setName(e.target.value)}
                     placeholder="e.g. Maersk Tennessee"
                     className={inputClass}
-                    autoFocus
+                    autoFocus={!name}
                   />
                 </Field>
 
-                <Field label="Vessel Type">
+                <Field label="Vessel Type" prefilled={prefilled.vesselType}>
                   <SelectInput value={vesselType} onChange={setVesselType} options={VESSEL_TYPES} />
                 </Field>
 
-                <Field label="Gross Tonnage (GT)">
+                <Field label="Gross Tonnage (GT)" prefilled={prefilled.grossTonnage}>
                   <input
                     type="number" value={grossTonnage}
                     onChange={(e) => setGrossTonnage(e.target.value)}
@@ -304,7 +530,7 @@ function WelcomeContent() {
                   />
                 </Field>
 
-                <Field label="Routes" required>
+                <Field label="Routes" required prefilled={prefilled.routeTypes}>
                   <div className="flex flex-col gap-2">
                     {ROUTE_OPTIONS.map((r) => (
                       <button
@@ -324,119 +550,95 @@ function WelcomeContent() {
                     ))}
                   </div>
                 </Field>
+
+                <Field label="Cargo Types" prefilled={prefilled.cargoTypes}>
+                  <div className="flex flex-wrap gap-2">
+                    {CARGO_OPTIONS.map((c) => {
+                      const selected = cargoTypes.includes(c)
+                      return (
+                        <button
+                          key={c}
+                          type="button"
+                          onClick={() => toggleCargo(c)}
+                          className={`font-mono px-3 py-1.5 rounded-full text-xs border transition-colors duration-150 ${
+                            selected
+                              ? 'bg-[#2dd4bf]/15 border-[#2dd4bf] text-[#2dd4bf]'
+                              : 'bg-white/5 border-white/10 text-[#6b7594] hover:border-white/25 hover:text-[#f0ece4]'
+                          }`}
+                        >
+                          {c}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </Field>
+              </section>
+
+              {/* Compliance details — collapsible but always visible on COI path */}
+              <section className="bg-[#111827] border border-white/8 rounded-xl p-5 flex flex-col gap-4">
+                <p className="font-mono text-xs text-[#2dd4bf] uppercase tracking-wider">
+                  Compliance Details
+                  <span className="normal-case tracking-normal ml-2 text-[#6b7594]/80">
+                    (optional — improves PSC checklist)
+                  </span>
+                </p>
+
+                <Field label="USCG Subchapter" prefilled={prefilled.subchapter}>
+                  <SelectInput
+                    value={subchapter}
+                    onChange={setSubchapter}
+                    options={['Not set', ...SUBCHAPTERS.map((s) => `Subchapter ${s}`)]}
+                    optionValues={['', ...SUBCHAPTERS]}
+                  />
+                </Field>
+
+                <Field label="Certificate Type" prefilled={prefilled.certType}>
+                  <input
+                    type="text" value={certType}
+                    onChange={(e) => setCertType(e.target.value)}
+                    placeholder="e.g. COI, SOLAS Safety, IOPP"
+                    className={inputClass}
+                  />
+                </Field>
+
+                <Field label="Manning Requirement" prefilled={prefilled.manning}>
+                  <input
+                    type="text" value={manning}
+                    onChange={(e) => setManning(e.target.value)}
+                    placeholder="e.g. 1 Master minimum"
+                    className={inputClass}
+                  />
+                </Field>
+
+                <Field label="Route Limitations" prefilled={prefilled.routeLimitations}>
+                  <textarea
+                    value={routeLimitations}
+                    onChange={(e) => setRouteLimitations(e.target.value)}
+                    rows={3}
+                    placeholder="e.g. Limited to Table Rock Lake; no operation in winds > 35mph"
+                    className={`${inputClass} resize-none`}
+                  />
+                </Field>
               </section>
 
               {error && <ErrorBox msg={error} />}
 
               <div className="flex items-center gap-3">
                 <button
-                  onClick={saveVessel}
+                  onClick={saveVesselAndContinue}
                   disabled={submitting}
                   className={primaryBtn}
                 >
                   {submitting ? 'Saving…' : 'Save Vessel & Continue'}
                 </button>
-                <button onClick={skipVessel} className={ghostBtn}>
+                <button onClick={skipStep2} disabled={submitting} className={ghostBtn}>
                   Skip
                 </button>
               </div>
             </>
           )}
 
-          {/* ── Step 2: COI Upload ─────────────────────────────────── */}
-          {step === 2 && createdVesselId && (
-            <>
-              <div className="flex flex-col gap-1">
-                <h1 className="font-display text-2xl font-bold text-[#f0ece4]">Got a COI?</h1>
-                <p className="font-mono text-xs text-[#6b7594] leading-relaxed">
-                  Upload your Certificate of Inspection and we&apos;ll auto-populate
-                  subchapter, manning requirements, equipment, and route limitations
-                  for {createdVesselName}.
-                </p>
-              </div>
-
-              <section className="bg-[#111827] border border-white/8 rounded-xl p-5 flex flex-col gap-4">
-                {!coiPreview ? (
-                  <>
-                    <button
-                      onClick={() => fileInputRef.current?.click()}
-                      disabled={coiUploading}
-                      className="border-2 border-dashed border-white/15 hover:border-[#2dd4bf]/40
-                        rounded-xl py-8 px-4 flex flex-col items-center gap-2
-                        transition-colors disabled:opacity-50"
-                    >
-                      {coiUploading ? (
-                        <>
-                          <div className="w-8 h-8 border-2 border-[#2dd4bf] border-t-transparent rounded-full animate-spin" />
-                          <p className="font-mono text-xs text-[#2dd4bf]">Extracting COI…</p>
-                          <p className="font-mono text-[10px] text-[#6b7594]">This takes 10-20 seconds</p>
-                        </>
-                      ) : (
-                        <>
-                          <svg className="w-10 h-10 text-[#6b7594]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                            <polyline points="17 8 12 3 7 8" />
-                            <line x1="12" y1="3" x2="12" y2="15" />
-                          </svg>
-                          <p className="font-mono text-sm text-[#f0ece4]">Tap to upload COI</p>
-                          <p className="font-mono text-[10px] text-[#6b7594]">PDF, JPG, or PNG · max 10MB</p>
-                        </>
-                      )}
-                    </button>
-                    <input
-                      ref={fileInputRef} type="file"
-                      accept="image/jpeg,image/png,image/webp,application/pdf"
-                      className="hidden"
-                      onChange={(e) => {
-                        const file = e.target.files?.[0]
-                        if (file) uploadCoi(file)
-                        e.target.value = ''
-                      }}
-                    />
-                  </>
-                ) : (
-                  <div className="flex flex-col gap-3">
-                    <p className="font-mono text-xs text-[#2dd4bf]">✓ Extracted from {coiPreview.filename}</p>
-                    <div className="bg-[#0d1225] border border-white/10 rounded-lg p-3 max-h-48 overflow-y-auto">
-                      <div className="flex flex-col gap-1.5 font-mono text-[11px]">
-                        {Object.entries(coiPreview.extracted_data)
-                          .filter(([_, v]) => v && String(v).toLowerCase() !== 'null')
-                          .slice(0, 10)
-                          .map(([k, v]) => (
-                            <div key={k} className="flex items-baseline gap-2">
-                              <span className="text-[#6b7594] shrink-0">{k.replace(/_/g, ' ')}:</span>
-                              <span className="text-[#f0ece4] truncate">{String(v)}</span>
-                            </div>
-                          ))}
-                      </div>
-                    </div>
-                    <button onClick={() => setCoiPreview(null)} className="font-mono text-[10px] text-[#6b7594] hover:text-[#f0ece4] self-start">
-                      Try a different file
-                    </button>
-                  </div>
-                )}
-              </section>
-
-              {error && <ErrorBox msg={error} />}
-
-              <div className="flex items-center gap-3">
-                <button
-                  onClick={coiPreview ? attachCoi : skipCoi}
-                  disabled={submitting || coiUploading}
-                  className={primaryBtn}
-                >
-                  {submitting ? 'Saving…' : coiPreview ? 'Apply to Vessel & Continue' : 'Continue'}
-                </button>
-                {!coiPreview && (
-                  <button onClick={skipCoi} className={ghostBtn}>
-                    Skip
-                  </button>
-                )}
-              </div>
-            </>
-          )}
-
-          {/* ── Step 3: Credential ──────────────────────────────────── */}
+          {/* ── Step 3: Credential ─────────────────────────────────── */}
           {step === 3 && (
             <>
               <div className="flex flex-col gap-1">
@@ -530,11 +732,10 @@ function WelcomeContent() {
               <section className="bg-[#111827] border border-white/8 rounded-xl p-5 flex flex-col gap-2">
                 <p className="font-mono text-xs text-[#6b7594] uppercase tracking-wider mb-1">Setup summary</p>
                 <SummaryRow done={completed.vessel} label={completed.vessel ? `Vessel: ${createdVesselName}` : 'Vessel: skipped'} />
-                <SummaryRow done={completed.coi} label={completed.coi ? 'COI uploaded & extracted' : 'COI: skipped'} />
+                <SummaryRow done={completed.coi} label={completed.coi ? 'COI uploaded & attached' : 'COI: skipped'} />
                 <SummaryRow done={!!credAddedTitle} label={credAddedTitle ? `Credential: ${credAddedTitle}` : 'Credential: skipped'} />
               </section>
 
-              {/* Show Coming Up if anything was set up */}
               {(completed.vessel || credAddedTitle) && (
                 <ComingUpWidget visible={true} compact={false} />
               )}
@@ -563,11 +764,28 @@ const primaryBtn = 'flex-1 font-mono text-sm font-bold text-[#0a0e1a] bg-[#2dd4b
 
 const ghostBtn = 'font-mono text-sm text-[#6b7594] hover:text-[#f0ece4] px-4 py-3 transition-colors'
 
-function Field({ label, required, children }: { label: string; required?: boolean; children: React.ReactNode }) {
+function Field({
+  label, required, prefilled, children,
+}: {
+  label: string
+  required?: boolean
+  prefilled?: boolean
+  children: React.ReactNode
+}) {
   return (
     <div className="flex flex-col gap-1">
-      <label className="font-mono text-xs text-[#6b7594]">
-        {label}{required && <span className="text-amber-400 ml-1">*</span>}
+      <label className="font-mono text-xs text-[#6b7594] flex items-center gap-1.5">
+        <span>{label}{required && <span className="text-amber-400 ml-1">*</span>}</span>
+        {prefilled && (
+          <span
+            title="Pre-filled from your COI"
+            className="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-[#2dd4bf]/20 text-[#2dd4bf]"
+          >
+            <svg className="w-2.5 h-2.5" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M2 6l3 3 5-5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </span>
+        )}
       </label>
       {children}
     </div>

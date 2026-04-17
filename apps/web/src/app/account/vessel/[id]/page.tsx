@@ -596,17 +596,9 @@ function VesselEditContent() {
             <path d="M19 12H5M12 5l-7 7 7 7" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         </button>
-        <div className="flex flex-col">
-          <h1 className="font-display text-xl font-bold text-[#f0ece4] tracking-wide leading-none">
-            Edit Vessel
-          </h1>
-          <button
-            onClick={() => router.push('/account')}
-            className="font-mono text-xs text-[#6b7594] hover:text-[#2dd4bf] transition-colors duration-150 text-left mt-0.5"
-          >
-            &larr; Back to Account
-          </button>
-        </div>
+        <h1 className="font-display text-xl font-bold text-[#f0ece4] tracking-wide leading-none">
+          Edit Vessel
+        </h1>
       </header>
 
       <main className="flex-1 overflow-y-auto px-4 py-6">

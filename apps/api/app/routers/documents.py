@@ -45,11 +45,27 @@ If this is a Certificate of Inspection (COI), extract:
 - official_number: USCG official number
 - imo_number: IMO number if present
 - call_sign: radio call sign if present
-- vessel_type: type of vessel
+- vessel_type: MUST be one of exactly: "Containership", "Tanker", "Bulk Carrier",
+    "OSV / Offshore Support", "Towing / Tugboat", "Passenger Vessel", "Ferry",
+    "Fish Processing", "Research Vessel", "Other". Derive this from the Service
+    field: "Passenger (Inspected)" or any service with passengers → "Passenger Vessel";
+    "Tank Vessel" or oil/chem/gas carrier → "Tanker"; "Cargo" + containers →
+    "Containership"; "Cargo" + bulk → "Bulk Carrier"; "OSV" → "OSV / Offshore Support";
+    "Towing" / "Tugboat" → "Towing / Tugboat"; if unclear → "Other".
+- cargo_types: JSON array, each element MUST be one of exactly: "Containers",
+    "Petroleum / Oil", "Chemicals", "Liquefied Gas", "Dry Bulk", "Passengers",
+    "Hazardous Materials", "Vehicles", "General Cargo", "None / Not Applicable".
+    Derive from the Service field. Examples: Service="Passenger (Inspected)" →
+    ["Passengers"]; Service="Tank Vessel" carrying oil → ["Petroleum / Oil"];
+    Inspected Towing Vessel with no named cargo → []; Cargo + containers →
+    ["Containers"]. Use [] (empty array) when cargo is not explicit — never guess.
 - subchapter: USCG subchapter (T, K, H, I, R, etc.)
-- gross_tonnage: gross tonnage
+- gross_tonnage: gross tonnage as a plain number if given as one. If given in
+    regulatory format (e.g. "R-4", "R-6"), return null for this field (do NOT
+    return the regulatory code string).
 - route: authorized route (inland, coastwise, near-coastal, oceans, Great Lakes, etc.)
-- route_limitations: any specific route limitations or restrictions
+- route_limitations: any specific route limitations or restrictions. If multiple
+    distinct limitations, return as a JSON array of strings; otherwise a single string.
 - max_persons: maximum persons allowed
 - max_passengers: maximum passengers if applicable
 - manning_requirement: minimum manning requirements
@@ -58,7 +74,8 @@ If this is a Certificate of Inspection (COI), extract:
 - inspection_date: date of last inspection
 - expiration_date: certificate expiration date
 - issuing_office: USCG office that issued the certificate
-- conditions_of_operation: any conditions or restrictions noted
+- conditions_of_operation: any conditions or restrictions noted. If multiple
+    distinct conditions, return as a JSON array of strings.
 - lifesaving_equipment: summary of required lifesaving equipment
 - fire_equipment: summary of required fire equipment
 
@@ -98,6 +115,7 @@ class AttachPreviewBody(BaseModel):
     preview_id: str
     document_type: str = "coi"
     extracted_data: dict = {}
+    apply_to_vessel: bool = True
 
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
@@ -360,8 +378,10 @@ async def attach_preview(
         json.dumps(body.extracted_data),
     )
 
-    # Apply extracted data to vessel profile
-    if body.extracted_data:
+    # Apply extracted data to vessel profile (skipped when caller has already
+    # written user-confirmed values, e.g. /welcome wizard creates the vessel
+    # with edited form values and doesn't want them clobbered).
+    if body.extracted_data and body.apply_to_vessel:
         await _apply_document_to_vessel(pool, vessel_id, body.extracted_data)
 
     return _row_to_doc(row)
@@ -453,39 +473,101 @@ async def retry_extraction(
     return _row_to_doc(row)
 
 
+_VESSEL_TYPE_WHITELIST = {
+    "Containership", "Tanker", "Bulk Carrier", "OSV / Offshore Support",
+    "Towing / Tugboat", "Passenger Vessel", "Ferry", "Fish Processing",
+    "Research Vessel", "Other",
+}
+_CARGO_TYPE_WHITELIST = {
+    "Containers", "Petroleum / Oil", "Chemicals", "Liquefied Gas", "Dry Bulk",
+    "Passengers", "Hazardous Materials", "Vehicles", "General Cargo",
+    "None / Not Applicable",
+}
+
+
+def _coerce_to_text(val) -> str | None:
+    """Flatten list/dict values into a human-readable TEXT column value.
+
+    Prevents Python's ``str(list)`` repr leaking into the DB as ``"['a', 'b']"``.
+    Lists become newline-joined; dicts become ``key: value`` pairs.
+    """
+    if val is None:
+        return None
+    if isinstance(val, list):
+        parts = [str(x).strip() for x in val if x is not None and str(x).strip() and str(x).strip().lower() != "null"]
+        return "\n".join(parts) if parts else None
+    if isinstance(val, dict):
+        parts = [
+            f"{k.replace('_', ' ')}: {v}"
+            for k, v in val.items()
+            if v is not None and str(v).strip() and str(v).strip().lower() != "null"
+        ]
+        return "; ".join(parts) if parts else None
+    s = str(val).strip()
+    if not s or s.lower() == "null":
+        return None
+    return s
+
+
 async def _apply_document_to_vessel(
     pool: asyncpg.Pool, vessel_id: _uuid.UUID, extracted: dict,
 ) -> None:
-    """Map confirmed document data back to the vessels table."""
+    """Map confirmed document data back to the vessels table.
+
+    Strategy: core fields (subchapter, manning, route_limitations, cert_type) overwrite
+    because users invoke this via the explicit Confirm flow on the edit page. Fields the
+    user is likely to have set manually (vessel_type, cargo_types, gross_tonnage) use
+    COALESCE to avoid clobbering. rich_keys land in additional_details JSONB.
+    """
     sets: list[str] = []
     params: list = []
     idx = 1
 
-    field_map = {
+    text_field_map = {
         "subchapter": "subchapter",
         "manning_requirement": "manning_requirement",
         "route_limitations": "route_limitations",
         "inspection_certificate_type": "inspection_certificate_type",
     }
-    for ext_key, col in field_map.items():
-        val = extracted.get(ext_key)
-        if val and val != "null":
+    for ext_key, col in text_field_map.items():
+        coerced = _coerce_to_text(extracted.get(ext_key))
+        if coerced:
             sets.append(f"{col} = ${idx}")
-            params.append(str(val))
+            params.append(coerced)
+            idx += 1
+
+    # vessel_type: only overwrite if currently unset, and only if the extracted
+    # value matches our UI whitelist — otherwise we'd pollute with free-text.
+    vt = _coerce_to_text(extracted.get("vessel_type"))
+    if vt and vt in _VESSEL_TYPE_WHITELIST:
+        sets.append(f"vessel_type = COALESCE(NULLIF(vessel_type, ''), ${idx})")
+        params.append(vt)
+        idx += 1
+
+    # cargo_types: only fill if currently empty. Filter to whitelist values.
+    raw_cargo = extracted.get("cargo_types")
+    if isinstance(raw_cargo, list):
+        cargo_clean = [c for c in raw_cargo if isinstance(c, str) and c in _CARGO_TYPE_WHITELIST]
+        if cargo_clean:
+            sets.append(
+                f"cargo_types = CASE WHEN COALESCE(array_length(cargo_types, 1), 0) = 0 "
+                f"THEN ${idx}::text[] ELSE cargo_types END"
+            )
+            params.append(cargo_clean)
             idx += 1
 
     gt = extracted.get("gross_tonnage")
-    if gt and gt != "null":
+    if gt and str(gt).strip().lower() != "null":
         try:
             gt_val = float(str(gt).replace(",", ""))
             sets.append(f"gross_tonnage = COALESCE(gross_tonnage, ${idx})")
             params.append(gt_val)
             idx += 1
         except (ValueError, TypeError):
-            pass
+            pass  # e.g. regulatory format "R-4" — silently skip
 
     route = extracted.get("route")
-    if route and route != "null":
+    if route and str(route).strip().lower() != "null":
         route_str = str(route).lower()
         route_types: list[str] = []
         if any(k in route_str for k in ("inland", "river", "lake", "great lakes")):
@@ -507,9 +589,9 @@ async def _apply_document_to_vessel(
     ]
     additional = {}
     for k in rich_keys:
-        v = extracted.get(k)
-        if v and v != "null" and str(v).strip():
-            additional[k] = str(v)
+        coerced = _coerce_to_text(extracted.get(k))
+        if coerced:
+            additional[k] = coerced
 
     if additional:
         sets.append(f"additional_details = COALESCE(additional_details, '{{}}'::jsonb) || ${idx}::jsonb")
