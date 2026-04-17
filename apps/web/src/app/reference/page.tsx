@@ -211,12 +211,27 @@ export default function ReferencePage() {
         </div>
 
         {/* Disclaimer — teal-bordered info box */}
-        <div className="mb-8 rounded-xl border border-[#2dd4bf]/30 bg-[#2dd4bf]/5 px-4 py-3">
+        <div className="mb-4 rounded-xl border border-[#2dd4bf]/30 bg-[#2dd4bf]/5 px-4 py-3">
           <p className="font-mono text-xs text-[#f0ece4]/90 leading-relaxed">
             This quick reference contains paraphrased summaries for general guidance only.
             Always consult the authoritative source for compliance decisions.{' '}
             <span className="text-[#6b7594]">Not legal advice.</span>
           </p>
+        </div>
+
+        {/* Related references — currently just Certificates, room to grow */}
+        <div className="mb-8 flex flex-wrap items-center gap-2">
+          <span className="font-mono text-[10px] uppercase tracking-wider text-[#6b7594]">
+            Related:
+          </span>
+          <a
+            href="/certificates"
+            className="font-mono text-xs text-[#2dd4bf] hover:underline
+              border border-[#2dd4bf]/30 hover:bg-[#2dd4bf]/10
+              rounded-md px-2.5 py-1 transition-colors"
+          >
+            Vessel Certificate Templates
+          </a>
         </div>
 
         <div className="flex flex-col gap-4">

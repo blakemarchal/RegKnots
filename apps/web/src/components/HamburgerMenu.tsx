@@ -20,21 +20,57 @@ interface MenuItem {
   path?: string  // route path if this item navigates
 }
 
-const BASE_MENU_ITEMS: MenuItem[] = [
-  { icon: '\uFF0B', label: 'New Chat', action: 'new', path: '/' },
-  { icon: '\u2261', label: 'Chat History', action: 'history', path: '/history' },
-  { icon: '\u2693', label: 'My Vessels', action: 'vessels' },
-  { icon: '\u25A1', label: 'Certificates', action: 'certificates', path: '/certificates' },
-  { icon: '\u2299', label: 'My Credentials', action: 'credentials', path: '/credentials' },
-  { icon: '\u270D', label: 'Sea Service Letter', action: 'sea-service-letter', path: '/sea-service-letter' },
-  { icon: '\u270E', label: 'Compliance Log', action: 'log', path: '/log' },
-  { icon: '\u2611', label: 'PSC Checklist', action: 'psc-checklist', path: '/psc-checklist' },
-  { icon: '\u24D8', label: 'Vessel Dossier', action: 'vessel-dossier', path: '/vessel-dossier' },
-  { icon: '\u2750', label: 'Reference', action: 'reference', path: '/reference' },
-  { icon: '?', label: 'Help', action: 'help', path: '/support' },
-  { icon: '\u2709', label: 'Give Feedback', action: 'feedback' },
-  { icon: '\u2665', label: 'Giving Back', action: 'giving', path: '/giving' },
-  { icon: '\u25CE', label: 'Account', action: 'account', path: '/account' },
+interface MenuSection {
+  label: string | null  // null = no header (e.g., the top "Chat" section can stay unlabelled)
+  items: MenuItem[]
+}
+
+// Menu organized into 5 conceptual sections so it scans cleanly even at 13+
+// items. Order: most-frequent actions first, settings/footer last.
+//
+// "Certificates" (the static cert reference page) intentionally NOT here —
+// it's reference material, accessible from the Reference page. Removing it
+// from primary nav reduces clutter and resolves the
+// "Certificates vs Credentials" ambiguity.
+const MENU_SECTIONS: MenuSection[] = [
+  {
+    label: 'Chat',
+    items: [
+      { icon: '\uFF0B', label: 'New Chat', action: 'new', path: '/' },
+      { icon: '\u2261', label: 'Chat History', action: 'history', path: '/history' },
+    ],
+  },
+  {
+    label: 'My Fleet',
+    items: [
+      { icon: '\u2693', label: 'My Vessels', action: 'vessels' },
+      { icon: '\u24D8', label: 'Vessel Dossier', action: 'vessel-dossier', path: '/vessel-dossier' },
+    ],
+  },
+  {
+    label: 'My Credentials',
+    items: [
+      { icon: '\u2299', label: 'Credentials Tracker', action: 'credentials', path: '/credentials' },
+      { icon: '\u270D', label: 'Sea Service Letter', action: 'sea-service-letter', path: '/sea-service-letter' },
+    ],
+  },
+  {
+    label: 'Compliance Tools',
+    items: [
+      { icon: '\u270E', label: 'Compliance Log', action: 'log', path: '/log' },
+      { icon: '\u2611', label: 'PSC Checklist', action: 'psc-checklist', path: '/psc-checklist' },
+    ],
+  },
+  {
+    label: 'Help & Account',
+    items: [
+      { icon: '\u2750', label: 'Reference', action: 'reference', path: '/reference' },
+      { icon: '?', label: 'Help', action: 'help', path: '/support' },
+      { icon: '\u2709', label: 'Give Feedback', action: 'feedback' },
+      { icon: '\u2665', label: 'Giving Back', action: 'giving', path: '/giving' },
+      { icon: '\u25CE', label: 'Account', action: 'account', path: '/account' },
+    ],
+  },
 ]
 
 const ADMIN_ITEM: MenuItem = { icon: '\u2318', label: 'Admin', action: 'admin', path: '/admin' }
@@ -59,16 +95,23 @@ export function HamburgerMenu({ open, onClose, onNewChat, onOpenVessels, onOpenS
     return () => { document.body.style.overflow = '' }
   }, [open])
 
+  // Flatten the grouped sections into a single list of items for prefetch
+  // and admin appending. Memoized so we don't rebuild on every render.
+  const allItems = (() => {
+    const flat = MENU_SECTIONS.flatMap((s) => s.items)
+    return isAdmin ? [...flat, ADMIN_ITEM] : flat
+  })()
+
   // Prefetch all route destinations when the drawer opens so subsequent
   // navigations are near-instant. Cheap — ~5-10 KB per route.
   useEffect(() => {
     if (!open) return
-    const allItems = [...BASE_MENU_ITEMS, ...(isAdmin ? [ADMIN_ITEM] : [])]
     allItems.forEach((item) => {
       if (item.path && item.path !== pathname) {
         try { router.prefetch(item.path) } catch { /* noop */ }
       }
     })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, isAdmin, router, pathname])
 
   // When a pending navigation completes, close the drawer + clear pending state.
@@ -113,7 +156,11 @@ export function HamburgerMenu({ open, onClose, onNewChat, onOpenVessels, onOpenS
     }
   }
 
-  const items = [...BASE_MENU_ITEMS, ...(isAdmin ? [ADMIN_ITEM] : [])]
+  // Append the admin item as its own section so it gets the same visual
+  // treatment as the rest of the menu when present.
+  const sections: MenuSection[] = isAdmin
+    ? [...MENU_SECTIONS, { label: 'Admin', items: [ADMIN_ITEM] }]
+    : MENU_SECTIONS
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
@@ -151,37 +198,46 @@ export function HamburgerMenu({ open, onClose, onNewChat, onOpenVessels, onOpenS
           </button>
         </div>
 
-        {/* Menu items */}
-        <nav className="flex-1 py-2 overflow-y-auto">
-          {items.map(item => {
-            const isCurrent = item.path && pathname === item.path
-            const isLoading = pendingAction === item.action
-            return (
-              <button
-                key={item.action}
-                onClick={() => handleItem(item)}
-                disabled={isPending}
-                className={`w-full flex items-center gap-4 px-5 py-3.5 text-left
-                  transition-colors duration-150 disabled:cursor-wait
-                  ${isCurrent
-                    ? 'text-[#2dd4bf] bg-[#2dd4bf]/5'
-                    : 'text-[#f0ece4]/80 hover:text-[#f0ece4] hover:bg-white/5'
-                  }
-                  ${isPending && !isLoading ? 'opacity-50' : ''}`}
-              >
-                <span className="w-5 text-teal/70 text-base leading-none text-center" aria-hidden="true">
-                  {item.icon}
-                </span>
-                <span className="text-sm font-medium flex-1">{item.label}</span>
-                {isLoading && (
-                  <svg className="w-4 h-4 text-[#2dd4bf] animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
-                  </svg>
-                )}
-              </button>
-            )
-          })}
+        {/* Menu items, grouped into sections */}
+        <nav className="flex-1 py-1 overflow-y-auto">
+          {sections.map((section, sIdx) => (
+            <div key={section.label ?? `section-${sIdx}`} className={sIdx > 0 ? 'mt-2 pt-2 border-t border-white/8' : 'pt-2'}>
+              {section.label && (
+                <p className="px-5 pb-1 font-mono text-[10px] uppercase tracking-wider text-[#6b7594]">
+                  {section.label}
+                </p>
+              )}
+              {section.items.map((item) => {
+                const isCurrent = item.path && pathname === item.path
+                const isLoading = pendingAction === item.action
+                return (
+                  <button
+                    key={item.action}
+                    onClick={() => handleItem(item)}
+                    disabled={isPending}
+                    className={`w-full flex items-center gap-4 px-5 py-2.5 text-left
+                      transition-colors duration-150 disabled:cursor-wait
+                      ${isCurrent
+                        ? 'text-[#2dd4bf] bg-[#2dd4bf]/5'
+                        : 'text-[#f0ece4]/80 hover:text-[#f0ece4] hover:bg-white/5'
+                      }
+                      ${isPending && !isLoading ? 'opacity-50' : ''}`}
+                  >
+                    <span className="w-5 text-teal/70 text-base leading-none text-center" aria-hidden="true">
+                      {item.icon}
+                    </span>
+                    <span className="text-sm font-medium flex-1">{item.label}</span>
+                    {isLoading && (
+                      <svg className="w-4 h-4 text-[#2dd4bf] animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                      </svg>
+                    )}
+                  </button>
+                )
+              })}
+            </div>
+          ))}
         </nav>
 
         {/* Sign out */}
