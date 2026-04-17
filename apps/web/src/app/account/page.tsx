@@ -707,6 +707,30 @@ function AccountContent() {
             </a>
           </section>
 
+          {/* ── Re-run setup wizard ───────────────────────────────── */}
+          <section className="bg-[#111827] border border-white/8 rounded-xl p-5 flex flex-col gap-3">
+            <p className="font-mono text-xs text-[#6b7594] uppercase tracking-wider">Setup</p>
+            <p className="font-mono text-xs text-[#f0ece4]/60 leading-relaxed">
+              Walk through the welcome wizard again to add a vessel, upload a COI,
+              or track a new credential.
+            </p>
+            <button
+              onClick={async () => {
+                try {
+                  await apiRequest('/onboarding/reset', { method: 'POST' })
+                } catch {
+                  /* harmless if it fails — wizard is still reachable directly */
+                }
+                router.push('/welcome')
+              }}
+              className="w-full text-center font-mono text-sm font-bold text-[#2dd4bf]
+                border border-[#2dd4bf]/40 hover:bg-[#2dd4bf]/10
+                rounded-lg py-2.5 transition-colors duration-150"
+            >
+              Re-run Setup Wizard
+            </button>
+          </section>
+
           {/* ── Chat History export ──────────────────────────────── */}
           <section className="bg-[#111827] border border-white/8 rounded-xl p-5 flex flex-col gap-4">
             <p className="font-mono text-xs text-[#6b7594] uppercase tracking-wider">Chat History</p>

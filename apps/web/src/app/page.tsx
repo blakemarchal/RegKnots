@@ -1,5 +1,6 @@
 import { ChatInterface } from '@/components/ChatInterface'
 import AuthGuard from '@/components/AuthGuard'
+import { OnboardingGate } from '@/components/OnboardingGate'
 
 export default async function Home({
   searchParams,
@@ -9,10 +10,12 @@ export default async function Home({
   const { conversation_id, q } = await searchParams
   return (
     <AuthGuard>
-      <ChatInterface
-        initialConversationId={conversation_id ?? null}
-        initialQuery={q ?? null}
-      />
+      <OnboardingGate>
+        <ChatInterface
+          initialConversationId={conversation_id ?? null}
+          initialQuery={q ?? null}
+        />
+      </OnboardingGate>
     </AuthGuard>
   )
 }
