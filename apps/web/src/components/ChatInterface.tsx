@@ -20,6 +20,7 @@ import { PilotSurveyModal } from './PilotSurveyModal'
 import { NotificationBanner } from './NotificationBanner'
 import { VerificationBanner } from './VerificationBanner'
 import { ComingUpWidget } from './ComingUpWidget'
+import type { VesselProfileForPrompts } from '@/lib/vesselPrompts'
 
 interface ConversationMessage {
   role: string
@@ -67,6 +68,22 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
       .catch(() => {})
   }, [setBilling])
   const activeVessel = vessels.find(v => v.id === activeVesselId) ?? null
+
+  // Fetch the active vessel's full profile for tailored empty-chat prompts.
+  // Re-runs when the user switches vessels. Only fetches when there's an id to match.
+  const [activeVesselProfile, setActiveVesselProfile] = useState<VesselProfileForPrompts | null>(null)
+  useEffect(() => {
+    if (!activeVesselId) { setActiveVesselProfile(null); return }
+    let cancelled = false
+    apiRequest<VesselProfileForPrompts[]>('/vessels')
+      .then((list) => {
+        if (cancelled) return
+        const v = list.find((x) => x.id === activeVesselId)
+        setActiveVesselProfile(v ?? null)
+      })
+      .catch(() => { if (!cancelled) setActiveVesselProfile(null) })
+    return () => { cancelled = true }
+  }, [activeVesselId])
 
   const [vesselSheetOpen, setVesselSheetOpen] = useState(false)
   const searchParams = useSearchParams()
@@ -379,6 +396,7 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
               onPrompt={handlePrompt}
               onCitationTap={handleCitationTap}
               isNewConversation={initialConversationId === null}
+              vessel={activeVesselProfile}
             />
           </>
         )}

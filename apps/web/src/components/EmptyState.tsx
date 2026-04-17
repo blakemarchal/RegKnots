@@ -1,18 +1,14 @@
 import { CompassRose } from './CompassRose'
-
-const SUGGESTED = [
-  'What fire safety equipment does my cargo vessel need?',
-  'Explain COLREGs Rule 15 \u2014 crossing situations',
-  'What SOLAS certificates need annual renewal?',
-  'NVIC guidelines for ballast water management',
-]
+import { getTailoredPrompts, type VesselProfileForPrompts } from '@/lib/vesselPrompts'
 
 interface Props {
   onPrompt: (text: string) => void
   isNewConversation: boolean
+  vessel?: VesselProfileForPrompts | null
 }
 
-export function EmptyState({ onPrompt, isNewConversation }: Props) {
+export function EmptyState({ onPrompt, isNewConversation, vessel = null }: Props) {
+  const { prompts, tailored } = getTailoredPrompts(vessel)
   return (
     <div className="flex flex-col items-center justify-center min-h-full px-6 py-12 text-center select-none">
       {/* Compass rose */}
@@ -37,8 +33,17 @@ export function EmptyState({ onPrompt, isNewConversation }: Props) {
       {/* Suggested prompts — only on a fresh new conversation */}
       {isNewConversation && (
         <div className="flex flex-col gap-2 w-full max-w-xs">
-          <p className="text-[10px] text-[#6b7594] uppercase tracking-widest mb-1">Try asking</p>
-          {SUGGESTED.map((prompt, i) => (
+          {tailored && vessel ? (
+            <p className="text-[10px] text-teal uppercase tracking-widest mb-1 flex items-center gap-1.5 justify-center">
+              <svg className="w-3 h-3" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M2 6l3 3 5-5" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+              Tailored for {vessel.name}
+            </p>
+          ) : (
+            <p className="text-[10px] text-[#6b7594] uppercase tracking-widest mb-1">Try asking</p>
+          )}
+          {prompts.map((prompt, i) => (
             <button
               key={prompt}
               onClick={() => onPrompt(prompt)}

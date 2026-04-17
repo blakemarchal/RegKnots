@@ -5,6 +5,7 @@ import type { Message } from '@/types/chat'
 import { ChatMessage } from './ChatMessage'
 import { TypingIndicator } from './TypingIndicator'
 import { EmptyState } from './EmptyState'
+import type { VesselProfileForPrompts } from '@/lib/vesselPrompts'
 
 interface Props {
   messages: Message[]
@@ -13,9 +14,10 @@ interface Props {
   onPrompt: (text: string) => void
   onCitationTap: (source: string, sectionNumber: string, sectionTitle: string) => void
   isNewConversation: boolean
+  vessel?: VesselProfileForPrompts | null
 }
 
-export function ChatThread({ messages, loading, progressMsg = null, onPrompt, onCitationTap, isNewConversation }: Props) {
+export function ChatThread({ messages, loading, progressMsg = null, onPrompt, onCitationTap, isNewConversation, vessel = null }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -30,7 +32,7 @@ export function ChatThread({ messages, loading, progressMsg = null, onPrompt, on
   return (
     <div className="flex flex-col min-h-full">
       {messages.length === 0 && !loading ? (
-        <EmptyState onPrompt={onPrompt} isNewConversation={isNewConversation} />
+        <EmptyState onPrompt={onPrompt} isNewConversation={isNewConversation} vessel={vessel} />
       ) : (
         <div className="flex flex-col py-3 gap-0.5">
           {messages.map(msg => (
