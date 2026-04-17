@@ -26,6 +26,7 @@ const BASE_MENU_ITEMS: MenuItem[] = [
   { icon: '\u2693', label: 'My Vessels', action: 'vessels' },
   { icon: '\u25A1', label: 'Certificates', action: 'certificates', path: '/certificates' },
   { icon: '\u2299', label: 'My Credentials', action: 'credentials', path: '/credentials' },
+  { icon: '\u270D', label: 'Sea Service Letter', action: 'sea-service-letter', path: '/sea-service-letter' },
   { icon: '\u270E', label: 'Compliance Log', action: 'log', path: '/log' },
   { icon: '\u2611', label: 'PSC Checklist', action: 'psc-checklist', path: '/psc-checklist' },
   { icon: '\u24D8', label: 'Vessel Dossier', action: 'vessel-dossier', path: '/vessel-dossier' },
