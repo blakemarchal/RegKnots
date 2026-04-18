@@ -32,8 +32,12 @@ Thumbs.db
 # Docker
 infra/pgdata/
 
-# Data
-data/
+# Data — ignored by default. Audit / discovery CSVs in data/reports/ are
+# the exception: small, version-controlled snapshots that feed gap-analysis
+# sprints. Use `data/*` (not `data/`) so git can still descend into data/
+# and discover the un-ignored reports subdirectory.
+data/*
+!data/reports/
 packages/ingest/data/
 
 # PWA
