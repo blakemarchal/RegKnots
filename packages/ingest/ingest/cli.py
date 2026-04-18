@@ -87,6 +87,13 @@ _PDF_SOURCE_CONFIG: dict[str, dict] = {
         "pdf":     _DATA_RAW / "stcw_supplements" / "QQQQD938E_supplement_January2025_EBK.pdf",
         "adapter": "ingest.sources.stcw_supplement",
     },
+    "uscg_bulletin": {
+        # URL-index-driven source; the adapter takes an ids file and fetches
+        # bulletin HTML live from content.govdelivery.com. Path resolved at
+        # invocation time from --ids-file (see dispatch in _run_pdf_source).
+        "ids_file_default": _DATA_RAW / "uscg_bulletins" / "wayback_ids.txt",
+        "adapter": "ingest.sources.uscg_bulletin",
+    },
 }
 
 _DATA_FAILED = Path(__file__).resolve().parents[3] / "data" / "failed"
@@ -155,6 +162,17 @@ Examples:
         help="Force re-extraction of already-processed images (use with --extract).",
     )
 
+    parser.add_argument(
+        "--ids-file",
+        type=Path,
+        default=None,
+        help=(
+            "For --source uscg_bulletin: path to a newline-delimited list of "
+            "GovDelivery bulletin hex IDs. Defaults to data/raw/uscg_bulletins/"
+            "wayback_ids.txt."
+        ),
+    )
+
     enrich_grp = parser.add_mutually_exclusive_group()
     enrich_grp.add_argument(
         "--enrich",
@@ -196,6 +214,7 @@ Examples:
         force=args.force,
         enrich=enrich,
         notify=not args.no_notify,
+        ids_file=args.ids_file,
     ))
 
 
@@ -207,6 +226,7 @@ async def _run(
     force: bool = False,
     enrich: bool = False,
     notify: bool = True,
+    ids_file: Path | None = None,
 ) -> None:
     import importlib
 
@@ -281,7 +301,10 @@ async def _run(
         for source in sources:
             console.rule(f"[cyan]{source}")
             if source in PDF_SOURCES:
-                result = await _run_pdf_source(source, mode, pool, console, enrich=enrich)
+                result = await _run_pdf_source(
+                    source, mode, pool, console,
+                    enrich=enrich, ids_file=ids_file,
+                )
             else:
                 result = await run_pipeline(
                     source=source,
@@ -331,6 +354,7 @@ async def _run_pdf_source(
     pool: asyncpg.Pool,
     console: Console,
     enrich: bool = False,
+    ids_file: Path | None = None,
 ) -> IngestResult:
     """Dispatch a PDF/text-sourced ingest run.
 
@@ -349,6 +373,31 @@ async def _run_pdf_source(
         return IngestResult(source=source, errors=1)
 
     adapter = importlib.import_module(cfg["adapter"])
+
+    # ── IDs-file path (e.g. uscg_bulletin) ────────────────────────────────────
+    # Source is driven by a newline-delimited list of IDs. The adapter's
+    # parse_source(ids_file) fetches each ID's content live from the publisher
+    # and returns Section objects.
+    if "ids_file_default" in cfg:
+        effective_ids_file = ids_file or cfg["ids_file_default"]
+        if not Path(effective_ids_file).exists():
+            console.print(
+                f"[red]IDs file not found: {effective_ids_file}\n"
+                f"Use --ids-file PATH or place the file at the default location.[/red]"
+            )
+            return IngestResult(source=source, errors=1)
+        console.print(f"  [cyan]IDs file:[/cyan] {effective_ids_file}")
+        section_loader = lambda: adapter.parse_source(Path(effective_ids_file))  # noqa: E731
+        return await run_pdf_pipeline(
+            source=source,
+            mode=mode,
+            section_loader=section_loader,
+            source_date=adapter.SOURCE_DATE,
+            pool=pool,
+            cfg=settings,
+            console=console,
+            enrich=enrich,
+        )
 
     # ── Text-dir path (e.g. solas) ────────────────────────────────────────────
     if "text_dir" in cfg:

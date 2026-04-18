@@ -21,7 +21,7 @@ TITLE_NAMES: dict[int, str] = {
 }
 
 # Sources ingested from text/PDF files (not eCFR API). title_number=0 for all.
-PDF_SOURCES: list[str] = ["colregs", "erg", "ism", "ism_supplement", "nmc_checklist", "nmc_policy", "nvic", "solas", "solas_supplement", "stcw", "stcw_supplement"]
+PDF_SOURCES: list[str] = ["colregs", "erg", "ism", "ism_supplement", "nmc_checklist", "nmc_policy", "nvic", "solas", "solas_supplement", "stcw", "stcw_supplement", "uscg_bulletin"]
 
 
 # ── Data models ─────────────────────────────────────────────────────────────
@@ -36,6 +36,11 @@ class Section:
     full_text: str                       # raw extracted text (no section prefix)
     up_to_date_as_of: date
     parent_section_number: Optional[str] = None  # e.g. "33 CFR Part 1"
+    # Freshness metadata (added in migration 0045). Only uscg_bulletin
+    # populates these today; other sources leave them None.
+    published_date: Optional[date] = None
+    expires_date: Optional[date] = None
+    superseded_by: Optional[str] = None
 
 
 @dataclass
@@ -51,6 +56,9 @@ class Chunk:
     token_count: int
     up_to_date_as_of: date
     parent_section_number: Optional[str] = None
+    published_date: Optional[date] = None
+    expires_date: Optional[date] = None
+    superseded_by: Optional[str] = None
 
 
 @dataclass
@@ -67,6 +75,9 @@ class EmbeddedChunk:
     up_to_date_as_of: date
     embedding: list[float]
     parent_section_number: Optional[str] = None
+    published_date: Optional[date] = None
+    expires_date: Optional[date] = None
+    superseded_by: Optional[str] = None
 
 
 @dataclass

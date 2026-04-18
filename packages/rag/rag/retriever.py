@@ -51,6 +51,11 @@ SOURCE_GROUPS: dict[str, tuple[str, ...]] = {
     # NMC policy letters + checklists share a group so the credentialing
     # corpus draws candidates together (mirrors the CFR group's 3 titles).
     "nmc": ("nmc_policy", "nmc_checklist"),
+    # USCG GovDelivery bulletins — MSIBs, NMC announcements, policy-letter
+    # notices, ALCOAST mentions. Distinct from 'nmc' because bulletins are
+    # broader (port security, enforcement, environmental, weather) and
+    # carry freshness metadata that retrieval can filter on later.
+    "uscg_bulletin": ("uscg_bulletin",),
 }
 
 # Per-group candidate pool sizes. CFR is larger because it covers three
@@ -199,6 +204,29 @@ _NMC_ABBR_RE = re.compile(
     re.IGNORECASE,
 )
 
+# USCG bulletin / GovDelivery — MSIBs, port security zones, NMC
+# announcements, enforcement priorities, environmental advisories,
+# weather/navigation alerts. Broader than NMC credentialing.
+_USCG_BULLETIN_TERMS: tuple[str, ...] = (
+    "bulletin", "advisory", "alert", "notice to mariners",
+    "operational", "operational advisory",
+    "msib", "marine safety information bulletin",
+    "alcoast", "notmar",
+    "port security", "marsec", "security zone", "port closure",
+    "safety alert", "equipment recall", "defective",
+    "enforcement priority", "psc campaign", "inspection focus",
+    "concentrated inspection",
+    "hurricane", "storm", "typhoon", "tsunami",
+    "aid to navigation", "weather advisory", "navigation safety",
+    "pollution response", "oil spill", "environmental compliance",
+    "mmc process", "nmc processing", "medical certificate backlog",
+    "current", "latest", "recent", "this week", "this month",
+)
+_USCG_BULLETIN_ABBR_RE = re.compile(
+    r"\b(?:msib|alcoast|marsec|notmar)\b",
+    re.IGNORECASE,
+)
+
 
 def _source_affinity(query: str) -> dict[str, float]:
     """Return a boost value per source group based on query keywords.
@@ -235,6 +263,9 @@ def _source_affinity(query: str) -> dict[str, float]:
         boosts["nmc"] = 0.20
         # Credentialing queries also benefit from CFR Parts 10-16
         boosts.setdefault("cfr", 0.10)
+
+    if any(t in q for t in _USCG_BULLETIN_TERMS) or _USCG_BULLETIN_ABBR_RE.search(q):
+        boosts["uscg_bulletin"] = 0.20
 
     if "cfr" in q or "code of federal" in q:
         boosts["cfr"] = 0.15

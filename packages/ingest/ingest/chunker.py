@@ -74,6 +74,9 @@ def _make_chunk(section: Section, idx: int, header: str, content: str) -> Chunk:
         token_count=_count(chunk_text),
         up_to_date_as_of=section.up_to_date_as_of,
         parent_section_number=section.parent_section_number,
+        published_date=section.published_date,
+        expires_date=section.expires_date,
+        superseded_by=section.superseded_by,
     )
 
 

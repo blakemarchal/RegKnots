@@ -32,12 +32,20 @@ Thumbs.db
 # Docker
 infra/pgdata/
 
-# Data — ignored by default. Audit / discovery CSVs in data/reports/ are
-# the exception: small, version-controlled snapshots that feed gap-analysis
-# sprints. Use `data/*` (not `data/`) so git can still descend into data/
-# and discover the un-ignored reports subdirectory.
+# Data — ignored by default. A few small version-controlled artefacts
+# under data/ are the exception: audit/discovery CSVs in data/reports/,
+# and the Wayback-derived USCG bulletin ID index in data/raw/uscg_bulletins/
+# (source of truth for the GovDelivery bulletin ingest sprint — small text
+# file, reproducible, needs to survive across machines).
+# Git requires un-ignoring each parent directory in order before a leaf
+# path can be included. Order matters: ignore broad, then carve holes.
 data/*
 !data/reports/
+!data/raw/
+data/raw/*
+!data/raw/uscg_bulletins/
+data/raw/uscg_bulletins/*
+!data/raw/uscg_bulletins/wayback_ids.txt
 packages/ingest/data/
 
 # PWA

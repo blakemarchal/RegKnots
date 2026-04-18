@@ -58,6 +58,9 @@ class EmbedderClient:
                         token_count=chunk.token_count,
                         up_to_date_as_of=chunk.up_to_date_as_of,
                         parent_section_number=chunk.parent_section_number,
+                        published_date=chunk.published_date,
+                        expires_date=chunk.expires_date,
+                        superseded_by=chunk.superseded_by,
                         embedding=embedding,
                     )
                 )

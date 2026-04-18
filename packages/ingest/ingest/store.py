@@ -20,16 +20,20 @@ logger = logging.getLogger(__name__)
 _UPSERT_SQL = """
     INSERT INTO regulations (
         source, source_version, title, section_number, section_title,
-        full_text, chunk_index, embedding, up_to_date_as_of, content_hash
+        full_text, chunk_index, embedding, up_to_date_as_of, content_hash,
+        published_date, expires_date, superseded_by
     )
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8::vector, $9, $10)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8::vector, $9, $10, $11, $12, $13)
     ON CONFLICT (source, section_number, chunk_index) DO UPDATE SET
         source_version   = EXCLUDED.source_version,
         section_title    = EXCLUDED.section_title,
         full_text        = EXCLUDED.full_text,
         embedding        = EXCLUDED.embedding,
         up_to_date_as_of = EXCLUDED.up_to_date_as_of,
-        content_hash     = EXCLUDED.content_hash
+        content_hash     = EXCLUDED.content_hash,
+        published_date   = EXCLUDED.published_date,
+        expires_date     = EXCLUDED.expires_date,
+        superseded_by    = EXCLUDED.superseded_by
     WHERE regulations.content_hash IS DISTINCT FROM EXCLUDED.content_hash
 """
 
@@ -124,6 +128,9 @@ def _to_row(c: EmbeddedChunk) -> tuple:
         _vec(c.embedding),                       # embedding as pgvector literal
         c.up_to_date_as_of,
         c.content_hash,
+        c.published_date,                        # nullable freshness column
+        c.expires_date,                          # nullable freshness column
+        c.superseded_by,                         # nullable freshness column
     )
 
 
