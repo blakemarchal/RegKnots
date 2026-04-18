@@ -48,7 +48,9 @@ SOURCE_GROUPS: dict[str, tuple[str, ...]] = {
     "stcw": ("stcw", "stcw_supplement"),
     "ism": ("ism", "ism_supplement"),
     "erg": ("erg",),
-    "nmc": ("nmc_memo",),
+    # NMC policy letters + checklists share a group so the credentialing
+    # corpus draws candidates together (mirrors the CFR group's 3 titles).
+    "nmc": ("nmc_policy", "nmc_checklist"),
 }
 
 # Per-group candidate pool sizes. CFR is larger because it covers three
@@ -164,7 +166,9 @@ _ERG_TERMS: tuple[str, ...] = (
 _ERG_ABBR_RE = re.compile(r"\berg\b", re.IGNORECASE)
 
 # NMC (National Maritime Center) — credentialing, medical certificates,
-# MMC processing, endorsements. These terms boost nmc_memo results.
+# MMC processing, endorsements. These terms boost nmc_policy + nmc_checklist
+# results. The NMC group is small (<25 docs) vs CFR (~33K chunks), so
+# affinity boosts are especially important for surfacing this corpus.
 _NMC_TERMS: tuple[str, ...] = (
     "nmc", "national maritime center",
     "merchant mariner credential", "mmc renewal", "mmc application",
@@ -175,10 +179,25 @@ _NMC_TERMS: tuple[str, ...] = (
     "twic", "transportation worker",
     "mariner credential", "mariner license",
     "drug test", "physical exam",
-    "stcw endorsement", "officer endorsement",
-    "raise of grade", "raise in grade",
+    "stcw endorsement", "national endorsement", "officer endorsement",
+    "rating endorsement",
+    "raise of grade", "raise in grade", "original issuance",
+    "continuity", "document of continuity", "harmonization",
+    "physical evaluation", "medical requirements",
+    "military sea service", "uniformed service", "credit for service",
+    "psc", "proficiency in survival craft", "lifeboatman",
+    "oicnw", "officer in charge of a navigational watch",
+    "tankerman", "tankerman-pic", "tankerman pic",
+    "able seaman", "able-bodied seaman",
+    "roupv", "uninspected passenger vessel",
+    "liftboat", "polar code",
+    "application checklist", "acceptance checklist",
+    "application guide",
 )
-_NMC_ABBR_RE = re.compile(r"\b(?:nmc|mmc|twic|cg-?719)\b", re.IGNORECASE)
+_NMC_ABBR_RE = re.compile(
+    r"\b(?:nmc|mmc|twic|cg-?719k?|oicnw|roupv|psc)\b",
+    re.IGNORECASE,
+)
 
 
 def _source_affinity(query: str) -> dict[str, float]:

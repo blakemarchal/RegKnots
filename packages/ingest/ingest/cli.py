@@ -57,9 +57,15 @@ _PDF_SOURCE_CONFIG: dict[str, dict] = {
         "text_dir": _DATA_RAW / "ism" / "extracted",
         "adapter":  "ingest.sources.ism_supplement",
     },
-    "nmc_memo": {
-        "raw_dir": _DATA_RAW / "nmc_memo",
-        "adapter": "ingest.sources.nmc_memo",
+    "nmc_checklist": {
+        "nmc_source": "nmc_checklist",
+        "raw_dir": _DATA_RAW / "nmc",
+        "adapter": "ingest.sources.nmc",
+    },
+    "nmc_policy": {
+        "nmc_source": "nmc_policy",
+        "raw_dir": _DATA_RAW / "nmc",
+        "adapter": "ingest.sources.nmc",
     },
     "nvic": {
         "raw_dir": _DATA_RAW / "nvic",
@@ -348,11 +354,32 @@ async def _run_pdf_source(
     if "text_dir" in cfg:
         return await _run_text_source(source, mode, cfg, adapter, pool, console, enrich=enrich)
 
-    # ── Multi-PDF path (e.g. nvic) ────────────────────────────────────────────
+    # ── Multi-PDF path (e.g. nvic, nmc) ───────────────────────────────────────
     if "raw_dir" in cfg:
         raw_dir: Path = cfg["raw_dir"]
         raw_dir.mkdir(parents=True, exist_ok=True)
 
+        # NMC manually-placed PDFs — files are scp'd in, no discovery phase.
+        # The adapter's parse_source takes a (raw_dir, source) signature so
+        # one module handles both nmc_policy and nmc_checklist buckets.
+        if "nmc_source" in cfg:
+            nmc_source = cfg["nmc_source"]
+            console.print(
+                f"  [cyan]Reading:[/cyan] {raw_dir} ([bold]{nmc_source}[/bold] bucket)"
+            )
+            section_loader = lambda: adapter.parse_source(raw_dir, nmc_source)  # noqa: E731
+            return await run_pdf_pipeline(
+                source=nmc_source,
+                mode=mode,
+                section_loader=section_loader,
+                source_date=adapter.SOURCE_DATE,
+                pool=pool,
+                cfg=settings,
+                console=console,
+                enrich=enrich,
+            )
+
+        # NVIC-style: adapter-driven discovery + download before parsing.
         console.print(f"  [cyan]Phase 1:[/cyan] Discovering and downloading {source.upper()} documents…")
         dl_success, dl_failures = adapter.discover_and_download(
             raw_dir, _DATA_FAILED, console
