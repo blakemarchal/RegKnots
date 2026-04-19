@@ -79,26 +79,65 @@ _DCO_PDF_HREF_RE = re.compile(
 _DATE_IN_DATELINE = re.compile(r"(\d{1,2})/(\d{1,2})/(\d{4})")
 
 
-# ── Canonical-ID filter — STRICT ──────────────────────────────────────────
+# ── Filter architecture (Sprint B2 rewrite) ─────────────────────────────
 #
-# Accept a bulletin iff subject OR first ~1000 chars of body match one of
-# these patterns. Rejections are logged with a reason code. False
-# negatives are acceptable per sprint direction — false positives are not.
+# Two-pass classification, subject-only:
+#
+#   Pass 1 — deterministic regex whitelist. Direct accept.
+#            section_number is parsed from the SUBJECT, never from the body.
+#            This fixes the "buried reference" bug from Sprint B where an
+#            ALCGENL bulletin's body-text reference to an older ALCOAST
+#            number was mistaken for the bulletin's own canonical ID.
+#
+#   Pre-deny — cheap regex reject for obvious noise (news/photo releases,
+#              rescue/search reports). Saves LLM calls + cost.
+#
+#   Pass 2 — LLM classifier (Claude Haiku 4.5) for anything ambiguous.
+#            Subject + first 500 body chars → JSON {accept, bulletin_type,
+#            confidence, reason}. Accept iff accept=true AND confidence
+#            >= 0.7. Fail closed on any error (API down, malformed JSON,
+#            low confidence).
+#
+# Pass 1 and Pre-deny run synchronously per bulletin during fetch; Pass 2
+# classifications are batched at end of fetch phase to amortize Anthropic
+# API latency. Prompt caching keeps the per-call cost sub-$0.001.
 
-_ACCEPT_PATTERNS: list[tuple[str, re.Pattern]] = [
-    ("MSIB", re.compile(r"\bMSIB[\s\-]*(\d{2}-\d{2,4})\b", re.I)),
-    ("ALCOAST", re.compile(r"\bALCOAST[\s\-]*(\d{3}/\d{2})\b", re.I)),
-    ("NVIC_mention", re.compile(r"\bNVIC[\s\-]*(\d{2}-\d{2,4})\b", re.I)),
-    ("CG_POLICY_LETTER", re.compile(
-        r"\b(CG-MMC|CG-CVC|CG-OES)[\s\-]*(?:Policy\s+Letter\s+)?(\d{2}-\d{2,4})\b",
-        re.I,
-    )),
-    ("NMC_ANNOUNCEMENT", re.compile(
-        r"\bNational\s+Maritime\s+Center\s+Announcement\b", re.I,
-    )),
-    ("MERCHANT_MARINER_SUBJ", re.compile(
-        r"\bMerchant\s+Mariner\s+(?:Credential|Medical\s+Certificate)\b", re.I,
-    )),
+# ── Pass 1: deterministic subject-only matches ──────────────────────────
+
+# MSIBs come in two flavors:
+#   - Coast-Guard-HQ style: "MSIB 07-20 Ports and Facilities..."  → ID NN-NN
+#   - Sector VTS style:     "MSIB Vol XXV Issue 062 Safety Advisory..." → Vol NN Issue NN
+# Broad match on "MSIB" + any number-ish follow-up catches both. Canonical ID
+# is extracted by _extract_msib_canonical below.
+_MSIB_SUBJECT_RE = re.compile(
+    r"\bMSIB\b(?![A-Za-z])",  # MSIB as a token, not part of a longer word
+    re.I,
+)
+
+# NVIC, CG Policy Letter, ALCOAST, NMC Announcement, Merchant Mariner Credential
+_NVIC_SUBJECT_RE = re.compile(r"\bNVIC\s+(\d{1,2}-\d{2,4})\b", re.I)
+_POLICY_LETTER_SUBJECT_RE = re.compile(
+    r"\b(CG-MMC|CG-CVC|CG-OES)\s+Policy\s+Letter\s+(\d{1,2}-\d{2,4})\b",
+    re.I,
+)
+_NMC_ANNOUNCEMENT_RE = re.compile(
+    r"^\s*National\s+Maritime\s+Center\s+Announcement\s*$", re.I,
+)
+_MMC_CERT_RE = re.compile(
+    r"\bMerchant\s+Mariner\s+(?:Credential|Medical\s+Certificate)\b", re.I,
+)
+
+# ── Pre-deny: cheap reject for obvious non-regulatory subjects ──────────
+
+_DENY_PREFIXES = [
+    re.compile(r"^\s*\(?(news|photo|multimedia|video|imagery|feature|media)\s+(release|available(?:ly)?)", re.I),
+    re.compile(r"^\s*(press\s+release|photo\s+release|update\s*\d*:)", re.I),
+]
+_DENY_PHRASES = [
+    re.compile(r"\brescues?\s+\d*\s*\w*\b", re.I),
+    re.compile(r"\bsuspends?\s+search\b", re.I),
+    re.compile(r"\bsearch\s+for\s+missing\b", re.I),
+    re.compile(r"\bsearching\s+for\s+\w+\s+(?:vessel|fisherman|diver|boater)\b", re.I),
 ]
 
 
@@ -216,41 +255,232 @@ def _parse_bulletin_html(gd_id: str, html: str) -> ParsedBulletin | None:
 # ── Canonical-ID filter + classification ──────────────────────────────────
 
 
-def _canonical_id_and_type(
-    subject: str, body_text: str, published_date: date | None,
-) -> tuple[str, str] | None:
-    """Return (canonical_id, bulletin_type) if the bulletin passes the filter.
+def _extract_msib_canonical(subject: str) -> str:
+    """Derive the canonical MSIB section_number from a subject line.
 
-    Scans the subject first, then the first 1000 chars of body. First
-    matching pattern wins. The NMC announcement fallback emits a
-    date-stamped canonical ID so every accepted bulletin has a distinct
-    section_number in the corpus.
+    Handles both formats we've seen in the wild:
+      "MSIB 07-20 Ports and Facilities..."      → "MSIB 07-20"
+      "MSIB Vol XXV Issue 062 Safety Advisory..." → "MSIB Vol XXV Issue 062"
+      "(Correction) MSIB Vol XXIII Issue 012 ..." → "MSIB Vol XXIII Issue 012"
+      "SEC VA MSIB 20-113 - HRBT Expansion..."   → "MSIB 20-113"
+      "MSIB XXV Issue: 048 High Water..."        → "MSIB XXV Issue 048"
+    Falls back to "MSIB" + next 40 chars if no pattern recognized.
     """
-    haystack_subject = subject or ""
-    haystack_body = (body_text or "")[:1000]
+    # NN-NN(N) form (CG HQ bulletins)
+    m = re.search(r"\bMSIB\s+(\d{1,3}-\d{2,4})\b", subject, re.I)
+    if m:
+        return f"MSIB {m.group(1)}"
+    # Vol/Issue form (Sector VTS bulletins) — capture roman or arabic numerals
+    m = re.search(
+        r"\bMSIB\s+(?:Vol\.?\s*)?([IVXLCDM]+|\d{1,3})[\s,.]*(?:Issue[\s:.]*)?(\d{1,4})\b",
+        subject, re.I,
+    )
+    if m:
+        return f"MSIB Vol {m.group(1).upper()} Issue {m.group(2)}"
+    # Bare "MSIB <something>" — grab a trailing chunk for traceability
+    m = re.search(r"\bMSIB\b[\s,.\-:]*(\S.{0,39})", subject, re.I)
+    if m:
+        tail = re.sub(r"\s+", " ", m.group(1)).strip(" ,.-:")
+        if tail:
+            return f"MSIB ({tail[:50]})"
+    return "MSIB (unparsed)"
 
-    for name, pat in _ACCEPT_PATTERNS:
-        for scope_text in (haystack_subject, haystack_body):
-            m = pat.search(scope_text)
-            if not m:
-                continue
-            if name == "MSIB":
-                return f"MSIB {m.group(1)}", "MSIB"
-            if name == "ALCOAST":
-                return f"ALCOAST {m.group(1)}", "ALCOAST"
-            if name == "NVIC_mention":
-                return f"NVIC {m.group(1)} (announcement)", "NVIC_mention"
-            if name == "CG_POLICY_LETTER":
-                office = m.group(1).upper()
-                return f"{office} PL {m.group(2)}", "CG_POLICY_LETTER"
-            if name == "NMC_ANNOUNCEMENT":
-                stamp = published_date.isoformat() if published_date else "undated"
-                return f"NMC Announcement {stamp}", "NMC_ANNOUNCEMENT"
-            if name == "MERCHANT_MARINER_SUBJ":
-                if scope_text is haystack_subject:
-                    stamp = published_date.isoformat() if published_date else "undated"
-                    return f"NMC Announcement {stamp}", "NMC_ANNOUNCEMENT"
+
+def _deny_prefilter(subject: str) -> str | None:
+    """Return a reason code if the subject is obvious non-regulatory noise.
+
+    Run before the LLM classifier to save cost. Matches press/photo/video
+    releases and incident-response announcements (rescues, search
+    reports). Returns None if subject doesn't trigger.
+    """
+    s = subject or ""
+    for pat in _DENY_PREFIXES:
+        if pat.search(s):
+            return "deny_press_release"
+    for pat in _DENY_PHRASES:
+        if pat.search(s):
+            return "deny_rescue_search"
     return None
+
+
+def _pass1_match(
+    subject: str, published_date: date | None,
+) -> tuple[str, str] | None:
+    """Subject-only deterministic match. Returns (canonical_id, type) or None.
+
+    Order matters: more specific patterns first so MSIB wins over a stray
+    "Merchant Mariner Credential" phrase in an MSIB subject.
+    """
+    s = subject or ""
+    if _MSIB_SUBJECT_RE.search(s):
+        return _extract_msib_canonical(s), "MSIB"
+    m = _NVIC_SUBJECT_RE.search(s)
+    if m:
+        return f"NVIC {m.group(1)} (announcement)", "NVIC_mention"
+    m = _POLICY_LETTER_SUBJECT_RE.search(s)
+    if m:
+        return f"{m.group(1).upper()} PL {m.group(2)}", "CG_POLICY_LETTER"
+    # NOTE: no blanket ALCOAST Pass 1 rule — the prior run showed this was
+    # a firehose for CG-internal admin (awards, solicitations, heritage
+    # months, pay policy, etc.). Let the LLM in Pass 2 decide which
+    # ALCOAST bulletins carry operational-regulatory content.
+    if _NMC_ANNOUNCEMENT_RE.match(s):
+        stamp = published_date.isoformat() if published_date else "undated"
+        return f"NMC Announcement {stamp}", "NMC_ANNOUNCEMENT"
+    if _MMC_CERT_RE.search(s):
+        stamp = published_date.isoformat() if published_date else "undated"
+        return f"NMC Announcement {stamp}", "NMC_ANNOUNCEMENT"
+    return None
+
+
+# ── Pass 2: Claude Haiku LLM classifier ─────────────────────────────────
+
+_LLM_MODEL = "claude-haiku-4-5"
+_LLM_MAX_CONCURRENCY = 10
+_LLM_CONFIDENCE_THRESHOLD = 0.7
+_LLM_TIMEOUT = 30.0
+
+_LLM_SYSTEM_PROMPT = """\
+You classify USCG bulletins for a maritime regulatory compliance database. \
+Accept if the bulletin contains:
+- Operational safety advisories (port security, equipment alerts, navigation hazards)
+- Regulatory enforcement priorities or inspection campaigns
+- Mariner credential process changes or medical certificate updates
+- References to MSIB/NVIC/Policy Letter issuances
+- Marine casualty investigation findings
+- Vessel inspection or PSC guidance
+- Ice operations, polar code, or environmental compliance
+
+Reject if the bulletin contains:
+- Internal CG HR (awards, solicitations, surveys, performance evaluations)
+- Heritage month proclamations or ceremonial announcements
+- Recruitment, benefits, pay, retirement, leave policy
+- News releases, photo releases, rescue reports
+- Internal training or administrative notices
+
+Return JSON only: {"accept": true|false, "bulletin_type": "MSIB|NVIC|ALCOAST_OPERATIONAL|NMC|POLICY_LETTER|OTHER_REGULATORY|ADMIN|NEWS|RECRUITMENT", "confidence": 0.0-1.0, "reason": "brief"}"""
+
+
+def _try_parse_llm_json(text: str) -> dict | None:
+    """Parse a JSON response from Claude. Strip markdown fences defensively.
+
+    Returns None on any parse failure — the caller treats that as a
+    reject per the fail-closed rule.
+    """
+    text = text.strip()
+    if text.startswith("```"):
+        # Strip ```json or ``` prefix and trailing ```
+        text = re.sub(r"^```(?:json)?\s*\n?", "", text, flags=re.I)
+        text = re.sub(r"\n?```\s*$", "", text)
+    try:
+        import json as _json
+        data = _json.loads(text.strip())
+        if not isinstance(data, dict):
+            return None
+        if "accept" not in data or "confidence" not in data:
+            return None
+        return data
+    except Exception:
+        return None
+
+
+async def _classify_one(client, subject: str, body: str) -> dict:
+    """Call Claude Haiku once, return parsed result dict or a fail-closed reject.
+
+    Uses prompt caching on the system prompt so the stable instructions
+    only count as cache-read (~10% cost) on calls after the first.
+    """
+    import anthropic
+    try:
+        resp = await client.messages.create(
+            model=_LLM_MODEL,
+            max_tokens=200,
+            system=[
+                {
+                    "type": "text",
+                    "text": _LLM_SYSTEM_PROMPT,
+                    "cache_control": {"type": "ephemeral"},
+                },
+            ],
+            messages=[{
+                "role": "user",
+                "content": (
+                    f"SUBJECT: {subject[:200]}\n\n"
+                    f"BODY (first 500 chars): {body[:500]}"
+                ),
+            }],
+            timeout=_LLM_TIMEOUT,
+        )
+        if not resp.content:
+            return {"accept": False, "reason": "llm_empty_response", "confidence": 0.0}
+        text = resp.content[0].text if hasattr(resp.content[0], "text") else ""
+        parsed = _try_parse_llm_json(text)
+        if parsed is None:
+            return {"accept": False, "reason": "llm_malformed_json", "confidence": 0.0,
+                    "raw": text[:200]}
+        return parsed
+    except anthropic.APIError as exc:
+        return {"accept": False, "reason": f"llm_api_error: {exc}", "confidence": 0.0}
+    except Exception as exc:
+        return {"accept": False, "reason": f"llm_exception: {type(exc).__name__}", "confidence": 0.0}
+
+
+async def _classify_batch(
+    parsed_bulletins: list["ParsedBulletin"],
+    anthropic_key: str,
+    log_fh,
+) -> dict[str, tuple[bool, str, str]]:
+    """Classify every bulletin in the list via Claude Haiku, bounded concurrency.
+
+    Returns {gd_id: (accept_bool, bulletin_type, reason)}. Every classification
+    is written to log_fh (tab-separated) for audit.
+    """
+    import anthropic
+
+    results: dict[str, tuple[bool, str, str]] = {}
+    if not parsed_bulletins:
+        return results
+
+    client = anthropic.AsyncAnthropic(api_key=anthropic_key)
+    sem = asyncio.Semaphore(_LLM_MAX_CONCURRENCY)
+
+    async def _one(pb: "ParsedBulletin") -> None:
+        async with sem:
+            res = await _classify_one(client, pb.subject, pb.body_text)
+            accept = (
+                res.get("accept") is True
+                and float(res.get("confidence") or 0) >= _LLM_CONFIDENCE_THRESHOLD
+            )
+            btype = res.get("bulletin_type", "UNKNOWN")
+            reason = res.get("reason", "")
+            results[pb.gd_id] = (accept, btype, reason)
+            log_fh.write(
+                f"{pb.gd_id}\t{accept}\t{res.get('confidence', 0)}\t"
+                f"{btype}\t{reason[:120]}\t{pb.subject[:120]}\n"
+            )
+
+    try:
+        await asyncio.gather(*[_one(pb) for pb in parsed_bulletins])
+    finally:
+        await client.close()
+
+    return results
+
+
+def _canonical_from_llm_accept(
+    subject: str, bulletin_type: str, published_date: date | None, gd_id: str,
+) -> tuple[str, str]:
+    """Build section_number + bulletin_type label for an LLM-accepted bulletin.
+
+    LLM-accepted bulletins don't have a Pass-1 canonical ID by definition.
+    Use the LLM's bulletin_type as the prefix + date + gd_id suffix for
+    traceability. Same-ID collisions auto-resolve via the chunker's
+    section_number disambiguation in _build_sections below.
+    """
+    stamp = published_date.isoformat() if published_date else "undated"
+    short = gd_id[:7]
+    type_tag = (bulletin_type or "OTHER_REGULATORY").strip().upper()[:30]
+    return f"USCG {type_tag} {stamp} [{short}]", f"LLM_{type_tag}"
 
 
 # ── Expiration / supersession parsing ─────────────────────────────────────
@@ -454,13 +684,18 @@ async def _fetch_pdf_text(client: httpx.AsyncClient, pdf_url: str) -> str:
 # ── Orchestration ────────────────────────────────────────────────────────
 
 
-async def _process_one(
-    client: httpx.AsyncClient,
-    gd_id: str,
-    stats: dict,
-    rejected_fh,
-) -> AcceptedBulletin | None:
-    """Fetch + parse + filter + (optionally) enrich one bulletin."""
+async def _fetch_and_prefilter_one(
+    client: httpx.AsyncClient, gd_id: str, stats: dict, rejected_fh,
+) -> tuple[ParsedBulletin | None, str | None]:
+    """Phase-1-inline step: fetch, parse, apply deny-prefilter + Pass 1 match.
+
+    Returns (parsed_bulletin_or_None, pass1_verdict_or_None):
+      - (None, None) — fetch/parse failed (logged already)
+      - (parsed, None) — needs Pass 2 LLM classification
+      - (parsed, canonical_id|type) — accepted by Pass 1 (stored as tuple string)
+
+    We never send a deny-prefiltered bulletin to the LLM — that's the cost-saving win.
+    """
     html, status = await _fetch_bulletin_html(client, gd_id)
     if html is None:
         stats["fetch_failures"] += 1
@@ -470,67 +705,102 @@ async def _process_one(
             stats["fetch_5xx"] += 1
         else:
             stats["fetch_other"] += 1
-        return None
+        return None, None
     stats["fetched"] += 1
 
     parsed = _parse_bulletin_html(gd_id, html)
     if parsed is None:
-        rejected_fh.write(f"{gd_id}\t(parse_failed)\t(no-subject-or-body)\n")
+        rejected_fh.write(f"{gd_id}\tparse_failed\t(no-subject-or-body)\t\n")
         stats["rejected"] += 1
         stats["rejected_parse"] += 1
-        return None
+        return None, None
 
-    verdict = _canonical_id_and_type(parsed.subject, parsed.body_text, parsed.published_date)
-    if verdict is None:
+    # Pass 1 — subject-only deterministic match
+    p1 = _pass1_match(parsed.subject, parsed.published_date)
+    if p1 is not None:
+        canonical_id, bulletin_type = p1
+        stats["accepted"] += 1
+        stats["accepted_pass1"] += 1
+        stats["accepted_by_type"][bulletin_type] = stats["accepted_by_type"].get(bulletin_type, 0) + 1
+        # Return verdict encoded as "pass1|canonical_id|type"
+        return parsed, f"pass1|{canonical_id}|{bulletin_type}"
+
+    # Pre-deny — cheap reject before LLM
+    deny_reason = _deny_prefilter(parsed.subject)
+    if deny_reason is not None:
         preview = parsed.body_text[:100].replace("\t", " ").replace("\n", " ")
-        rejected_fh.write(
-            f"{gd_id}\tno_canonical_id\t{parsed.subject[:100]}\t{preview}\n"
-        )
+        rejected_fh.write(f"{gd_id}\t{deny_reason}\t{parsed.subject[:100]}\t{preview}\n")
         stats["rejected"] += 1
-        stats["rejected_no_canonical_id"] += 1
-        return None
+        stats["rejected_predeny"] += 1
+        return None, None
 
-    canonical_id, bulletin_type = verdict
-    stats["accepted"] += 1
-    stats["accepted_by_type"][bulletin_type] = stats["accepted_by_type"].get(bulletin_type, 0) + 1
+    # Candidate for Pass 2 LLM classification
+    return parsed, None
 
-    # PDF text (best-effort, only for content.govdelivery.com attachments)
-    pdf_text = ""
-    for pdf_url in parsed.pdf_urls[:3]:  # cap at 3 PDFs per bulletin
-        text = await _fetch_pdf_text(client, pdf_url)
-        if text:
-            pdf_text += "\n\n" + text
-            stats["pdf_text_extracted"] += 1
 
-    # Freshness metadata — best-effort, null when absent
-    superseded_by = _extract_superseded_by(parsed.body_text)
+def _build_accepted_from_parsed(
+    pb: ParsedBulletin,
+    canonical_id: str,
+    bulletin_type: str,
+    pdf_text: str,
+    stats: dict,
+) -> AcceptedBulletin:
+    """Finish building an AcceptedBulletin once fetch + filter decided to accept."""
+    superseded_by = _extract_superseded_by(pb.body_text)
     if superseded_by:
         stats["superseded_by_count"] += 1
-    expires_date = _extract_expires_date(parsed.body_text)
+    expires_date = _extract_expires_date(pb.body_text)
     if expires_date:
         stats["expires_date_count"] += 1
 
-    aliases = _select_aliases(parsed.subject, parsed.body_text + pdf_text)
+    aliases = _select_aliases(pb.subject, pb.body_text + pdf_text)
 
     return AcceptedBulletin(
-        gd_id=gd_id,
-        url=parsed.url,
+        gd_id=pb.gd_id,
+        url=pb.url,
         canonical_id=canonical_id,
         bulletin_type=bulletin_type,
-        subject=parsed.subject,
-        body_text=parsed.body_text,
+        subject=pb.subject,
+        body_text=pb.body_text,
         pdf_text=pdf_text.strip(),
-        published_date=parsed.published_date,
+        published_date=pb.published_date,
         expires_date=expires_date,
         superseded_by=superseded_by,
         alias_list=aliases,
     )
 
 
+async def _fetch_pdfs_for_accepted(
+    client: httpx.AsyncClient, parsed: ParsedBulletin, stats: dict,
+) -> str:
+    pdf_text = ""
+    for pdf_url in parsed.pdf_urls[:3]:
+        text = await _fetch_pdf_text(client, pdf_url)
+        if text:
+            pdf_text += "\n\n" + text
+            stats["pdf_text_extracted"] += 1
+    return pdf_text.strip()
+
+
 async def _fetch_and_filter_all(
-    ids: list[str], rejected_log_path: Path,
+    ids: list[str],
+    rejected_log_path: Path,
+    llm_log_path: Path,
+    anthropic_key: str | None,
 ) -> tuple[list[AcceptedBulletin], dict]:
-    """Drive the full fetch → filter pipeline with bounded concurrency."""
+    """Two-phase pipeline:
+
+    Phase A — fetch + parse + prefilter (Pass 1 + deny). Parallel, 5 concurrent.
+              Accepts per Pass 1 stay in `pass1_accepts`. Ambiguous bulletins
+              (not deterministically matched, not pre-denied) go to
+              `llm_candidates` for Phase B.
+
+    Phase B — batch LLM classification on all `llm_candidates`. 10 concurrent.
+              Every classification logged to `llm_log_path`.
+
+    Phase C — for every accepted bulletin (from Pass 1 or Pass 2), fetch any
+              attached PDF text and build the final AcceptedBulletin.
+    """
     stats: dict = {
         "attempted": len(ids),
         "fetched": 0,
@@ -539,18 +809,26 @@ async def _fetch_and_filter_all(
         "fetch_5xx": 0,
         "fetch_other": 0,
         "accepted": 0,
+        "accepted_pass1": 0,
+        "accepted_pass2_llm": 0,
         "rejected": 0,
         "rejected_parse": 0,
-        "rejected_no_canonical_id": 0,
+        "rejected_predeny": 0,
+        "rejected_llm_lowconf": 0,
+        "rejected_llm_error": 0,
         "accepted_by_type": {},
         "pdf_text_extracted": 0,
         "superseded_by_count": 0,
         "expires_date_count": 0,
     }
-    accepted: list[AcceptedBulletin] = []
-
-    sem = asyncio.Semaphore(_MAX_CONCURRENCY)
     rejected_log_path.parent.mkdir(parents=True, exist_ok=True)
+    llm_log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Phase A state
+    pass1_accepts: dict[str, tuple[ParsedBulletin, str, str]] = {}  # gd_id -> (parsed, canonical, type)
+    llm_candidates: list[ParsedBulletin] = []
+
+    sem_fetch = asyncio.Semaphore(_MAX_CONCURRENCY)
 
     async with httpx.AsyncClient(
         headers={"User-Agent": _USER_AGENT},
@@ -559,27 +837,121 @@ async def _fetch_and_filter_all(
         with rejected_log_path.open("w", encoding="utf-8") as rejected_fh:
             rejected_fh.write("gd_id\treason\tsubject\tbody_preview\n")
 
-            async def _one(gd_id: str) -> None:
-                async with sem:
+            async def _phase_a_one(gd_id: str) -> None:
+                async with sem_fetch:
                     try:
-                        ab = await _process_one(client, gd_id, stats, rejected_fh)
-                        if ab is not None:
-                            accepted.append(ab)
+                        parsed, verdict = await _fetch_and_prefilter_one(
+                            client, gd_id, stats, rejected_fh,
+                        )
                     except Exception:
                         logger.exception("unhandled error on %s", gd_id)
                         stats["fetch_failures"] += 1
+                        return
+                    if parsed is None:
+                        return
+                    if verdict is not None:
+                        # Pass 1 accepted
+                        _tag, canonical_id, btype = verdict.split("|", 2)
+                        pass1_accepts[gd_id] = (parsed, canonical_id, btype)
+                    else:
+                        llm_candidates.append(parsed)
 
-            tasks = [asyncio.create_task(_one(i)) for i in ids]
-            # Simple progress logging every 500 done
+            # ── Phase A: fetch + prefilter ────────────────────────────────
+            logger.info("Phase A: fetching %d bulletins…", len(ids))
+            tasks = [asyncio.create_task(_phase_a_one(i)) for i in ids]
             done = 0
             for coro in asyncio.as_completed(tasks):
                 await coro
                 done += 1
                 if done % 500 == 0:
                     logger.info(
-                        "progress: %d/%d (accepted=%d rejected=%d)",
-                        done, len(ids), stats["accepted"], stats["rejected"],
+                        "  A-progress: %d/%d (pass1=%d llm_candidates=%d rejected=%d)",
+                        done, len(ids), stats["accepted_pass1"],
+                        len(llm_candidates), stats["rejected"],
                     )
+
+            logger.info(
+                "Phase A complete: %d fetched, %d pass1-accepted, %d llm-candidates, %d pre-rejected",
+                stats["fetched"], stats["accepted_pass1"], len(llm_candidates),
+                stats["rejected"],
+            )
+
+            # ── Phase B: LLM classification ───────────────────────────────
+            llm_results: dict[str, tuple[bool, str, str]] = {}
+            if llm_candidates and anthropic_key:
+                logger.info("Phase B: LLM-classifying %d candidates…", len(llm_candidates))
+                with llm_log_path.open("w", encoding="utf-8") as llm_log_fh:
+                    llm_log_fh.write("gd_id\taccept\tconfidence\tbulletin_type\treason\tsubject\n")
+                    llm_results = await _classify_batch(
+                        llm_candidates, anthropic_key, llm_log_fh,
+                    )
+                for pb in llm_candidates:
+                    res = llm_results.get(pb.gd_id)
+                    if res is None:
+                        # Fail-closed on missing result
+                        stats["rejected"] += 1
+                        stats["rejected_llm_error"] += 1
+                        rejected_fh.write(f"{pb.gd_id}\tllm_missing\t{pb.subject[:100]}\t\n")
+                        continue
+                    accept, btype, reason = res
+                    if not accept:
+                        stats["rejected"] += 1
+                        if reason.startswith("llm_"):
+                            stats["rejected_llm_error"] += 1
+                        else:
+                            stats["rejected_llm_lowconf"] += 1
+                        rejected_fh.write(
+                            f"{pb.gd_id}\tllm_reject:{btype}\t{pb.subject[:100]}\t{reason[:100]}\n"
+                        )
+                        continue
+                    # Accepted by Pass 2
+                    stats["accepted"] += 1
+                    stats["accepted_pass2_llm"] += 1
+                    canonical, type_tag = _canonical_from_llm_accept(
+                        pb.subject, btype, pb.published_date, pb.gd_id,
+                    )
+                    stats["accepted_by_type"][type_tag] = stats["accepted_by_type"].get(type_tag, 0) + 1
+                    pass1_accepts[pb.gd_id] = (pb, canonical, type_tag)
+            elif llm_candidates and not anthropic_key:
+                # Fail-closed: no key means all candidates are rejected.
+                logger.warning(
+                    "Phase B skipped: ANTHROPIC_API_KEY not set. %d candidates auto-rejected.",
+                    len(llm_candidates),
+                )
+                for pb in llm_candidates:
+                    stats["rejected"] += 1
+                    stats["rejected_llm_error"] += 1
+                    rejected_fh.write(
+                        f"{pb.gd_id}\tllm_no_key\t{pb.subject[:100]}\t\n"
+                    )
+
+            # ── Phase C: PDF fetch + build AcceptedBulletin ───────────────
+            logger.info("Phase C: fetching PDFs + building %d accepted records…", len(pass1_accepts))
+            accepted: list[AcceptedBulletin] = []
+            sem_pdf = asyncio.Semaphore(_MAX_CONCURRENCY)
+
+            async def _phase_c_one(gd_id: str, parsed: ParsedBulletin,
+                                    canonical_id: str, btype: str) -> None:
+                async with sem_pdf:
+                    try:
+                        pdf_text = await _fetch_pdfs_for_accepted(client, parsed, stats)
+                        ab = _build_accepted_from_parsed(
+                            parsed, canonical_id, btype, pdf_text, stats,
+                        )
+                        accepted.append(ab)
+                    except Exception:
+                        logger.exception("phase C error on %s", gd_id)
+
+            c_tasks = [
+                asyncio.create_task(_phase_c_one(gd_id, parsed, cid, btype))
+                for gd_id, (parsed, cid, btype) in pass1_accepts.items()
+            ]
+            done = 0
+            for coro in asyncio.as_completed(c_tasks):
+                await coro
+                done += 1
+                if done % 200 == 0:
+                    logger.info("  C-progress: %d/%d", done, len(c_tasks))
 
     return accepted, stats
 
@@ -644,10 +1016,12 @@ def _build_sections(accepted: list[AcceptedBulletin]) -> list[Section]:
 
 
 def parse_source(ids_file: Path) -> list[Section]:
-    """Fetch, filter, enrich, and return Section objects for the CLI pipeline.
+    """Fetch, filter (two-pass), enrich, and return Section objects.
 
-    This is the callable the shared PDF pipeline invokes. Takes the
-    Wayback-derived IDs file path and drives the whole fetch loop.
+    Run inside a dedicated worker thread because the CLI dispatch already
+    owns an asyncio event loop and we can't call ``asyncio.run`` from a
+    running loop. The anthropic key is pulled from ``ingest.config.settings``
+    at call time so the adapter stays config-free otherwise.
     """
     ids_file = Path(ids_file)
     if not ids_file.exists():
@@ -657,7 +1031,22 @@ def parse_source(ids_file: Path) -> list[Section]:
     logger.info("uscg_bulletin: %d ids to process", len(ids))
 
     rejected_log_path = ids_file.parent / "rejected.log"
-    accepted, stats = asyncio.run(_fetch_and_filter_all(ids, rejected_log_path))
+    llm_log_path = ids_file.parent / "llm_classifications.log"
+
+    # Pull the key at call time — avoids making the module import-time
+    # dependent on the ingest.config settings.
+    from ingest.config import settings as _ingest_settings
+    anthropic_key = _ingest_settings.anthropic_api_key or None
+
+    import concurrent.futures
+
+    def _run_in_thread():
+        return asyncio.run(
+            _fetch_and_filter_all(ids, rejected_log_path, llm_log_path, anthropic_key),
+        )
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        accepted, stats = pool.submit(_run_in_thread).result()
 
     # Write stats to a sibling file so the CLI can surface them later.
     stats_path = ids_file.parent / "ingest_stats.json"

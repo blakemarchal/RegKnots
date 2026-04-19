@@ -46,6 +46,7 @@ data/raw/*
 !data/raw/uscg_bulletins/
 data/raw/uscg_bulletins/*
 !data/raw/uscg_bulletins/wayback_ids.txt
+!data/raw/uscg_bulletins/regression_set.json
 packages/ingest/data/
 
 # PWA
@@ -61,3 +62,4 @@ apps/web/public/swe-worker-*.js
 *.tsbuildinfo
 ".env.txt" 
 ".env.txt" 
+.claude/scheduled_tasks.lock

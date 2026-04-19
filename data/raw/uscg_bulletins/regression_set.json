@@ -1,0 +1,312 @@
+{
+  "known_good": [
+    {
+      "gd_id": "2820ebe",
+      "prior_section_number": "MSIB 07-20",
+      "subject": "MSIB 07-20 Ports and Facilities MSIB for Coranavirus (port security, MARSEC, security zone, port closure, environmental compliance, pollution response)",
+      "published_date": "2020-03-19"
+    },
+    {
+      "gd_id": "289cb80",
+      "prior_section_number": "MSIB 20-113",
+      "subject": "SEC VA MSIB 20-113 - HRBT Expansion - Maritime Community Outreach Meetings",
+      "published_date": "2020-05-04"
+    },
+    {
+      "gd_id": "38d5a17",
+      "prior_section_number": "NMC Announcement 2024-02-26",
+      "subject": "New Merchant Mariner Credential (MMC) (MMC process, credential update, NMC processing)",
+      "published_date": "2024-02-26"
+    },
+    {
+      "gd_id": "38d86df",
+      "prior_section_number": "NMC Announcement 2024-02-27",
+      "subject": "New Merchant Mariner Credential (MMC process, credential update, NMC processing)",
+      "published_date": "2024-02-27"
+    }
+  ],
+  "mislabeled": [
+    {
+      "gd_id": "1c15349",
+      "prior_section_number": "ALCOAST 278/17 [1c15349]",
+      "subject": "ACN 120/17 - OCT 2017 SITREP 7 - HUMAN CAPITAL STRATEGY - BLENDED RETIREMENT SYSTEM (BRS) - CONTINUATION PAY (CP) POLICY",
+      "published_date": "2017-10-31"
+    },
+    {
+      "gd_id": "1f93cc1",
+      "prior_section_number": "ALCOAST 214/18 [1f93cc1]",
+      "subject": "ACN 061/18 - JUN 2018 TWELVE MONTH DEFERMENT FOR POST-PARTUM MEMBERS",
+      "published_date": "2018-06-22"
+    },
+    {
+      "gd_id": "200a380",
+      "prior_section_number": "ALCOAST 214/18 [200a380]",
+      "subject": "ACN 072/18 - JUL 2018 ADVANCEMENT AUTHORITY FOR OFFICERS IN CHARGE",
+      "published_date": "2018-07-23"
+    },
+    {
+      "gd_id": "209b991",
+      "prior_section_number": "ALCOAST 121/18",
+      "subject": "ACN 087/18 - AUG 2018 FY19 WORKFORCE PLANNING SITREP 2 - SPECIAL DUTY ASSIGNMENT PAY (SDAP)",
+      "published_date": "2018-08-30"
+    },
+    {
+      "gd_id": "26f6015",
+      "prior_section_number": "ALCOAST 214/18 [26f6015]",
+      "subject": "ALCGENL 220/19 - MASTER CHIEF ADVANCEMENT PANEL ANNOUNCEMENT",
+      "published_date": "2019-12-02"
+    },
+    {
+      "gd_id": "288137e",
+      "prior_section_number": "ALCOAST 086/20",
+      "subject": "ACN 054/20 - APR 2020 INACTIVE DUTY TRAINING (IDT) SUBSISTENCE ALLOWANCE WHILE DRILLING REMOTELY",
+      "published_date": "2020-04-23"
+    },
+    {
+      "gd_id": "29fa71a",
+      "prior_section_number": "ALCOAST 278/20 [29fa71a]",
+      "subject": "ACN 106/20 - SEP 2020 FY21 SPECIAL DUTY PAY (SDP) AND ASSIGNMENT PAY (AP)",
+      "published_date": "2020-09-10"
+    },
+    {
+      "gd_id": "2a63f0d",
+      "prior_section_number": "ALCOAST 335/20",
+      "subject": "ACN 124/20 - OCT 2020 CHANGES TO REENLISTMENT ELIGIBLITY FOR BONUSES AND SERVICE OBLIGATION FOR INTELLIGENCE SPECIALIST (IS) CLASS A SCHOOL (port security, MARSEC, security zone, port closure)",
+      "published_date": "2020-10-16"
+    },
+    {
+      "gd_id": "2b12da7",
+      "prior_section_number": "ALCOAST 317/20",
+      "subject": "ACN 148/20 - DEC 2020 TWO-YEAR ENLISTMENT PROGRAM",
+      "published_date": "2020-12-15"
+    },
+    {
+      "gd_id": "2b1af3b",
+      "prior_section_number": "ALCOAST 292/20 [2b1af3b]",
+      "subject": "ACN 150/20 - DEC 2020 COAST GUARD OMBUDSMAN PROGRAM POLICY UPDATE: SEXUAL ASSAULT AS AN OMBUDSMAN REPORTABLE ISSUE",
+      "published_date": "2020-12-17"
+    },
+    {
+      "gd_id": "2c0f1ed",
+      "prior_section_number": "ALCOAST 408/20 [2c0f1ed]",
+      "subject": "ALCGENL 018/21 - DIVER RATING SOLICITATION FOR ASSIGNMENT YEAR (AY) 2022 (OSV, offshore supply vessel, MODU)",
+      "published_date": "2021-02-12"
+    },
+    {
+      "gd_id": "2e22600",
+      "prior_section_number": "ALCOAST 187/20",
+      "subject": "ACN 055/21 - JUN 2021 COVID-19: SPECIAL LEAVE ACCRUAL (SLA) UPDATE FY21",
+      "published_date": "2021-06-01"
+    },
+    {
+      "gd_id": "2e512f1",
+      "prior_section_number": "ALCOAST 326/20 [2e512f1]",
+      "subject": "ALCGENL 089/21 - ENLISTED PERSONNEL ADVANCEMENT ANNOUNCEMENT (EPAA) NO. 07-21",
+      "published_date": "2021-06-22"
+    },
+    {
+      "gd_id": "2e68f4c",
+      "prior_section_number": "ALCOAST 214/18 [2e68f4c]",
+      "subject": "ACN 064/21 - JUL 2021 RESERVE MASTER CHIEF ADVANCEMENT PANEL ANNOUNCEMENT (port security, MARSEC, security zone, port closure)",
+      "published_date": "2021-07-02"
+    },
+    {
+      "gd_id": "2ee8792",
+      "prior_section_number": "ALCOAST 003/20",
+      "subject": "ACN 081/21 - AUG 2021 SEXUAL ASSAULT PREVENTION, RESPONSE, AND RECOVERY (SAPRR) POLICY UPDATE: SAPRR SERVICES EXPANDED TO FORMER USCG MEMBERS AND CURRENT CIVILIAN EMPLOYEES",
+      "published_date": "2021-08-26"
+    },
+    {
+      "gd_id": "2f29516",
+      "prior_section_number": "ALCOAST 232/21",
+      "subject": "ALCGENL 147/21 - AVIATION TECHNOLOGY ADVANCED EDUCATION PANEL RESULTS FOR ASSIGNMENT YEAR 2022",
+      "published_date": "2021-09-20"
+    },
+    {
+      "gd_id": "2f29620",
+      "prior_section_number": "ALCOAST 214/21",
+      "subject": "ALCGENL 150/21 - PUBLIC AFFAIRS (PA) ADVANCED EDUCATION PANEL RESULTS FOR ASSIGNMENT YEAR 2022",
+      "published_date": "2021-09-20"
+    },
+    {
+      "gd_id": "2f297d7",
+      "prior_section_number": "ALCOAST 326/20 [2f297d7]",
+      "subject": "ALCGENL 153/21 - ENLISTED PERSONNEL ADVANCEMENT ANNOUNCEMENT (EPAA) NO. 10-21",
+      "published_date": "2021-09-20"
+    },
+    {
+      "gd_id": "2f830f3",
+      "prior_section_number": "ALCOAST 371/21 [2f830f3]",
+      "subject": "ACN 103/21 - OCT 2021 FY22 MILITARY WORKFORCE PLANNING TEAM RESULTS - ENLISTED NON-MONETARY INTERVENTIONS",
+      "published_date": "2021-10-19"
+    },
+    {
+      "gd_id": "2f8314d",
+      "prior_section_number": "ALCOAST 371/21 [2f8314d]",
+      "subject": "ACN 104/21 - OCT 2021 FY22 MILITARY WORKFORCE PLANNING TEAM RESULTS - ENLISTED MONETARY INTERVENTIONS",
+      "published_date": "2021-10-19"
+    },
+    {
+      "gd_id": "2f89adb",
+      "prior_section_number": "ALCOAST 188/21",
+      "subject": "ALCGENL 158/21 - MARINE ENVIRONMENTAL PROTECTION INDUSTRY TRAINING (MEPIT), PORT SAFETY AND SECURITY INDUSTRY TRAINING (PSSIT), AND WATERWAYS MANAGEMENT INDUSTRY TRAINING (WWMIT) SELECTION PANEL RESULTS FOR ASSIGNMENT YEAR 2022 (environmental compliance, pollution response)",
+      "published_date": "2021-10-21"
+    },
+    {
+      "gd_id": "308f4b2",
+      "prior_section_number": "ALCOAST 235/20 [308f4b2]",
+      "subject": "ACN 008/22 - FEB 2022 RELEASE OF DOD SKILLBRIDGE VOLUNTARY EMPLOYMENT SKILLS TRAINING PROGRAM POLICY",
+      "published_date": "2022-02-03"
+    },
+    {
+      "gd_id": "30a0b93",
+      "prior_section_number": "ALCOAST 118/21 [30a0b93]",
+      "subject": "ALCGENL 010/22 - NOV 2021 SERVICEWIDE EXAM REVISED CUTOFFS",
+      "published_date": "2022-02-10"
+    },
+    {
+      "gd_id": "30c53df",
+      "prior_section_number": "ALCOAST 408/20 [30c53df]",
+      "subject": "ALCGENL 015/22 - AY23 DIVER RATING SOLICITATION",
+      "published_date": "2022-02-25"
+    },
+    {
+      "gd_id": "30c5385",
+      "prior_section_number": "ALCOAST 326/20 [30c5385]",
+      "subject": "ALCGENL 014/22 - ENLISTED PERSONNEL ADVANCEMENT ANNOUNCEMENT (EPAA) NO. 03-22",
+      "published_date": "2022-02-25"
+    },
+    {
+      "gd_id": "3330407",
+      "prior_section_number": "ALCOAST 236/22",
+      "subject": "ALCGENL 192/22 - YEOMAN BUSINESS ADMINISTRATION AND MANAGEMENT (YNBA) ADVANCED EDUCATION PANEL RESULTS FOR ASSIGNMENT YEAR 2023",
+      "published_date": "2022-10-18"
+    },
+    {
+      "gd_id": "343be41",
+      "prior_section_number": "ALCOAST 497/22 [343be41]",
+      "subject": "ALCGENL 006/23 - 2023 MASTER CHIEF ADVANCEMENT PANEL ANNOUNCEMENT",
+      "published_date": "2023-01-19"
+    },
+    {
+      "gd_id": "343be49",
+      "prior_section_number": "ALCOAST 326/20 [343be49]",
+      "subject": "ALCGENL 007/23 - ENLISTED PERSONNEL ADVANCEMENT ANNOUNCEMENT (EPAA) NO. 02-23",
+      "published_date": "2023-01-19"
+    },
+    {
+      "gd_id": "343be6d",
+      "prior_section_number": "ALCOAST 445/22 [343be6d]",
+      "subject": "ALCGENL 009/23 - MAY 2023 SERVICE WIDE EXAMINATION (SWE) COMPETITION",
+      "published_date": "2023-01-19"
+    },
+    {
+      "gd_id": "34894cf",
+      "prior_section_number": "ALCOAST 326/20 [34894cf]",
+      "subject": "ALCGENL 022/23 - MAY 2022 SERVICEWIDE EXAM REVISED CUTOFFS",
+      "published_date": "2023-02-13"
+    },
+    {
+      "gd_id": "34ce5e0",
+      "prior_section_number": "ALCOAST 326/20 [34ce5e0]",
+      "subject": "ALCGENL 028/23 - ENLISTED PERSONNEL ADVANCEMENT ANNOUNCEMENT (EPAA) NO. 03-23",
+      "published_date": "2023-03-06"
+    },
+    {
+      "gd_id": "34eb31a",
+      "prior_section_number": "ALCOAST 326/20 [34eb31a]",
+      "subject": "ALCGENL 039/23 - MAY 2022 SERVICEWIDE EXAM REVISED CUTOFFS",
+      "published_date": "2023-03-14"
+    },
+    {
+      "gd_id": "3503a90",
+      "prior_section_number": "ALCOAST 326/20 [3503a90]",
+      "subject": "ALCGENL 048/23 - ENLISTED PERSONNEL ADVANCEMENT ANNOUNCEMENT (EPAA) NO. 04-23",
+      "published_date": "2023-03-22"
+    },
+    {
+      "gd_id": "3593c48",
+      "prior_section_number": "ALCOAST 326/20 [3593c48]",
+      "subject": "ALCGENL 083/23 - ENLISTED PERSONNEL ADVANCEMENT ANNOUNCEMENT (EPAA) NO. 05-23",
+      "published_date": "2023-05-08"
+    },
+    {
+      "gd_id": "359fac8",
+      "prior_section_number": "ALCOAST 152/23 [359fac8]",
+      "subject": "ALCGENL 104/23 - ENLISTED POSTGRADUATE AND ADVANCED EDUCATION APPLICATION PROCESS FOR ASSIGNMENT YEAR 2024 (AY24) (equipment recall, safety alert, defective equipment)",
+      "published_date": "2023-05-11"
+    },
+    {
+      "gd_id": "35be72d",
+      "prior_section_number": "ALCOAST 326/20 [35be72d]",
+      "subject": "ALCGENL 114/23 - ENLISTED PERSONNEL ADVANCEMENT ANNOUNCEMENT (EPAA) NO. 06-23",
+      "published_date": "2023-05-22"
+    },
+    {
+      "gd_id": "3611e1c",
+      "prior_section_number": "ALCOAST 326/20 [3611e1c]",
+      "subject": "ALCGENL 135/23 - ENLISTED PERSONNEL ADVANCEMENT ANNOUNCEMENT (EPAA) NO. 07-23",
+      "published_date": "2023-06-20"
+    },
+    {
+      "gd_id": "3682503",
+      "prior_section_number": "ALCOAST 152/23 [3682503]",
+      "subject": "ALCGENL 147/23 - SOLICITATION FOR UNIVERSITY OF MINNESOTA SCHOOL OF DENTISTRY DUAL HYGIENE/DENTAL THERAPY ADVANCED EDUCATION PROGRAM FOR ASSIGNMENT YEAR 2024 (AY24)",
+      "published_date": "2023-07-31"
+    },
+    {
+      "gd_id": "37a5b9f",
+      "prior_section_number": "ALCOAST 326/20 [37a5b9f]",
+      "subject": "ALCGENL 231/23 - ENLISTED PERSONNEL ADVANCEMENT ANNOUNCEMENT (EPAA) NO. 11-23 (navigation safety, weather advisory, aid to navigation)",
+      "published_date": "2023-11-09"
+    },
+    {
+      "gd_id": "37a5bb1",
+      "prior_section_number": "ALCOAST 313/23 [37a5bb1]",
+      "subject": "ALCGENL 240/23 - PUBLICATION OF THE ASSIGNMENT YEAR (AY) 2024 OFFICIAL SHOPPING LIST",
+      "published_date": "2023-11-09"
+    },
+    {
+      "gd_id": "37a5c67",
+      "prior_section_number": "ALCOAST 313/23 [37a5c67]",
+      "subject": "ALCGENL 236/23 - AY24 ELECTRICIAN'S MATE (EM) SITREP TWO",
+      "published_date": "2023-11-09"
+    },
+    {
+      "gd_id": "37a5c60",
+      "prior_section_number": "ALCOAST 313/23 [37a5c60]",
+      "subject": "ALCGENL 237/23 - AY24 MACHINERY TECHNICIAN (MK) SITREP TWO",
+      "published_date": "2023-11-09"
+    },
+    {
+      "gd_id": "37a5d74",
+      "prior_section_number": "ALCOAST 428/22 [37a5d74]",
+      "subject": "ALCGENL 254/23 - MAY 2023 SERVICEWIDE EXAM REVISED CUTOFFS",
+      "published_date": "2023-11-10"
+    },
+    {
+      "gd_id": "3960545",
+      "prior_section_number": "ALCOAST 001/17",
+      "subject": "ALCGENL 161/24 - SUBJ: NON-RATE PATROL FORCES SOUTHWEST ASIA (PATFORSWA) SOLICITATION (AY25 WINTER ROTATION)",
+      "published_date": "2024-04-12"
+    },
+    {
+      "gd_id": "396069d",
+      "prior_section_number": "ALCOAST 096/24 [396069d]",
+      "subject": "ALCGENL 164/24 - SUBJ: ENLISTED POSTGRADUATE AND ADVANCED EDUCATION APPLICATION PROCESS FOR ASSIGNMENT YEAR 2025 (AY25) (equipment recall, safety alert, defective equipment, environmental compliance, pollution response)",
+      "published_date": "2024-04-12"
+    },
+    {
+      "gd_id": "39e8806",
+      "prior_section_number": "ALCOAST 326/20 [39e8806]",
+      "subject": "ALCGENL 221/24 - SUBJ: ENLISTED PERSONNEL ADVANCEMENT ANNOUNCEMENT (EPAA) NO. 06-24",
+      "published_date": "2024-05-24"
+    },
+    {
+      "gd_id": "3aa5d11",
+      "prior_section_number": "ALCOAST 326/20 [3aa5d11]",
+      "subject": "ALCGENL 303/24 - SUBJ: ENLISTED PERSONNEL ADVANCEMENT ANNOUNCEMENT (EPAA) NO. 08-24",
+      "published_date": "2024-07-23"
+    }
+  ]
+}
