@@ -1,0 +1,13 @@
+{
+  "timestamp": "2026-04-20_183711",
+  "total_runs": 28,
+  "grade_distribution": {
+    "A": 23,
+    "A-": 3,
+    "F": 2
+  },
+  "a_or_better_pct": 92.9,
+  "b_or_better_pct": 92.9,
+  "total_input_tokens": 190949,
+  "total_output_tokens": 21784
+}

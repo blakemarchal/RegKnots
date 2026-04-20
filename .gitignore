@@ -47,6 +47,11 @@ data/raw/*
 data/raw/uscg_bulletins/*
 !data/raw/uscg_bulletins/wayback_ids.txt
 !data/raw/uscg_bulletins/regression_set.json
+# Eval summary files (not full jsonl dumps)
+!data/eval/
+data/eval/*/
+!data/eval/*/summary.md
+!data/eval/*/summary.json
 packages/ingest/data/
 
 # PWA
