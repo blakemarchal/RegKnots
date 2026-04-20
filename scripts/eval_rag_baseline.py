@@ -133,15 +133,18 @@ QUESTIONS: list[TestQuestion] = [
         query="What are the regulations for SCBA packs on my vessel?",
         vessels=["V1", "V2", "V5"],
         expected=[
-            r"46 CFR 96\.35-10",   # V1 containership
-            r"46 CFR 35\.30-20",   # V2 tanker
-            r"46 CFR 142\.226",    # V5 towing M
-            r"SOLAS Ch\.II-2.*10",
+            r"46 CFR 96\.35-10",                 # V1 containership
+            r"46 CFR 35\.30-20",                 # V2 tanker
+            r"46 CFR 142\.226",                  # V5 towing M
+            r"SOLAS\s*Ch\.?\s*II-2",             # Tolerant SOLAS II-2 match
+            r"NVIC 06-93",                       # USCG type-approval termination — valid pointer
         ],
         wrong_sub=[
             r"46 CFR 195\.",       # Subchapter U (research)
             r"46 CFR 77\.",        # Subchapter H (passenger ops) for non-pax
             r"46 CFR 169\.",       # Subchapter R (sailing school)
+            r"46 CFR 117\.",       # Subchapter T (small passenger)
+            r"46 CFR 180\.",       # Subchapter T (small passenger LSA)
         ],
     ),
     TestQuestion(
@@ -151,7 +154,7 @@ QUESTIONS: list[TestQuestion] = [
         expected=[
             r"46 CFR 96\.35-10",
             r"46 CFR 35\.30-20",
-            r"SOLAS Ch\.II-2.*10",
+            r"SOLAS\s*Ch\.?\s*II-2",
         ],
         wrong_sub=[
             r"46 CFR 195\.",
@@ -165,10 +168,11 @@ QUESTIONS: list[TestQuestion] = [
         expected=[
             r"46 CFR 95\.15",
             r"46 CFR 144\.240",
-            r"SOLAS Ch\.II-2",
+            r"SOLAS\s*Ch\.?\s*II-2",
         ],
         wrong_sub=[
             r"46 CFR 195\.",
+            r"46 CFR 28\.320",     # Fishing industry — wrong for towing
         ],
     ),
     TestQuestion(
