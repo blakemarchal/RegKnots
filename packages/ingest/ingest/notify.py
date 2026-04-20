@@ -211,6 +211,79 @@ def _build_alert_html(first_name: str, title: str, body: str) -> str:
 </html>"""
 
 
+# Suppression threshold for bulk-republish noise. eCFR republishes entire
+# CFR titles weekly; even without substantive regulatory changes, whitespace
+# / metadata / paragraph normalization produces thousands of "modified"
+# content_hashes. When net_chunk_delta == 0 AND >15% of the source's total
+# chunks have new hashes, treat the run as a bulk republish and suppress
+# the user-facing notification. The threshold was calibrated against the
+# 2026-04-19 weekly run (cfr_33: 71%, cfr_46: 81%, cfr_49: 63% modified —
+# all confirmed republish-only) vs a realistic amendment cadence (~0.5-2%
+# of sections actually change in any given week).
+_BULK_REPUBLISH_THRESHOLD = 0.15
+
+
+async def _should_suppress_as_bulk_republish(
+    pool: asyncpg.Pool, result: IngestResult,
+) -> tuple[bool, str]:
+    """Decide whether this ingest result is mass eCFR republish noise.
+
+    Only fires when (a) no net chunk delta — neither grew nor shrank —
+    and (b) the modified-chunk ratio exceeds the threshold. A source
+    with genuine net-new content falls through (delta != 0).
+    Returns (suppress, reason_for_log).
+    """
+    if result.net_chunk_delta != 0:
+        return False, ""
+    total = await pool.fetchval(
+        "SELECT COUNT(*) FROM regulations WHERE source = $1",
+        result.source,
+    )
+    total = int(total or 0)
+    if total == 0:
+        return False, ""
+    ratio = result.new_or_modified_chunks / total
+    if ratio > _BULK_REPUBLISH_THRESHOLD:
+        pct = ratio * 100
+        return True, (
+            f"suppressed: {result.new_or_modified_chunks}/{total} = {pct:.0f}% "
+            f"of {result.source} chunks modified with net_delta=0 "
+            f"(bulk republish, threshold={_BULK_REPUBLISH_THRESHOLD * 100:.0f}%)"
+        )
+    return False, ""
+
+
+async def _deactivate_prior_source_notifications(
+    pool: asyncpg.Pool, source: str,
+) -> int:
+    """Mark any active regulation_update banners for this source as inactive.
+
+    Keeps the notification panel to one active banner per source — users
+    see "latest state" rather than a running history of every weekly
+    ingest. Deactivated rows remain queryable in the "ALL" tab.
+    """
+    try:
+        result = await pool.execute(
+            "UPDATE notifications "
+            "SET is_active = false "
+            "WHERE notification_type = 'regulation_update' "
+            "  AND source = $1 "
+            "  AND is_active = true",
+            source,
+        )
+        # asyncpg returns a command tag like "UPDATE 3"
+        try:
+            return int(result.split()[-1])
+        except (ValueError, IndexError):
+            return 0
+    except Exception as exc:
+        logger.warning(
+            "notify: failed to deactivate prior notifications for %s: %s",
+            source, exc,
+        )
+        return 0
+
+
 async def create_regulation_update_notification(
     pool: asyncpg.Pool,
     result: IngestResult,
@@ -221,8 +294,15 @@ async def create_regulation_update_notification(
     updated source. Emails only fire when there are actual content changes
     (new_or_modified_chunks > 0), never on no-op re-checks.
 
+    Pre-insert gates (in order):
+      1. new_or_modified_chunks must be > 0 (existing guard).
+      2. Must not look like a bulk eCFR republish — we skip when >15% of a
+         source's chunks were modified with zero net delta.
+      3. Any existing active regulation_update banner for this source is
+         deactivated before the new one lands (collapse-per-source).
+
     Returns the new notification id (str) when a row is created, or None if
-    the run had no real changes and no notification was needed.
+    suppressed or on error.
 
     Silently logs and returns None on insertion errors — a notification
     failure should never abort an otherwise-successful ingest.
@@ -234,12 +314,27 @@ async def create_regulation_update_notification(
         )
         return None
 
+    # Gate on bulk-republish suppression before spending any more work.
+    suppress, reason = await _should_suppress_as_bulk_republish(pool, result)
+    if suppress:
+        logger.info("notify: %s (would-have-body: %r)", reason, _build_message(result))
+        return None
+
     label = _SOURCE_LABELS.get(
         result.source,
         (f"{result.source} updated", result.source),
     )
     title = label[0]
     body = _build_message(result)
+
+    # Collapse-per-source: deactivate any prior active banner for this
+    # source so the user sees only one at a time.
+    deactivated = await _deactivate_prior_source_notifications(pool, result.source)
+    if deactivated > 0:
+        logger.info(
+            "notify: deactivated %d prior active notification(s) for %s",
+            deactivated, result.source,
+        )
 
     # 1. Insert in-app notification banner
     notif_id = None

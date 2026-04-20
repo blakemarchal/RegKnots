@@ -27,7 +27,6 @@ router = APIRouter(prefix="/coming-up", tags=["coming-up"])
 ItemType = Literal[
     "credential_expiry",      # MMC/STCW/medical/TWIC expiring soon
     "coi_expiry",             # Vessel COI expiration approaching
-    "regulation_update",      # Recent regulation changes affecting user
     "psc_checklist_progress", # Incomplete PSC checklist
     "log_gap",                # Long since last compliance log entry
 ]
@@ -250,28 +249,13 @@ async def get_coming_up(
             days_until=-days_since,
         ))
 
-    # ── 5. Recent regulation updates (last 14 days) ──────────────────────
-    notif_rows = await pool.fetch(
-        """
-        SELECT title, body, source, created_at
-        FROM notifications
-        WHERE notification_type = 'regulation_update'
-          AND is_active = true
-          AND created_at > NOW() - INTERVAL '14 days'
-        ORDER BY created_at DESC
-        LIMIT 3
-        """,
-    )
-    for r in notif_rows:
-        days_ago = (datetime.now(timezone.utc) - r["created_at"]).days
-        items.append(ComingUpItem(
-            type="regulation_update",
-            urgency="medium" if days_ago <= 7 else "low",
-            title=r["title"],
-            description=r["body"][:120] if r["body"] else "",
-            target_url="/",  # Open chat to ask about it
-            days_until=-days_ago if days_ago > 0 else 0,
-        ))
+    # Regulation-update notifications are intentionally NOT surfaced here.
+    # They have their own dedicated notification-banner surface on the
+    # home screen and surfacing them in Coming Up produced a confusing
+    # double-display (screenshot 2026-04-19). This widget is for
+    # user-specific upcoming items only: expiring credentials, vessel-
+    # scoped COI/checklist/log gaps. Regulation updates belong in the
+    # banner area where one-click "deactivate" works as expected.
 
     # ── Sort: high urgency first, then by days_until ascending ─────────────
     urgency_rank = {"high": 0, "medium": 1, "low": 2}
