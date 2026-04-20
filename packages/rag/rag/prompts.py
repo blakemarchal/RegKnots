@@ -74,7 +74,10 @@ Maritime workplace safety is covered by 46 CFR Subchapter V (Marine Occupational
 the ISM Code, and vessel-specific Subchapters. If a user's question touches OSHA-adjacent topics \
 (respiratory protection, HAZMAT response, confined-space entry), cite the equivalent 46 CFR / SOLAS / \
 ISM / NIOSH-via-SOLAS pathway, NOT a 29 CFR section. If no equivalent exists in the knowledge base, \
-say so directly.
+say so directly. This rule applies especially on tanker SCBA / breathing-apparatus questions, \
+where mariners sometimes expect an OSHA citation — instead cite 46 CFR 35.30-20 (Subchapter D tank \
+vessel emergency outfits), SOLAS Ch.II-2 Reg.10, and NVIC 06-93 (USCG type-approval termination \
+for breathing apparatus).
 - COVERAGE — your knowledge base includes the sources listed above. If a particular rule or section was \
 not included in the retrieved context for THIS query, acknowledge that briefly ("I didn't surface the \
 specific section for that — try asking about it directly") rather than inventing a citation or claiming \

@@ -771,6 +771,11 @@ async def retrieve(
         )
 
     if candidates:
+        # Drop CFR chunks whose Subchapter is forbidden for this vessel type.
+        # Applied BEFORE rerank so filtered-out chunks can't consume a top-N
+        # slot. Non-CFR sources (SOLAS, NVIC, NMC, uscg_bulletin, ERG) pass
+        # through untouched — they're vessel-agnostic in our corpus.
+        candidates = _filter_by_vessel_applicability(candidates, vessel_profile)
         candidates = _rerank(candidates, query, vessel_profile)
 
     final = candidates[:limit]
@@ -793,6 +798,373 @@ async def retrieve(
         logger.info("Selected chunks: %s", chunk_summaries)
 
     return final
+
+
+# ── Vessel-type × CFR Subchapter applicability filter ────────────────────
+#
+# CFR regulations are organized by Subchapter, where each Subchapter applies
+# to a specific vessel type. The same physical requirement (e.g. fireman's
+# outfit) is repeated in 6+ nearly-identical chunks across Subchapters —
+# one per vessel type. Vector search cannot distinguish them because the
+# text is essentially identical. This filter drops CFR chunks from Parts
+# that explicitly don't apply to the user's vessel type.
+#
+# Data source: each Subchapter's "Applicability" section (usually Part N.01-1)
+# in the CFR. Values verified against the official CFR table of contents.
+# Where a vessel type might apply to multiple Subchapters (e.g. a large
+# passenger vessel on international routes is subject to both Subchapter
+# H and SOLAS), we include both; the filter only removes Parts that are
+# unambiguously outside the vessel's scope.
+#
+# Format: vessel_type (lowercased) → {
+#     "applicable": set of Part-number string prefixes (e.g. "95", "96"),
+#     "forbidden": set of Part-number string prefixes that MUST NOT appear
+#                  in citations for this vessel type,
+# }
+# The distinction lets us default to "keep with no change" for Parts not
+# listed in either set (prevents silent data loss when a Part we didn't
+# map turns out to be applicable).
+
+# Universal Parts that apply to every commercial vessel regardless of type.
+# These never get filtered out; their presence in a citation is fine for
+# any vessel type.
+_UNIVERSAL_CFR_46_PARTS: frozenset[str] = frozenset({
+    # Subchapter A — Procedures Applicable to the Public
+    "1", "2", "3", "4", "5",
+    # Subchapter B — Merchant Marine Officers and Seamen (credentialing)
+    "10", "11", "12", "13", "14", "15", "16",
+    # Subchapter C-I — Uninspected Vessels (general provisions)
+    "24", "25", "26",
+    # Subchapter E — Load Lines
+    "40", "41", "42", "43", "44", "45", "46", "47", "48", "49",
+    # Subchapter F — Marine Engineering
+    "50", "51", "52", "53", "54", "55", "56", "57", "58", "59",
+    "60", "61", "62", "63", "64",
+    # Subchapter G — Documentation of Vessels
+    "67",
+    # Subchapter J — Electrical Engineering
+    "110", "111", "112", "113",
+    # Subchapter Q — Equipment, Construction, and Materials (type-approval
+    # standards — applicable to anyone whose vessel uses the equipment)
+    "159", "160", "161", "162", "163", "164",
+    # Subchapter S — Subdivision and Stability
+    "170", "171", "172", "173", "174",
+    # Subchapter V — Marine Occupational Safety
+    "196", "197",
+    # Subchapter W — Lifesaving Appliance Service Facilities
+    "198", "199",
+})
+
+_VESSEL_TYPE_CFR_APPLICABILITY: dict[str, dict[str, frozenset[str]]] = {
+    "containership": {
+        "applicable": frozenset({
+            # Subchapter I — Cargo and Miscellaneous Vessels (primary)
+            "90", "91", "92", "93", "94", "95", "96", "97", "98",
+            "105",
+            # Subchapter O — Certain Bulk Dangerous Cargoes (may apply if
+            # containerized hazmat is carried; keep for edge cases)
+            # Intentionally NOT marking as forbidden for OSVs that carry
+            # similar cargo.
+        }),
+        "forbidden": frozenset({
+            # Subchapter D — Tank Vessels
+            "30", "31", "32", "33", "34", "35", "36", "37", "38", "39",
+            # Subchapter H — Passenger Vessels (large)
+            "70", "71", "72", "73", "74", "75", "76", "77", "78",
+            "79", "80", "81", "82", "83", "84", "85", "86", "87",
+            "88", "89",
+            # Subchapter I-A — MODU
+            "107", "108", "109",
+            # Subchapter K — Small Passenger (≥150 pax)
+            "114", "115", "116", "117", "118", "119", "120", "121", "122",
+            # Subchapter L — OSV
+            "125", "126", "127", "128", "129", "130", "131", "132",
+            "133", "134", "135", "136", "137", "138", "139",
+            # Subchapter M — Towing
+            "140", "141", "142", "143", "144",
+            # Subchapter R — Sailing School
+            "165", "166", "167", "168", "169",
+            # Subchapter T — Small Passenger (under 100 GT)
+            "175", "176", "177", "178", "179", "180", "181", "182",
+            "183", "184", "185", "186", "187",
+            # Subchapter U — Oceanographic Research
+            "188", "189", "190", "191", "192", "193", "194", "195",
+            # Part 28 — Commercial Fishing Industry Vessels
+            "28",
+        }),
+    },
+    "bulk carrier": {
+        "applicable": frozenset({
+            "90", "91", "92", "93", "94", "95", "96", "97", "98", "105",
+        }),
+        "forbidden": frozenset({
+            "30", "31", "32", "33", "34", "35", "36", "37", "38", "39",
+            "70", "71", "72", "73", "74", "75", "76", "77", "78",
+            "79", "80", "81", "82", "83", "84", "85", "86", "87",
+            "88", "89",
+            "107", "108", "109",
+            "114", "115", "116", "117", "118", "119", "120", "121", "122",
+            "125", "126", "127", "128", "129", "130", "131", "132",
+            "133", "134", "135", "136", "137", "138", "139",
+            "140", "141", "142", "143", "144",
+            "165", "166", "167", "168", "169",
+            "175", "176", "177", "178", "179", "180", "181", "182",
+            "183", "184", "185", "186", "187",
+            "188", "189", "190", "191", "192", "193", "194", "195",
+            "28",
+        }),
+    },
+    "tanker": {
+        "applicable": frozenset({
+            # Subchapter D — Tank Vessels (primary)
+            "30", "31", "32", "33", "34", "35", "36", "37", "38", "39",
+            # Subchapter N — Dangerous Cargoes (applies to tankers carrying
+            # hazardous bulk liquids)
+            "148", "149", "150", "151", "153", "154",
+            # Subchapter O — Bulk Dangerous Cargoes
+            "159",
+        }),
+        "forbidden": frozenset({
+            # Cargo non-tank
+            "90", "91", "92", "93", "94", "95", "96", "97", "98", "105",
+            # Large passenger
+            "70", "71", "72", "73", "74", "75", "76", "77", "78",
+            "79", "80", "81", "82", "83", "84", "85", "86", "87",
+            "88", "89",
+            # MODU
+            "107", "108", "109",
+            # Small Passenger K
+            "114", "115", "116", "117", "118", "119", "120", "121", "122",
+            # OSV
+            "125", "126", "127", "128", "129", "130", "131", "132",
+            "133", "134", "135", "136", "137", "138", "139",
+            # Towing M
+            "140", "141", "142", "143", "144",
+            # Sailing school
+            "165", "166", "167", "168", "169",
+            # Small passenger T
+            "175", "176", "177", "178", "179", "180", "181", "182",
+            "183", "184", "185", "186", "187",
+            # Research U
+            "188", "189", "190", "191", "192", "193", "194", "195",
+            # Fishing
+            "28",
+        }),
+    },
+    "passenger vessel": {
+        # Large passenger (Subchapter H). For small passenger vessels, we
+        # rely on the subchapter field in the vessel_profile to switch to
+        # Subchapter K or T mappings below.
+        "applicable": frozenset({
+            # Subchapter H primary
+            "70", "71", "72", "73", "74", "75", "76", "77", "78",
+            "79", "80", "81", "82", "83", "84", "85", "86", "87",
+            "88", "89",
+            # Subchapter K applies if ≥150 pax small passenger
+            "114", "115", "116", "117", "118", "119", "120", "121", "122",
+            # Subchapter T applies if <100 GT small passenger
+            "175", "176", "177", "178", "179", "180", "181", "182",
+            "183", "184", "185", "186", "187",
+        }),
+        "forbidden": frozenset({
+            "30", "31", "32", "33", "34", "35", "36", "37", "38", "39",
+            "90", "91", "92", "93", "94", "95", "96", "97", "98", "105",
+            "107", "108", "109",
+            "125", "126", "127", "128", "129", "130", "131", "132",
+            "133", "134", "135", "136", "137", "138", "139",
+            "140", "141", "142", "143", "144",
+            "165", "166", "167", "168", "169",
+            "188", "189", "190", "191", "192", "193", "194", "195",
+            "28",
+        }),
+    },
+    "ferry": {
+        # Ferries are passenger vessels, usually Subchapter T or K.
+        "applicable": frozenset({
+            "70", "71", "72", "73", "74", "75", "76", "77", "78",
+            "79", "80", "81", "82", "83", "84", "85", "86", "87",
+            "88", "89",
+            "114", "115", "116", "117", "118", "119", "120", "121", "122",
+            "175", "176", "177", "178", "179", "180", "181", "182",
+            "183", "184", "185", "186", "187",
+        }),
+        "forbidden": frozenset({
+            "30", "31", "32", "33", "34", "35", "36", "37", "38", "39",
+            "90", "91", "92", "93", "94", "95", "96", "97", "98", "105",
+            "107", "108", "109",
+            "125", "126", "127", "128", "129", "130", "131", "132",
+            "133", "134", "135", "136", "137", "138", "139",
+            "140", "141", "142", "143", "144",
+            "165", "166", "167", "168", "169",
+            "188", "189", "190", "191", "192", "193", "194", "195",
+            "28",
+        }),
+    },
+    "towing / tugboat": {
+        "applicable": frozenset({
+            # Subchapter M — Towing Vessels (primary, since 2016)
+            "140", "141", "142", "143", "144",
+            # Part 27 — fire/lifesaving for uninspected vessels ≥65ft that
+            # pre-date Subchapter M phase-in
+            "27",
+        }),
+        "forbidden": frozenset({
+            "30", "31", "32", "33", "34", "35", "36", "37", "38", "39",
+            "70", "71", "72", "73", "74", "75", "76", "77", "78",
+            "79", "80", "81", "82", "83", "84", "85", "86", "87",
+            "88", "89",
+            "90", "91", "92", "93", "94", "95", "96", "97", "98", "105",
+            "107", "108", "109",
+            "114", "115", "116", "117", "118", "119", "120", "121", "122",
+            "125", "126", "127", "128", "129", "130", "131", "132",
+            "133", "134", "135", "136", "137", "138", "139",
+            "165", "166", "167", "168", "169",
+            "175", "176", "177", "178", "179", "180", "181", "182",
+            "183", "184", "185", "186", "187",
+            "188", "189", "190", "191", "192", "193", "194", "195",
+            "28",
+        }),
+    },
+    "osv / offshore support": {
+        "applicable": frozenset({
+            # Subchapter L — Offshore Supply Vessels (primary)
+            "125", "126", "127", "128", "129", "130", "131", "132",
+            "133", "134", "135", "136", "137", "138", "139",
+            # Some OSVs carry dangerous bulk liquids → Subchapter D/O apply
+            "30", "31", "32", "33", "34", "35", "36", "37", "38", "39",
+        }),
+        "forbidden": frozenset({
+            "70", "71", "72", "73", "74", "75", "76", "77", "78",
+            "79", "80", "81", "82", "83", "84", "85", "86", "87",
+            "88", "89",
+            "90", "91", "92", "93", "94", "95", "96", "97", "98", "105",
+            "107", "108", "109",
+            "114", "115", "116", "117", "118", "119", "120", "121", "122",
+            "140", "141", "142", "143", "144",
+            "165", "166", "167", "168", "169",
+            "175", "176", "177", "178", "179", "180", "181", "182",
+            "183", "184", "185", "186", "187",
+            "188", "189", "190", "191", "192", "193", "194", "195",
+            "28",
+        }),
+    },
+    "fish processing": {
+        "applicable": frozenset({
+            # Part 28 — Commercial Fishing Industry Vessels
+            "28",
+        }),
+        "forbidden": frozenset({
+            "30", "31", "32", "33", "34", "35", "36", "37", "38", "39",
+            "70", "71", "72", "73", "74", "75", "76", "77", "78",
+            "79", "80", "81", "82", "83", "84", "85", "86", "87",
+            "88", "89",
+            "90", "91", "92", "93", "94", "95", "96", "97", "98", "105",
+            "107", "108", "109",
+            "114", "115", "116", "117", "118", "119", "120", "121", "122",
+            "125", "126", "127", "128", "129", "130", "131", "132",
+            "133", "134", "135", "136", "137", "138", "139",
+            "140", "141", "142", "143", "144",
+            "165", "166", "167", "168", "169",
+            "175", "176", "177", "178", "179", "180", "181", "182",
+            "183", "184", "185", "186", "187",
+            "188", "189", "190", "191", "192", "193", "194", "195",
+        }),
+    },
+    "research vessel": {
+        "applicable": frozenset({
+            # Subchapter U — Oceanographic Research (primary; the ONE place
+            # where Part 195 actually applies — Cassandra's case in reverse)
+            "188", "189", "190", "191", "192", "193", "194", "195",
+        }),
+        "forbidden": frozenset({
+            "28",
+            "30", "31", "32", "33", "34", "35", "36", "37", "38", "39",
+            "70", "71", "72", "73", "74", "75", "76", "77", "78",
+            "79", "80", "81", "82", "83", "84", "85", "86", "87",
+            "88", "89",
+            "90", "91", "92", "93", "94", "95", "96", "97", "98", "105",
+            "107", "108", "109",
+            "114", "115", "116", "117", "118", "119", "120", "121", "122",
+            "125", "126", "127", "128", "129", "130", "131", "132",
+            "133", "134", "135", "136", "137", "138", "139",
+            "140", "141", "142", "143", "144",
+            "165", "166", "167", "168", "169",
+            "175", "176", "177", "178", "179", "180", "181", "182",
+            "183", "184", "185", "186", "187",
+        }),
+    },
+    # Other / unspecified falls through to no filter.
+}
+
+
+_CFR_PART_RE = re.compile(r"^(\d{1,3})\s+CFR\s+(\d{1,3})", re.IGNORECASE)
+
+
+def _cfr_part_prefix(section_number: str) -> tuple[str, str] | None:
+    """Extract (title, part) from a section_number string.
+
+    Returns ('46', '95') for '46 CFR 95.05-10', or None if not a CFR citation.
+    """
+    if not section_number:
+        return None
+    m = _CFR_PART_RE.match(section_number)
+    if m:
+        return m.group(1), m.group(2)
+    return None
+
+
+def _filter_by_vessel_applicability(
+    results: list[dict], vessel_profile: dict | None,
+) -> list[dict]:
+    """Drop 46 CFR chunks whose Part is on the vessel type's forbidden list.
+
+    Additive filter: only removes chunks we're confident don't apply.
+    Non-CFR chunks (SOLAS, NVIC, NMC, bulletins, ERG) are never filtered
+    here. Unknown CFR Parts (not in applicable OR forbidden) are kept.
+    No-op when vessel_profile is None or vessel_type is unknown.
+    """
+    if not vessel_profile:
+        return results
+    vt = (vessel_profile.get("vessel_type") or "").strip().lower()
+    mapping = _VESSEL_TYPE_CFR_APPLICABILITY.get(vt)
+    if mapping is None:
+        return results
+    forbidden = mapping["forbidden"]
+    if not forbidden:
+        return results
+
+    kept: list[dict] = []
+    dropped: list[str] = []
+    for r in results:
+        src = r.get("source", "")
+        # Only filter CFR sources. Non-CFR (SOLAS, NVIC, NMC, bulletin) are
+        # vessel-agnostic in our corpus.
+        if not src.startswith("cfr_"):
+            kept.append(r)
+            continue
+        sec = r.get("section_number", "")
+        parsed = _cfr_part_prefix(sec)
+        if parsed is None:
+            kept.append(r)
+            continue
+        _title, part = parsed
+        # Universal parts: never drop
+        if part in _UNIVERSAL_CFR_46_PARTS:
+            kept.append(r)
+            continue
+        # Forbidden for this vessel type: drop
+        if part in forbidden:
+            dropped.append(sec)
+            continue
+        # Applicable or unknown: keep
+        kept.append(r)
+
+    if dropped:
+        logger.info(
+            "Vessel-applicability filter dropped %d chunks for vessel_type=%s: %s",
+            len(dropped), vt, ", ".join(dropped[:5]) + ("…" if len(dropped) > 5 else ""),
+        )
+    return kept
 
 
 # ── Soft re-ranking ──────────────────────────────────────────────────────────
