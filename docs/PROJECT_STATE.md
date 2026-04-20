@@ -92,6 +92,7 @@ Latest eval artifact path: `data/eval/<timestamp>/summary.md` + `summary.json` (
 - `docs/testing/retrieval-regression-test-plan.md` — 10 vessel setups × ~60 test questions for Karynn + pilots
 - `docs/announcements/operator-update-april-2026.md` — Karynn-facing update on what changed
 - `docs/chat-bring-up-prompt.md` — copy/paste bring-up prompts for Claude.ai / Desktop / Cowork
+- `docs/cowork-task-prompts.md` — watertight prompts for the Cowork scheduled tasks (GovDelivery stager, weekly one-pager)
 
 ## Standing rules (non-negotiable)
 

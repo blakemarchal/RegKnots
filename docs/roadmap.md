@@ -210,6 +210,8 @@ Environmental-compliance queries currently hit CFR 33 subchapter N, which is the
 
 Do **not** connect Cowork to the repo path. Mixing both agents on the same repo will create exactly the kind of "which agent committed what to which branch" mess that the Sprint C3 VPS reset just cleaned up.
 
+**Classifier boundary (critical):** the authoritative USCG-bulletin classifier is the Pass-1-deterministic + Pass-2-Haiku pipeline in `packages/ingest/sources/uscg_bulletin.py`. Cowork never classifies for ingest. When Cowork reads email subject lines to describe them in a weekly summary, that's a summary-only label — it must never be used as canonical metadata for a chunk. Two classifiers → guaranteed drift.
+
 ### 5.0. One-time setup
 
 - Install the **Founders / Productivity** plugin (whichever is available) in Cowork.
@@ -218,20 +220,24 @@ Do **not** connect Cowork to the repo path. Mixing both agents on the same repo 
   - 🟢 **Local filesystem** scoped to `C:\Users\Blake Marchal\Documents\RegKnots\data\raw\` — regulation PDF staging, corpus hygiene
   - 🟡 **Google Sheets / Excel** — pilot metrics tracking, weekly one-pager source
   - 🟡 **Google Calendar** — sprint cadence, Karynn sync scheduling
-  - ⚪ **GitHub (read-only)** — "what shipped this week" summaries for Karynn (never write)
+  - ⚪ **GitHub (read-only)** — "what shipped this week" summaries for Karynn (never write). Note: read-only includes issues and PR bodies; don't paste prompts, API keys, or proprietary content into either.
   - ⚪ **Stripe** — billing-state reports once we turn on paid tiers
 
 Copy/paste bring-up prompts live at `docs/chat-bring-up-prompt.md`.
 
-### 5.1. GovDelivery inbox → ingest pipeline staging (scheduled Mon 0700)
+### 5.1. GovDelivery inbox → ingest pipeline staging (scheduled Mon 0700) — supersedes 1a V1
 
-Unblocks Priority 1a without webhook code. Cowork task reads the past 7 days of GovDelivery emails, classifies MSIB / ALCOAST / NMC / other via subject-line rules + Haiku fallback, downloads the attached PDFs + captures source URLs, stages them into `data/raw/uscg_bulletins/incoming/<YYYY-MM-DD>/`, and writes a manifest (`manifest.json`) with subject, sender, classification, URL, file path. Blake then triggers the existing `packages/ingest` pipeline against that folder when he's ready.
+Cowork task reads GovDelivery emails from the past 7 days, downloads attached PDFs + captures source URLs, stages them into `data/raw/uscg_bulletins/incoming/<YYYY-MM-DD>/`, writes a per-folder `manifest.json` with subject, sender, URL, file path, and Cowork's **descriptive label** (not a classification — see boundary rule above). The authoritative MSIB/ALCOAST/NMC classification happens when Blake runs the existing `packages/ingest` pipeline against the staged folder.
 
 **Why Cowork-first:** the backfill ingest pipeline already works; the missing piece is delivery. Wiring a Resend webhook (V2) costs a session. A Cowork task costs 30 min.
 
+**When V2 becomes necessary:** Cowork's weekly cadence means a bulletin published on Tuesday sits in Gmail for ~6 days before becoming queryable. Fine for current pilot users — nobody is asking "latest MSIB" with sub-24h expectations. But when marketing claims "real-time regulatory freshness" as a differentiator, or when a single real-world incident surfaces a "this bulletin came out 3 days ago and you didn't have it" user complaint, build V2. V2's Resend webhook lands into the same `incoming/` staging folder — the migration is drop-in.
+
 ### 5.2. Weekly RegKnot ops one-pager for Karynn (scheduled Mon 0800)
 
-Pull: (a) new MSIB/ALCOAST/NMC subjects received in Gmail past 7 days with one-line classifications, (b) files added to `data/raw/` past 7 days, (c) recent commit subjects on the RegKnots repo via GitHub connector, (d) user-facing metrics (DAU, messages/user, checklist edit rate) from the ops dashboard export. Compose into a Google Doc titled "RegKnot weekly — {date}". Share read link with Karynn.
+Pull: (a) new USCG GovDelivery email subjects received in Gmail past 7 days with Cowork's descriptive label (not a canonical classification), (b) files added to `data/raw/` past 7 days, (c) recent commit subjects on the RegKnots repo via GitHub connector, (d) user-facing metrics (DAU, messages/user, checklist edit rate) from the ops dashboard export. Compose into a Google Doc titled "RegKnot weekly — {date}". Share read link with Karynn.
+
+**Independent value:** this artifact earns its keep even if §5.1 never ships. Partnership rhythm is the actual product here — Karynn gets consistent context without Blake writing status updates, which is exactly the kind of thing that quietly falls apart in a 50/50 partnership when one side is heads-down in code.
 
 Replaces §2c "Compliance Activity digest" for the *internal* use-case; the pilot-facing digest still ships as code when we get there.
 
