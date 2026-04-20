@@ -1,6 +1,30 @@
 # RegKnot Roadmap
 
-**Last updated:** 2026-04-20 (post-notification-system sprint)
+**Last updated:** 2026-04-20 (post-Sprint-C3)
+
+> **One-page snapshot:** `docs/PROJECT_STATE.md` is the canonical quick-reference for fresh sessions. This file is the strategic roadmap.
+
+## Recent sprints (reverse chronological)
+
+### Sprint C3 — per-vessel grader + project state doc (2026-04-20)
+Tightened the autonomous regression grader to use per-vessel `expected` regex dicts (V1 expects `46 CFR 96.35-10`, V2 expects `35.30-20`, V5 expects `142.226`) so cross-vessel regex leakage no longer masks applicability bugs. Added `29 CFR 1910` to `wrong_sub` to catch OSHA hallucinations. Still 28/28 A. Created `docs/PROJECT_STATE.md` as the operational one-pager. VPS + origin + local reconciled to `92d2d89`.
+
+### Sprint C2 — vessel-type × CFR-Subchapter applicability filter (2026-04-20)
+Retrieval now drops CFR chunks from Parts that don't apply to the user's vessel type (mapping at `packages/rag/rag/retriever.py:_VESSEL_TYPE_CFR_APPLICABILITY`). 10 vessel types mapped to applicable/forbidden CFR Part prefixes; non-CFR sources (SOLAS/NVIC/NMC/bulletin/ERG) pass through. Eval went from C1's 89.3% A-or-A- → 100% A.
+
+### Sprint C1 — prompt refresh (2026-04-20)
+Added NMC policy letters, NMC checklists, USCG bulletins to the KNOWLEDGE BASE SOURCES block with cite formats. Added an explicit anti-OSHA clause ("DO NOT cite 29 CFR") with a tanker-SCBA-specific redirect to 46 CFR 35.30-20 + SOLAS Ch.II-2 + NVIC 06-93. Softened the COVERAGE clause. Baseline 92.9% → C1 89.3% (mixed — prompt alone wasn't enough, set up C2).
+
+### Sprint B3 — CFR content-hash gate + rollback tooling (earlier April)
+Threshold-gated content-hash sensitivity so weekly eCFR republishes don't fire "3,482 new sections" notifications on trivial whitespace changes. Wrote `scripts/rollback_source.sh` for transactional corpus + notification rollback after the Sprint B → B2 transition left a stale banner.
+
+### Sprint B2 — USCG bulletin filter rewrite (earlier April)
+Replaced the blanket "accept all ALCOASTs" Pass 1 with a subject-only deterministic filter + Claude Haiku LLM Pass 2 with prompt caching. Dropped from 7,414 raw → 1,658 operational bulletins (2,232 chunks).
+
+### Sprint B — USCG GovDelivery backfill (earlier April)
+3 years of Wayback-CDX-sourced MSIBs, ALCOASTs, NMC announcements. New `uscg_bulletin` source + migration 0045 freshness columns (`published_date`, `expires_date`, `superseded_by`).
+
+---
 
 ## 0. Current state — what we have today
 
@@ -30,9 +54,17 @@ Total corpus: ~42,000 chunks across 15 sources. Three new sources (bold) added i
 
 - Hybrid search: vector (text-embedding-3-small, pgvector HNSW) + ILIKE trigram + structured-identifier regex (UN1219, NVIC 04-08, Rule 14, etc.).
 - Source-diversified fetch: per-group top-N so small sources aren't swamped by CFR.
+- **Vessel-type × CFR-Subchapter applicability filter (Sprint C2)** — drops CFR chunks from Parts that don't apply to the user's vessel type; non-CFR sources pass through. Map at `packages/rag/rag/retriever.py:_VESSEL_TYPE_CFR_APPLICABILITY`.
 - Source-affinity boost: queries mentioning `MSIB`, `MMC`, `medical certificate`, etc. tilt scoring toward the relevant group.
 - Vessel-profile boost: query scoring adjusts for the active vessel's type, route, cargo.
+- Citation verification: regex extracts cites, verifies each in DB; regenerates on unverified with feedback; strips any still-unverified.
 - Tailored starter prompts on empty chat, driven by the active vessel's profile.
+
+### Eval & QA infrastructure
+
+- `scripts/eval_rag_baseline.py` — autonomous regression harness (28 queries × 5 vessel profiles) with per-vessel expected regex + `wrong_sub` Subchapter-leakage detection. Current score: 28/28 A.
+- `scripts/debug_retrieval.py` — replay any query against live retriever with vessel context.
+- `scripts/verify_filter.py` — standalone unit test for `_filter_by_vessel_applicability`.
 
 ### Ingest features
 
@@ -75,7 +107,19 @@ Three columns added in migration 0045 are captured but unused in retrieval. Need
 
 **Estimated effort:** ~1 session. Pure retriever change, no schema or ingest changes. Matches the sprint prompt's original "retrieval-side expiration filtering (future sprint)" flag.
 
-### 1c. Pilot-user feedback loop on bulletin smoke tests
+### 1c. Karynn exhaustive test pass (in progress)
+
+Current blocker before re-engaging lapsed pilots. Karynn runs the 10-vessel × ~60-question test bank (`docs/testing/retrieval-regression-test-plan.md`) over 2-3 days. Any findings get a hardening sprint before pilots see the upgraded system. Then: personal "we heard you, we upgraded" note from Karynn to lapsed pilots.
+
+**Status:** awaiting Karynn's availability; harness + test bank + PROJECT_STATE doc all ready.
+
+### 1d. V5/F5 retrieval gap — Subchapter M CO2 promotion
+
+Identified but deferred during Sprint C2: towing-vessel CO2 system question (`46 CFR 144.240`) isn't being surfaced by vector search. The filter can drop wrong content but can't promote missing content. Answer degrades to honest-limit rather than wrong, so it's not eval-failing — but a real Subchapter-M captain would expect the citation. Needs a retrieval-side promotion pass once Karynn's test data reveals whether this is an isolated miss or a pattern.
+
+**Estimated effort:** 1 session, pending pilot data to scope.
+
+### 1e. Pilot-user feedback loop on bulletin smoke tests
 
 Sprint B2's smoke tests showed 4/4 queries surfacing uscg_bulletin content. Real-world queries from Karynn + early pilot captains will reveal what the synthetic tests miss. Need:
 
@@ -84,6 +128,12 @@ Sprint B2's smoke tests showed 4/4 queries surfacing uscg_bulletin content. Real
 - Weekly review pass on queries that returned 0 bulletin hits (candidates for missing operational terminology in our enrichment).
 
 **Estimated effort:** 0.5 session to add the logging + a standing weekly review checklist.
+
+### 1f. Deploy script — end ssh-and-edit drift
+
+Sprint C1/C2 was deployed by ssh-into-VPS-and-edit-in-place, leaving the VPS git HEAD 3 commits behind its running code until C3 reset cleaned it up. A `scripts/deploy.sh` that does `ssh … "cd /opt/RegKnots && git fetch && git reset --hard origin/main && systemctl restart regknots-api regknots-web regknots-worker"` would make future deploys boring and auditable.
+
+**Estimated effort:** 0.25 session.
 
 ## 2. Priority 2 — next month
 
@@ -151,10 +201,13 @@ Environmental-compliance queries currently hit CFR 33 subchapter N, which is the
 
 ## Known drift / tech debt
 
+- **CRLF/LF on VPS**: ssh-edited files on `/opt/RegKnots` were LF; local repo is CRLF. Benign (git auto-normalizes), but every file on the VPS will show as "modified" until `git reset --hard origin/main` is run. Hardened by the Sprint C3 reset; the deploy script (1f) will keep it fixed.
+- **DB check constraint drift**: `ism_supplement` was added to the prod `sources` check constraint live on the VPS, but the change isn't captured in a migration file. Next time migration 0042 downgrades run, this regresses. Low-probability issue.
 - Migration 0042 downgrade path omits `ism_supplement` (legacy bug, fixed forward in 0044 but downgrade-of-0042 still regresses).
 - `regulations` table has no `updated_at` column — cannot tell when a chunk was last modified vs. first inserted. Low priority; `content_hash` + version table cover most audit cases.
-- Local Windows DNS is unreliable (private note — forces curl `--resolve` workaround on local test fetches).
+- Local Windows DNS is unreliable (private note — forces curl `--resolve` + `--ssl-no-revoke` workaround on local test fetches).
 - CRA `_send_trial_reminders_async` and similar tasks read `RESEND_API_KEY` from env; not currently hit by notify.py's immediate-alert path because env isn't set in the ingest container.
+- Live GovDelivery feed not wired — bulletin corpus freshness stops at ~2026-04. Priority 1a.
 
 ## Deprecated / removed
 
