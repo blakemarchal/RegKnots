@@ -3,6 +3,8 @@
 **Last updated:** 2026-04-20 (post-Sprint-C3)
 
 > **One-page snapshot:** `docs/PROJECT_STATE.md` is the canonical quick-reference for fresh sessions. This file is the strategic roadmap.
+>
+> **Agent split:** Claude Code owns the repo (`/opt/RegKnots`, local worktree). Claude Cowork owns everything else — Gmail, `data/raw/` folder hygiene, pilot-ops reports, business paperwork. See §5 below.
 
 ## Recent sprints (reverse chronological)
 
@@ -86,16 +88,19 @@ Total corpus: ~42,000 chunks across 15 sources. Three new sources (bold) added i
 
 ### 1a. GovDelivery forward channel
 
-We have 3 years of USCG bulletin history via the Wayback CDX backfill, but no ongoing ingestion. New bulletins appear daily. Need:
+We have 3 years of USCG bulletin history via the Wayback CDX backfill, but no ongoing ingestion. New bulletins appear daily.
 
-- Subscribe `alerts@regknots.com` (or similar) to the USDHSCG GovDelivery feed.
+**V1 — Cowork-driven (recommended, zero code):** subscribe Blake's Gmail to GovDelivery, let a scheduled Cowork task triage the inbox weekly, classify MSIB/ALCOAST/NMC, drop PDFs + metadata into `data/raw/uscg_bulletins/`, and fire the existing ingest pipeline. See §5 below.
+
+**V2 — webhook-driven (upgrade, if/when near-real-time becomes a marketing claim):**
+- Subscribe `alerts@regknots.com` to the USDHSCG GovDelivery feed.
 - Inbound email parser (Resend webhook or Postmark inbound) extracts bulletin URL + subject + body from each email.
 - Apply the same Pass-1-deterministic / pre-deny / Pass-2-LLM filter pipeline we use for the backfill.
 - Upsert via the existing `uscg_bulletin` source — no schema changes.
 
-**Estimated effort:** ~1 session including Resend webhook wiring. Zero cost beyond the Haiku classifier (~$0.01/day).
+**Estimated effort:** V1 ~30 min of Cowork setup. V2 ~1 session including Resend webhook wiring. Zero cost beyond the Haiku classifier (~$0.01/day) either way.
 
-**Why priority 1:** the backfill data goes stale fast. "Latest MSIB" queries need real-time freshness to justify the marketing claim.
+**Why priority 1:** the backfill data goes stale fast. "Latest MSIB" queries need freshness to justify the marketing claim; V1 gets us to weekly-fresh now, V2 goes real-time later.
 
 ### 1b. Retrieval-side freshness filtering
 
@@ -196,6 +201,51 @@ Environmental-compliance queries currently hit CFR 33 subchapter N, which is the
 - **Pilot user recruitment** — 10-20 captains across vessel types (small passenger, tug, tanker, offshore). See the operator update in `docs/announcements/operator-update-april-2026.md`.
 - **Marketing content** — operator-voice case studies; "ask RegKnot about MSIB Vol XXV Issue 046" demo video.
 - **Regulatory partnership** — maritime associations (AMO, CAWA, Passenger Vessel Association, OMSA) — one-page flyer introducing RegKnot as a free-tier tool for members.
+
+---
+
+## 5. Claude Cowork integration
+
+**Agent split:** Claude Code owns `/opt/RegKnots` and the local repo (worktrees, deploys, CI-adjacent work, all file edits inside the repo). Claude Cowork owns everything else — Gmail, `data/raw/` folder hygiene, pilot-ops reports, business paperwork, Karynn deliverables.
+
+Do **not** connect Cowork to the repo path. Mixing both agents on the same repo will create exactly the kind of "which agent committed what to which branch" mess that the Sprint C3 VPS reset just cleaned up.
+
+### 5.0. One-time setup
+
+- Install the **Founders / Productivity** plugin (whichever is available) in Cowork.
+- Connectors, priority-ranked:
+  - 🟢 **Gmail** — GovDelivery inbox processing, Karynn comms, pilot outreach
+  - 🟢 **Local filesystem** scoped to `C:\Users\Blake Marchal\Documents\RegKnots\data\raw\` — regulation PDF staging, corpus hygiene
+  - 🟡 **Google Sheets / Excel** — pilot metrics tracking, weekly one-pager source
+  - 🟡 **Google Calendar** — sprint cadence, Karynn sync scheduling
+  - ⚪ **GitHub (read-only)** — "what shipped this week" summaries for Karynn (never write)
+  - ⚪ **Stripe** — billing-state reports once we turn on paid tiers
+
+Copy/paste bring-up prompts live at `docs/chat-bring-up-prompt.md`.
+
+### 5.1. GovDelivery inbox → ingest pipeline staging (scheduled Mon 0700)
+
+Unblocks Priority 1a without webhook code. Cowork task reads the past 7 days of GovDelivery emails, classifies MSIB / ALCOAST / NMC / other via subject-line rules + Haiku fallback, downloads the attached PDFs + captures source URLs, stages them into `data/raw/uscg_bulletins/incoming/<YYYY-MM-DD>/`, and writes a manifest (`manifest.json`) with subject, sender, classification, URL, file path. Blake then triggers the existing `packages/ingest` pipeline against that folder when he's ready.
+
+**Why Cowork-first:** the backfill ingest pipeline already works; the missing piece is delivery. Wiring a Resend webhook (V2) costs a session. A Cowork task costs 30 min.
+
+### 5.2. Weekly RegKnot ops one-pager for Karynn (scheduled Mon 0800)
+
+Pull: (a) new MSIB/ALCOAST/NMC subjects received in Gmail past 7 days with one-line classifications, (b) files added to `data/raw/` past 7 days, (c) recent commit subjects on the RegKnots repo via GitHub connector, (d) user-facing metrics (DAU, messages/user, checklist edit rate) from the ops dashboard export. Compose into a Google Doc titled "RegKnot weekly — {date}". Share read link with Karynn.
+
+Replaces §2c "Compliance Activity digest" for the *internal* use-case; the pilot-facing digest still ships as code when we get there.
+
+### 5.3. Regulation source folder hygiene (scheduled Sun 1800)
+
+Scan `data/raw/solas/`, `data/raw/solas_supplements/`, `data/raw/nmc/`, `data/raw/erg/`, and flag: inconsistent filenames (non-ISO date prefixes, mixed case), duplicates via filesize+mtime, zero-byte or corrupted PDFs, unexpected files (non-PDF, non-metadata). Propose renames + moves; require Blake's approval before executing. Write a weekly hygiene report to `docs/ops-log/folder-hygiene-<date>.md`.
+
+### 5.4. Business paperwork assembly (ad-hoc)
+
+LLC filings, trademark renewals, Stripe tax-form assembly, vendor agreements. Document-assembly tasks: hand Cowork the folder + template + prior year's version, get back drafts for Blake to review.
+
+### 5.5. Pilot outreach personalization (ad-hoc, after Karynn's test pass)
+
+Once Karynn's test bank yields results, Cowork drafts per-pilot outreach emails (from Karynn's voice, citing specific upgrades that addressed that pilot's original complaint) for her to review and send.
 
 ---
 
