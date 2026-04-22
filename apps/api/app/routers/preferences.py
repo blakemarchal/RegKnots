@@ -17,10 +17,13 @@ from app.db import get_pool
 
 router = APIRouter(prefix="/preferences", tags=["preferences"])
 
-# All regulation sources that can trigger alerts.
+# All regulation sources that can trigger user-facing alerts.
+# Note: `nmc_memo` was removed in Sprint D1 — the NMC monitor is now
+# admin-only and does not produce user-facing notifications.
 ALL_REG_SOURCES = [
     "cfr_33", "cfr_46", "cfr_49", "nvic",
-    "colregs", "solas", "stcw", "ism", "erg", "nmc_memo",
+    "colregs", "solas", "stcw", "ism", "erg",
+    "nmc_policy", "nmc_checklist", "uscg_bulletin",
 ]
 
 

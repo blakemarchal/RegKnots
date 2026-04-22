@@ -690,17 +690,27 @@ def _send_erg_release_alert(db_year: int, hits: list[tuple[str, str, int]]):
         logger.error("Failed to send ERG release alert email: %s", exc)
 
 
-# ── NMC memo / credentialing policy monitor ──────────────────────────────
+# ── NMC document monitor (ADMIN-ONLY, weekly) ───────────────────────────
 #
 # The USCG National Maritime Center publishes policy letters, memos, and
-# credentialing guidance at dco.uscg.mil/nmc/. These cover medical certificate
-# extensions, MMC processing time changes, and endorsement policy updates.
+# credentialing guidance at dco.uscg.mil/nmc/. This task scrapes the 3
+# NMC index pages weekly and emails a single admin digest to
+# blakemarchal@gmail.com whenever genuinely new PDFs appear.
 #
-# This task scrapes the NMC announcements and policy pages weekly for new
-# PDF links, compares against previously-seen URLs stored in a DB table
-# (notifications), and emails hello@regknots.com when new documents appear.
-# Unlike regulation sources, NMC memos are not auto-ingested — they require
-# manual review and ingestion via the CLI.
+# Sprint D1 refactor (2026-04-22):
+#   - State moved from the user-facing `notifications` table to a
+#     dedicated `nmc_monitor_seen_urls` table. Cold-start bursts can no
+#     longer cascade into user-visible banners.
+#   - Task never inserts into `notifications`. Ever.
+#   - Single digest email per run instead of per-PDF notifications.
+#   - Dedupes findings against the ingested `nmc_policy` / `nmc_checklist`
+#     corpus so the digest doesn't re-surface docs RegKnot already knows.
+#
+# Admin-only by design: we advertise "up to date" without needing to
+# prove it via user-visible banners. The digest is for Blake's ingest
+# decisions; users never see this signal.
+#
+# Schedule: weekly on Wednesdays at 12:00 UTC (see celery_beat.py).
 
 _NMC_SOURCES = [
     {
@@ -723,10 +733,37 @@ _NMC_PDF_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Admin recipient for the weekly NMC digest. Hardcoded per standing
+# rule: Owner is blakemarchal@gmail.com; Karynn is admin but not Owner
+# and explicitly does NOT want these ops signals.
+_NMC_DIGEST_RECIPIENT = "blakemarchal@gmail.com"
+
+
+def _normalize_nmc_url(pdf_path: str) -> str:
+    """Resolve relative NMC PDF URLs to absolute form."""
+    if pdf_path.startswith("/"):
+        return f"https://www.dco.uscg.mil{pdf_path}"
+    if not pdf_path.startswith("http"):
+        return f"https://www.dco.uscg.mil/{pdf_path}"
+    return pdf_path
+
+
+def _prettify_nmc_filename(pdf_url: str) -> str:
+    """Extract a human-readable filename from an NMC PDF URL."""
+    filename = pdf_url.rsplit("/", 1)[-1].replace("%20", " ").replace("_", " ")
+    if filename.lower().endswith(".pdf"):
+        filename = filename[:-4]
+    return filename
+
+
+def _filename_stem_tokens(filename: str) -> set[str]:
+    """Lowercase alphanumeric tokens from a filename stem for corpus dedup."""
+    return {t for t in re.split(r"[^a-z0-9]+", filename.lower()) if len(t) >= 3}
+
 
 @celery.task(name="app.tasks.check_nmc_updates")
 def check_nmc_updates():
-    """Check NMC website for new policy letters, memos, and credentialing guidance."""
+    """Weekly NMC scraper. Admin-only digest email; no user notifications."""
     _run_async(_check_nmc_updates_async())
 
 
@@ -738,16 +775,28 @@ async def _check_nmc_updates_async():
     conn = await asyncpg.connect(dsn)
 
     try:
-        # Get previously-seen NMC PDF URLs from notifications
-        seen_rows = await conn.fetch(
+        # Seen-URL state lives in its own table (not notifications).
+        seen_rows = await conn.fetch("SELECT url FROM nmc_monitor_seen_urls")
+        seen_urls: set[str] = {r["url"] for r in seen_rows}
+
+        # Filename-token sets for every already-ingested NMC doc, used to
+        # skip URLs whose filename clearly matches corpus content.
+        ingested_rows = await conn.fetch(
             """
-            SELECT DISTINCT link_url FROM notifications
-            WHERE notification_type = 'nmc_memo' AND link_url IS NOT NULL
+            SELECT DISTINCT COALESCE(source_version, section_number) AS ident
+            FROM regulations
+            WHERE source IN ('nmc_policy', 'nmc_checklist')
+              AND COALESCE(source_version, section_number) IS NOT NULL
             """
         )
-        seen_urls: set[str] = {r["link_url"] for r in seen_rows}
+        ingested_token_sets: list[set[str]] = [
+            _filename_stem_tokens(r["ident"]) for r in ingested_rows
+        ]
+        ingested_token_sets = [s for s in ingested_token_sets if s]
 
         new_findings: list[dict] = []
+        already_ingested: list[dict] = []
+        total_urls_scanned = 0
 
         for source in _NMC_SOURCES:
             try:
@@ -759,94 +808,122 @@ async def _check_nmc_updates_async():
                 resp.raise_for_status()
 
                 for match in _NMC_PDF_RE.finditer(resp.text):
-                    pdf_path = match.group(1)
-                    # Resolve relative URLs
-                    if pdf_path.startswith("/"):
-                        pdf_url = f"https://www.dco.uscg.mil{pdf_path}"
-                    elif not pdf_path.startswith("http"):
-                        pdf_url = f"https://www.dco.uscg.mil/{pdf_path}"
-                    else:
-                        pdf_url = pdf_path
+                    pdf_url = _normalize_nmc_url(match.group(1))
+                    total_urls_scanned += 1
 
                     if pdf_url in seen_urls:
                         continue
 
-                    # Extract a human-readable name from the filename
-                    filename = pdf_url.rsplit("/", 1)[-1].replace("%20", " ").replace("_", " ")
-                    if filename.lower().endswith(".pdf"):
-                        filename = filename[:-4]
-
-                    new_findings.append({
+                    filename = _prettify_nmc_filename(pdf_url)
+                    finding = {
                         "url": pdf_url,
                         "filename": filename,
                         "source_name": source["name"],
                         "source_url": source["url"],
-                    })
-                    seen_urls.add(pdf_url)  # prevent duplicates across sources
+                    }
+
+                    # Dedupe against ingested corpus — if the filename tokens
+                    # substantially match an already-ingested doc identifier,
+                    # classify as already-known rather than truly new.
+                    finding_tokens = _filename_stem_tokens(filename)
+                    is_in_corpus = finding_tokens and any(
+                        len(finding_tokens & s) >= max(2, len(finding_tokens) // 2)
+                        for s in ingested_token_sets
+                    )
+
+                    if is_in_corpus:
+                        already_ingested.append(finding)
+                    else:
+                        new_findings.append(finding)
+
+                    seen_urls.add(pdf_url)  # prevent cross-page duplicates
 
             except Exception as exc:
-                logger.warning("NMC monitor: failed to scrape %s: %s", source["name"], exc)
-
-        if not new_findings:
-            logger.info("NMC monitor: no new documents found")
-            return
-
-        logger.info("NMC monitor: found %d new document(s)", len(new_findings))
-
-        # Record each new document as a notification for tracking
-        for doc in new_findings:
-            try:
-                await conn.execute(
-                    """
-                    INSERT INTO notifications
-                        (title, body, notification_type, source, link_url, is_active)
-                    VALUES ($1, $2, 'nmc_memo', 'nmc', $3, true)
-                    """,
-                    f"New NMC Document: {doc['filename'][:80]}",
-                    f"New document found on {doc['source_name']}: {doc['filename']}",
-                    doc["url"],
+                logger.warning(
+                    "NMC monitor: failed to scrape %s: %s", source["name"], exc
                 )
-            except Exception:
-                logger.debug("Failed to insert NMC notification for %s", doc["url"])
 
-        # Alert admin
-        _send_nmc_alert(new_findings)
+        # Persist EVERY new URL (both buckets) to seen-URLs table so we
+        # don't re-process them next week — including the in-corpus ones.
+        all_new = new_findings + already_ingested
+        if all_new:
+            await conn.executemany(
+                """
+                INSERT INTO nmc_monitor_seen_urls (url, filename, source_page)
+                VALUES ($1, $2, $3)
+                ON CONFLICT (url) DO NOTHING
+                """,
+                [(d["url"], d["filename"], d["source_name"]) for d in all_new],
+            )
+
+        logger.info(
+            "NMC monitor: scanned=%d seen=%d truly_new=%d already_in_corpus=%d",
+            total_urls_scanned,
+            len(seen_urls) - len(all_new),
+            len(new_findings),
+            len(already_ingested),
+        )
+
+        # Only email the admin if there are truly new findings worth
+        # acting on. Skip already-ingested dedupes from the email (they
+        # are logged for audit but not actionable).
+        if new_findings:
+            _send_nmc_admin_digest(new_findings, already_ingested_count=len(already_ingested))
+        else:
+            logger.info("NMC monitor: no new documents this week — skipping digest email")
 
     finally:
         await conn.close()
 
 
-def _send_nmc_alert(findings: list[dict]):
-    """Send alert email about new NMC documents."""
+def _send_nmc_admin_digest(new_findings: list[dict], *, already_ingested_count: int = 0):
+    """Send the weekly NMC admin digest to the Owner.
+
+    Admin-only — never sent to end users. One email per run, summarizing
+    all genuinely-new NMC documents that warrant ingest consideration.
+    """
     try:
         import resend
         from app.config import settings
         resend.api_key = settings.resend_api_key
 
-        items_html = ""
-        for f in findings:
-            items_html += (
-                f"<li><a href='{f['url']}'>{f['filename']}</a> "
-                f"<em>(via {f['source_name']})</em></li>"
+        items_html = "".join(
+            f"<li><a href='{f['url']}'>{f['filename']}</a> "
+            f"<em>(via {f['source_name']})</em></li>"
+            for f in new_findings
+        )
+
+        corpus_note = ""
+        if already_ingested_count:
+            corpus_note = (
+                f"<p><em>({already_ingested_count} additional URL(s) matched "
+                f"already-ingested corpus content and were auto-skipped.)</em></p>"
             )
 
         resend.Emails.send({
             "from": "RegKnot <hello@mail.regknots.com>",
-            "to": ["hello@regknots.com"],
-            "subject": f"{len(findings)} new NMC document(s) detected — RegKnot",
+            "to": [_NMC_DIGEST_RECIPIENT],
+            "subject": f"RegKnot NMC digest — {len(new_findings)} new doc(s) to review",
             "html": (
-                f"<h2>New NMC Documents Detected</h2>"
-                f"<p>The following new documents were found on the USCG National "
-                f"Maritime Center website:</p>"
+                f"<h2>Weekly NMC document digest</h2>"
+                f"<p><strong>{len(new_findings)}</strong> new document(s) appeared "
+                f"on the USCG NMC site since last week's check. Review for ingest:</p>"
                 f"<ul>{items_html}</ul>"
-                f"<p><strong>Action required:</strong> Review for relevance to "
-                f"credentialing policy, medical certificate guidance, or MMC "
-                f"processing updates. If relevant, download the PDF and ingest "
-                f"manually as an NMC policy source.</p>"
-                f"<p>These documents are tracked in the notifications table for "
-                f"deduplication — the monitor won't re-alert on the same URLs.</p>"
+                f"{corpus_note}"
+                f"<p>If a document is relevant to credentialing policy, medical "
+                f"certificate guidance, or MMC processing updates, download the "
+                f"PDF and ingest via "
+                f"<code>uv run python -m ingest.cli --source nmc_policy --update</code> "
+                f"(or <code>nmc_checklist</code> for form-instruction documents).</p>"
+                f"<p>This digest is admin-only and tracked in "
+                f"<code>nmc_monitor_seen_urls</code>. The monitor will not "
+                f"re-surface any URL listed here in future runs.</p>"
             ),
         })
-        logger.info("Sent NMC document alert for %d documents", len(findings))
+        logger.info(
+            "Sent NMC admin digest to %s (%d new)",
+            _NMC_DIGEST_RECIPIENT,
+            len(new_findings),
+        )
     except Exception as exc:
-        logger.error("Failed to send NMC document alert: %s", exc)
+        logger.error("Failed to send NMC admin digest: %s", exc)
