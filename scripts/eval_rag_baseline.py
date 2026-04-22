@@ -700,6 +700,49 @@ QUESTIONS: list[TestQuestion] = [
         wrong_sub=[],
         naturalistic=True,
     ),
+
+    # ── Sprint D3 authority-tier sanity checks ─────────────────────────
+    TestQuestion(
+        qid="N-AUTH1",
+        # Cross-tier hazmat question. Tier 4 (ERG) must not be dropped in
+        # favor of Tier 1 (49 CFR HM). Both should appear — they answer
+        # different aspects (response actions vs carriage regulations).
+        query=(
+            "We're carrying UN1219 isopropanol on an international voyage — "
+            "what applies to us and what do we do if a drum ruptures?"
+        ),
+        vessels=["V1"],
+        expected=[
+            r"ERG Guide 129",
+            r"Guide 129",
+            r"49 CFR",
+            r"UN1219",
+            r"isopropanol",
+        ],
+        wrong_sub=[],
+        naturalistic=True,
+    ),
+    TestQuestion(
+        qid="N-AUTH2",
+        # Cross-tier applicability question. SOLAS (Tier 1 international)
+        # vs 46 CFR Subchapter I (Tier 1 domestic) both potentially apply.
+        # Correct answer identifies which applies to a containership on an
+        # international route, rather than citing both as equivalent.
+        query="What fire safety requirements apply to our vessel on international routes?",
+        vessels=["V1"],
+        expected=[
+            r"SOLAS.*II-2",
+            r"46 CFR 9[56]\.",
+            r"international",
+            r"applies",
+        ],
+        wrong_sub=[
+            r"46 CFR 195\.",       # Subchapter U (research)
+            r"46 CFR 169\.",       # Subchapter R (sailing school)
+            r"46 CFR 142\.",       # Subchapter M (towing)
+        ],
+        naturalistic=True,
+    ),
 ]
 
 
