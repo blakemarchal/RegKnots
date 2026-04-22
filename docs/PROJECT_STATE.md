@@ -122,20 +122,21 @@ Latest eval artifact path: `data/eval/<timestamp>/summary.md` + `summary.json` (
 - `scripts/rollback_source.sh` — transactional corpus + notification rollback
 - `scripts/ocr_scanned_nmc.py` — Claude Vision OCR for image-only PDFs
 - `scripts/ingest_nvic_04-08.py` — one-off ingest for NVIC 04-08 Ch-2 (template for future Wayback-sourced gap fills)
+- `scripts/seed_nmc_monitor.py` — one-time seed for `nmc_monitor_seen_urls` after migration 0046 (Sprint D1)
 
 ## Recent shipped work (reverse chronological, last 10 commits)
 
 ```
+1ba69db fix(seed_nmc_monitor): use REGKNOTS_DATABASE_URL env var name
+666633f feat(nmc-monitor): Sprint D1 — admin-only weekly digest, retire nmc_memo
+7ca7a82 docs(cowork): tighten §5 + ship scheduled-task prompts
+8ff2986 docs(roadmap): add §5 Cowork integration + V1 path on GovDelivery
+e80e509 docs: post-C3 refresh — roadmap, chat bring-up prompt, state pointers
+92d2d89 merge: Sprint C3 — per-vessel grader + PROJECT_STATE snapshot
+1741a53 feat(eval+docs): Sprint C3 — per-vessel grader + PROJECT_STATE snapshot
 a906051 feat(rag): Sprint C2 — vessel-type × CFR-Subchapter applicability filter
 ee5cd72 feat(rag): Sprint C1 — prompt refresh cuts OSHA hallucinations 83%
 abb37c7 docs: full RAG architecture audit with baseline-driven recommendations
-0939766 feat(eval): autonomous RAG regression harness + baseline run
-25f882b docs: retrieval-regression test plan + debug_retrieval.py
-2868b9d docs: updated roadmap + Karynn-facing operator update
-296094f fix(notify): collapse-per-source + bulk-republish gate + rollback cleanup
-3f6085e fix(uscg_bulletin): rewrite filter (subject-only Pass 1 + LLM Pass 2)
-fc469c2 chore: USCG bulletin smoke-test + ingest-report scripts
-337e507 feat(rag): USCG GovDelivery bulletin source + freshness columns (Sprint B)
 ```
 
 ## How to resume in a fresh Claude Code session

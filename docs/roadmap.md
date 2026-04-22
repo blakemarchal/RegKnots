@@ -8,6 +8,9 @@
 
 ## Recent sprints (reverse chronological)
 
+### Sprint D1 — NMC monitor admin-only weekly digest (2026-04-22)
+Retired the `nmc_memo` user-facing notification pathway that had been producing cold-start bursts of ~220 banners every time the `notifications` table was purged. New state: migration 0046 adds `nmc_monitor_seen_urls` as a dedicated tracking table; `check_nmc_updates` now reads/writes that table, dedupes new findings against the already-ingested `nmc_policy`/`nmc_checklist` corpus, and sends a single admin-only digest to `blakemarchal@gmail.com`. Zero rows are ever inserted into `notifications`. `scripts/seed_nmc_monitor.py` pre-populated the table with the current 221-URL NMC catalog on deploy so the first scheduled run will produce near-zero findings. Preferences list lost `nmc_memo` and picked up the actual shipped `nmc_policy`, `nmc_checklist`, `uscg_bulletin` entries.
+
 ### Sprint C3 — per-vessel grader + project state doc (2026-04-20)
 Tightened the autonomous regression grader to use per-vessel `expected` regex dicts (V1 expects `46 CFR 96.35-10`, V2 expects `35.30-20`, V5 expects `142.226`) so cross-vessel regex leakage no longer masks applicability bugs. Added `29 CFR 1910` to `wrong_sub` to catch OSHA hallucinations. Still 28/28 A. Created `docs/PROJECT_STATE.md` as the operational one-pager. VPS + origin + local reconciled to `92d2d89`.
 
