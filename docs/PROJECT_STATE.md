@@ -73,6 +73,12 @@ Grader tightened in C3 to use per-vessel expected regex (V1 expects `46 CFR 96.3
 
 Latest eval artifact path: `data/eval/<timestamp>/summary.md` + `summary.json` (C3 run: `2026-04-20_192453`)
 
+## Operational data (Sprint D2-LOG)
+
+- `retrieval_misses` (migration 0047) — every chat response whose final answer contains a hedge phrase (see `packages/rag/rag/hedge.py`) auto-logs: query, vessel_profile_set, full vessel_profile, top-8 retrieved chunks + similarity, cited regulations, model/tokens, 2KB answer preview.
+- Query the table to find real-world retrieval misses instead of hand-grepping messages. Example: `SELECT query, vessel_profile_set, hedge_phrase_matched FROM retrieval_misses ORDER BY created_at DESC LIMIT 20;`
+- Expected baseline: 5-10% of real-user chat responses hedge. Watch for spikes tied to specific source ingestions or vessel-type combinations.
+
 ## Known issues & follow-ups
 
 - **V5/F5 retrieval gap** (towing vessel CO2 system): the Subchapter M applicability table (`46 CFR 144.240`) isn't being surfaced by vector search; answer is honest-limit rather than wrong. Needs a retrieval-side promotion tuning pass.
@@ -123,6 +129,7 @@ Latest eval artifact path: `data/eval/<timestamp>/summary.md` + `summary.json` (
 - `scripts/ocr_scanned_nmc.py` — Claude Vision OCR for image-only PDFs
 - `scripts/ingest_nvic_04-08.py` — one-off ingest for NVIC 04-08 Ch-2 (template for future Wayback-sourced gap fills)
 - `scripts/seed_nmc_monitor.py` — one-time seed for `nmc_monitor_seen_urls` after migration 0046 (Sprint D1)
+- `packages/rag/rag/hedge.py` — shared hedge-phrase patterns (Sprint D2.1b); auto-applied by the engine (logs to `retrieval_misses`) and by the eval grader (demotes hedged answers)
 
 ## Recent shipped work (reverse chronological, last 10 commits)
 

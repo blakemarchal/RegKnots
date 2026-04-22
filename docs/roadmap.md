@@ -8,6 +8,15 @@
 
 ## Recent sprints (reverse chronological)
 
+### Sprint D2.1 + D2.1b + D2-LOG — naturalistic eval, hedge demotion, retrieval-miss logging (2026-04-22)
+Measurement-first pass on the "more bad answers than good lately" pushback. Three coordinated deliverables shipped together:
+
+- **D2.1** — `scripts/eval_rag_baseline.py` gained 20 naturalistic-phrasing questions (verbatim from real hedged user queries: Karynn's G&H Towing, chlorine/ammonia/UN1219, VDR beacon, HRA transit) alongside the existing 28 regulatory-register questions. Added V0 "no vessel profile" so we can measure Karynn's exact failure mode directly.
+- **D2.1b** — new `packages/rag/rag/hedge.py` module with `HEDGE_PATTERNS` shared between the engine and the eval grader. Eval now demotes A→A− and A−→B when the answer contains a hedge phrase, closing the "partial retrieval + honest hedge still graded A because a peripheral citation matched regex" loophole that masked the real bad-answer signal.
+- **D2-LOG** — migration 0047 adds `retrieval_misses` table. Every chat response whose final answer contains a hedge phrase gets logged with the query, vessel_profile_set boolean, full vessel_profile JSONB, top-8 retrieved chunks with similarity scores, what the model actually cited, the matched hedge phrase, model/tokens, and a 2KB answer preview. Fire-and-forget; DB errors never fail chat responses.
+
+Key finding from D2.1 baseline: the blanket "paraphrase retrieval is broken" hypothesis was wrong. ERG, credentialing (with vessel), and most naturalistic scenarios pass. The real failures are concentrated: (a) no-vessel profile → partial retrieval → hedge (Karynn's exact bug), (b) specific-interval queries (VDR, fire pump), and (c) geographic/ops scenario queries that don't trigger bulletin retrieval (N-P1 Mississippi). D2.2 / D2.3 broad alias-enrichment was cancelled; D2-LOG + Karynn's real-user test session will drive the targeted fixes. Pre-D2-LOG we could only find these by hand-grepping `messages.content`; now they accumulate as structured data.
+
 ### Sprint D1 — NMC monitor admin-only weekly digest (2026-04-22)
 Retired the `nmc_memo` user-facing notification pathway that had been producing cold-start bursts of ~220 banners every time the `notifications` table was purged. New state: migration 0046 adds `nmc_monitor_seen_urls` as a dedicated tracking table; `check_nmc_updates` now reads/writes that table, dedupes new findings against the already-ingested `nmc_policy`/`nmc_checklist` corpus, and sends a single admin-only digest to `blakemarchal@gmail.com`. Zero rows are ever inserted into `notifications`. `scripts/seed_nmc_monitor.py` pre-populated the table with the current 221-URL NMC catalog on deploy so the first scheduled run will produce near-zero findings. Preferences list lost `nmc_memo` and picked up the actual shipped `nmc_policy`, `nmc_checklist`, `uscg_bulletin` entries.
 
