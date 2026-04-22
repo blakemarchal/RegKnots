@@ -29,6 +29,7 @@ from anthropic import (
 
 from rag.context import build_context
 from rag.fallback import FALLBACK_MODEL_ID, fallback_chat
+from rag.hedge import detect_hedge
 from rag.models import ChatMessage, ChatResponse, CitedRegulation
 from rag.prompts import NAVIGATION_AID_REMINDER, SYSTEM_PROMPT
 from rag.retriever import retrieve
@@ -1062,6 +1063,32 @@ async def chat(
     input_tokens += regen_in
     output_tokens += regen_out
 
+    # Sprint D2-LOG: if the final answer hedges on retrieval, log the miss
+    # to `retrieval_misses` for offline analysis. Fire-and-forget — DB
+    # errors never fail the chat response.
+    hedge_phrase = detect_hedge(cleaned_answer)
+    if hedge_phrase is not None:
+        try:
+            await _log_retrieval_miss(
+                pool=pool,
+                conversation_id=conversation_id,
+                query=query,
+                vessel_profile=vessel_profile,
+                hedge_phrase=hedge_phrase,
+                model_used=model_used,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                retrieved_chunks=chunks,
+                cited=verified_cited,
+                answer=cleaned_answer,
+            )
+        except Exception as exc:
+            logger.warning(
+                "retrieval_miss log failed (non-fatal): %s: %s",
+                type(exc).__name__,
+                str(exc)[:200],
+            )
+
     return ChatResponse(
         answer=cleaned_answer,
         conversation_id=conversation_id,
@@ -1072,6 +1099,85 @@ async def chat(
         unverified_citations=all_unverified,
         vessel_update=vessel_update,
         regenerated=regenerated,
+    )
+
+
+async def _log_retrieval_miss(
+    *,
+    pool: asyncpg.Pool,
+    conversation_id: UUID,
+    query: str,
+    vessel_profile: dict | None,
+    hedge_phrase: str,
+    model_used: str,
+    input_tokens: int,
+    output_tokens: int,
+    retrieved_chunks: list,
+    cited: list[CitedRegulation],
+    answer: str,
+) -> None:
+    """Insert a row into retrieval_misses for later analysis.
+
+    Called when `detect_hedge(answer)` matched. Captures the full retrieval
+    context (top-K chunks) plus what the model actually cited, so we can
+    later see whether the miss was "nothing relevant retrieved" vs "right
+    content retrieved but model still hedged" vs "retrieval gap under
+    specific vessel/no-vessel configurations."
+    """
+    import json as _json
+
+    # Resolve user_id from conversation (best-effort; DB constraint allows NULL).
+    user_id = await pool.fetchval(
+        "SELECT user_id FROM conversations WHERE id = $1", conversation_id,
+    )
+
+    def _chunk_get(c, key, default=None):
+        # retrieve() yields dicts; be defensive in case this ever changes.
+        if isinstance(c, dict):
+            return c.get(key, default)
+        return getattr(c, key, default)
+
+    retrieved_payload = [
+        {
+            "source": _chunk_get(c, "source"),
+            "section_number": _chunk_get(c, "section_number"),
+            "section_title": (_chunk_get(c, "section_title") or "")[:200],
+            "similarity": float(_chunk_get(c, "similarity", 0.0) or 0.0),
+        }
+        for c in retrieved_chunks
+    ]
+    cited_payload = [
+        {
+            "source": c.source,
+            "section_number": c.section_number,
+            "section_title": (c.section_title or "")[:200],
+        }
+        for c in cited
+    ]
+
+    await pool.execute(
+        """
+        INSERT INTO retrieval_misses (
+            user_id, conversation_id, query,
+            vessel_profile_set, vessel_profile,
+            hedge_phrase_matched, model_used,
+            input_tokens, output_tokens,
+            retrieved_chunks, cited_regulations, answer_preview
+        )
+        VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10::jsonb, $11::jsonb, $12)
+        """,
+        user_id,
+        conversation_id,
+        query,
+        vessel_profile is not None,
+        _json.dumps(vessel_profile) if vessel_profile is not None else None,
+        hedge_phrase,
+        model_used,
+        input_tokens,
+        output_tokens,
+        _json.dumps(retrieved_payload),
+        _json.dumps(cited_payload),
+        answer[:2000],
     )
 
 

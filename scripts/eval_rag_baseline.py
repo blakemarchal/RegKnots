@@ -44,6 +44,7 @@ sys.path.insert(0, "/opt/RegKnots/apps/api")
 
 from app.config import settings
 from rag.engine import chat
+from rag.hedge import detect_hedge  # Sprint D2.1b — demote hedged answers
 
 
 # ── Vessel profiles ─────────────────────────────────────────────────────
@@ -721,6 +722,7 @@ class GradeResult:
     output_tokens: int
     retrieved_count: int
     unverified: list[str]
+    hedge_phrase: str | None = None  # Sprint D2.1b — populated if hedge detected
 
 
 def _grade_answer(q: TestQuestion, citations: list[dict], answer_text: str,
@@ -810,6 +812,33 @@ def _grade_answer(q: TestQuestion, citations: list[dict], answer_text: str,
     )
 
 
+# ── Sprint D2.1b — hedge-phrase demotion ─────────────────────────────────
+
+_HEDGE_DEMOTION: dict[str, str] = {
+    "A": "A-",
+    "A-": "B",
+    # B / C / F already reflect real problems; no further demotion.
+}
+
+
+def _apply_hedge_demotion(
+    grade: str, reason: str, hedge_phrase: str | None,
+) -> tuple[str, str]:
+    """If the answer contained a hedge phrase, demote A→A− and A−→B.
+
+    Pre-D2.1b, a "partial retrieval + honest hedge" answer could grade A
+    because the regex matched any peripheral citation. That rewarded the
+    exact failure mode users complain about. D2.1b fixes the grader so
+    hedged answers can never grade above A−.
+    """
+    if hedge_phrase is None:
+        return grade, reason
+    new_grade = _HEDGE_DEMOTION.get(grade, grade)
+    if new_grade == grade:
+        return grade, reason
+    return new_grade, f"{reason} [DEMOTED: hedge phrase in answer — {hedge_phrase!r}]"
+
+
 # ── Driver ──────────────────────────────────────────────────────────────
 
 
@@ -871,6 +900,8 @@ async def run_one(
     grade, reason, exp_hits, wrong_hits = _grade_answer(
         q, citations, resp.answer, resp.unverified_citations, vessel_code,
     )
+    hedge_phrase = detect_hedge(resp.answer)
+    grade, reason = _apply_hedge_demotion(grade, reason, hedge_phrase)
     return GradeResult(
         qid=q.qid, vessel_code=vessel_code, query=q.query,
         answer=resp.answer, citations=citations,
@@ -881,6 +912,7 @@ async def run_one(
         output_tokens=resp.output_tokens,
         retrieved_count=len(citations),
         unverified=resp.unverified_citations,
+        hedge_phrase=hedge_phrase,
     )
 
 
@@ -962,23 +994,31 @@ async def main():
             return 0.0
         return round(100 * sum(dist[g] for g in grades) / count, 1)
 
+    hedged_total = sum(1 for r in results if r.hedge_phrase)
+    hedged_reg = sum(1 for r in reg_results if r.hedge_phrase)
+    hedged_nat = sum(1 for r in nat_results if r.hedge_phrase)
+
     summary = {
         "timestamp": ts,
         "total_runs": total,
         "grade_distribution": dict(grade_dist),
         "a_or_better_pct": _pct(grade_dist, total, ("A", "A-")),
         "b_or_better_pct": _pct(grade_dist, total, ("A", "A-", "B")),
+        "hedged_answers": hedged_total,
+        "hedged_pct": round(100 * hedged_total / total, 1) if total else 0.0,
         "total_input_tokens": total_in,
         "total_output_tokens": total_out,
         "regulatory_register": {
             "runs": len(reg_results),
             "grade_distribution": dict(reg_dist),
             "a_or_better_pct": _pct(reg_dist, len(reg_results), ("A", "A-")),
+            "hedged_answers": hedged_reg,
         },
         "naturalistic": {
             "runs": len(nat_results),
             "grade_distribution": dict(nat_dist),
             "a_or_better_pct": _pct(nat_dist, len(nat_results), ("A", "A-")),
+            "hedged_answers": hedged_nat,
         },
     }
     summary_json_path = out_dir / "summary.json"
@@ -1042,7 +1082,31 @@ async def main():
         md.append(f"### {r.vessel_code} / {r.qid}")
         md.append(f"**Query:** {r.query}")
         md.append(f"**Wrong-Subchapter cites in top-2:** {r.wrong_sub_matched}")
+        if r.hedge_phrase:
+            md.append(f"**Hedge phrase:** {r.hedge_phrase!r}")
         md.append("")
+
+    # ── D2.1b — hedged answers (any grade) ───────────────────────────────
+    md.append("## Hedged answers (Sprint D2.1b detection)")
+    md.append("")
+    hedged_rows = [r for r in results if r.hedge_phrase]
+    if not hedged_rows:
+        md.append("(none — no answer contained a hedge phrase)")
+    else:
+        md.append(
+            f"{len(hedged_rows)} of {total} answers contained a hedge phrase. "
+            "These are the answers that got cited something but still told the user "
+            "they couldn't give a complete answer. Each of these is a real-world "
+            "'bad answer' from the user's point of view even if the grader passes "
+            "the citation check."
+        )
+        md.append("")
+        for r in hedged_rows:
+            md.append(
+                f"- [{r.grade:<2}] {r.vessel_code} / {r.qid}: "
+                f"`{r.query[:70]}` — hedge: {r.hedge_phrase!r}"
+            )
+    md.append("")
     md.append("## A / A− roll-up")
     md.append("")
     for r in results:
@@ -1057,16 +1121,17 @@ async def main():
     print(f"Grade distribution (all): {dict(grade_dist)}")
     print(f"A or A−: {summary['a_or_better_pct']}%")
     print(f"B or better: {summary['b_or_better_pct']}%")
+    print(f"Hedged answers: {hedged_total}/{total} ({summary['hedged_pct']}%)")
     print()
     print(
         f"Regulatory-register subset:  {len(reg_results):>3} runs | "
         f"A-or-A− {summary['regulatory_register']['a_or_better_pct']}% | "
-        f"dist: {dict(reg_dist)}"
+        f"dist: {dict(reg_dist)} | hedged: {hedged_reg}"
     )
     print(
         f"Naturalistic subset (D2.1):  {len(nat_results):>3} runs | "
         f"A-or-A− {summary['naturalistic']['a_or_better_pct']}% | "
-        f"dist: {dict(nat_dist)}"
+        f"dist: {dict(nat_dist)} | hedged: {hedged_nat}"
     )
     print(f"Summary: {md_path}")
 
