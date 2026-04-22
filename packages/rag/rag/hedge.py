@@ -22,11 +22,15 @@ import re
 # indicate the model is acknowledging insufficient retrieved context, not
 # routine caveats or "consult the source" reminders.
 HEDGE_PATTERNS: list[str] = [
+    # "not (included|covered) in ... context"
     r"not included in\s+(?:the\s+)?(?:verified\s+)?context",
-    r"not in\s+(?:my|the)\s+(?:retrieved|verified|knowledge)",
+    r"not (?:in|part of)\s+(?:my|the)\s+(?:retrieved|verified|knowledge|regulation)",
     r"not fully covered",
     r"aren'?t fully covered",
     r"isn'?t fully covered",
+    r"not fully (?:included|available|captured)",
+
+    # Model self-limit phrases
     r"can'?t confirm",
     r"cannot confirm",
     r"didn'?t surface",
@@ -34,11 +38,26 @@ HEDGE_PATTERNS: list[str] = [
     r"do not have the specific",
     r"don'?t have (?:a )?specific",
     r"do not have (?:a )?specific",
-    r"not fully (?:included|available|captured)",
+
+    # "X does not appear in (the|my) [regulation|retrieved|verified] context"
+    r"(?:does not|doesn'?t|do not|don'?t)\s+appear in\s+(?:the|my|any)?",
+    r"does not appear in\s+(?:the\s+)?(?:regulation|retrieved|verified|knowledge)",
+
+    # "not present in" / "outside the scope" / explicit corpus admissions
+    r"not present in\s+(?:the|my|any)",
+    r"outside (?:the scope of|my|the retrieved)",
+    r"not available in\s+(?:my|the|this)",
+
+    # "context does not/doesn't contain/include/cover/address"
+    r"context (?:does not|doesn'?t) (?:contain|include|cover|address)",
+
+    # Specific-section escape phrases
     r"no specific[^.]{0,40}(?:regulation|section|citation|guidance)",
-    r"context (?:does not|doesn'?t) (?:contain|include|cover)",
     r"specific (?:details|sections?)[^.]{0,60}aren'?t",
     r"specific (?:details|sections?)[^.]{0,60}(?:not included|not in|not available)",
+
+    # "regulation context I have" / "retrieved context for this query"
+    r"(?:regulation|retrieved|verified) context (?:I have|for this|returned)",
 ]
 
 _HEDGE_RE = re.compile("|".join(HEDGE_PATTERNS), re.IGNORECASE)
