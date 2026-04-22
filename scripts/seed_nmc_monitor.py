@@ -55,11 +55,11 @@ def _prettify(pdf_url: str) -> str:
 
 
 async def main() -> int:
-    dsn = os.environ.get("DATABASE_URL")
+    dsn = os.environ.get("REGKNOTS_DATABASE_URL") or os.environ.get("DATABASE_URL")
     if not dsn:
         logger.error(
-            "DATABASE_URL env var required. Source from .env or pass "
-            "explicitly, e.g. DATABASE_URL=postgresql://regknots:...@localhost:5432/regknots"
+            "REGKNOTS_DATABASE_URL (or DATABASE_URL) env var required. "
+            "Source from /opt/RegKnots/.env before running."
         )
         return 2
 
