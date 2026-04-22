@@ -67,6 +67,15 @@ class VesselProfile:
 
 
 VESSELS: dict[str, VesselProfile] = {
+    # V0 is the "no vessel profile" marker — used by naturalistic queries
+    # that simulate a user chatting without having set up a vessel. The
+    # driver passes vessel_profile=None to chat() when vessel_code=="V0".
+    "V0": VesselProfile(
+        name="[no profile]",
+        vessel_type="",
+        route_type="",
+        cargo_types=[],
+    ),
     "V1": VesselProfile(
         name="MAERSK Tennessee",
         vessel_type="Containership",
@@ -129,6 +138,11 @@ class TestQuestion:
     # Subchapter D for tanker, Subchapter M for towing).
     expected: list[str] | dict[str, list[str]]
     wrong_sub: list[str] = field(default_factory=list)
+    # Sprint D2.1: naturalistic=True means the question uses real-user
+    # phrasing (career narrative, material names, operational scenarios)
+    # rather than regulatory register. Reported in a separate summary
+    # section to measure the paraphrase-retrieval gap.
+    naturalistic: bool = False
 
 
 def _expected_for_vessel(q: "TestQuestion", vessel_code: str) -> list[str]:
@@ -360,6 +374,331 @@ QUESTIONS: list[TestQuestion] = [
         ],
         wrong_sub=[],
     ),
+
+    # ═══════════════════════════════════════════════════════════════════
+    # Sprint D2.1 — Naturalistic-phrasing set (20 questions)
+    #
+    # Bold items are verbatim or near-verbatim from actual hedged user
+    # queries captured in the 2026-04-22 audit. Measures the gap between
+    # regulatory-register retrieval (passing 100% A today) and
+    # naturalistic-phrasing retrieval (hypothesis: 55-70% A).
+    # ═══════════════════════════════════════════════════════════════════
+
+    # ── Credentialing paraphrases ──────────────────────────────────────
+    TestQuestion(
+        qid="N-C1",
+        # VERBATIM from Karynn's 2026-04-22 conversation that hedged.
+        query=(
+            "If I wanted to start a career as a merchant mariner, "
+            "and I chose to start from the bottom at g&h towing in Houston, "
+            "what path would I need to take?"
+        ),
+        vessels=["V5", "V0"],
+        expected=[
+            r"46 CFR 10\.",
+            r"46 CFR 11\.",
+            r"46 CFR 12\.",
+            r"NVIC 01-95",
+            r"merchant mariner credential",
+            r"MMC",
+        ],
+        wrong_sub=[],
+        naturalistic=True,
+    ),
+    TestQuestion(
+        qid="N-C2",
+        query="What's the path from deckhand to master on a towing vessel?",
+        vessels=["V5"],
+        expected=[
+            r"46 CFR 11\.",
+            r"TOAR",
+            r"Towing Officer",
+            r"STCW.*II/[45]",
+        ],
+        wrong_sub=[],
+        naturalistic=True,
+    ),
+    TestQuestion(
+        qid="N-C3",
+        query="My MMC expires next month — am I still allowed to work?",
+        vessels=["V1", "V5"],
+        expected=[
+            r"46 CFR 10\.227",
+            r"46 CFR 10\.",
+            r"CG-MMC PL",
+            r"grace period",
+            r"expiration",
+        ],
+        wrong_sub=[],
+        naturalistic=True,
+    ),
+    TestQuestion(
+        qid="N-C4",
+        query=(
+            "I served 4 years in the Navy as a boatswain's mate. "
+            "Does that count toward an MMC?"
+        ),
+        vessels=["V1"],
+        expected=[
+            r"CG-CVC PL 15-03",
+            r"military sea service",
+            r"crediting_military",
+        ],
+        wrong_sub=[],
+        naturalistic=True,
+    ),
+
+    # ── ERG / HAZMAT material-name queries ─────────────────────────────
+    TestQuestion(
+        qid="N-E1",
+        # VERBATIM from 4 separate hedged conversations.
+        query="What ERG guide covers chlorine gas?",
+        vessels=["V1", "V2"],
+        expected=[
+            r"ERG Guide 124",
+            r"Guide 124",
+            r"UN1017",
+            r"chlorine",
+        ],
+        wrong_sub=[],
+        naturalistic=True,
+    ),
+    TestQuestion(
+        qid="N-E2",
+        # VERBATIM from the 2026-04-10 hedged conversation.
+        query="How do I handle an ammonia leak?",
+        vessels=["V1", "V2"],
+        expected=[
+            r"ERG Guide 12[56]",
+            r"Guide 12[56]",
+            r"UN1005",
+            r"anhydrous ammonia",
+        ],
+        wrong_sub=[],
+        naturalistic=True,
+    ),
+    TestQuestion(
+        qid="N-E3",
+        # VERBATIM from the 2026-04-10 hedged conversation.
+        query="What is the emergency response for a UN1219 isopropanol spill?",
+        vessels=["V1"],
+        expected=[
+            r"ERG Guide 129",
+            r"Guide 129",
+            r"UN1219",
+            r"isopropanol",
+        ],
+        wrong_sub=[],
+        naturalistic=True,
+    ),
+    TestQuestion(
+        qid="N-E4",
+        query="What's in the ERG for hydrogen peroxide?",
+        vessels=["V1"],
+        expected=[
+            r"ERG Guide 14[03]",
+            r"Guide 14[03]",
+            r"UN201[45]",
+            r"UN2984",
+            r"peroxide",
+        ],
+        wrong_sub=[],
+        naturalistic=True,
+    ),
+
+    # ── SOLAS / equipment interval queries ─────────────────────────────
+    TestQuestion(
+        qid="N-S1",
+        # VERBATIM from the 2026-04-13 hedged conversation.
+        query="How often does a VDR beacon need to be changed?",
+        vessels=["V1"],
+        expected=[
+            r"SOLAS.*V.?.?20",
+            r"46 CFR 164",
+            r"annual performance test",
+            r"VDR",
+            r"voyage data recorder",
+        ],
+        wrong_sub=[],
+        naturalistic=True,
+    ),
+    TestQuestion(
+        qid="N-S2",
+        query="When does my emergency fire pump need its annual test?",
+        vessels=["V1", "V2"],
+        expected=[
+            r"46 CFR 14[67]",
+            r"SOLAS.*II-2",
+            r"fire pump",
+            r"annual",
+        ],
+        wrong_sub=[],
+        naturalistic=True,
+    ),
+    TestQuestion(
+        qid="N-S3",
+        query="What's the drill schedule for fire and abandon ship?",
+        vessels=["V1"],
+        expected=[
+            r"46 CFR 199",
+            r"SOLAS.*III.*Reg\.?\s*19",
+            r"weekly drill",
+            r"monthly drill",
+            r"fire drill",
+            r"abandon ship drill",
+        ],
+        wrong_sub=[],
+        naturalistic=True,
+    ),
+
+    # ── Maritime security / HRA ────────────────────────────────────────
+    TestQuestion(
+        qid="N-M1",
+        # VERBATIM from the 2026-04-22 hedged conversation.
+        query="What guidelines do i need to follow when transitting HRA",
+        vessels=["V1"],
+        expected=[
+            r"NVIC",
+            r"piracy",
+            r"BMP",
+            r"UKMTO",
+            r"MSCHOA",
+            r"high risk area",
+            r"don't have",
+            r"do not have",
+            r"not in my",
+        ],
+        wrong_sub=[],
+        naturalistic=True,
+    ),
+    TestQuestion(
+        qid="N-M2",
+        # VERBATIM from the 2026-04-22 hedged conversation.
+        query=(
+            "If we take the route from the USEC around south africa to pakistan, "
+            "what High Risk Waters would we sail through?"
+        ),
+        vessels=["V1"],
+        expected=[
+            r"NVIC",
+            r"piracy",
+            r"BMP",
+            r"Gulf of Aden",
+            r"HOA",
+            r"Arabian Sea",
+            r"don't have",
+            r"do not have",
+            r"not in my",
+        ],
+        wrong_sub=[],
+        naturalistic=True,
+    ),
+
+    # ── Port / vessel operations scenarios ─────────────────────────────
+    TestQuestion(
+        qid="N-V1",
+        query="My vessel is heading to India — what paperwork do we need at port?",
+        vessels=["V1"],
+        expected=[
+            r"33 CFR 160",
+            r"NOAD",
+            r"notice of arrival",
+            r"arrival notice",
+            r"port state",
+        ],
+        wrong_sub=[],
+        naturalistic=True,
+    ),
+    TestQuestion(
+        qid="N-V2",
+        query="What documents does crew sign when they join a containership?",
+        vessels=["V1"],
+        expected=[
+            r"46 CFR 14\.",
+            r"shipping articles",
+            r"articles of agreement",
+            r"sign.on",
+            r"46 USC",
+        ],
+        wrong_sub=[],
+        naturalistic=True,
+    ),
+    TestQuestion(
+        qid="N-V3",
+        query=(
+            "My medical cert extension was approved by NMC — "
+            "how long does it last?"
+        ),
+        vessels=["V1", "V5"],
+        expected=[
+            r"NMC",
+            r"CG-MMC",
+            r"medical certificate",
+            r"extension",
+            r"NVIC 04-08",
+        ],
+        wrong_sub=[],
+        naturalistic=True,
+    ),
+
+    # ── Fire protection paraphrases (match F5/F1 semantics) ───────────
+    TestQuestion(
+        qid="N-F1",
+        query="What kind of fire suppression does my engine room need?",
+        vessels=["V1", "V5"],
+        expected={
+            "V1": [r"46 CFR 95\.", r"SOLAS.*II-2", r"CO2", r"fixed fire"],
+            "V5": [r"46 CFR 144\.", r"Subchapter M", r"SOLAS.*II-2", r"fixed fire"],
+        },
+        wrong_sub=[
+            r"46 CFR 195\.",       # Subchapter U (research)
+            r"46 CFR 169\.",       # Subchapter R (sailing school)
+            r"46 CFR 117\.",       # Subchapter T (small passenger)
+        ],
+        naturalistic=True,
+    ),
+    TestQuestion(
+        qid="N-F2",
+        query="How often do I need to inspect my life rafts?",
+        vessels=["V1"],
+        expected=[
+            r"46 CFR 199\.180",
+            r"46 CFR 199",
+            r"SOLAS.*III.*Reg\.?\s*20",
+            r"annual",
+            r"servicing",
+        ],
+        wrong_sub=[],
+        naturalistic=True,
+    ),
+
+    # ── Scenario / ops ─────────────────────────────────────────────────
+    TestQuestion(
+        qid="N-P1",
+        query="Can we make a river run today or is the Mississippi too high?",
+        vessels=["V5"],
+        expected=[
+            r"MSIB Vol",
+            r"Carrollton",
+            r"Port Condition",
+            r"High Water",
+            r"Low Water",
+        ],
+        wrong_sub=[],
+        naturalistic=True,
+    ),
+    TestQuestion(
+        qid="N-O1",
+        query="I need to log something in my Oil Record Book — what's required?",
+        vessels=["V2"],
+        expected=[
+            r"33 CFR 151\.25",
+            r"MARPOL.*I",
+            r"oil record",
+        ],
+        wrong_sub=[],
+        naturalistic=True,
+    ),
 ]
 
 
@@ -478,6 +817,9 @@ async def run_one(
     q: TestQuestion, vessel_code: str, pool, anthropic_client, eval_user_id,
 ) -> GradeResult:
     vessel = VESSELS[vessel_code]
+    # V0 = simulates a user chatting without a vessel profile set. Pass
+    # None so the RAG engine takes the no-profile synthesis path.
+    vessel_profile_arg = None if vessel_code == "V0" else vessel.profile_dict
     conv_id = uuid4()
     # Pre-insert a real conversations row so the citation_errors FK is satisfied
     # when the RAG pipeline tries to log unverified citations. Without this
@@ -492,7 +834,7 @@ async def run_one(
         resp = await chat(
             query=q.query,
             conversation_history=[],
-            vessel_profile=vessel.profile_dict,
+            vessel_profile=vessel_profile_arg,
             pool=pool,
             anthropic_client=anthropic_client,
             openai_api_key=settings.openai_api_key,
@@ -598,19 +940,46 @@ async def main():
 
     # ── Aggregates ───────────────────────────────────────────────────────
     from collections import Counter
+
+    # Build a qid → naturalistic map so the summary can split results
+    # into two subsets. The regulatory-register subset is what the eval
+    # has always graded; the naturalistic subset is the Sprint D2.1
+    # addition that stress-tests paraphrase retrieval.
+    naturalistic_qids = {q.qid for q in QUESTIONS if q.naturalistic}
+
     grade_dist = Counter(r.grade for r in results)
     total = len(results)
     total_in = sum(r.input_tokens for r in results)
     total_out = sum(r.output_tokens for r in results)
 
+    reg_results = [r for r in results if r.qid not in naturalistic_qids]
+    nat_results = [r for r in results if r.qid in naturalistic_qids]
+    reg_dist = Counter(r.grade for r in reg_results)
+    nat_dist = Counter(r.grade for r in nat_results)
+
+    def _pct(dist: Counter, count: int, grades: tuple[str, ...]) -> float:
+        if not count:
+            return 0.0
+        return round(100 * sum(dist[g] for g in grades) / count, 1)
+
     summary = {
         "timestamp": ts,
         "total_runs": total,
         "grade_distribution": dict(grade_dist),
-        "a_or_better_pct": round(100 * (grade_dist["A"] + grade_dist["A-"]) / total, 1),
-        "b_or_better_pct": round(100 * (grade_dist["A"] + grade_dist["A-"] + grade_dist["B"]) / total, 1),
+        "a_or_better_pct": _pct(grade_dist, total, ("A", "A-")),
+        "b_or_better_pct": _pct(grade_dist, total, ("A", "A-", "B")),
         "total_input_tokens": total_in,
         "total_output_tokens": total_out,
+        "regulatory_register": {
+            "runs": len(reg_results),
+            "grade_distribution": dict(reg_dist),
+            "a_or_better_pct": _pct(reg_dist, len(reg_results), ("A", "A-")),
+        },
+        "naturalistic": {
+            "runs": len(nat_results),
+            "grade_distribution": dict(nat_dist),
+            "a_or_better_pct": _pct(nat_dist, len(nat_results), ("A", "A-")),
+        },
     }
     summary_json_path = out_dir / "summary.json"
     summary_json_path.write_text(json.dumps(summary, indent=2))
@@ -627,6 +996,27 @@ async def main():
     md.append(f"**B or better:** {summary['b_or_better_pct']}%")
     md.append("")
     md.append(f"**LLM spend:** {total_in:,} input + {total_out:,} output tokens across {total} runs")
+    md.append("")
+
+    # ── Sprint D2.1 split: regulatory-register vs naturalistic ───────────
+    md.append("## Subset comparison")
+    md.append("")
+    md.append("| Subset | Runs | A | A− | B | C | F | A-or-A− |")
+    md.append("|---|---|---|---|---|---|---|---|")
+    for label, subset_results, subset_dist in [
+        ("Regulatory-register (original)", reg_results, reg_dist),
+        ("Naturalistic (Sprint D2.1)", nat_results, nat_dist),
+    ]:
+        row = [label, str(len(subset_results))]
+        for g in ("A", "A-", "B", "C", "F"):
+            row.append(str(subset_dist[g]))
+        row.append(f"{_pct(subset_dist, len(subset_results), ('A','A-'))}%")
+        md.append("| " + " | ".join(row) + " |")
+    md.append("")
+    md.append(
+        "The delta between the two A-or-A− percentages is the "
+        "paraphrase-retrieval gap that Sprint D2.2 — D2.5 target."
+    )
     md.append("")
     md.append("## Failures (C + F)")
     md.append("")
@@ -664,9 +1054,20 @@ async def main():
 
     print()
     print("=" * 70)
-    print(f"Grade distribution: {dict(grade_dist)}")
+    print(f"Grade distribution (all): {dict(grade_dist)}")
     print(f"A or A−: {summary['a_or_better_pct']}%")
     print(f"B or better: {summary['b_or_better_pct']}%")
+    print()
+    print(
+        f"Regulatory-register subset:  {len(reg_results):>3} runs | "
+        f"A-or-A− {summary['regulatory_register']['a_or_better_pct']}% | "
+        f"dist: {dict(reg_dist)}"
+    )
+    print(
+        f"Naturalistic subset (D2.1):  {len(nat_results):>3} runs | "
+        f"A-or-A− {summary['naturalistic']['a_or_better_pct']}% | "
+        f"dist: {dict(nat_dist)}"
+    )
     print(f"Summary: {md_path}")
 
 
