@@ -8,6 +8,9 @@
 
 ## Recent sprints (reverse chronological)
 
+### Sprint D3 — authority-tier synthesis with ERG protection (2026-04-22)
+New `packages/rag/rag/authority.py` maps every source to a 4-tier authority scheme (binding statute/treaty → federal interpretive guidance → operational notice → domain reference standard). The context builder prefixes every retrieved chunk with its tier label, and the system prompt gained three rules: conflict resolution (prefer higher tier when sources truly conflict), applicability (identify which Tier-1 applies when SOLAS vs CFR or different Subchapters could both apply), and explicit **Tier-4 protection** — ERG must not be deprioritized by Tier 1 for hazmat questions because it's the authoritative source within its own subject matter (first-response actions, isolation distances, PPE). Ships with two new regression questions: N-AUTH1 (UN1219 on international voyage — must cite both ERG Guide 129 and 49 CFR HM rules) and N-AUTH2 (fire safety applicability test for international containership). Post-D3 eval: 57/57 A-or-A−, zero ERG regression, both AUTH questions graded A with correct dual-citation and applicability reasoning.
+
 ### Sprint D2.1 + D2.1b + D2-LOG — naturalistic eval, hedge demotion, retrieval-miss logging (2026-04-22)
 Measurement-first pass on the "more bad answers than good lately" pushback. Three coordinated deliverables shipped together:
 

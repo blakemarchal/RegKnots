@@ -130,6 +130,7 @@ Latest eval artifact path: `data/eval/<timestamp>/summary.md` + `summary.json` (
 - `scripts/ingest_nvic_04-08.py` — one-off ingest for NVIC 04-08 Ch-2 (template for future Wayback-sourced gap fills)
 - `scripts/seed_nmc_monitor.py` — one-time seed for `nmc_monitor_seen_urls` after migration 0046 (Sprint D1)
 - `packages/rag/rag/hedge.py` — shared hedge-phrase patterns (Sprint D2.1b); auto-applied by the engine (logs to `retrieval_misses`) and by the eval grader (demotes hedged answers)
+- `packages/rag/rag/authority.py` — source → authority tier mapping (Sprint D3); every context chunk prefixed with tier label so the synthesizer can reason about conflicts and applicability
 
 ## Recent shipped work (reverse chronological, last 10 commits)
 
