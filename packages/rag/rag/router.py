@@ -17,8 +17,15 @@ logger = logging.getLogger(__name__)
 MODEL_MAP: dict[int, str] = {
     1: "claude-haiku-4-5-20251001",
     2: "claude-sonnet-4-6",
-    3: "claude-opus-4-6",
+    3: "claude-opus-4-7",  # Sprint D4 — Opus 4.6 → 4.7 (better reasoning, 1M ctx)
 }
+
+# Sprint D4 — regeneration pass always uses Opus 4.7 regardless of the
+# initial routed model. Fires only when the citation verifier catches an
+# unverified cite or the initial answer hedged (i.e., bad answer already
+# happened). Cheap second chance: costs Opus only on failures, not on
+# every call. Engine imports this and passes it to the second-try path.
+REGENERATION_MODEL: str = "claude-opus-4-7"
 
 _DEFAULT_SCORE = 2
 

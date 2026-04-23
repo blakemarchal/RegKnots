@@ -33,7 +33,7 @@ from rag.hedge import detect_hedge
 from rag.models import ChatMessage, ChatResponse, CitedRegulation
 from rag.prompts import NAVIGATION_AID_REMINDER, SYSTEM_PROMPT
 from rag.retriever import retrieve
-from rag.router import route_query
+from rag.router import REGENERATION_MODEL, route_query
 
 # Anthropic exceptions that indicate Claude itself is unavailable — these are
 # the only errors we fall back on. Application-level bugs (ValueError,
@@ -727,9 +727,17 @@ async def _regenerate_answer(
             logger.warning("Regeneration via GPT-4o failed: %s", exc)
             return None
 
+    # Sprint D4 — regeneration pass always uses Opus 4.7 regardless of the
+    # initial model. The first answer already failed verification; we spend
+    # Opus only on these recoveries, not on every call. Upside: second-try
+    # reasoning is materially better on conflict/applicability cases.
+    regen_model = REGENERATION_MODEL
+    logger.info(
+        "REGEN: original=%s → regenerating with %s", model_used, regen_model,
+    )
     try:
         response = await anthropic_client.messages.create(
-            model=model_used,
+            model=regen_model,
             max_tokens=_MAX_TOKENS,
             system=SYSTEM_PROMPT,
             messages=messages,
@@ -741,11 +749,34 @@ async def _regenerate_answer(
         )
     except _CLAUDE_FAILURE_EXCEPTIONS as exc:
         logger.warning(
-            "Regeneration via Claude failed (%s: %s)",
+            "Regeneration via Claude %s failed (%s: %s) — falling back to original model %s",
+            regen_model,
             type(exc).__name__,
             str(exc)[:200],
+            model_used,
         )
-        return None
+        # If Opus is transiently unavailable, fall back to the original model
+        # rather than return None (which would surface to the user as a cite
+        # stripped with disclaimer).
+        try:
+            response = await anthropic_client.messages.create(
+                model=model_used,
+                max_tokens=_MAX_TOKENS,
+                system=SYSTEM_PROMPT,
+                messages=messages,
+            )
+            return (
+                response.content[0].text,
+                response.usage.input_tokens,
+                response.usage.output_tokens,
+            )
+        except _CLAUDE_FAILURE_EXCEPTIONS as exc2:
+            logger.warning(
+                "Regeneration fallback also failed (%s: %s)",
+                type(exc2).__name__,
+                str(exc2)[:200],
+            )
+            return None
 
 
 async def _finalize_answer(

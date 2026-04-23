@@ -144,6 +144,12 @@ class TestQuestion:
     # rather than regulatory register. Reported in a separate summary
     # section to measure the paraphrase-retrieval gap.
     naturalistic: bool = False
+    # Sprint D4: sailor_speak=True means the question was auto-generated
+    # by scripts/generate_sailor_queries.py in mariner voice. Graded on a
+    # looser rubric (A if cited + not hedged; A- if hedged; F if
+    # unverified citation) since we don't know the "right" expected
+    # source for synthetic queries.
+    sailor_speak: bool = False
 
 
 def _expected_for_vessel(q: "TestQuestion", vessel_code: str) -> list[str]:
@@ -701,6 +707,10 @@ QUESTIONS: list[TestQuestion] = [
         naturalistic=True,
     ),
 
+    # Sprint D4 — sailor-speak queries are loaded from JSON below
+    # (scripts/generate_sailor_queries.py writes the file). They are
+    # appended to QUESTIONS at import time by _load_sailor_speak().
+
     # ── Sprint D3 authority-tier sanity checks ─────────────────────────
     TestQuestion(
         qid="N-AUTH1",
@@ -746,6 +756,40 @@ QUESTIONS: list[TestQuestion] = [
 ]
 
 
+# ── Sprint D4 — load sailor-speak queries from JSON ─────────────────────
+
+
+def _load_sailor_speak() -> list[TestQuestion]:
+    """Load synthetic sailor-speak queries from data/eval/sailor_queries.json.
+
+    Silently returns [] if the file doesn't exist — regulatory-register +
+    naturalistic still run. Run scripts/generate_sailor_queries.py to
+    populate the file.
+    """
+    p = Path("/opt/RegKnots/data/eval/sailor_queries.json")
+    if not p.exists():
+        return []
+    try:
+        payload = json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+    out: list[TestQuestion] = []
+    for row in payload.get("queries", []):
+        out.append(TestQuestion(
+            qid=row["qid"],
+            query=row["query"],
+            vessels=[row["vessel_code"]],
+            expected=[],      # no regex cheat sheet — graded on hedge + cite presence
+            wrong_sub=[],
+            naturalistic=False,
+            sailor_speak=True,
+        ))
+    return out
+
+
+QUESTIONS.extend(_load_sailor_speak())
+
+
 # ── Auto-grader ─────────────────────────────────────────────────────────
 
 
@@ -777,6 +821,18 @@ def _grade_answer(q: TestQuestion, citations: list[dict], answer_text: str,
     question's expected field is a dict (e.g., SCBA: different Subchapter
     per vessel type).
     """
+    # Sprint D4 — sailor-speak queries have no `expected` regex cheat
+    # sheet. Grade on a simpler rubric: F on hallucinated citation,
+    # otherwise A (hedge demotion in _apply_hedge_demotion may drop it
+    # to A−). The goal here is to measure the hedge rate on synthetic
+    # mariner-voice queries, not to verify specific-source retrieval.
+    if q.sailor_speak:
+        if unverified:
+            return ("F", f"Unverified citation(s): {unverified[:3]}", [], [])
+        if not citations:
+            return ("F", "No citations surfaced at all", [], [])
+        return ("A", f"Sailor-speak clean: {len(citations)} citation(s)", [], [])
+
     # Compose the grading haystack: all section_numbers in citation order +
     # the answer text itself (some expected patterns like "Kidde" are text,
     # not section_numbers).
@@ -1016,21 +1072,24 @@ async def main():
     # ── Aggregates ───────────────────────────────────────────────────────
     from collections import Counter
 
-    # Build a qid → naturalistic map so the summary can split results
-    # into two subsets. The regulatory-register subset is what the eval
-    # has always graded; the naturalistic subset is the Sprint D2.1
-    # addition that stress-tests paraphrase retrieval.
+    # Build qid → subset maps so the summary splits into:
+    #   Regulatory-register (original hand-written cheat-sheet questions)
+    #   Naturalistic (Sprint D2.1 — real user-phrasing questions)
+    #   Sailor-speak (Sprint D4 — synthetic mariner-voice queries)
     naturalistic_qids = {q.qid for q in QUESTIONS if q.naturalistic}
+    sailor_qids = {q.qid for q in QUESTIONS if q.sailor_speak}
 
     grade_dist = Counter(r.grade for r in results)
     total = len(results)
     total_in = sum(r.input_tokens for r in results)
     total_out = sum(r.output_tokens for r in results)
 
-    reg_results = [r for r in results if r.qid not in naturalistic_qids]
+    reg_results = [r for r in results if r.qid not in naturalistic_qids and r.qid not in sailor_qids]
     nat_results = [r for r in results if r.qid in naturalistic_qids]
+    sailor_results = [r for r in results if r.qid in sailor_qids]
     reg_dist = Counter(r.grade for r in reg_results)
     nat_dist = Counter(r.grade for r in nat_results)
+    sailor_dist = Counter(r.grade for r in sailor_results)
 
     def _pct(dist: Counter, count: int, grades: tuple[str, ...]) -> float:
         if not count:
@@ -1040,6 +1099,7 @@ async def main():
     hedged_total = sum(1 for r in results if r.hedge_phrase)
     hedged_reg = sum(1 for r in reg_results if r.hedge_phrase)
     hedged_nat = sum(1 for r in nat_results if r.hedge_phrase)
+    hedged_sailor = sum(1 for r in sailor_results if r.hedge_phrase)
 
     summary = {
         "timestamp": ts,
@@ -1063,6 +1123,13 @@ async def main():
             "a_or_better_pct": _pct(nat_dist, len(nat_results), ("A", "A-")),
             "hedged_answers": hedged_nat,
         },
+        "sailor_speak": {
+            "runs": len(sailor_results),
+            "grade_distribution": dict(sailor_dist),
+            "a_or_better_pct": _pct(sailor_dist, len(sailor_results), ("A", "A-")),
+            "hedged_answers": hedged_sailor,
+            "hedged_pct": round(100 * hedged_sailor / len(sailor_results), 1) if sailor_results else 0.0,
+        },
     }
     summary_json_path = out_dir / "summary.json"
     summary_json_path.write_text(json.dumps(summary, indent=2))
@@ -1084,16 +1151,18 @@ async def main():
     # ── Sprint D2.1 split: regulatory-register vs naturalistic ───────────
     md.append("## Subset comparison")
     md.append("")
-    md.append("| Subset | Runs | A | A− | B | C | F | A-or-A− |")
-    md.append("|---|---|---|---|---|---|---|---|")
-    for label, subset_results, subset_dist in [
-        ("Regulatory-register (original)", reg_results, reg_dist),
-        ("Naturalistic (Sprint D2.1)", nat_results, nat_dist),
+    md.append("| Subset | Runs | A | A− | B | C | F | A-or-A− | Hedged |")
+    md.append("|---|---|---|---|---|---|---|---|---|")
+    for label, subset_results, subset_dist, hedge_n in [
+        ("Regulatory-register (original)", reg_results, reg_dist, hedged_reg),
+        ("Naturalistic (Sprint D2.1)", nat_results, nat_dist, hedged_nat),
+        ("Sailor-speak (Sprint D4)", sailor_results, sailor_dist, hedged_sailor),
     ]:
         row = [label, str(len(subset_results))]
         for g in ("A", "A-", "B", "C", "F"):
             row.append(str(subset_dist[g]))
         row.append(f"{_pct(subset_dist, len(subset_results), ('A','A-'))}%")
+        row.append(str(hedge_n))
         md.append("| " + " | ".join(row) + " |")
     md.append("")
     md.append(
@@ -1176,6 +1245,13 @@ async def main():
         f"A-or-A− {summary['naturalistic']['a_or_better_pct']}% | "
         f"dist: {dict(nat_dist)} | hedged: {hedged_nat}"
     )
+    if sailor_results:
+        print(
+            f"Sailor-speak subset (D4):    {len(sailor_results):>3} runs | "
+            f"A-or-A− {summary['sailor_speak']['a_or_better_pct']}% | "
+            f"dist: {dict(sailor_dist)} | hedged: {hedged_sailor} "
+            f"({summary['sailor_speak']['hedged_pct']}%)"
+        )
     print(f"Summary: {md_path}")
 
 
