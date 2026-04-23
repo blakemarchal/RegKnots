@@ -1,0 +1,635 @@
+{
+  "topics": 30,
+  "queries": [
+    {
+      "qid": "S-001",
+      "topic": "oil_record_book",
+      "domain": "env",
+      "vessel_code": "V2",
+      "query": "We're running a 30,000-ton coastal crude carrier and the old man wants to know how long we're supposed to hang onto the oil record books after the last entry \u2014 port captain's asking and nobody can give him a straight answer."
+    },
+    {
+      "qid": "S-002",
+      "topic": "oil_record_book",
+      "domain": "env",
+      "vessel_code": "V2",
+      "query": "How far back do I need to keep my ORBs on a crude tanker this size, like if the CG boards us in Corpus and asks to see old books, what's the cutoff before I can toss them?"
+    },
+    {
+      "qid": "S-003",
+      "topic": "oil_record_book",
+      "domain": "env",
+      "vessel_code": "V2",
+      "query": "Finished up Part II entries after our last cargo discharge and I'm trying to figure out when I'm actually clear to archive or dump the old oil record books \u2014 we're coastal crude, about 30k gross tons, what's the retention period supposed to be?"
+    },
+    {
+      "qid": "S-004",
+      "topic": "foreign_articles",
+      "domain": "labor",
+      "vessel_code": "V1",
+      "query": "We're inbound to Long Beach after 47 days out and three of my ABs want to break articles early \u2014 can they do that before we even clear customs or do they have to wait until the old man signs off the paperwork at the port captain's office?"
+    },
+    {
+      "qid": "S-005",
+      "topic": "foreign_articles",
+      "domain": "labor",
+      "vessel_code": "V1",
+      "query": "Got a Filipino OS who signed foreign articles in Rotterdam but now wants to pay off in New York, says his contract runs out in two weeks anyway \u2014 what's the actual process for getting him off the books legally without the company getting hit by CG?"
+    },
+    {
+      "qid": "S-006",
+      "topic": "foreign_articles",
+      "domain": "labor",
+      "vessel_code": "V1",
+      "query": "Heard from the mate on another box boat that you can't just cut a guy loose dockside on foreign articles, there's gotta be a consulate involved or something \u2014 is that still the case for a 75,000 GT container ship or did they change that, because we've got two guys wanting to pay off in Savannah next port?"
+    },
+    {
+      "qid": "S-007",
+      "topic": "colregs_crossing",
+      "domain": "nav",
+      "vessel_code": "V1",
+      "query": "We're westbound in the TSS off Ushant, big box boat fully loaded about 78,000 gross, and there's a fishing fleet spread across the separation zone \u2014 who's supposed to give way to who, and do we still have to maneuver even if they're clearly not watching their AIS?"
+    },
+    {
+      "qid": "S-008",
+      "topic": "colregs_crossing",
+      "domain": "nav",
+      "vessel_code": "V1",
+      "query": "Outbound Singapore Strait last night, had a VLCC coming at us nearly dead on, maybe 8 degrees off the bow, old man called it a crossing situation and put the helm over to starboard \u2014 chief mate says it was head-on and we should've held course longer before acting, which one of them is right and what's the actual cutoff between head-on and crossing?"
+    },
+    {
+      "qid": "S-009",
+      "topic": "colregs_crossing",
+      "domain": "nav",
+      "vessel_code": "V1",
+      "query": "Got a situation where we're overtaking a slower feeder vessel in the Dover Strait, we're doing 22 knots she's doing about 11, same general track \u2014 at what point does she stop being the stand-on vessel and who's got the conn decision if the overtaken ship suddenly alters into our path?"
+    },
+    {
+      "qid": "S-010",
+      "topic": "crew_sign_on",
+      "domain": "labor",
+      "vessel_code": "V1",
+      "query": "We're sailing out of Savannah next week, deep-sea run to Rotterdam, and the old man wants to make sure all the articles are squared away before we clear the sea buoy \u2014 what paperwork does every crew member need signed before we can legally sail on an international voyage on a ship this size?"
+    },
+    {
+      "qid": "S-011",
+      "topic": "crew_sign_on",
+      "domain": "labor",
+      "vessel_code": "V1",
+      "query": "Got a new OS who just got his MMC but never sailed foreign \u2014 shipping articles, do we need him to sign on in front of a shipping commissioner or can the chief mate witness it dockside and call it good on a big box boat going foreign?"
+    },
+    {
+      "qid": "S-012",
+      "topic": "crew_sign_on",
+      "domain": "labor",
+      "vessel_code": "V1",
+      "query": "Bosun told me the company emailed the crew agreement over but half the guys haven't signed yet and we're bunkering tonight and sailing tomorrow morning \u2014 what's the actual hard deadline for getting articles signed, and does the manning level have to be certified complete before departure on an international containership?"
+    },
+    {
+      "qid": "S-013",
+      "topic": "scba_requirements",
+      "domain": "fire",
+      "vessel_code": "V1",
+      "query": "Chief told me to check the fireman's outfits before we clear Singapore and I'm finding some of the SCBA cylinders are down to like 180 bar \u2014 what's the actual minimum pressure we need before those units are considered out of service, and do we log that as a deficiency on the SMS or just swap the cylinders and move on?"
+    },
+    {
+      "qid": "S-014",
+      "topic": "scba_requirements",
+      "domain": "fire",
+      "vessel_code": "V1",
+      "query": "We're a big box boat, 80-something thousand tons, running Asia-Europe, and the old man wants to know if there's been any recent safety alerts or casualties involving SCBA failures on containerships because we had a near-miss in the forward hold last port where the second engineer's set fogged up bad and he couldn't see anything \u2014 where would we even find if the flag state or CG put anything out on that?"
+    },
+    {
+      "qid": "S-015",
+      "topic": "scba_requirements",
+      "domain": "fire",
+      "vessel_code": "V1",
+      "query": "Got an OS doing his basic safety refresher next month and I'm trying to figure out what the minimum gear is that counts as a proper fireman's outfit on a ship our size \u2014 like does he need the full thermal suit and the SCBA together or can the outfit be certified without the breathing apparatus, because the one we pulled out of the locker has a BA set that's way past its hydro date?"
+    },
+    {
+      "qid": "S-016",
+      "topic": "ballast_water",
+      "domain": "env",
+      "vessel_code": "V1",
+      "query": "We're a big box ship, 78,000 GT, running Asia-USEC, and the old man wants to know if we still gotta do mid-ocean exchange if our ballast water treatment system craps out mid-voyage \u2014 like do we document that as a failure and get a pass at the port, or are we showing up to a world of hurt from the Coast Guard?"
+    },
+    {
+      "qid": "S-017",
+      "topic": "ballast_water",
+      "domain": "env",
+      "vessel_code": "V1",
+      "query": "Chief mate here on a containership inbound to Savannah, took on ballast in Busan and ran our treatment system the whole way, but the logbook entries got spotty for two days when we had the electrical fault \u2014 how bad is that gonna look on inspection and what exactly should be in those records to keep us clean?"
+    },
+    {
+      "qid": "S-018",
+      "topic": "ballast_water",
+      "domain": "env",
+      "vessel_code": "V1",
+      "query": "Got a question about our BWM record book \u2014 we're 80,000 GT container vessel, flag state is Marshall Islands, and I'm trying to figure out if every single ballast operation needs its own entry or if we can batch log a watch's worth of transfers, because our third mate is spending half his watch writing in that damn book and I'm not sure we're even doing it right."
+    },
+    {
+      "qid": "S-019",
+      "topic": "co2_fixed_system",
+      "domain": "fire",
+      "vessel_code": "V1",
+      "query": "Chief wants the CO2 total flooding system in the engine room inspected before we hit Rotterdam \u2014 what exactly has to get checked and how often does that inspection need to happen on a ship our size running SOLAS routes?"
+    },
+    {
+      "qid": "S-020",
+      "topic": "co2_fixed_system",
+      "domain": "fire",
+      "vessel_code": "V1",
+      "query": "We had a near-miss last port where somebody almost tripped the fixed CO2 in the ER by accident, and now the old man's asking me what the regs say about lockout procedures and crew drills for that system on an international containership \u2014 anybody know what we're supposed to be doing?"
+    },
+    {
+      "qid": "S-021",
+      "topic": "co2_fixed_system",
+      "domain": "fire",
+      "vessel_code": "V1",
+      "query": "Our fitter found two cylinders in the CO2 battery room showing low pressure on the gauge and one actuator line looks corroded to hell \u2014 at what point are we actually out of compliance and what do we have to do before we can sail?"
+    },
+    {
+      "qid": "S-022",
+      "topic": "vdr_beacon",
+      "domain": "nav",
+      "vessel_code": "V1",
+      "query": "Our VDR float-free EPIRB beacon battery is coming up on its stamp date next month \u2014 port captain's asking whether we swap it out on the annual survey or does it have a separate replacement clock we need to track independent of the performance test?"
+    },
+    {
+      "qid": "S-023",
+      "topic": "vdr_beacon",
+      "domain": "nav",
+      "vessel_code": "V1",
+      "query": "Chief mate here on a big box boat, 80k GT, running Asia-Europe. Surveyor's coming aboard in Rotterdam and I want to make sure our VDR capsule battery replacement is in order \u2014 is the battery interval tied to the annual performance test or does it run on its own schedule, and who signs off on it?"
+    },
+    {
+      "qid": "S-024",
+      "topic": "vdr_beacon",
+      "domain": "nav",
+      "vessel_code": "V1",
+      "query": "We're deep-sea containership, just got flagged during a PSC exam in Singapore that our VDR hydrostatic release unit and beacon battery documentation wasn't right \u2014 can somebody explain how often those batteries actually need replacing versus when the annual performance test has to happen, because the old man is saying they're the same thing and I don't think that's correct?"
+    },
+    {
+      "qid": "S-025",
+      "topic": "entry_mariner",
+      "domain": "credentialing",
+      "vessel_code": "V0",
+      "query": "My kid just finished high school and wants to work on the water \u2014 what's the very first thing he needs to get in his hands before anyone will even let him set foot on a commercial vessel?"
+    },
+    {
+      "qid": "S-026",
+      "topic": "entry_mariner",
+      "domain": "credentialing",
+      "vessel_code": "V0",
+      "query": "Trying to get my first MMC sorted out and I don't know if I need sea time before I apply or if I can just walk into a regional exam center with my TWIC and my medical and get something issued \u2014 how does that work exactly?"
+    },
+    {
+      "qid": "S-027",
+      "topic": "entry_mariner",
+      "domain": "credentialing",
+      "vessel_code": "V0",
+      "query": "Never sailed a day in my life but I got hired at a towing company pending getting my credentials \u2014 do I show up to the NMC with nothing and they start me off at entry level, or do I need some kind of school certificate first before they'll touch my application?"
+    },
+    {
+      "qid": "S-028",
+      "topic": "garbage_management",
+      "domain": "env",
+      "vessel_code": "V1",
+      "query": "We're a big box boat, 80k GT, running Asia-Pacific to USWC \u2014 do we need a written garbage management plan on board or is that just for cruiseships and tankers?"
+    },
+    {
+      "qid": "S-029",
+      "topic": "garbage_management",
+      "domain": "env",
+      "vessel_code": "V1",
+      "query": "Chief mate here, just got handed a placard from the bosun that looks beat to hell and half the text is faded \u2014 what's the rule on where those garbage placards gotta be posted and how many we need on a containership our size?"
+    },
+    {
+      "qid": "S-030",
+      "topic": "garbage_management",
+      "domain": "env",
+      "vessel_code": "V1",
+      "query": "Bosun says we can ditch cardboard boxes over the side once we're past 12 miles out in open ocean, but that doesn't sound right to me \u2014 what can we actually throw overboard on an international run and what has to go in the slops or garbage log?"
+    },
+    {
+      "qid": "S-031",
+      "topic": "required_pubs",
+      "domain": "nav",
+      "vessel_code": "V1",
+      "query": "We're headed out of Rotterdam to Ningbo next week and I'm getting the library squared away \u2014 do I actually need a current light list onboard or is the electronic chart system enough to satisfy port state?"
+    },
+    {
+      "qid": "S-032",
+      "topic": "required_pubs",
+      "domain": "nav",
+      "vessel_code": "V1",
+      "query": "Old man wants to know if we're good with the NtMs we downloaded before departure or if we gotta show updated chart corrections to the PSC inspector in Shanghai, this is a 85,000 GT box boat running APL service."
+    },
+    {
+      "qid": "S-033",
+      "topic": "required_pubs",
+      "domain": "nav",
+      "vessel_code": "V1",
+      "query": "Just got relieved as nav officer on a containership and the charts in the folio room are a mess \u2014 some paper, some ENC, corrections look months behind \u2014 what publications do we absolutely have to keep current and corrected for an oceangoing vessel this size before the USCG comes aboard in LA?"
+    },
+    {
+      "qid": "S-034",
+      "topic": "hra_transit",
+      "domain": "security",
+      "vessel_code": "V1",
+      "query": "We're running down through the Gulf of Aden next week on our way to Jeddah, 76,000 GT box boat, and the old man wants to know what security measures we're supposed to have locked in before we even enter the high risk area \u2014 razor wire, watchstanders, fire hoses, all of it \u2014 what's actually required versus just best practice?"
+    },
+    {
+      "qid": "S-035",
+      "topic": "hra_transit",
+      "domain": "security",
+      "vessel_code": "V1",
+      "query": "Got a containership transit coming up, Suez bound, and our SSO is asking me what the company security plan needs to spell out specifically for piracy waters \u2014 like do we need to formally declare an increased MARSEC level onboard or file something with flag state before we enter the corridor?"
+    },
+    {
+      "qid": "S-036",
+      "topic": "hra_transit",
+      "domain": "security",
+      "vessel_code": "V1",
+      "query": "Just came off watch, we're about 18 hours out from the HRA, and the second mate is asking whether our SSAS needs to be tested and logged before entry or if the last quarterly test covers us \u2014 also does the bridge team need a separate piracy muster drill on record before we hit the Gulf of Aden?"
+    },
+    {
+      "qid": "S-037",
+      "topic": "fire_drill_schedule",
+      "domain": "fire",
+      "vessel_code": "V1",
+      "query": "How often are we supposed to be running fire and boat drills on a big box boat like ours \u2014 we're international trade, pushing 80,000 tons, and the old man wants to know if monthly is still the requirement or if it's tightened up since SOLAS got revised."
+    },
+    {
+      "qid": "S-038",
+      "topic": "fire_drill_schedule",
+      "domain": "fire",
+      "vessel_code": "V1",
+      "query": "Got a new OS who's never done an abandon ship muster on anything bigger than a coastal ferry \u2014 on a containership this size doing transpacific runs, what's the actual drill frequency he needs to hit before he's considered trained up, and does each drill have to cover the full lifeboat lowering or can we mix it up?"
+    },
+    {
+      "qid": "S-039",
+      "topic": "fire_drill_schedule",
+      "domain": "fire",
+      "vessel_code": "V1",
+      "query": "We just turned over half the deck crew in Busan and I'm trying to sort out the drill schedule before we clear port \u2014 large container vessel, international voyage, what's the minimum fire drill and abandon ship drill cadence I need to be running to stay legit with flag state?"
+    },
+    {
+      "qid": "S-040",
+      "topic": "port_arrival_docs",
+      "domain": "port",
+      "vessel_code": "V1",
+      "query": "We're inbound Rotterdam to Newark, big box ship, about 96 hours out \u2014 when exactly do we need to have our NOA submitted to the NRC and what catches people out on the deep-draft vessel fields?"
+    },
+    {
+      "qid": "S-041",
+      "topic": "port_arrival_docs",
+      "domain": "port",
+      "vessel_code": "V1",
+      "query": "Running a 78,000 GT containership and our port captain's asking if NOAD applies every single port call or just the first one of the voyage \u2014 old man wants a straight answer before we hit Savannah."
+    },
+    {
+      "qid": "S-042",
+      "topic": "port_arrival_docs",
+      "domain": "port",
+      "vessel_code": "V1",
+      "query": "PSC boarding expected when we tie up in Baltimore tomorrow and the chief mate's sweating the document package \u2014 what's the actual checklist they're gonna want to see for a large foreign-flag container vessel, ISPS stuff, SMC, everything?"
+    },
+    {
+      "qid": "S-043",
+      "topic": "mate_advancement",
+      "domain": "credentialing",
+      "vessel_code": "V1",
+      "query": "Got my AB Special endorsement and about four years deep-water time on container runs out of Long Beach, mostly Pacific trades on ships north of 80,000 GT \u2014 what sea time do I actually need to sit for a third mate unlimited ticket and is my time on foreign-flag vessels going to count?"
+    },
+    {
+      "qid": "S-044",
+      "topic": "mate_advancement",
+      "domain": "credentialing",
+      "vessel_code": "V1",
+      "query": "Bosun told me I should be looking at upgrading to mate soon, I'm sitting on 36 months AB time all on containerships doing Asia-Europe, but half of it's on a Liberian-flagged boat \u2014 does the old man's sea service letter from a foreign vessel hold the same weight as domestic time when NMC is counting days toward third mate?"
+    },
+    {
+      "qid": "S-045",
+      "topic": "mate_advancement",
+      "domain": "credentialing",
+      "vessel_code": "V1",
+      "query": "Running into something weird at the union hall \u2014 I've got my unlimited mate third and I'm trying to figure out how much more time I need to move up to chief mate on these big box ships, 'cause I keep hearing different numbers about whether your watchkeeping days count the same as time actually serving as third or second mate when you're going for the upgrade."
+    },
+    {
+      "qid": "S-046",
+      "topic": "hazmat_response",
+      "domain": "hazmat",
+      "vessel_code": "V1",
+      "query": "We got a drum of isocyanate that cracked open in bay 14 during heavy weather, fumes spreading fast \u2014 how do I pull the right ERG guide for this stuff and what's the first thing my team needs to do before we even think about containment?"
+    },
+    {
+      "qid": "S-047",
+      "topic": "hazmat_response",
+      "domain": "hazmat",
+      "vessel_code": "V1",
+      "query": "Chief mate here on a big box ship, we're carrying a mixed load including some class 6 poison inhalation hazard and something's leaking two decks below \u2014 bosun says it smells like ammonia but we're not sure of the exact UN number yet, how do we find the right emergency guide when we're not 100% certain what we're dealing with?"
+    },
+    {
+      "qid": "S-048",
+      "topic": "hazmat_response",
+      "domain": "hazmat",
+      "vessel_code": "V1",
+      "query": "Spill in the cargo hold, some kind of corrosive liquid, manifests says UN 1830 sulfuric acid, old man wants me to tell him exactly what the ERG says we should be doing right now for a ship this size out here in the middle of the Pacific with no port nearby \u2014 where do I look and what actions does that guide actually tell us to take first?"
+    },
+    {
+      "qid": "S-049",
+      "topic": "extinguisher_inspection",
+      "domain": "fire",
+      "vessel_code": "V1",
+      "query": "Chief mate wants to know how often we're supposed to be physically checking the portables \u2014 we've got like 200 of them spread across the ship and half the crew thinks it's monthly, half thinks it's weekly, who's right for a vessel our size running international?"
+    },
+    {
+      "qid": "S-050",
+      "topic": "extinguisher_inspection",
+      "domain": "fire",
+      "vessel_code": "V1",
+      "query": "Heard there's been some kind of recall on dry chem extinguishers, Amerex or one of those brands, anyone know if that affects what we carry and do we have to pull them from service while we're still mid-voyage or can it wait till next port?"
+    },
+    {
+      "qid": "S-051",
+      "topic": "extinguisher_inspection",
+      "domain": "fire",
+      "vessel_code": "V1",
+      "query": "Our port captain is riding us about the portable extinguisher logs before we hit Rotterdam and I need to know what the actual inspection interval is supposed to be on a big box boat \u2014 are we talking every week somebody signs off on these things or is there a different schedule for the fixed-mount ones versus the ones in the accommodations?"
+    },
+    {
+      "qid": "S-052",
+      "topic": "military_service",
+      "domain": "credentialing",
+      "vessel_code": "V1",
+      "query": "Got out of the Navy six years ago as a BM1, did four years on destroyers plus two on a Ticonderoga-class cruiser \u2014 how much of that counts when I'm trying to build up sea time for an AB or mate's ticket, and what paperwork do I need to pull together to prove it?"
+    },
+    {
+      "qid": "S-053",
+      "topic": "military_service",
+      "domain": "credentialing",
+      "vessel_code": "V1",
+      "query": "My old man says my four years active duty Coast Guard should fast-track me to an OUPV or even a 500-ton license but the recruiter at the union hall told me something different \u2014 who's right and what do I actually bring to the NMC to get credit for that service on a big box ship run?"
+    },
+    {
+      "qid": "S-054",
+      "topic": "military_service",
+      "domain": "credentialing",
+      "vessel_code": "V1",
+      "query": "Trying to get my MMC sorted before I sign articles on a 80,000-ton containership out of Long Beach \u2014 did eight years Navy as a Machinist's Mate, got my DD-214 but not sure if I need anything else like a letter from my command or official training records to show the time counts toward an engineer license."
+    },
+    {
+      "qid": "S-055",
+      "topic": "mmc_renewal",
+      "domain": "credentialing",
+      "vessel_code": "V1",
+      "query": "My Z-card's coming up in a couple months and the old man's already on my case about it \u2014 do I need the full medical done again or just the STCW physical, and how far out can I submit the renewal before it actually expires?"
+    },
+    {
+      "qid": "S-056",
+      "topic": "mmc_renewal",
+      "domain": "credentialing",
+      "vessel_code": "V1",
+      "query": "Got an AB on my containership running Asia-Pacific who let his credential lapse about six weeks ago, wasn't paying attention \u2014 is he totally cooked or is there some grace period where CG still lets him sail while the renewal's processing?"
+    },
+    {
+      "qid": "S-057",
+      "topic": "mmc_renewal",
+      "domain": "credentialing",
+      "vessel_code": "V1",
+      "query": "Heard through the union hall that they changed something about how long your CG-719K physical is good for before you can't use it on a renewal application anymore \u2014 anybody know if that's still 12 months or did it go to something different?"
+    },
+    {
+      "qid": "S-058",
+      "topic": "psc_inspection",
+      "domain": "port",
+      "vessel_code": "V1",
+      "query": "PSC guy just boarded in Rotterdam, old man's tied up with the pilot \u2014 what papers does he usually want to see first on a box boat our size, and what's he most likely to write us up for?"
+    },
+    {
+      "qid": "S-059",
+      "topic": "psc_inspection",
+      "domain": "port",
+      "vessel_code": "V1",
+      "query": "Got a Paris MOU inspector coming aboard in Hamburg tomorrow morning, 75k GT containership, been a long passage and I know the crew certs and the SMS binder are gonna get scrutinized \u2014 anyone know what the usual gotchas are so we can do a quick sweep tonight?"
+    },
+    {
+      "qid": "S-060",
+      "topic": "psc_inspection",
+      "domain": "port",
+      "vessel_code": "V1",
+      "query": "We just got detained in Felixstowe last rotation over some ISM nonsense and the old man wants everyone sharp \u2014 what documents does the PSC inspector typically pull when he comes up the gangway on a large container vessel and where do most ships our size end up getting dinged?"
+    },
+    {
+      "qid": "S-061",
+      "topic": "vgm_compliance",
+      "domain": "hazmat",
+      "vessel_code": "V1",
+      "query": "We're loading out of Savannah next tide and the terminal just handed me a stack of VGM declarations \u2014 half of them are from shippers using Method 2 and I'm not sure if their accredited verifier stamps are legit, can I actually sail without getting the port state on my back if I accept these as-is?"
+    },
+    {
+      "qid": "S-062",
+      "topic": "vgm_compliance",
+      "domain": "hazmat",
+      "vessel_code": "V1",
+      "query": "Got a reefer box coming aboard at Rotterdam, shipper says the VGM is on the bill of lading but my mate can't find any separate verified gross mass document and the old man wants to know if the BL entry counts or if we're holding that container on the dock."
+    },
+    {
+      "qid": "S-063",
+      "topic": "vgm_compliance",
+      "domain": "hazmat",
+      "vessel_code": "V1",
+      "query": "We're a 78,000 GT containership running Asia-Europe and I've got a freight forwarder telling me their customer weighed the stuffed container on a certified scale but the paperwork just says \"estimated\" \u2014 what's the actual cutoff for when I can refuse to load that box and what's my exposure if I sail with it anyway?"
+    },
+    {
+      "qid": "S-064",
+      "topic": "lifeboat_lowering",
+      "domain": "lsa",
+      "vessel_code": "V1",
+      "query": "We're a big box boat, 80k GT, doing Asia-Europe runs \u2014 how often does the crew actually have to lower the lifeboats to the embarkation deck, and is there a different interval for the full water-lowering drill?"
+    },
+    {
+      "qid": "S-065",
+      "topic": "lifeboat_lowering",
+      "domain": "lsa",
+      "vessel_code": "V1",
+      "query": "Chief mate wants me to log the lifeboat lowering inspections but I'm fuzzy on whether \"lowering to embarkation level\" and actually putting her in the water are on the same schedule or separate \u2014 this is a container vessel international trade, way over 500 GT."
+    },
+    {
+      "qid": "S-066",
+      "topic": "lifeboat_lowering",
+      "domain": "lsa",
+      "vessel_code": "V1",
+      "query": "On our last port state in Rotterdam they dinged us on lifeboat drill intervals \u2014 we're 75,000-plus GT containership, deep sea \u2014 what's the actual required frequency for lowering the boats to embarkation deck versus when you gotta wet-launch them?"
+    },
+    {
+      "qid": "S-067",
+      "topic": "toar_towing",
+      "domain": "credentialing",
+      "vessel_code": "V5",
+      "query": "Mydeckhand's been running the face wires and working the sticks for about eight months now on our inland tow pushing up the Mississippi \u2014 when does he actually need to start logging his TOAR tasks and who signs off on each item, is that the old man or does it have to be a licensed mate?"
+    },
+    {
+      "qid": "S-068",
+      "topic": "toar_towing",
+      "domain": "credentialing",
+      "vessel_code": "V5",
+      "query": "Got a guy trying to get his apprentice mate of towing ticket and we're on a SubM boat out of Memphis, 198 gross tons \u2014 does he need a certain number of towing hours before we can even open up the TOAR, or can we start checking boxes from day one?"
+    },
+    {
+      "qid": "S-069",
+      "topic": "toar_towing",
+      "domain": "credentialing",
+      "vessel_code": "V5",
+      "query": "We're pushing a double cut of loaded tank barges northbound out of Baton Rouge and my OS wants to move up \u2014 what's the deal with the TOAR, does every single maneuver have to be witnessed underway in actual towing conditions or can some of that be done tied off to the fleet?"
+    },
+    {
+      "qid": "S-070",
+      "topic": "river_conditions",
+      "domain": "port",
+      "vessel_code": "V5",
+      "query": "Got a call from dispatch saying the Ohio's running high near Cairo \u2014 how do I find out if there's an actual restriction posted or if they're just covering their ass, and who do I contact at the district to get the real story?"
+    },
+    {
+      "qid": "S-071",
+      "topic": "river_conditions",
+      "domain": "port",
+      "vessel_code": "V5",
+      "query": "We're pushing a double-wide rake up the lower Mississippi and my old man wants the latest on pool stages and whether Memphis is gonna let us through under the bridges at current water \u2014 where do I pull that MSIB or notice, and is it district eight I'm looking at?"
+    },
+    {
+      "qid": "S-072",
+      "topic": "river_conditions",
+      "domain": "port",
+      "vessel_code": "V5",
+      "query": "River's been climbing three feet a day and I heard there's a height restriction somewhere between Baton Rouge and New Orleans but my dispatcher's got nothing \u2014 how do I look that up myself and what am I actually looking for, a MSIB or a local notice or what?"
+    },
+    {
+      "qid": "S-073",
+      "topic": "imdg_requirement",
+      "domain": "hazmat",
+      "vessel_code": "V1",
+      "query": "We're loading out of Rotterdam next week, got a mix of Class 1.4 and some Class 8 corrosives in the stack \u2014 does the old man need a hard copy of the IMDG code physically on board or can we run off the shore office's digital subscription when the manifest questions come up at sea?"
+    },
+    {
+      "qid": "S-074",
+      "topic": "imdg_requirement",
+      "domain": "hazmat",
+      "vessel_code": "V1",
+      "query": "Chief mate here on a big box boat, we had a PSC inspector in Busan get real picky about our dangerous goods manifest not matching the placard on one of the reefer units \u2014 who's actually responsible for making sure those class labels on the boxes match what's declared, is that on us or the shipper?"
+    },
+    {
+      "qid": "S-075",
+      "topic": "imdg_requirement",
+      "domain": "hazmat",
+      "vessel_code": "V1",
+      "query": "Got a container coming aboard in Algeciras marked as limited quantity, shipper says no placard required, but my bosun's telling me he's seen these come through before and the CG pulled a vessel over this same cargo last year \u2014 what's the actual deal with limited quantity exemptions for IMDG placarding on a ship our size doing deep sea runs?"
+    },
+    {
+      "qid": "S-076",
+      "topic": "station_bill",
+      "domain": "lsa",
+      "vessel_code": "V1",
+      "query": "We're getting our station bill updated before the Port State Control inspection in Rotterdam \u2014 chief mate wants to make sure we've got everything that's supposed to be on there for a box boat this size, what details are actually required to show up on that thing?"
+    },
+    {
+      "qid": "S-077",
+      "topic": "station_bill",
+      "domain": "lsa",
+      "vessel_code": "V1",
+      "query": "Just came aboard as AB on a big containership running Asia-Europe, they posted me to muster station C but the bill on the back of my cabin door looks different from the one outside the messroom \u2014 should those match and what's the minimum info that's gotta be on both of them?"
+    },
+    {
+      "qid": "S-078",
+      "topic": "station_bill",
+      "domain": "lsa",
+      "vessel_code": "V1",
+      "query": "Old man is breathing down our necks before we sail from Busan, we're 75,000 plus GT fully cellular container vessel, and he wants to know if the muster list has to show liferaft assignments separate from lifeboat stations or if we can just lump it all together on one bill."
+    },
+    {
+      "qid": "S-079",
+      "topic": "medical_cert_ext",
+      "domain": "medical",
+      "vessel_code": "V1",
+      "query": "My medical cert runs out in three weeks and we're looking at another six weeks minimum before I get back to a US port \u2014 chief mate on a 85,000 GT box boat, what's my options for getting an extension so I don't end up sailing out of compliance?"
+    },
+    {
+      "qid": "S-080",
+      "topic": "medical_cert_ext",
+      "domain": "medical",
+      "vessel_code": "V1",
+      "query": "Got an AB whose CG-719K expired while we were mid-Pacific, old man wants to know if there's some kind of grace period or emergency extension he can get sorted through the company without pulling into port early, we're on a Asia-USWC run."
+    },
+    {
+      "qid": "S-081",
+      "topic": "medical_cert_ext",
+      "domain": "medical",
+      "vessel_code": "V1",
+      "query": "Sailing as bosun on a big containership, been at sea four months straight, my medical book lapsed about ten days ago \u2014 port health officer in Rotterdam flagged it last call but let us go, will I actually get pulled off in Singapore or is there a way to get a temporary certificate sorted through the flag state while we're still underway?"
+    },
+    {
+      "qid": "S-082",
+      "topic": "mlc_compliance",
+      "domain": "labor",
+      "vessel_code": "V1",
+      "query": "Got a AB on my watch who's been running 14-hour days for the past week covering for a guy who went ashore sick in Rotterdam \u2014 port state control boarding tomorrow in Felixstowe and I'm sweating his rest hour logbook, what's the minimum rest he's supposed to show and can they pull his ticket if the hours are cooked?"
+    },
+    {
+      "qid": "S-083",
+      "topic": "mlc_compliance",
+      "domain": "labor",
+      "vessel_code": "V1",
+      "query": "We're a 78,000 GT container ship running Asia-Europe and my old man wants me to figure out if we can legally keep the crew on standby during cargo ops in Hamburg without it counting against their off-watch rest \u2014 these guys have already been at it since 0400 and it's now nearly midnight, does standby time eat into their mandatory rest?"
+    },
+    {
+      "qid": "S-084",
+      "topic": "mlc_compliance",
+      "domain": "labor",
+      "vessel_code": "V1",
+      "query": "Chief mate told me our OS is owed back pay from last port because the company shorted his overtime on the MLC wage sheet \u2014 we're flagged Marshall Islands and heading into Southampton next, can the port state inspectors there actually chase the company for that money on the sailor's behalf or does he have to sort it himself through the union?"
+    },
+    {
+      "qid": "S-085",
+      "topic": "liferaft_service",
+      "domain": "lsa",
+      "vessel_code": "V1",
+      "query": "Our chief mate is telling me the liferaft certificates are coming due next port call in Rotterdam and wants to know if any certified service station there can do the inspection or does it have to be the manufacturer's own shop to keep us compliant on an international run?"
+    },
+    {
+      "qid": "S-086",
+      "topic": "liferaft_service",
+      "domain": "lsa",
+      "vessel_code": "V1",
+      "query": "Got a big box boat, 75k-plus GT, and the old man is asking me whether we can get our rafts re-certified at a yard in Singapore that ain't on the original manufacturer's approved list \u2014 port state's been cracking down and nobody wants a deficiency on this one."
+    },
+    {
+      "qid": "S-087",
+      "topic": "liferaft_service",
+      "domain": "lsa",
+      "vessel_code": "V1",
+      "query": "We're coming into Busan with three liferafts whose annual service stickers are gonna be expired by the time we sail out \u2014 what exactly needs to be on that certificate when the service station hands it back to us, and who's authorized to sign off on it for a vessel our size running international voyages?"
+    },
+    {
+      "qid": "S-088",
+      "topic": "disqualifying_conditions",
+      "domain": "medical",
+      "vessel_code": "V0",
+      "query": "Got a buddy who just got diagnosed with Type 2 diabetes and he's scared he's gonna lose his MMC \u2014 what's the deal, is that an automatic disqualifier or can he get some kind of waiver to keep sailing?"
+    },
+    {
+      "qid": "S-089",
+      "topic": "disqualifying_conditions",
+      "domain": "medical",
+      "vessel_code": "V0",
+      "query": "My old man had a heart attack eight months ago, got a stent put in, says he's feeling fine and wants to come back as master on our tug \u2014 is that even possible or is cardiac history a hard no for the USCG medical?"
+    },
+    {
+      "qid": "S-090",
+      "topic": "disqualifying_conditions",
+      "domain": "medical",
+      "vessel_code": "V0",
+      "query": "Trying to figure out if insulin-dependent diabetics can hold a merchant mariner credential at all because I've heard different things from different people at the union hall and nobody seems to know the actual answer."
+    }
+  ]
+}
