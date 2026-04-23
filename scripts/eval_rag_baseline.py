@@ -366,6 +366,42 @@ QUESTIONS: list[TestQuestion] = [
         ],
         wrong_sub=[],
     ),
+    # ── Sprint D5.1 regression — 46 USC (Subtitle II) ingest canaries
+    TestQuestion(
+        qid="U-1",
+        query="What does 46 USC Chapter 111 require regarding slop chests on US vessels?",
+        vessels=["V1"],
+        expected=[
+            r"46 USC 1110[1-9]",
+            r"46 USC Chapter 111",
+            r"slop chest",
+        ],
+        wrong_sub=[],
+    ),
+    TestQuestion(
+        qid="U-2",
+        query="Under US law, what are the requirements for issuing shipping articles on a foreign voyage?",
+        vessels=["V1"],
+        expected=[
+            r"46 USC 103\d\d",
+            r"46 USC Chapter 103",
+            r"shipping articles",
+            r"foreign voyage",
+        ],
+        wrong_sub=[],
+    ),
+    TestQuestion(
+        qid="U-3",
+        query="When can a seaman lawfully be discharged from their vessel under US law?",
+        vessels=["V1"],
+        expected=[
+            r"46 USC 10[3-5]\d\d",
+            r"discharge",
+            r"seaman",
+        ],
+        wrong_sub=[],
+    ),
+
     TestQuestion(
         qid="X4",
         query="Is NFPA 1981 required on my vessel?",

@@ -38,6 +38,7 @@ _SOURCE_TO_TIER: dict[str, int] = {
     "cfr_33": 1,
     "cfr_46": 1,
     "cfr_49": 1,
+    "usc_46": 1,
     "solas": 1,
     "solas_supplement": 1,
     "colregs": 1,

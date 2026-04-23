@@ -94,6 +94,15 @@ _PDF_SOURCE_CONFIG: dict[str, dict] = {
         "ids_file_default": _DATA_RAW / "uscg_bulletins" / "wayback_ids.txt",
         "adapter": "ingest.sources.uscg_bulletin",
     },
+    "usc_46": {
+        # Sprint D5.1 — 46 USC Subtitle II only. Source file is the USLM
+        # XML from the House release-point zip (see sources/usc_46.py
+        # docstring). Uses the single-file dispatch path — the "pdf" key
+        # name is the CLI's generic single-file handle; the adapter's
+        # parse_source() knows this is XML.
+        "pdf":     _DATA_RAW / "usc_46" / "usc46.xml",
+        "adapter": "ingest.sources.usc_46",
+    },
 }
 
 _DATA_FAILED = Path(__file__).resolve().parents[3] / "data" / "failed"
