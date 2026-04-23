@@ -48,8 +48,21 @@ HEDGE_PATTERNS: list[str] = [
     r"outside (?:the scope of|my|the retrieved)",
     r"not available in\s+(?:my|the|this)",
 
-    # "context does not/doesn't contain/include/cover/address"
+    # "context does not/doesn't contain/include/cover/address" — with up
+    # to 80 chars allowed between "context" and the verb ("context provided
+    # for this query does not contain" style).
+    r"(?:context|corpus|knowledge base)\s+[^.]{0,80}(?:does not|doesn'?t)\s+(?:contain|include|cover|address)",
     r"context (?:does not|doesn'?t) (?:contain|include|cover|address)",
+    # "cannot cite specifics" / "cannot provide specific" variants
+    r"cannot cite specific",
+    r"cannot provide specific",
+    r"cannot give (?:you )?specific",
+    # "none of these (speak to|cover|address)" — admission that retrieved
+    # sources don't answer the question
+    r"none of these\s+(?:speak to|cover|address|apply)",
+    # "retrieved context covers only X" — explicit narrow-scope admission
+    r"retrieved context covers only",
+    r"retrieved context (?:does not|doesn'?t|only|is limited|contains only)",
 
     # Specific-section escape phrases
     r"no specific[^.]{0,40}(?:regulation|section|citation|guidance)",
