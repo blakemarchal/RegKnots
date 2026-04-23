@@ -42,6 +42,9 @@ _EMBED_MODEL = "text-embedding-3-small"
 # together. Each group fetches its own top-N independently in Phase 1.
 SOURCE_GROUPS: dict[str, tuple[str, ...]] = {
     "cfr": ("cfr_33", "cfr_46", "cfr_49"),
+    # 46 USC (statute) gets its own group so it isn't crowded out by the
+    # much larger CFR corpus during per-group diversification. Sprint D5.1.
+    "usc": ("usc_46",),
     "colregs": ("colregs",),
     "solas": ("solas", "solas_supplement"),
     "nvic": ("nvic",),
