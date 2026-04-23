@@ -402,6 +402,32 @@ QUESTIONS: list[TestQuestion] = [
         wrong_sub=[],
     ),
 
+    # ── Sprint D5.4 regression — WHO IHR 2005 ingest canaries
+    TestQuestion(
+        qid="W-1",
+        query="What is a Ship Sanitation Control Certificate and when does it need to be renewed?",
+        vessels=["V1"],
+        expected=[
+            r"WHO IHR",
+            r"Annex 3",
+            r"Ship Sanitation",
+            r"six months|6 months",
+        ],
+        wrong_sub=[],
+    ),
+    TestQuestion(
+        qid="W-2",
+        query="Under WHO IHR, what health measures can a port apply to a ship on arrival?",
+        vessels=["V1"],
+        expected=[
+            r"WHO IHR",
+            r"Article 2[38]",
+            r"health measure",
+            r"points of entry",
+        ],
+        wrong_sub=[],
+    ),
+
     TestQuestion(
         qid="X4",
         query="Is NFPA 1981 required on my vessel?",

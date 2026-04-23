@@ -54,6 +54,12 @@ _SOURCE_TO_TIER: dict[str, int] = {
     "uscg_bulletin": 3,
     # Tier 4 — domain reference standard
     "erg": 4,
+    # WHO IHR 2005 is an international treaty adopted by the World Health
+    # Assembly and binding on member states. Tier 1 for port-health
+    # questions; the Secretary of HHS implements domestically via
+    # 42 CFR 71 (not in corpus — WHO IHR is the authoritative source
+    # users should cite for ship sanitation certificates and port health).
+    "who_ihr": 1,
 }
 
 _TIER_LABEL: dict[int, str] = {

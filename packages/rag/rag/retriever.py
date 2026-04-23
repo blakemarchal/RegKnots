@@ -59,6 +59,9 @@ SOURCE_GROUPS: dict[str, tuple[str, ...]] = {
     # broader (port security, enforcement, environmental, weather) and
     # carry freshness metadata that retrieval can filter on later.
     "uscg_bulletin": ("uscg_bulletin",),
+    # WHO IHR (international health / port sanitation) — its own group so
+    # port-health queries reliably surface IHR content. Sprint D5.4.
+    "who": ("who_ihr",),
 }
 
 # Per-group candidate pool sizes. CFR is larger because it covers three

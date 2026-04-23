@@ -8,6 +8,13 @@
 
 ## Recent sprints (reverse chronological)
 
+### Sprint D5.1 — 46 USC Subtitle II ingest (2026-04-23)
+Ingested US Code Title 46 Subtitle II (Vessels and Seamen) — 399 non-repealed sections, 511 chunks — to directly address Karynn's 2026-04-22 labor-cluster hedges (foreign articles, slop chest, crew sign-on, wages). Adapter parses USLM XML from the House release-point zip (current through Pub. L. 119-84). Added `usc_46` to authority.py as Tier 1 (binding statute) and to retriever.py as its own SOURCE_GROUP (prevents crowding by the much larger CFR corpus in per-group diversification).
+
+Results: eval 150 runs, A-or-A− **95.3% → 98.7%**, F count **7 → 2**. Sailor-speak subset hit **100% A-or-A−** for the first time. Sailor-speak `labor` domain hedge rate **66.7% → 33.3%** (target achieved). Other major improvements: security 66.7% → 0%, port 55.6% → 22.2%, hazmat 44.4% → 22.2%, nav 33.3% → 11.1%. Minor regression on credentialing (26.7% → 40.0%) — USC Chapter 71 now competes for retrieval attention with 46 CFR Parts 10-12; worth one session of retrieval tuning when time allows. All three new USC canary questions (U-1 slop chest, U-2 articles, U-3 discharge) grade A.
+
+**D5.2 (BMP5) and D5.3 (USCG Marine Safety Manual) blocked on source acquisition** — BMP5 PDFs 404/403 across all known URLs (likely retired in favor of the 2025 Global Counter Piracy Guidance, which we haven't located publicly yet); USCG MSM is behind Akamai anti-bot on dco.uscg.mil. Both need manual download + scp path. Documented in `docs/MORNING_REVIEW_2026-04-23.md` for operator decision.
+
 ### Sprint D3 — authority-tier synthesis with ERG protection (2026-04-22)
 New `packages/rag/rag/authority.py` maps every source to a 4-tier authority scheme (binding statute/treaty → federal interpretive guidance → operational notice → domain reference standard). The context builder prefixes every retrieved chunk with its tier label, and the system prompt gained three rules: conflict resolution (prefer higher tier when sources truly conflict), applicability (identify which Tier-1 applies when SOLAS vs CFR or different Subchapters could both apply), and explicit **Tier-4 protection** — ERG must not be deprioritized by Tier 1 for hazmat questions because it's the authoritative source within its own subject matter (first-response actions, isolation distances, PPE). Ships with two new regression questions: N-AUTH1 (UN1219 on international voyage — must cite both ERG Guide 129 and 49 CFR HM rules) and N-AUTH2 (fire safety applicability test for international containership). Post-D3 eval: 57/57 A-or-A−, zero ERG regression, both AUTH questions graded A with correct dual-citation and applicability reasoning.
 

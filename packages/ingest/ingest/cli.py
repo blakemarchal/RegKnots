@@ -103,6 +103,13 @@ _PDF_SOURCE_CONFIG: dict[str, dict] = {
         "pdf":     _DATA_RAW / "usc_46" / "usc46.xml",
         "adapter": "ingest.sources.usc_46",
     },
+    "who_ihr": {
+        # Sprint D5.4 — WHO International Health Regulations (2005)
+        # consolidated with 2014/2022/2024 amendments. Covers port
+        # health + Ship Sanitation Control Certificate (Annex 3).
+        "pdf":     _DATA_RAW / "who_health" / "ihr_consolidated.pdf",
+        "adapter": "ingest.sources.who_ihr",
+    },
 }
 
 _DATA_FAILED = Path(__file__).resolve().parents[3] / "data" / "failed"
