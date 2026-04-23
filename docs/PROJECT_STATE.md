@@ -20,7 +20,7 @@ RegKnot is a maritime-compliance RAG at **https://regknots.com**. Production sta
 - **Services:** `regknots-api`, `regknots-web`, `regknots-worker` — all systemd, all active
 - **DB:** `docker exec regknots-postgres psql -U regknots -d regknots`
 
-## Corpus — 15 sources (~42,000 chunks)
+## Corpus — 17 sources (~42,700 chunks)
 
 | Source | Type | Chunks (approx.) | Freshness |
 |---|---|---|---|
@@ -39,6 +39,8 @@ RegKnot is a maritime-compliance RAG at **https://regknots.com**. Production sta
 | `nmc_policy` | NMC policy letters + crediting guidance | 127 | Manual |
 | `nmc_checklist` | MMC application/renewal checklists | 33 | Manual |
 | `uscg_bulletin` | USCG GovDelivery (MSIBs, NMC announcements, ALCOASTs) | 2,232 | **Backfill only 2023-04 → 2026-04**; live feed pending |
+| **`usc_46`** | **46 USC Subtitle II — US Code, Vessels & Seamen (statute)** | **511** | **Quarterly GovInfo USLM release-point check (Sprint D5.1)** |
+| **`who_ihr`** | **WHO International Health Regulations (2005) + amendments** | **163** | **On WHO consolidated-edition republish (Sprint D5.4)** |
 
 ## RAG pipeline — current architecture
 
