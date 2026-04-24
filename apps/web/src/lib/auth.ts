@@ -50,6 +50,9 @@ export interface BillingStatus {
   monthly_messages_used: number
   monthly_messages_remaining: number | null
   cycle_resets_at: string | null
+  // Sprint D6.3b — charity-partner referral. Non-null value grants
+  // lifetime promo pricing on upgrade flows.
+  referral_source: string | null
 }
 
 export interface VesselSummary {

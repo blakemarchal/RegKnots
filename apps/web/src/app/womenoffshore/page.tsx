@@ -49,8 +49,18 @@ const PRICING = {
 } as const
 
 const ANNUAL_DESCRIPTORS = {
-  mate_annual:    { label: 'Mate (annual)',    sub: '$14.99/mo · billed $179.88/year' },
-  captain_annual: { label: 'Captain (annual)', sub: '$29.99/mo · billed $359.88/year' },
+  mate_annual: {
+    label: 'Mate',
+    monthlyEq: '$14.99',
+    annualTotal: '$179.88',
+    standardMonthly: '$19.99/mo',
+  },
+  captain_annual: {
+    label: 'Captain',
+    monthlyEq: '$29.99',
+    annualTotal: '$359.88',
+    standardMonthly: '$39.99/mo',
+  },
 } as const
 
 export default function WomenOffshorePage() {
@@ -125,8 +135,8 @@ export default function WomenOffshorePage() {
       </nav>
 
       {/* ── Hero ─────────────────────────────────────────────────────────── */}
-      <section className="relative flex flex-col items-center justify-center min-h-[80vh]
-        px-5 text-center pt-24 pb-16 overflow-hidden">
+      <section className="relative flex flex-col items-center justify-center
+        px-5 text-center pt-24 pb-10 md:pb-14 overflow-hidden">
 
         <div className="absolute inset-0 pointer-events-none"
           style={{
@@ -155,20 +165,20 @@ export default function WomenOffshorePage() {
             Built by mariners.<br/>
             <span className="text-[#2dd4bf]">Backed by community.</span>
           </h1>
-          <p className="font-mono text-base md:text-lg text-[#6b7594] max-w-xl mx-auto leading-relaxed mb-8">
-            RegKnot is a maritime compliance co-pilot built by a containership Master and her engineer
-            brother. Every subscription that starts on this page sends 10% directly to{' '}
+          <p className="font-mono text-base md:text-lg text-[#6b7594] max-w-xl mx-auto leading-relaxed mb-6">
+            RegKnot is co-founded by Karynn Marchal (Master Unlimited, active containership Captain)
+            and her brother Blake (CTO and engineer) — maritime expertise and engineering, under
+            one roof. Every subscription that starts on this page sends 10% directly to{' '}
             <a href="https://womenoffshore.org" target="_blank" rel="noopener noreferrer"
               className="text-[#f0ece4] underline decoration-[#2dd4bf]/40 hover:decoration-[#2dd4bf] transition-colors">
               Women Offshore
             </a>.
-            Use the codeless link below — discount applies automatically.
           </p>
 
-          <div className="inline-flex items-center gap-2 mb-8 px-3 py-2 rounded-lg
+          <div className="inline-flex items-center gap-2 mb-2 px-3 py-2 rounded-lg
             bg-amber-950/30 border border-amber-800/30">
             <span className="font-mono text-xs uppercase tracking-wider text-amber-400">
-              Limited time · 25% off monthly · 10% to Women Offshore
+              Limited time · 25% off monthly
             </span>
           </div>
         </div>
@@ -243,30 +253,58 @@ export default function WomenOffshorePage() {
             })}
           </div>
 
-          {/* Annual fallback row */}
-          <div className="mt-8 grid gap-3 md:grid-cols-2 max-w-3xl mx-auto">
-            {(['mate_annual', 'captain_annual'] as const).map((plan) => {
-              const data = ANNUAL_DESCRIPTORS[plan]
-              const isLoading = loading === plan
-              return (
-                <button
-                  key={plan}
-                  onClick={() => handleSubscribe(plan)}
-                  disabled={!!loading}
-                  className="flex items-center justify-between gap-3 px-4 py-3 rounded-lg
-                    border border-white/8 hover:border-white/20 bg-[#0d1225] transition-colors duration-150
-                    disabled:opacity-50 disabled:cursor-not-allowed text-left"
-                >
-                  <div>
-                    <p className="font-mono text-sm font-bold text-[#f0ece4]">{data.label}</p>
-                    <p className="font-mono text-xs text-[#6b7594] mt-0.5">{data.sub}</p>
-                  </div>
-                  <span className="font-mono text-xs text-[#2dd4bf] uppercase tracking-wider">
-                    {isLoading ? '…' : 'Choose →'}
-                  </span>
-                </button>
-              )
-            })}
+          {/* Annual fallback row — more visual weight than a flat row,
+              less than the primary promo cards. Gives committed users a
+              real choice without distracting from the monthly promo. */}
+          <div className="mt-10">
+            <p className="font-mono text-xs uppercase tracking-widest text-[#6b7594] text-center mb-4">
+              Prefer to commit annually? Lock in the same rate, paid yearly.
+            </p>
+            <div className="grid gap-4 md:grid-cols-2 max-w-3xl mx-auto">
+              {(['mate_annual', 'captain_annual'] as const).map((plan) => {
+                const data = ANNUAL_DESCRIPTORS[plan]
+                const isLoading = loading === plan
+                return (
+                  <button
+                    key={plan}
+                    onClick={() => handleSubscribe(plan)}
+                    disabled={!!loading}
+                    className="group flex flex-col gap-2 rounded-xl px-5 py-4
+                      border border-white/8 hover:border-[#2dd4bf]/40 bg-[#0d1225]
+                      hover:bg-[#111827] transition-colors duration-150
+                      disabled:opacity-50 disabled:cursor-not-allowed text-left"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="font-display text-base font-bold text-[#f0ece4] tracking-wide">
+                          {data.label} · Annual
+                        </p>
+                        <p className="font-mono text-2xl font-bold text-[#f0ece4] mt-1">
+                          {data.monthlyEq}
+                          <span className="font-mono text-xs font-normal text-[#6b7594] ml-1">/mo</span>
+                        </p>
+                        <p className="font-mono text-xs text-[#6b7594] mt-0.5">
+                          Billed {data.annualTotal} / year
+                        </p>
+                      </div>
+                      <span className="font-mono text-[10px] font-bold text-[#2dd4bf] bg-[#2dd4bf]/10
+                        border border-[#2dd4bf]/30 rounded px-2 py-1 uppercase tracking-wider whitespace-nowrap">
+                        Save 25%
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between pt-2 border-t border-white/5 mt-auto">
+                      <span className="font-mono text-xs text-[#6b7594]">
+                        vs {data.standardMonthly} standard
+                      </span>
+                      <span className="font-mono text-xs font-bold text-[#2dd4bf] uppercase tracking-wider
+                        group-hover:translate-x-0.5 transition-transform duration-150">
+                        {isLoading ? '…' : 'Choose →'}
+                      </span>
+                    </div>
+                  </button>
+                )
+              })}
+            </div>
           </div>
         </div>
       </section>
@@ -287,8 +325,8 @@ export default function WomenOffshorePage() {
               Question · COLREGs Rule 13
             </p>
             <p className="font-mono text-sm text-[#f0ece4]/90 leading-relaxed mb-4">
-              \u201cI\u2019m overtaking another vessel at night — what light configuration tells me
-              they\u2019re a power-driven vessel longer than 50 meters underway?\u201d
+              “I’m overtaking another vessel at night — what light configuration tells me
+              they’re a power-driven vessel longer than 50 meters underway?”
             </p>
             <div className="border-t border-white/8 pt-4">
               <p className="font-mono text-xs text-[#6b7594] mb-3 uppercase tracking-wider">
@@ -326,8 +364,8 @@ export default function WomenOffshorePage() {
             Offshore. No middleman, no marketing budget shell game.
           </p>
           <p className="font-mono text-sm text-[#6b7594] leading-relaxed mb-5">
-            RegKnot also partners with maritime charities more broadly — Mercy Ships, Waves of
-            Impact, and Elijah Rising. Read the full giving model on our{' '}
+            RegKnot is building expanding partnerships with maritime-focused charities. Read the
+            full giving model on our{' '}
             <Link href="/giving" className="text-[#2dd4bf] hover:underline">Giving Back page</Link>.
           </p>
           {/* Testimonial placeholder — Karynn or Ally to provide. */}

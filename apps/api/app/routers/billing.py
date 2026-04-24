@@ -95,6 +95,10 @@ class BillingStatus(BaseModel):
     monthly_messages_used: int
     monthly_messages_remaining: int | None
     cycle_resets_at: str | None
+    # Sprint D6.3b — charity-partner referral for lifetime-promo pricing.
+    # If set (e.g. 'womenoffshore'), upgrade flows should surface promo
+    # price IDs rather than standard prices. Null means standard pricing.
+    referral_source: str | None
 
 
 _FREE_MESSAGE_LIMIT = 50
@@ -111,7 +115,7 @@ async def billing_status(
                trial_ends_at, message_count,
                monthly_message_count, message_cycle_started_at,
                cancel_at_period_end, current_period_end, billing_interval,
-               stripe_subscription_id,
+               stripe_subscription_id, referral_source,
                is_admin, is_internal
         FROM users WHERE id = $1
         """,
@@ -203,6 +207,7 @@ async def billing_status(
         monthly_messages_used=monthly_count if monthly_message_cap is not None else 0,
         monthly_messages_remaining=monthly_messages_remaining,
         cycle_resets_at=cycle_resets_at.isoformat() if cycle_resets_at else None,
+        referral_source=row["referral_source"],
     )
 
 

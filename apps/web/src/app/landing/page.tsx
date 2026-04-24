@@ -442,38 +442,53 @@ export default function LandingPage() {
                   Annual
                   <span className="ml-1.5 text-[10px] font-bold uppercase tracking-wider
                     bg-[#2dd4bf]/15 text-[#2dd4bf] px-1.5 py-0.5 rounded">
-                    Save 26%
+                    Save 25%
                   </span>
                 </button>
               </div>
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
             <PricingCard
               name="Free Trial"
               price="$0"
-              priceSub="for 14 days"
+              priceSub="for 7 days"
               features={[
-                '14-day free trial',
+                '7-day free trial',
                 '50 messages during trial',
-                'No credit card required',
+                'Full feature access',
+                'Upgrade or cancel anytime',
               ]}
-              smallPrint="One trial per account. No credit card required to start."
+              smallPrint="No credit card required to start."
               cta="Start Free Trial"
             />
             <PricingCard
-              name="Pro"
-              price={plan === 'monthly' ? '$39' : '$29'}
-              priceSub={plan === 'monthly' ? 'per month' : 'per month, billed $348/year'}
+              name="Mate"
+              price={plan === 'monthly' ? '$19.99' : '$14.99'}
+              priceSub={plan === 'monthly' ? 'per month' : 'per month, billed $179.88/year'}
               features={[
-                'Unlimited questions',
-                'CFR Titles 33, 46 & 49 + COLREGs, NVICs, SOLAS 2024, STCW, ISM Code & ERG',
-                'Vessel profile + history',
-                'Priority regulation updates',
-                'Audit-ready chat logs',
+                '100 messages per month',
+                'CFR 33 / 46 / 49, SOLAS, COLREGs, NVICs, STCW, ISM, ERG',
+                '46 USC + WHO IHR (port health & seamen’s law)',
+                'Vessel profile + chat history',
+                'Cited regulation answers, not summaries',
               ]}
-              cta="Start Free Trial"
+              cta="Subscribe to Mate"
+            />
+            <PricingCard
+              name="Captain"
+              price={plan === 'monthly' ? '$39.99' : '$29.99'}
+              priceSub={plan === 'monthly' ? 'per month' : 'per month, billed $359.88/year'}
+              badge="Most popular"
+              features={[
+                'Unlimited messages',
+                'Everything in Mate',
+                'Priority regulation update notifications',
+                'Audit-ready chat logs',
+                'PSC checklist builder & sea-service letters',
+              ]}
+              cta="Subscribe to Captain"
               featured
             />
           </div>
