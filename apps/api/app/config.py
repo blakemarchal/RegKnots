@@ -33,8 +33,32 @@ class Settings(BaseSettings):
     # Stripe — no REGKNOTS_ prefix in .env
     stripe_secret_key: str = Field(default="", validation_alias="STRIPE_SECRET_KEY")
     stripe_webhook_secret: str = Field(default="", validation_alias="STRIPE_WEBHOOK_SECRET")
+    # Legacy pre-D6.1 single-tier price IDs. Retained for backward compat
+    # with any stale webhook traffic; new checkout flows do not use them.
+    # Safe to unset once D6.1 two-tier pricing is verified live.
     stripe_price_id: str = Field(default="", validation_alias="STRIPE_PRICE_ID")
     stripe_annual_price_id: str = Field(default="", validation_alias="STRIPE_ANNUAL_PRICE_ID")
+    # Sprint D6.1 two-tier pricing — six Stripe price IDs across Mate and
+    # Captain products. See apps/api/app/plans.py for how these map to
+    # subscription_tier + billing_interval + promo flag.
+    stripe_price_mate_monthly: str = Field(
+        default="", validation_alias="STRIPE_PRICE_MATE_MONTHLY"
+    )
+    stripe_price_mate_annual: str = Field(
+        default="", validation_alias="STRIPE_PRICE_MATE_ANNUAL"
+    )
+    stripe_price_mate_promo: str = Field(
+        default="", validation_alias="STRIPE_PRICE_MATE_PROMO"
+    )
+    stripe_price_captain_monthly: str = Field(
+        default="", validation_alias="STRIPE_PRICE_CAPTAIN_MONTHLY"
+    )
+    stripe_price_captain_annual: str = Field(
+        default="", validation_alias="STRIPE_PRICE_CAPTAIN_ANNUAL"
+    )
+    stripe_price_captain_promo: str = Field(
+        default="", validation_alias="STRIPE_PRICE_CAPTAIN_PROMO"
+    )
     app_url: str = "https://regknots.com"
 
     # File uploads

@@ -6,6 +6,12 @@ from datetime import datetime, timezone
 import stripe
 
 from app.config import settings
+from app.plans import (
+    PlanInfo,
+    is_paid_tier,
+    plan_info_from_price_id,
+    resolve_price_for_plan,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -32,12 +38,40 @@ def _get_current_period_end_ts(subscription) -> int | None:
     return None
 
 
+# Sprint D6.1 — accepted `plan` parameter values for create_checkout_session.
+# Legacy "monthly"/"annual" route to Captain tier for backward compat with
+# any pre-D6.1 frontend code paths still in flight.
+_PLAN_TO_LOOKUP: dict[str, tuple[str, str, bool]] = {
+    "mate_monthly":    ("mate", "month", False),
+    "mate_annual":     ("mate", "year",  False),
+    "mate_promo":      ("mate", "month", True),
+    "captain_monthly": ("captain", "month", False),
+    "captain_annual":  ("captain", "year",  False),
+    "captain_promo":   ("captain", "month", True),
+    # Legacy shims
+    "monthly":         ("captain", "month", False),
+    "annual":          ("captain", "year",  False),
+}
+
+
 async def create_checkout_session(
-    user_id: str, email: str, pool, *, plan: str = "monthly",
+    user_id: str,
+    email: str,
+    pool,
+    *,
+    plan: str = "captain_monthly",
+    referral_source: str | None = None,
 ) -> str:
     """Create a Stripe Checkout Session and return the URL.
 
     If the user has no stripe_customer_id yet, one is created and stored.
+
+    Args:
+        plan: One of the keys in _PLAN_TO_LOOKUP. Legacy "monthly"/"annual"
+            values map to Captain tier for backward compat.
+        referral_source: Attribution key from charity landing pages
+            (e.g., "womenoffshore"). Stored on the user record so the
+            admin charity accounting view can track contributions owed.
     """
     _configure()
 
@@ -45,7 +79,11 @@ async def create_checkout_session(
         "SELECT stripe_customer_id, subscription_tier, subscription_status FROM users WHERE id = $1",
         __import__("uuid").UUID(user_id),
     )
-    if row and row["subscription_tier"] == "pro" and row["subscription_status"] == "active":
+    if (
+        row
+        and is_paid_tier(row["subscription_tier"])
+        and row["subscription_status"] == "active"
+    ):
         raise ValueError("User already has an active subscription")
 
     customer_id = row["stripe_customer_id"] if row else None
@@ -59,9 +97,27 @@ async def create_checkout_session(
             __import__("uuid").UUID(user_id),
         )
 
-    price_id = settings.stripe_price_id
-    if plan == "annual" and settings.stripe_annual_price_id:
-        price_id = settings.stripe_annual_price_id
+    # Resolve plan string → Stripe price ID via the single mapping in plans.py.
+    lookup = _PLAN_TO_LOOKUP.get(plan)
+    if not lookup:
+        raise ValueError(f"Unknown plan: {plan!r}")
+    tier, interval, promo = lookup
+    price_id = resolve_price_for_plan(tier, interval, promo=promo)
+    if not price_id:
+        raise ValueError(
+            f"No Stripe price_id configured for plan {plan!r} "
+            f"(tier={tier} interval={interval} promo={promo}). "
+            "Verify the corresponding STRIPE_PRICE_* env var is set."
+        )
+
+    # Persist referral source on the user row BEFORE checkout so it's
+    # available even if the user abandons checkout mid-flow.
+    if referral_source:
+        await pool.execute(
+            "UPDATE users SET referral_source = COALESCE(referral_source, $1) WHERE id = $2",
+            referral_source,
+            __import__("uuid").UUID(user_id),
+        )
 
     session = stripe.checkout.Session.create(
         customer=customer_id,
@@ -69,7 +125,11 @@ async def create_checkout_session(
         line_items=[{"price": price_id, "quantity": 1}],
         success_url=f"{settings.app_url}/subscribe/success?session_id={{CHECKOUT_SESSION_ID}}",
         cancel_url=f"{settings.app_url}/pricing",
-        metadata={"user_id": user_id},
+        metadata={
+            "user_id": user_id,
+            "plan": plan,
+            "referral_source": referral_source or "",
+        },
     )
     return session.url
 
@@ -132,10 +192,36 @@ async def handle_webhook_event(payload: bytes, sig_header: str, pool) -> None:
 async def _on_checkout_completed(session, pool) -> None:
     customer_id = session.customer
     subscription_id = session.subscription
-    logger.info("Checkout completed: customer_id=%s subscription_id=%s", customer_id, subscription_id)
+    logger.info(
+        "Checkout completed: customer_id=%s subscription_id=%s",
+        customer_id, subscription_id,
+    )
     if not customer_id or not subscription_id:
         logger.warning("Checkout missing customer_id or subscription_id, skipping")
         return
+
+    # Resolve which tier this subscription lands in by reading the price
+    # off the Stripe subscription object. Sprint D6.1 — tier is no longer
+    # hardcoded to 'pro'; it's derived from the price_id via plans.py.
+    plan_info: PlanInfo | None = None
+    try:
+        _configure()
+        sub = stripe.Subscription.retrieve(subscription_id)
+        price_id = sub.items.data[0].price.id if sub.items.data else None
+        plan_info = plan_info_from_price_id(price_id)
+    except Exception as exc:
+        logger.warning(
+            "Could not resolve plan_info for subscription %s: %s",
+            subscription_id, exc,
+        )
+
+    tier = plan_info.tier if plan_info else "captain"  # safe default if resolution fails
+    if plan_info is None:
+        logger.warning(
+            "Unmapped price_id on subscription %s — defaulting tier to 'captain'. "
+            "Verify STRIPE_PRICE_* env vars cover every configured price.",
+            subscription_id,
+        )
 
     # Check previous state before updating
     prev = await pool.fetchrow(
@@ -143,30 +229,37 @@ async def _on_checkout_completed(session, pool) -> None:
         customer_id,
     )
     if prev and prev["stripe_subscription_id"] == subscription_id:
-        logger.info("Skipping duplicate checkout.session.completed for customer %s", customer_id)
+        logger.info(
+            "Skipping duplicate checkout.session.completed for customer %s",
+            customer_id,
+        )
         return
 
-    was_already_pro = prev and prev["subscription_tier"] == "pro"
+    was_already_paid = prev and is_paid_tier(prev["subscription_tier"])
 
     row = await pool.fetchrow(
         """
         UPDATE users
-        SET subscription_tier = 'pro',
+        SET subscription_tier = $1,
             subscription_status = 'active',
-            stripe_subscription_id = $1
-        WHERE stripe_customer_id = $2
+            stripe_subscription_id = $2
+        WHERE stripe_customer_id = $3
         RETURNING email, full_name
         """,
+        tier,
         subscription_id,
         customer_id,
     )
     if row:
-        logger.info("Activated pro subscription for customer %s (email=%s)", customer_id, row["email"])
+        logger.info(
+            "Activated %s subscription for customer %s (email=%s)",
+            tier, customer_id, row["email"],
+        )
     else:
         logger.warning("Checkout UPDATE matched no user for customer %s", customer_id)
 
-    # Send subscription confirmed email only if they weren't already pro
-    if row and not was_already_pro:
+    # Send subscription confirmed email only on first activation.
+    if row and not was_already_paid:
         try:
             from app.email import send_subscription_confirmed_email
             await send_subscription_confirmed_email(row["email"], row["full_name"] or "")
@@ -186,39 +279,55 @@ async def _on_subscription_change(subscription, pool) -> None:
         sub_id, customer_id, status, cancel_at_period_end, cancel_at,
     )
 
+    # Sprint D6.1 — resolve tier from the subscription's price_id rather
+    # than hardcoding 'pro'. Falls back to 'captain' if price is unmapped
+    # (safer than silently pinning to 'free' on a genuine unknown).
+    price_id: str | None = None
+    billing_interval: str | None = None
+    try:
+        if subscription.items and subscription.items.data:
+            item = subscription.items.data[0]
+            price_id = item.price.id
+            billing_interval = item.price.recurring.interval  # 'month' | 'year'
+    except Exception:
+        pass
+
+    plan_info = plan_info_from_price_id(price_id)
+    if plan_info is None and price_id:
+        logger.warning(
+            "Unmapped price_id %s on subscription %s — defaulting to captain tier. "
+            "Verify STRIPE_PRICE_* env vars cover every configured price.",
+            price_id, sub_id,
+        )
+    # The tier assigned when status is active/trialing/past_due.
+    resolved_paid_tier = plan_info.tier if plan_info else "captain"
+
     # Detect cancellation pending — two Stripe patterns:
     # 1. cancel_at_period_end=True (standard "cancel at end of billing cycle")
-    # 2. cancel_at is set (scheduled cancellation date, cancel_at_period_end may be False)
+    # 2. cancel_at is set (scheduled cancellation date)
     if status == "active" and (cancel_at_period_end or cancel_at):
-        tier, sub_status = "pro", "canceling"
+        tier, sub_status = resolved_paid_tier, "canceling"
     else:
+        status_to_paid = resolved_paid_tier
         status_map = {
-            "active": ("pro", "active"),
-            "past_due": ("pro", "past_due"),
+            "active": (status_to_paid, "active"),
+            "past_due": (status_to_paid, "past_due"),
             "canceled": ("free", "canceled"),
             "unpaid": ("free", "inactive"),
             "paused": ("free", "paused"),
             "incomplete": ("free", "inactive"),
             "incomplete_expired": ("free", "inactive"),
-            "trialing": ("pro", "active"),
+            "trialing": (status_to_paid, "active"),
         }
         tier, sub_status = status_map.get(status, ("free", "inactive"))
 
-    # Extract billing details for DB persistence.
-    # In Stripe API 2025-03-31+ current_period_end moved from the subscription
-    # onto individual subscription items. Fall back accordingly.
+    # Extract billing period end for DB persistence.
+    # In Stripe API 2025-03-31+ current_period_end moved onto subscription items.
     current_period_end_ts = _get_current_period_end_ts(subscription)
     current_period_end = (
         datetime.fromtimestamp(current_period_end_ts, tz=timezone.utc)
         if current_period_end_ts else None
     )
-
-    billing_interval = None
-    try:
-        if subscription.items and subscription.items.data:
-            billing_interval = subscription.items.data[0].price.recurring.interval
-    except Exception:
-        pass
 
     # Check previous state before updating
     prev = await pool.fetchrow(
@@ -230,7 +339,7 @@ async def _on_subscription_change(subscription, pool) -> None:
             "SELECT subscription_tier, subscription_status FROM users WHERE stripe_customer_id = $1",
             customer_id,
         )
-    was_already_pro = prev and prev["subscription_tier"] == "pro"
+    was_already_paid = prev and is_paid_tier(prev["subscription_tier"])
     prev_status = prev["subscription_status"] if prev else None
 
     # Try lookup by subscription_id first
@@ -302,12 +411,13 @@ async def _on_subscription_change(subscription, pool) -> None:
         except Exception as exc:
             logger.error("Failed to send cancellation email: %s", exc)
 
-    # Send Pro welcome email only on first activation (not already pro)
-    if tier == "pro" and sub_status == "active" and not was_already_pro and row:
+    # Send welcome email only on first activation (not already paid).
+    # Fires for any paid tier — mate, captain, or legacy pro.
+    if is_paid_tier(tier) and sub_status == "active" and not was_already_paid and row:
         try:
             from app.email import send_subscription_confirmed_email
             await send_subscription_confirmed_email(row["email"], row["full_name"] or "")
-            logger.info("Sent Pro welcome email to %s", row["email"])
+            logger.info("Sent %s welcome email to %s", tier, row["email"])
         except Exception as exc:
             logger.error("Failed to send subscription confirmed email: %s", exc)
 
@@ -405,11 +515,13 @@ async def _on_invoice_payment_failed(invoice, pool) -> None:
     if not customer_id:
         return
 
+    # Sprint D6.1 — match any paying tier, not just legacy 'pro'.
     await pool.execute(
         """
         UPDATE users
         SET subscription_status = 'past_due'
-        WHERE stripe_customer_id = $1 AND subscription_tier = 'pro'
+        WHERE stripe_customer_id = $1
+          AND subscription_tier IN ('pro', 'mate', 'captain')
         """,
         customer_id,
     )

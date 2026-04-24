@@ -379,9 +379,27 @@ async def _persist_chat_outcome(
         except Exception:
             logger.exception("Failed to apply vessel update for vessel %s", vessel_id)
 
-    # Increment message count for billing
+    # Increment message counts for billing + Mate cap tracking.
+    # Sprint D6.1 — lifetime `message_count` continues to gate the 50-message
+    # free trial cap (unchanged). `monthly_message_count` is the per-cycle
+    # counter for Mate 100-msg/month enforcement; it resets to 1 (this
+    # message) when the current cycle is ≥30 days old.
+    # Logic runs in a single atomic UPDATE so concurrent messages can't
+    # double-count or race across the reset boundary.
     await pool.execute(
-        "UPDATE users SET message_count = message_count + 1 WHERE id = $1",
+        """
+        UPDATE users
+        SET message_count = message_count + 1,
+            monthly_message_count = CASE
+                WHEN NOW() - message_cycle_started_at >= INTERVAL '30 days' THEN 1
+                ELSE monthly_message_count + 1
+            END,
+            message_cycle_started_at = CASE
+                WHEN NOW() - message_cycle_started_at >= INTERVAL '30 days' THEN NOW()
+                ELSE message_cycle_started_at
+            END
+        WHERE id = $1
+        """,
         user_id,
     )
 
