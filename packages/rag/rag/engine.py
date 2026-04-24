@@ -1326,6 +1326,34 @@ async def chat_with_progress(
     input_tokens += regen_in
     output_tokens += regen_out
 
+    # Sprint D2-LOG (also in chat() above) — detect hedges on the final
+    # answer and log the miss to retrieval_misses. This path is the one
+    # real users hit via SSE streaming; the eval-only chat() path had the
+    # hook but this one was missing it prior to 2026-04-23 analysis.
+    # Fire-and-forget: DB errors never fail the SSE stream.
+    hedge_phrase = detect_hedge(cleaned_answer)
+    if hedge_phrase is not None:
+        try:
+            await _log_retrieval_miss(
+                pool=pool,
+                conversation_id=conversation_id,
+                query=query,
+                vessel_profile=vessel_profile,
+                hedge_phrase=hedge_phrase,
+                model_used=model_used,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                retrieved_chunks=chunks,
+                cited=verified_cited,
+                answer=cleaned_answer,
+            )
+        except Exception as exc:
+            logger.warning(
+                "retrieval_miss log failed (non-fatal): %s: %s",
+                type(exc).__name__,
+                str(exc)[:200],
+            )
+
     # Stage 6: Final event with the complete response
     yield {
         "event": "done",
