@@ -17,7 +17,14 @@ router = APIRouter(prefix="/billing", tags=["billing"])
 
 
 class CheckoutRequest(BaseModel):
-    plan: str = "monthly"
+    # Sprint D6.3 — accepted plan keys: mate_monthly, mate_annual,
+    # mate_promo, captain_monthly, captain_annual, captain_promo. Legacy
+    # values "monthly"/"annual" still accepted (mapped to Captain).
+    plan: str = "captain_monthly"
+    # Charity attribution — set when the user came in via a charity
+    # landing page (e.g., /womenoffshore). Persisted on the user record
+    # so the admin charity accounting view can attribute their MRR.
+    referral_source: str | None = None
 
 
 class CheckoutResponse(BaseModel):
@@ -35,10 +42,14 @@ async def create_checkout(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Payment system not configured",
         )
-    plan = body.plan if body else "monthly"
+    plan = body.plan if body else "captain_monthly"
+    referral_source = body.referral_source if body else None
     pool = await get_pool()
     try:
-        url = await create_checkout_session(user.user_id, user.email, pool, plan=plan)
+        url = await create_checkout_session(
+            user.user_id, user.email, pool,
+            plan=plan, referral_source=referral_source,
+        )
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,

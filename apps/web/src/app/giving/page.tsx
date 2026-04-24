@@ -32,6 +32,14 @@ const CHARITIES = [
     url: 'https://elijahrising.org/',
     linkText: 'Visit elijahrising.org',
   },
+  {
+    name: 'Women Offshore',
+    tag: 'Maritime \u00b7 Mentorship',
+    description:
+      'Women Offshore is a community and educational nonprofit supporting women working on, above, and below the water \u2014 through mentorship programs, scholarships, and the Women Offshore Foundation. Subscriptions that originate from our /womenoffshore landing page send 10% directly to them, every month.',
+    url: 'https://womenoffshore.org/',
+    linkText: 'Visit womenoffshore.org',
+  },
 ]
 
 function CharitySuggestionSection() {
