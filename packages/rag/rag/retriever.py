@@ -71,6 +71,15 @@ _CANDIDATES_PER_GROUP: dict[str, int] = {
 }
 _DEFAULT_CANDIDATES_PER_GROUP = 6
 
+# Sprint D5.5 — maximum chunks retained per section_number during
+# deduplication. Previously 1 (strict); now 2 so multi-chunk sections
+# (e.g. 46 CFR 199.175 has 11 chunks — intro rules in chunk 0, specific
+# equipment in chunks 1-8, Table 1 with quantity counts in chunks 9-10)
+# can surface both a scene-setter and a specific-answer chunk in the
+# same retrieval. The alternative (top-1) suppresses Table-1 style
+# content behind chunk-0 intros that score higher on vector similarity.
+_MAX_CHUNKS_PER_SECTION = 2
+
 # Reverse index: source_code → group_name. Built once at module load.
 _SOURCE_TO_GROUP: dict[str, str] = {
     src: group_name
@@ -611,19 +620,29 @@ async def retrieve(
             fetch_limit,
             sources,
         )
-        # Deduplicate by section_number (keep highest similarity)
+        # Deduplicate by section_number — keep top _MAX_CHUNKS_PER_SECTION
+        # chunks per section. Sprint D5.5: was "top 1" which suppressed
+        # multi-chunk sections' specific-answer chunks behind their intro
+        # chunks (see retriever.py header comment near _MAX_CHUNKS_PER_SECTION).
         candidates = []
-        seen_sections: dict[str, int] = {}
+        section_indices: dict[str, list[int]] = {}  # section_number → indices in candidates
         for r in rows:
             chunk = dict(r)
             sec = chunk.get("section_number", "")
-            if sec and sec in seen_sections:
-                existing_idx = seen_sections[sec]
-                if chunk["similarity"] > candidates[existing_idx]["similarity"]:
-                    candidates[existing_idx] = chunk
+            if sec and sec in section_indices:
+                existing = section_indices[sec]
+                if len(existing) < _MAX_CHUNKS_PER_SECTION:
+                    # Slot available — append.
+                    section_indices[sec].append(len(candidates))
+                    candidates.append(chunk)
+                else:
+                    # At cap — replace the weakest kept chunk if this one is better.
+                    weakest_idx = min(existing, key=lambda i: candidates[i]["similarity"])
+                    if chunk["similarity"] > candidates[weakest_idx]["similarity"]:
+                        candidates[weakest_idx] = chunk
                 continue
             if sec:
-                seen_sections[sec] = len(candidates)
+                section_indices[sec] = [len(candidates)]
             candidates.append(chunk)
         active_groups: list[str] = []
     else:
@@ -644,7 +663,7 @@ async def retrieve(
 
         candidates = []
         seen_ids: set = set()
-        seen_sections: dict[str, int] = {}  # section_number → index in candidates
+        section_indices: dict[str, list[int]] = {}  # section_number → indices in candidates
         for group_results in results_per_group:
             for chunk in group_results:
                 chunk_id = chunk["id"]
@@ -652,17 +671,27 @@ async def retrieve(
                     continue
                 seen_ids.add(chunk_id)
 
-                # Deduplicate by section_number: keep the highest-similarity
-                # version.  Multiple ingest runs can create duplicate rows
-                # with different IDs but identical content.
+                # Sprint D5.5: keep top _MAX_CHUNKS_PER_SECTION chunks per
+                # section_number (was: top 1). Multi-chunk sections with
+                # tables or appendices (e.g. 46 CFR 199.175 lifeboat equipment
+                # Table 1) now get a shot at competing with their own
+                # intro chunks instead of being silently suppressed.
+                # Duplicate rows from repeat ingest runs (same section_number,
+                # same content, different IDs) are handled by the same cap —
+                # only the top 2 by similarity survive.
                 sec = chunk.get("section_number", "")
-                if sec and sec in seen_sections:
-                    existing_idx = seen_sections[sec]
-                    if chunk["similarity"] > candidates[existing_idx]["similarity"]:
-                        candidates[existing_idx] = chunk
+                if sec and sec in section_indices:
+                    existing = section_indices[sec]
+                    if len(existing) < _MAX_CHUNKS_PER_SECTION:
+                        section_indices[sec].append(len(candidates))
+                        candidates.append(chunk)
+                    else:
+                        weakest_idx = min(existing, key=lambda i: candidates[i]["similarity"])
+                        if chunk["similarity"] > candidates[weakest_idx]["similarity"]:
+                            candidates[weakest_idx] = chunk
                     continue
                 if sec:
-                    seen_sections[sec] = len(candidates)
+                    section_indices[sec] = [len(candidates)]
                 candidates.append(chunk)
 
     # ── Hybrid merge: two-tier keyword search ────────────────────────────
@@ -744,18 +773,33 @@ async def retrieve(
                 if chunk["id"] in existing_ids:
                     continue
                 if sec and sec in existing_sections:
-                    # Score override: boost existing chunk if keyword
-                    # score is higher than its vector similarity.
-                    idx = seen_sections.get(sec)
-                    if idx is not None and synthetic_sim > float(candidates[idx]["similarity"]):
-                        candidates[idx]["similarity"] = synthetic_sim
-                        boosted += 1
+                    # Section already present. Either:
+                    #   (a) the keyword/id hit is for a chunk we already have
+                    #       a sibling of — boost the weakest sibling so the
+                    #       section signals properly through rerank; OR
+                    #   (b) we haven't yet filled the per-section cap, in
+                    #       which case append this chunk as another sibling
+                    #       (Sprint D5.5 — allows Table 1 chunks to enter
+                    #       even when chunk-0 intro already got retrieved).
+                    existing = section_indices.get(sec, [])
+                    if len(existing) < _MAX_CHUNKS_PER_SECTION:
+                        chunk["similarity"] = synthetic_sim
+                        section_indices[sec].append(len(candidates))
+                        candidates.append(chunk)
+                        existing_ids.add(chunk["id"])
+                        added += 1
+                    else:
+                        # At cap — boost the weakest kept chunk for this section.
+                        weakest_idx = min(existing, key=lambda i: candidates[i]["similarity"])
+                        if synthetic_sim > float(candidates[weakest_idx]["similarity"]):
+                            candidates[weakest_idx]["similarity"] = synthetic_sim
+                            boosted += 1
                     continue
                 chunk["similarity"] = synthetic_sim
                 candidates.append(chunk)
                 if sec:
                     existing_sections.add(sec)
-                    seen_sections[sec] = len(candidates) - 1
+                    section_indices[sec] = [len(candidates) - 1]
                 existing_ids.add(chunk["id"])
                 added += 1
             return added, boosted
