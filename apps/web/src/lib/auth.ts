@@ -42,6 +42,14 @@ export interface BillingStatus {
   billing_interval: string | null
   price_amount: number | null
   unlimited?: boolean  // True for admin/internal — bypass all limits/banners
+  // Sprint D6.2 — Mate tier monthly message cap visibility.
+  // Only meaningful when tier === 'mate'. Captain and legacy pro return
+  // monthly_message_cap=null; free users return whatever their state is
+  // but the UI should rely on trial_active + messages_remaining instead.
+  monthly_message_cap: number | null
+  monthly_messages_used: number
+  monthly_messages_remaining: number | null
+  cycle_resets_at: string | null
 }
 
 export interface VesselSummary {

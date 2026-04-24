@@ -117,7 +117,11 @@ async def _run_chat_preflight(
     # ── Pilot mode gate ────────────────────────────────────────────────────
     from app.config import settings as _cfg
     sub_row = await pool.fetchrow(
-        "SELECT subscription_tier, trial_ends_at, message_count, created_at FROM users WHERE id = $1",
+        """
+        SELECT subscription_tier, trial_ends_at, message_count,
+               monthly_message_count, message_cycle_started_at, created_at
+        FROM users WHERE id = $1
+        """,
         uuid.UUID(current_user.user_id),
     )
     if sub_row and _cfg.pilot_mode and sub_row["subscription_tier"] == "free":
@@ -138,6 +142,27 @@ async def _run_chat_preflight(
             raise HTTPException(
                 status_code=status.HTTP_402_PAYMENT_REQUIRED,
                 detail="Trial expired or message limit reached. Subscribe to continue.",
+            )
+
+    # ── Mate tier monthly cap gate (Sprint D6.2) ───────────────────────────
+    # Mate plan caps at 100 messages per rolling 30-day cycle. Captain and
+    # privileged users bypass. Pre-check saves the expensive RAG call when
+    # the user is already capped. Race with concurrent requests is bounded
+    # to at most one extra message past the cap (the atomic increment step
+    # gates subsequent calls).
+    if sub_row and sub_row["subscription_tier"] == "mate" and not _is_privileged:
+        from app.plans import MATE_MESSAGE_CAP as _MATE_CAP
+        cycle_start = sub_row["message_cycle_started_at"]
+        cycle_age = datetime.now(timezone.utc) - cycle_start if cycle_start else None
+        cycle_still_current = cycle_age is not None and cycle_age.days < 30
+        used_this_cycle = sub_row["monthly_message_count"]
+        if cycle_still_current and used_this_cycle >= _MATE_CAP:
+            raise HTTPException(
+                status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                detail=(
+                    f"Mate plan monthly cap reached ({_MATE_CAP} messages). "
+                    "Upgrade to Captain for unlimited messages."
+                ),
             )
 
     # 1. Load vessel profile (including enriched fields)

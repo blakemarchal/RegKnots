@@ -371,6 +371,50 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
         </div>
       )}
 
+      {/* ── Mate tier monthly-cap banner (Sprint D6.2) ─────────────── */}
+      {billing && billing.tier === 'mate' && !billing.unlimited &&
+        billing.monthly_message_cap !== null && (() => {
+          const used = billing.monthly_messages_used
+          const cap = billing.monthly_message_cap
+          const remaining = billing.monthly_messages_remaining ?? 0
+          // At cap: full-width red banner + upgrade CTA. At 90: red banner.
+          // At 75: soft amber. Below 75: quiet single-line counter.
+          const atCap = remaining === 0
+          const nearCap = used >= 90 && !atCap
+          const approachingCap = used >= 75 && used < 90
+          const bgClass = atCap
+            ? 'bg-rose-950/60 border-rose-800/50'
+            : nearCap
+            ? 'bg-rose-950/40 border-rose-800/30'
+            : approachingCap
+            ? 'bg-amber-950/40 border-amber-800/30'
+            : 'bg-slate-900/60 border-slate-800/40'
+          const textClass = atCap || nearCap
+            ? 'text-rose-400'
+            : approachingCap
+            ? 'text-amber-400'
+            : 'text-slate-400'
+          const label = atCap
+            ? `You've used all ${cap} messages on the Mate plan this month.`
+            : `Mate plan: ${used}/${cap} messages used this month`
+          return (
+            <div className={`flex-shrink-0 flex items-center justify-between gap-3 px-4 py-2 border-b ${bgClass}`}>
+              <p className={`font-mono text-xs ${textClass}`}>
+                {label}
+                {!atCap && approachingCap && ' — upgrade to Captain for unlimited.'}
+              </p>
+              {(atCap || nearCap || approachingCap) && (
+                <button
+                  onClick={() => router.push('/pricing')}
+                  className="font-mono text-xs font-bold text-[#2dd4bf] hover:underline whitespace-nowrap"
+                >
+                  {atCap ? 'Upgrade to Captain' : 'Upgrade'}
+                </button>
+              )}
+            </div>
+          )
+        })()}
+
       {/* ── Chat thread ──────────────────────────────────────────── */}
       <main className="chat-thread flex-1 overflow-y-auto overscroll-contain
         bg-[image:repeating-linear-gradient(0deg,transparent,transparent_47px,rgba(45,212,191,0.018)_47px,rgba(45,212,191,0.018)_48px),repeating-linear-gradient(90deg,transparent,transparent_47px,rgba(45,212,191,0.018)_47px,rgba(45,212,191,0.018)_48px)]">

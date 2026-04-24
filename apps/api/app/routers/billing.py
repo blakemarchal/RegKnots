@@ -1,7 +1,7 @@
 """Billing endpoints: checkout, webhook, subscription status."""
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from app.auth.deps import get_current_user
 from app.auth.schemas import CurrentUser
 from app.db import get_pool
+from app.plans import MATE_MESSAGE_CAP, message_cap_for_tier
 from app.stripe_service import create_billing_portal_session, create_checkout_session, handle_webhook_event
 
 router = APIRouter(prefix="/billing", tags=["billing"])
@@ -73,6 +74,16 @@ class BillingStatus(BaseModel):
     billing_interval: str | None  # "month" or "year"
     price_amount: int | None  # cents, e.g. 3900
     unlimited: bool = False      # True for admin/internal accounts (bypass all limits)
+    # Sprint D6.2 — Mate tier message-cap visibility. These fields are
+    # populated for every user but only meaningful when tier=='mate':
+    #   - monthly_message_cap: 100 for mate, null for captain/legacy pro
+    #   - monthly_messages_used: count this cycle (always 0 for captain)
+    #   - monthly_messages_remaining: null for captain (unlimited)
+    #   - cycle_resets_at: ISO time when the current 30-day cycle rolls over
+    monthly_message_cap: int | None
+    monthly_messages_used: int
+    monthly_messages_remaining: int | None
+    cycle_resets_at: str | None
 
 
 _FREE_MESSAGE_LIMIT = 50
@@ -87,6 +98,7 @@ async def billing_status(
         """
         SELECT subscription_tier, subscription_status,
                trial_ends_at, message_count,
+               monthly_message_count, message_cycle_started_at,
                cancel_at_period_end, current_period_end, billing_interval,
                stripe_subscription_id,
                is_admin, is_internal
@@ -100,8 +112,19 @@ async def billing_status(
     sub_status = row["subscription_status"]
     trial_ends_at = row["trial_ends_at"]
     message_count = row["message_count"]
+    monthly_count = row["monthly_message_count"]
+    cycle_start = row["message_cycle_started_at"]
     trial_active = tier == "free" and trial_ends_at is not None and trial_ends_at > now
     is_privileged = bool(row["is_admin"]) or bool(row["is_internal"])
+
+    # Compute cycle reset — Mate users see this roll over every 30 days.
+    # If the cycle has already expired, the UI should show "resets now" /
+    # count of 0 rather than a stale in-past timestamp.
+    cycle_resets_at = cycle_start + timedelta(days=30) if cycle_start else None
+    if cycle_resets_at is not None and cycle_resets_at <= now:
+        # Cycle will reset on the next message — expose the fresh counter.
+        monthly_count = 0
+        cycle_resets_at = now + timedelta(days=30)
 
     if is_privileged:
         # Admin / internal accounts bypass the subscription gate entirely.
@@ -122,6 +145,22 @@ async def billing_status(
     if sub_status == "paused" and not is_privileged:
         needs_subscription = True
         messages_remaining = 0
+
+    # Mate-specific cap visibility. Captain and legacy pro stay unlimited.
+    if is_privileged:
+        monthly_message_cap: int | None = None
+        monthly_messages_remaining: int | None = None
+    else:
+        monthly_message_cap = message_cap_for_tier(tier)
+        if monthly_message_cap is not None:
+            monthly_messages_remaining = max(0, monthly_message_cap - monthly_count)
+            # If Mate user has already hit the cap, also set needs_subscription
+            # so the frontend knows to surface an upgrade prompt even though
+            # the user is already paying.
+            if monthly_messages_remaining == 0 and not needs_subscription:
+                needs_subscription = True
+        else:
+            monthly_messages_remaining = None
 
     # Fetch live price from Stripe if user has a subscription
     price_amount = None
@@ -149,6 +188,10 @@ async def billing_status(
         billing_interval=row["billing_interval"],
         price_amount=price_amount,
         unlimited=is_privileged,
+        monthly_message_cap=monthly_message_cap,
+        monthly_messages_used=monthly_count if monthly_message_cap is not None else 0,
+        monthly_messages_remaining=monthly_messages_remaining,
+        cycle_resets_at=cycle_resets_at.isoformat() if cycle_resets_at else None,
     )
 
 
