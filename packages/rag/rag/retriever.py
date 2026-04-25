@@ -59,6 +59,10 @@ SOURCE_GROUPS: dict[str, tuple[str, ...]] = {
     # broader (port security, enforcement, environmental, weather) and
     # carry freshness metadata that retrieval can filter on later.
     "uscg_bulletin": ("uscg_bulletin",),
+    # USCG Marine Safety Manual (CIM 16000.X). Own group so PSC /
+    # inspection-procedure queries reliably surface MSM content alongside
+    # the binding CFR rules they implement. Sprint D6.4.
+    "uscg_msm": ("uscg_msm",),
     # WHO IHR (international health / port sanitation) — its own group so
     # port-health queries reliably surface IHR content. Sprint D5.4.
     "who": ("who_ihr",),

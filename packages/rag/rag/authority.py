@@ -50,6 +50,12 @@ _SOURCE_TO_TIER: dict[str, int] = {
     "nvic": 2,
     "nmc_policy": 2,
     "nmc_checklist": 2,
+    # USCG Marine Safety Manual (CIM 16000.X) — Coast Guard internal
+    # operational procedures and inspector guidance. Tier 2 because it's
+    # how USCG personnel implement the binding 33/46/49 CFR rules; not
+    # itself binding regulation, but authoritative for how PSC and
+    # inspection programs are conducted in practice.
+    "uscg_msm": 2,
     # Tier 3 — operational notice
     "uscg_bulletin": 3,
     # Tier 4 — domain reference standard

@@ -402,6 +402,30 @@ QUESTIONS: list[TestQuestion] = [
         wrong_sub=[],
     ),
 
+    # ── Sprint D6.4 regression — USCG Marine Safety Manual canaries
+    TestQuestion(
+        qid="M-1",
+        query="What is the USCG Port State Control examination process for a foreign-flag vessel arriving at a US port?",
+        vessels=["V1"],
+        expected=[
+            r"USCG MSM 16000\.73",
+            r"Port State Control",
+            r"PSC",
+        ],
+        wrong_sub=[],
+    ),
+    TestQuestion(
+        qid="M-2",
+        query="If a USCG marine inspector finds a deficiency during a port state control exam, what are the possible enforcement actions?",
+        vessels=["V1"],
+        expected=[
+            r"USCG MSM 16000\.(73|10A)",
+            r"deficiency",
+            r"enforcement",
+        ],
+        wrong_sub=[],
+    ),
+
     # ── Sprint D5.4 regression — WHO IHR 2005 ingest canaries
     TestQuestion(
         qid="W-1",

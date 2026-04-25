@@ -29,6 +29,7 @@ from anthropic import (
 
 from rag.context import build_context
 from rag.fallback import FALLBACK_MODEL_ID, fallback_chat
+from rag.followup import compose_followup_query, detect_followup
 from rag.hedge import detect_hedge
 from rag.models import ChatMessage, ChatResponse, CitedRegulation
 from rag.prompts import NAVIGATION_AID_REMINDER, SYSTEM_PROMPT
@@ -1020,9 +1021,29 @@ async def chat(
     route = await route_query(query, anthropic_client)
     logger.info(f"Routed query to {route.model} (score={route.score})")
 
+    # Sprint D6.4 — conversational follow-up retrieval. If the new query
+    # looks like a clarification or pushback ("So you can't tell me...",
+    # "What about X?", "Are you sure?"), retrieve against the combined
+    # prior-question + current-query so the embedding stays anchored to
+    # the topic instead of drifting toward meta-discussion content.
+    # Also escalate synthesis to Opus on the followup turn — these are
+    # the moments where reasoning quality matters most.
+    followup_match = detect_followup(query)
+    retrieval_query = query
+    if followup_match:
+        prior_user_msg = next(
+            (m.content for m in reversed(conversation_history) if m.role == "user"),
+            None,
+        )
+        retrieval_query = compose_followup_query(prior_user_msg, query)
+        logger.info(
+            "Followup detected (pattern=%r); routing to %s with combined retrieval query",
+            followup_match, REGENERATION_MODEL,
+        )
+
     # 2. Retrieve
     chunks = await retrieve(
-        query=query,
+        query=retrieval_query,
         pool=pool,
         openai_api_key=openai_api_key,
         vessel_profile=vessel_profile,
@@ -1037,10 +1058,11 @@ async def chat(
     messages = _build_chat_messages(query, conversation_history, vessel_profile, context_str, credential_context)
 
     # 5. Call Claude — fall back to OpenAI GPT-4o on Anthropic API failures.
-    model_used = route.model
+    # Followup turns escalate to Opus regardless of route score (Sprint D6.4).
+    model_used = REGENERATION_MODEL if followup_match else route.model
     try:
         response = await anthropic_client.messages.create(
-            model=route.model,
+            model=model_used,
             max_tokens=_MAX_TOKENS,
             system=SYSTEM_PROMPT,
             messages=messages,
@@ -1246,11 +1268,25 @@ async def chat_with_progress(
     route = await route_query(query, anthropic_client)
     logger.info(f"Routed query to {route.model} (score={route.score})")
 
+    # Sprint D6.4 — same followup detection + escalation as chat().
+    followup_match = detect_followup(query)
+    retrieval_query = query
+    if followup_match:
+        prior_user_msg = next(
+            (m.content for m in reversed(conversation_history) if m.role == "user"),
+            None,
+        )
+        retrieval_query = compose_followup_query(prior_user_msg, query)
+        logger.info(
+            "Followup detected (pattern=%r); routing to %s with combined retrieval query",
+            followup_match, REGENERATION_MODEL,
+        )
+
     # Stage 2: Retrieve
     source_labels = _describe_sources(query)
     yield {"event": "status", "data": f"Searching {source_labels}…"}
     chunks = await retrieve(
-        query=query,
+        query=retrieval_query,
         pool=pool,
         openai_api_key=openai_api_key,
         vessel_profile=vessel_profile,
@@ -1277,10 +1313,11 @@ async def chat_with_progress(
     messages = _build_chat_messages(query, conversation_history, vessel_profile, context_str, credential_context)
 
     yield {"event": "status", "data": "Consulting compliance engine…"}
-    model_used = route.model
+    # Sprint D6.4 — followup turns escalate to Opus.
+    model_used = REGENERATION_MODEL if followup_match else route.model
     try:
         response = await anthropic_client.messages.create(
-            model=route.model,
+            model=model_used,
             max_tokens=_MAX_TOKENS,
             system=SYSTEM_PROMPT,
             messages=messages,

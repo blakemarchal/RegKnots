@@ -110,6 +110,17 @@ _PDF_SOURCE_CONFIG: dict[str, dict] = {
         "pdf":     _DATA_RAW / "who_health" / "ihr_consolidated.pdf",
         "adapter": "ingest.sources.who_ihr",
     },
+    "uscg_msm": {
+        # Sprint D6.4 — USCG Marine Safety Manual (CIM 16000.X series).
+        # Multi-PDF directory; adapter parses each known volume and
+        # skips cancelled change-notices. Source PDFs are manually
+        # downloaded by Blake from the USCG Directives Library
+        # (Akamai blocks automated fetching) and placed under
+        # data/raw/uscg_msm/. Uses the multi-PDF raw_dir dispatch path,
+        # not the single-PDF "pdf" key.
+        "raw_dir": _DATA_RAW / "uscg_msm",
+        "adapter": "ingest.sources.uscg_msm",
+    },
 }
 
 _DATA_FAILED = Path(__file__).resolve().parents[3] / "data" / "failed"
