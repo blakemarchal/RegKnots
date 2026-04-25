@@ -1156,6 +1156,16 @@ async def _log_retrieval_miss(
     specific vessel/no-vessel configurations."
     """
     import json as _json
+    from decimal import Decimal as _Decimal
+
+    def _json_default(o):
+        # Sprint D6.3c bugfix — vessel_profile may contain Decimal values
+        # (e.g. gross_tonnage from numeric(12,2) columns). json.dumps
+        # rejects Decimal by default which silently dropped every
+        # retrieval_miss for users with vessel profiles.
+        if isinstance(o, _Decimal):
+            return float(o)
+        raise TypeError(f"unserializable for retrieval_misses log: {type(o)}")
 
     # Resolve user_id from conversation (best-effort; DB constraint allows NULL).
     user_id = await pool.fetchval(
@@ -1201,13 +1211,13 @@ async def _log_retrieval_miss(
         conversation_id,
         query,
         vessel_profile is not None,
-        _json.dumps(vessel_profile) if vessel_profile is not None else None,
+        _json.dumps(vessel_profile, default=_json_default) if vessel_profile is not None else None,
         hedge_phrase,
         model_used,
         input_tokens,
         output_tokens,
-        _json.dumps(retrieved_payload),
-        _json.dumps(cited_payload),
+        _json.dumps(retrieved_payload, default=_json_default),
+        _json.dumps(cited_payload, default=_json_default),
         answer[:2000],
     )
 
