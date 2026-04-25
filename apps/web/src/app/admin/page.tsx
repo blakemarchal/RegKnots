@@ -608,6 +608,30 @@ function AdminContent() {
     setActionLoading(null)
   }
 
+  // Sprint D6.3c — Owner can set/clear referral_source on a user.
+  // Used to test referral-aware pricing or correct lost attribution.
+  async function setReferralSource(userId: string, currentEmail: string) {
+    const next = window.prompt(
+      `Set referral source for ${currentEmail}.\n\n` +
+      `Examples: womenoffshore, mercyships, mission-to-seafarers\n` +
+      `Leave blank to clear.`,
+    )
+    if (next === null) return // user cancelled
+    setActionLoading(`${userId}-referral-source`)
+    try {
+      await apiRequest(`/admin/users/${userId}/referral-source`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ referral_source: next.trim() || null }),
+      })
+      fetchUsers(0, false)
+      setUsersOffset(0)
+    } catch {
+      // Silent — admin can re-try; existing pattern in this file.
+    }
+    setActionLoading(null)
+  }
+
   async function sendTestEmail(type: string) {
     setEmailSending(type)
     setEmailToast(null)
@@ -1995,6 +2019,17 @@ function AdminContent() {
                                 disabled:opacity-50 transition-colors"
                             >
                               Simulate Expiry
+                            </button>
+                            <button
+                              onClick={() => setReferralSource(u.id, u.email)}
+                              disabled={actionLoading === `${u.id}-referral-source`}
+                              className="font-mono text-[10px] font-bold uppercase tracking-wider
+                                px-2.5 py-1.5 rounded border border-[#2dd4bf]/30
+                                text-[#2dd4bf]/80 hover:text-[#2dd4bf] hover:bg-[#2dd4bf]/10
+                                disabled:opacity-50 transition-colors"
+                              title="Set or clear charity-partner referral_source"
+                            >
+                              Referral
                             </button>
                             <button
                               onClick={() => resetUser(u.id, u.email)}

@@ -21,6 +21,18 @@ interface ConversationSummary {
   vessel_name: string | null
 }
 
+// Sprint D6.3c — discreet history search. Returned by /conversations/search
+// when the user has typed ≥2 chars in the search input.
+interface ConversationSearchResult {
+  id: string
+  title: string
+  updated_at: string
+  vessel_name: string | null
+  matched_role: 'user' | 'assistant'
+  matched_preview: string
+  matched_at: string
+}
+
 // ── Date formatting ────────────────────────────────────────────────────────────
 
 function formatDate(iso: string): string {
@@ -167,6 +179,10 @@ function HistoryContent() {
   const [filter, setFilter] = useState<string>('all')
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set())
   const [exportingId, setExportingId] = useState<string | null>(null)
+  // Sprint D6.3c — chat history search state
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchResults, setSearchResults] = useState<ConversationSearchResult[] | null>(null)
+  const [searching, setSearching] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -188,6 +204,38 @@ function HistoryContent() {
 
     return () => { cancelled = true }
   }, [])
+
+  // Debounced search effect — fires 300ms after the user stops typing.
+  // Trims and requires ≥2 chars to avoid pinging the API on every keystroke.
+  useEffect(() => {
+    const trimmed = searchQuery.trim()
+    if (trimmed.length < 2) {
+      setSearchResults(null)
+      setSearching(false)
+      return
+    }
+    let cancelled = false
+    setSearching(true)
+    const handle = setTimeout(() => {
+      apiRequest<ConversationSearchResult[]>(
+        `/conversations/search?q=${encodeURIComponent(trimmed)}&limit=25`,
+      )
+        .then(data => {
+          if (cancelled) return
+          setSearchResults(data)
+          setSearching(false)
+        })
+        .catch(() => {
+          if (cancelled) return
+          setSearchResults([])
+          setSearching(false)
+        })
+    }, 300)
+    return () => {
+      cancelled = true
+      clearTimeout(handle)
+    }
+  }, [searchQuery])
 
   function openConversation(id: string) {
     signalNavigation()
@@ -267,8 +315,43 @@ function HistoryContent() {
       <main className="chat-thread flex-1 overflow-y-auto">
         <div className="px-4 py-4 flex flex-col gap-2">
 
-          {/* Filter bar */}
+          {/* ── Search input (Sprint D6.3c — discreet) ─────────────────── */}
           {!loading && !error && conversations.length > 0 && (
+            <div className="relative mb-1">
+              <svg
+                className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#6b7594]"
+                viewBox="0 0 16 16" fill="none" stroke="currentColor"
+                strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <circle cx="7" cy="7" r="5" />
+                <path d="m11 11 3 3" />
+              </svg>
+              <input
+                type="search"
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                placeholder="Search your chat history…"
+                className="w-full pl-9 pr-3 py-2 rounded-lg bg-[#0d1225] border border-white/8
+                  font-mono text-sm text-[#f0ece4] placeholder:text-[#6b7594]
+                  focus:outline-none focus:border-[#2dd4bf]/40 transition-colors"
+              />
+              {searchQuery.trim().length >= 2 && (
+                <button
+                  onClick={() => setSearchQuery('')}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 px-2 py-1 rounded
+                    font-mono text-[10px] uppercase tracking-wider text-[#6b7594]
+                    hover:text-[#f0ece4] transition-colors"
+                  aria-label="Clear search"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Filter bar — hidden when actively searching to keep focus on results */}
+          {!loading && !error && conversations.length > 0 && searchResults === null && (
             <div className="flex items-center gap-1.5 overflow-x-auto pb-2 -mx-1 px-1 no-scrollbar">
               <button
                 onClick={() => setFilter('all')}
@@ -338,8 +421,54 @@ function HistoryContent() {
             </div>
           )}
 
-          {/* Grouped conversation cards */}
-          {!loading && filter === 'all' && vesselGroups.length > 0 && (
+          {/* Search results — shown only when actively searching */}
+          {searchResults !== null && (
+            <>
+              {searching && (
+                <p className="font-mono text-xs text-[#6b7594] text-center py-4">
+                  Searching…
+                </p>
+              )}
+              {!searching && searchResults.length === 0 && (
+                <p className="font-mono text-sm text-[#6b7594] text-center py-8">
+                  No matches for &ldquo;{searchQuery.trim()}&rdquo;
+                </p>
+              )}
+              {!searching && searchResults.length > 0 && (
+                <div className="flex flex-col gap-2">
+                  <p className="font-mono text-[10px] uppercase tracking-widest text-[#6b7594] mt-1 mb-1">
+                    {searchResults.length} match{searchResults.length === 1 ? '' : 'es'}
+                  </p>
+                  {searchResults.map(r => (
+                    <button
+                      key={`${r.id}-${r.matched_at}`}
+                      onClick={() => openConversation(r.id)}
+                      className="text-left bg-[#111827] border-l-2 border-[#2dd4bf]/30
+                        hover:border-[#2dd4bf] hover:bg-[#111827]/80
+                        rounded-r-xl transition-all duration-150 px-4 py-3"
+                    >
+                      <p className="font-mono text-sm text-[#f0ece4] truncate leading-snug">
+                        {r.title}
+                      </p>
+                      <p className="font-mono text-xs text-[#6b7594] mt-1">
+                        {r.vessel_name
+                          ? <><span className="text-[#2dd4bf]">{r.vessel_name}</span> · {formatDate(r.matched_at)}</>
+                          : formatDate(r.matched_at)}
+                        {' · '}
+                        <span className="text-[#f0ece4]/50">{r.matched_role === 'user' ? 'you' : 'RegKnot'}</span>
+                      </p>
+                      <p className="font-mono text-xs text-[#f0ece4]/60 mt-1.5 line-clamp-2 leading-snug">
+                        {r.matched_preview}
+                      </p>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+
+          {/* Grouped conversation cards — hidden during search */}
+          {!loading && searchResults === null && filter === 'all' && vesselGroups.length > 0 && (
             <div className="flex flex-col gap-1">
               {vesselGroups.map(group => (
                 <VesselGroupSection
@@ -355,8 +484,8 @@ function HistoryContent() {
             </div>
           )}
 
-          {/* Flat list when filtering by vessel */}
-          {!loading && filter !== 'all' && filtered.map(c => (
+          {/* Flat list when filtering by vessel — hidden during search */}
+          {!loading && searchResults === null && filter !== 'all' && filtered.map(c => (
             <div
               key={c.id}
               className="relative bg-[#111827] border-l-2 border-[#2dd4bf]/30

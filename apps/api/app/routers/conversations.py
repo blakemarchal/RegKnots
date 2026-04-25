@@ -1,5 +1,6 @@
 """
 GET /conversations                       — list current user's conversations (newest first, limit 50)
+GET /conversations/search?q=<term>       — search across the user's message content
 GET /conversations/{id}/messages         — full message thread with citations resolved
 GET /conversations/{id}/export           — single conversation export (JSON, with citations)
 GET /conversations/export-all            — bulk export of last 100 conversations
@@ -9,7 +10,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Path, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from pydantic import BaseModel
 
 from app.auth.deps import get_current_user
@@ -26,6 +27,17 @@ class ConversationSummary(BaseModel):
     title: str
     updated_at: str
     vessel_name: str | None
+
+
+class ConversationSearchResult(BaseModel):
+    """Search hit: a conversation containing at least one matching message."""
+    id: str
+    title: str
+    updated_at: str
+    vessel_name: str | None
+    matched_role: str          # 'user' or 'assistant' for the matched message
+    matched_preview: str       # ≤280 char excerpt of the matched message
+    matched_at: str            # ISO timestamp of the matched message
 
 
 class CitedReg(BaseModel):
@@ -79,6 +91,87 @@ async def list_conversations(
             title=r["title"] or "Untitled conversation",
             updated_at=r["updated_at"].isoformat(),
             vessel_name=r["vessel_name"],
+        )
+        for r in rows
+    ]
+
+
+@router.get("/search", response_model=list[ConversationSearchResult])
+async def search_conversations(
+    user: Annotated[CurrentUser, Depends(get_current_user)],
+    q: Annotated[str, Query(min_length=2, max_length=200, description="search term")],
+    limit: Annotated[int, Query(ge=1, le=50)] = 25,
+    pool=Depends(get_pool),
+) -> list[ConversationSearchResult]:
+    """Search across the current user's chat history.
+
+    Sprint D6.3c — discreet history search Karynn requested. Matches
+    the term against message content (case-insensitive, ILIKE substring).
+    Always scoped to user_id — never exposes another user's data.
+
+    For each matching conversation, returns the most recent matching
+    message as a preview snippet so the user can see context without
+    opening the full thread. Conversations are ordered newest-match
+    first so a freshly-asked question surfaces immediately.
+
+    For typical per-user message counts (low thousands at most), ILIKE
+    on the existing messages table is fast enough — no full-text index
+    or trigram needed yet. Add a tsvector + GIN index if a power user
+    accumulates >50K messages and search latency becomes noticeable.
+    """
+    pattern = f"%{q.strip()}%"
+    user_uuid = uuid.UUID(user.user_id)
+
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT
+                c.id,
+                COALESCE(
+                    c.title,
+                    LEFT(
+                        (SELECT content FROM messages m_first
+                         WHERE m_first.conversation_id = c.id AND m_first.role = 'user'
+                         ORDER BY m_first.created_at ASC LIMIT 1),
+                        80
+                    )
+                ) AS title,
+                c.updated_at,
+                v.name AS vessel_name,
+                hit.matched_role,
+                hit.matched_preview,
+                hit.matched_at
+            FROM conversations c
+            LEFT JOIN vessels v ON v.id = c.vessel_id
+            INNER JOIN LATERAL (
+                SELECT
+                    m.role AS matched_role,
+                    LEFT(m.content, 280) AS matched_preview,
+                    m.created_at AS matched_at
+                FROM messages m
+                WHERE m.conversation_id = c.id
+                  AND m.content ILIKE $2
+                ORDER BY m.created_at DESC
+                LIMIT 1
+            ) hit ON TRUE
+            WHERE c.user_id = $1
+            ORDER BY hit.matched_at DESC
+            LIMIT $3
+            """,
+            user_uuid,
+            pattern,
+            limit,
+        )
+
+    return [
+        ConversationSearchResult(
+            id=str(r["id"]),
+            title=r["title"] or "Untitled conversation",
+            updated_at=r["updated_at"].isoformat(),
+            vessel_name=r["vessel_name"],
+            matched_role=r["matched_role"],
+            matched_preview=r["matched_preview"],
+            matched_at=r["matched_at"].isoformat(),
         )
         for r in rows
     ]

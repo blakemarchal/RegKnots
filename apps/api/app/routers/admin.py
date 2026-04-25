@@ -498,6 +498,55 @@ async def grant_pro(
     return AdminActionResult(ok=True)
 
 
+# ── Sprint D6.3c — referral_source override ──────────────────────────────
+#
+# Lets the Owner manually set or clear referral_source on any user. Useful
+# for:
+#   * Testing the referral-aware pricing flow without going through a full
+#     /womenoffshore signup detour
+#   * Correcting attribution when a charity-partner signup happened but
+#     localStorage didn't persist (private browsing, etc.)
+#   * Retroactively crediting a known charity referral when the user
+#     signed up via the wrong path
+# All changes are audit-logged.
+
+class SetReferralSourceRequest(BaseModel):
+    referral_source: str | None  # None or empty string clears the field
+
+
+@router.post("/users/{user_id}/referral-source", response_model=AdminActionResult)
+async def set_referral_source(
+    user_id: str,
+    body: SetReferralSourceRequest,
+    admin: Annotated[CurrentUser, Depends(require_owner)],
+) -> AdminActionResult:
+    """Set or clear referral_source on a user (Owner-only, audit-logged)."""
+    try:
+        uid = uuid.UUID(user_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid user id")
+
+    pool = await get_pool()
+    new_value = (body.referral_source or "").strip() or None
+    await audit_log(
+        pool, admin, "set_referral_source",
+        target_id=user_id,
+        details={"referral_source": new_value},
+    )
+    result = await pool.execute(
+        "UPDATE users SET referral_source = $1 WHERE id = $2",
+        new_value,
+        uid,
+    )
+    if result == "UPDATE 0":
+        raise HTTPException(status_code=404, detail="User not found")
+    logger.info(
+        "Admin %s set referral_source=%s for %s",
+        admin.email, new_value, user_id,
+    )
+    return AdminActionResult(ok=True)
+
+
 class DeleteUserResult(BaseModel):
     deleted: bool
     email: str

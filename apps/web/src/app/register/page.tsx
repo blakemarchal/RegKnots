@@ -35,6 +35,41 @@ export default function RegisterPage() {
     setLoading(true)
     try {
       await register(email, password, fullName, role)
+      // Sprint D6.3c — if the user came in via /pricing or /womenoffshore
+      // and clicked Subscribe before authenticating, we saved the chosen
+      // plan as `pending_checkout_plan` in localStorage. Resume that
+      // checkout intent now so they don't have to navigate back manually.
+      let pendingPlan: string | null = null
+      let referralSource: string | null = null
+      try {
+        pendingPlan = localStorage.getItem('pending_checkout_plan')
+        referralSource = localStorage.getItem('regknot_referral_source')
+      } catch {
+        // localStorage unavailable — skip resume, go to default landing.
+      }
+      if (pendingPlan) {
+        try { localStorage.removeItem('pending_checkout_plan') } catch {}
+        try {
+          const { apiRequest } = await import('@/lib/api')
+          const data = await apiRequest<{ checkout_url: string }>(
+            '/billing/checkout',
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                plan: pendingPlan,
+                ...(referralSource && { referral_source: referralSource }),
+              }),
+            },
+          )
+          window.location.href = data.checkout_url
+          return
+        } catch {
+          // Checkout call failed (e.g. Stripe not configured for this env).
+          // Fall through to the standard post-register landing rather than
+          // leaving the user on a broken state.
+        }
+      }
       // Vessel onboarding is optional — shore-side users can skip it and
       // add a vessel later from the vessel sheet. Go straight to chat.
       router.replace('/')
