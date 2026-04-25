@@ -25,24 +25,11 @@ const ROLE_LABELS: Record<string, string> = Object.fromEntries(
   ROLE_OPTIONS.map((r) => [r.value, r.label]),
 )
 
-const ROUTE_LABEL: Record<string, string> = {
-  inland: 'Inland',
-  coastal: 'Coastal',
-  international: 'Intl',
-}
-
-interface VesselItem {
-  id: string
-  name: string
-  vessel_type: string
-  route_types: string[]
-  cargo_types: string[]
-  gross_tonnage: number | null
-}
-
 function AccountContent() {
   const router = useRouter()
-  const { user, logout, updateUserFromToken, removeVessel, billing, setBilling } = useAuthStore()
+  // Sprint D6.5 — vessel list/edit/delete moved to the My Vessels sheet
+  // (single source of truth). Account page no longer touches vessels.
+  const { user, logout, updateUserFromToken, billing, setBilling } = useAuthStore()
 
   // ── Profile editing ────────────────────────────────────────────
   const [fullName, setFullName] = useState(user?.full_name ?? '')
@@ -63,12 +50,6 @@ function AccountContent() {
   const [billingLoading, setBillingLoading] = useState(true)
   const [billingError, setBillingError] = useState(false)
 
-  // ── Vessels ────────────────────────────────────────────────────
-  const [vessels, setVessels] = useState<VesselItem[]>([])
-  const [vesselsLoading, setVesselsLoading] = useState(true)
-  const [deletingId, setDeletingId] = useState<string | null>(null)
-  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
-
   // ── Notification preferences ────────────────────────────────────
   const [notifPrefs, setNotifPrefs] = useState<{
     cert_expiry_reminders: boolean
@@ -86,10 +67,6 @@ function AccountContent() {
   const [exportError, setExportError] = useState<string | null>(null)
 
   useEffect(() => {
-    apiRequest<VesselItem[]>('/vessels')
-      .then(setVessels)
-      .catch(() => {})
-      .finally(() => setVesselsLoading(false))
     setBillingLoading(true)
     setBillingError(false)
     apiRequest<BillingStatus>('/billing/status')
@@ -182,19 +159,7 @@ function AccountContent() {
     }
   }
 
-  async function deleteVessel(id: string) {
-    setDeletingId(id)
-    try {
-      await apiRequest(`/vessels/${id}`, { method: 'DELETE' })
-      setVessels((prev) => prev.filter((v) => v.id !== id))
-      removeVessel(id)
-    } catch {
-      // ignore
-    } finally {
-      setDeletingId(null)
-      setConfirmDeleteId(null)
-    }
-  }
+  // Sprint D6.5 — deleteVessel moved to VesselSheet (My Vessels tab).
 
   async function openBillingPortal() {
     setPortalLoading(true)
@@ -615,80 +580,6 @@ function AccountContent() {
                 </p>
               )}
             </div>
-          </section>
-
-          {/* ── My Vessels ───────────────────────────────────────── */}
-          <section className="bg-[#111827] border border-white/8 rounded-xl p-5 flex flex-col gap-4">
-            <div className="flex items-center justify-between">
-              <p className="font-mono text-xs text-[#6b7594] uppercase tracking-wider">My Vessels</p>
-              <button
-                onClick={() => router.push('/onboarding?add=true')}
-                className="font-mono text-xs text-[#2dd4bf] border border-[#2dd4bf]/40
-                  hover:bg-[#2dd4bf]/10 rounded-lg px-3 py-1.5 transition-colors duration-150"
-              >
-                + Add Vessel
-              </button>
-            </div>
-
-            {vesselsLoading && (
-              <div className="flex flex-col gap-2">
-                {[1, 2].map((i) => (
-                  <div key={i} className="h-12 bg-white/5 rounded-lg animate-pulse" />
-                ))}
-              </div>
-            )}
-
-            {!vesselsLoading && vessels.length === 0 && (
-              <p className="font-mono text-sm text-[#6b7594]">No vessels yet.</p>
-            )}
-
-            {!vesselsLoading && vessels.map((v) => (
-              <div key={v.id} className="flex items-center gap-3 bg-[#0d1225] border border-white/8 rounded-lg p-3">
-                <div className="min-w-0 flex-1">
-                  <p className="font-mono text-sm text-[#f0ece4] truncate">{v.name}</p>
-                  <p className="font-mono text-xs text-[#6b7594] mt-0.5">
-                    {v.vessel_type}
-                    {v.route_types.length > 0 && (
-                      <> · {v.route_types.length === 1
-                        ? (ROUTE_LABEL[v.route_types[0]] ?? v.route_types[0])
-                        : 'Multiple routes'}</>
-                    )}
-                  </p>
-                </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  <button
-                    onClick={() => router.push(`/account/vessel/${v.id}`)}
-                    className="font-mono text-xs text-[#2dd4bf] hover:underline"
-                  >
-                    Edit
-                  </button>
-                  {confirmDeleteId === v.id ? (
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        onClick={() => deleteVessel(v.id)}
-                        disabled={deletingId === v.id}
-                        className="font-mono text-xs text-red-400 hover:underline disabled:opacity-50"
-                      >
-                        {deletingId === v.id ? '...' : 'Confirm'}
-                      </button>
-                      <button
-                        onClick={() => setConfirmDeleteId(null)}
-                        className="font-mono text-xs text-[#6b7594] hover:underline"
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  ) : (
-                    <button
-                      onClick={() => setConfirmDeleteId(v.id)}
-                      className="font-mono text-xs text-red-400/70 hover:text-red-400"
-                    >
-                      Delete
-                    </button>
-                  )}
-                </div>
-              </div>
-            ))}
           </section>
 
           {/* ── My Credentials shortcut ────────────────────────── */}

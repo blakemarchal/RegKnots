@@ -28,11 +28,16 @@ interface Props {
 
 export function VesselSheet({ onClose }: Props) {
   const router = useRouter()
-  const { vessels, activeVesselId, setActiveVessel, setVessels } = useAuthStore()
+  const { vessels, activeVesselId, setActiveVessel, setVessels, removeVessel } = useAuthStore()
 
   const [detail, setDetail] = useState<VesselDetail[]>([])
   const [loading, setLoading] = useState(true)
   const [dismissing, setDismissing] = useState(false)
+  // Sprint D6.5 — inline confirm-delete (no modal). Pilot complaint:
+  // edit/delete were buried in the Account tab; My Vessels is now the
+  // single source of truth.
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
 
   // Drag-to-dismiss
   const dragStartY = useRef<number | null>(null)
@@ -75,6 +80,32 @@ export function VesselSheet({ onClose }: Props) {
   function goToOnboardingAdd() {
     dismiss()
     setTimeout(() => router.push('/onboarding?add=true'), 280)
+  }
+
+  function editVessel(id: string) {
+    // Re-use the existing /account/vessel/[id] full editor (1010 lines,
+    // well-tested). No need to rebuild inside the sheet.
+    dismiss()
+    setTimeout(() => router.push(`/account/vessel/${id}`), 280)
+  }
+
+  async function deleteVessel(id: string) {
+    setDeletingId(id)
+    try {
+      await apiRequest(`/vessels/${id}`, { method: 'DELETE' })
+      setDetail(prev => prev.filter(v => v.id !== id))
+      setVessels(detail.filter(v => v.id !== id).map(v => ({ id: v.id, name: v.name })))
+      removeVessel(id)
+      // If the deleted vessel was active, deselect.
+      if (activeVesselId === id) {
+        setActiveVessel(null)
+      }
+    } catch {
+      // Silent — rare path; UI doesn't need a global error toast here.
+    } finally {
+      setDeletingId(null)
+      setConfirmDeleteId(null)
+    }
   }
 
   // Touch drag
@@ -192,29 +223,74 @@ export function VesselSheet({ onClose }: Props) {
             </div>
           )}
 
-          {/* Vessel rows */}
+          {/* Vessel rows — Sprint D6.5: name-area selects, side actions
+              cluster handles edit/delete with inline confirmation. */}
           {!loading && detail.length > 0 && detail.map(v => {
             const isActive = v.id === activeVesselId
+            const isConfirming = confirmDeleteId === v.id
+            const isDeleting = deletingId === v.id
             return (
-              <button
+              <div
                 key={v.id}
-                onClick={() => selectVessel(v.id)}
-                className={`w-full flex items-center justify-between gap-3 px-5 py-3.5 text-left
+                className={`w-full flex items-center gap-2 px-5 py-3.5
                   transition-colors duration-150
-                  ${isActive ? 'bg-[#2dd4bf]/8 hover:bg-[#2dd4bf]/12' : 'hover:bg-white/5'}`}
+                  ${isActive ? 'bg-[#2dd4bf]/8' : ''}`}
               >
-                <div className="min-w-0">
-                  <p className="font-mono text-sm text-[#f0ece4] truncate">{v.name}</p>
-                  <p className="font-mono text-xs text-[#2dd4bf]/70 mt-0.5">
-                    {v.vessel_type} · {routeSummary(v.route_types)}
-                  </p>
+                {/* Selectable name area */}
+                <button
+                  onClick={() => selectVessel(v.id)}
+                  className="flex-1 min-w-0 flex items-center gap-3 text-left"
+                >
+                  <div className="min-w-0 flex-1">
+                    <p className="font-mono text-sm text-[#f0ece4] truncate">{v.name}</p>
+                    <p className="font-mono text-xs text-[#2dd4bf]/70 mt-0.5">
+                      {v.vessel_type} · {routeSummary(v.route_types)}
+                    </p>
+                  </div>
+                  {isActive && (
+                    <svg className="w-4 h-4 text-[#2dd4bf] flex-shrink-0" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                      <path d="M13.854 3.646a.5.5 0 0 1 0 .708l-7 7a.5.5 0 0 1-.708 0l-3.5-3.5a.5.5 0 1 1 .708-.708L6.5 10.293l6.646-6.647a.5.5 0 0 1 .708 0z"/>
+                    </svg>
+                  )}
+                </button>
+
+                {/* Action cluster — edit / delete (with inline confirm) */}
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  {isConfirming ? (
+                    <>
+                      <button
+                        onClick={() => deleteVessel(v.id)}
+                        disabled={isDeleting}
+                        className="font-mono text-xs text-red-400 hover:underline disabled:opacity-50 px-1.5 py-1"
+                      >
+                        {isDeleting ? '…' : 'Confirm'}
+                      </button>
+                      <button
+                        onClick={() => setConfirmDeleteId(null)}
+                        disabled={isDeleting}
+                        className="font-mono text-xs text-[#6b7594] hover:underline px-1.5 py-1"
+                      >
+                        Cancel
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        onClick={() => editVessel(v.id)}
+                        className="font-mono text-xs text-[#2dd4bf] hover:underline px-1.5 py-1"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        onClick={() => setConfirmDeleteId(v.id)}
+                        className="font-mono text-xs text-red-400/70 hover:text-red-400 px-1.5 py-1"
+                      >
+                        Delete
+                      </button>
+                    </>
+                  )}
                 </div>
-                {isActive && (
-                  <svg className="w-4 h-4 text-[#2dd4bf] flex-shrink-0" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-                    <path d="M13.854 3.646a.5.5 0 0 1 0 .708l-7 7a.5.5 0 0 1-.708 0l-3.5-3.5a.5.5 0 1 1 .708-.708L6.5 10.293l6.646-6.647a.5.5 0 0 1 .708 0z"/>
-                  </svg>
-                )}
-              </button>
+              </div>
             )
           })}
 
