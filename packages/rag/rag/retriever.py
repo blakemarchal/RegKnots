@@ -400,6 +400,10 @@ _STOPWORDS: frozenset[str] = frozenset(
 _MAX_KEYWORD_TERMS = 4
 _MIN_KEYWORD_LEN = 4
 _MAX_KEYWORD_FREQ = 200  # Skip keywords appearing in > this many chunks
+# Sprint D6.8 — synonyms (e.g. "logbook" 203, "lifesaving appliance" 155)
+# are by design slightly broader than the user's term. Allow a higher cap
+# for them specifically; bare-user keywords still cap at 200.
+_MAX_SYNONYM_FREQ = 800
 
 
 def _extract_keywords(query: str) -> list[str]:
@@ -477,6 +481,7 @@ async def _broad_keyword_search(
     keywords: list[str],
     pool: asyncpg.Pool,
     limit: int = 5,
+    synonym_keywords: set[str] | None = None,
 ) -> tuple[list[dict], list[str]]:
     """Search regulations by text for broad keywords (lower confidence).
 
@@ -498,7 +503,12 @@ async def _broad_keyword_search(
     results: list[dict] = []
     seen_ids: set = set()
     passed_keywords: list[str] = []
+    synonym_set = synonym_keywords or set()
     for kw in keywords:
+        # Synonyms get a more permissive cap because they're curated
+        # corpus-vocab terms — by design slightly broader than user input.
+        is_syn = kw in synonym_set
+        cap = _MAX_SYNONYM_FREQ if is_syn else _MAX_KEYWORD_FREQ
         # Fast specificity check: skip overly common terms.
         freq = await pool.fetchval(
             """
@@ -509,12 +519,12 @@ async def _broad_keyword_search(
             ) sub
             """,
             kw,
-            _MAX_KEYWORD_FREQ + 1,
+            cap + 1,
         )
-        if freq > _MAX_KEYWORD_FREQ:
+        if freq > cap:
             logger.info(
-                "Keyword '%s' matches > %d chunks — too common, skipping",
-                kw, _MAX_KEYWORD_FREQ,
+                "Keyword '%s' matches > %d chunks — too common, skipping%s",
+                kw, cap, " (synonym)" if is_syn else "",
             )
             continue
 
@@ -719,13 +729,30 @@ async def retrieve(
     identifiers = _extract_identifiers(query)
     keywords = _extract_keywords(query)
 
+    # Sprint D6.8 — expand mariner-vocab keywords ("lifejacket", "log",
+    # "MOB") into the corpus's formal CFR phrasing ("lifesaving
+    # appliance", "logbook", "person overboard"). Conservative dict —
+    # see packages/rag/rag/synonyms.py. The expanded synonyms get a
+    # higher freq cap inside _broad_keyword_search so they aren't
+    # falsely skipped (e.g. "logbook" hits 203 chunks, just over the
+    # base cap of 200).
+    synonym_added: set[str] = set()
+    if keywords:
+        from .synonyms import expand_keywords
+        keywords, synonym_map = expand_keywords(keywords)
+        if synonym_map:
+            synonym_added = {s for syns in synonym_map.values() for s in syns}
+            logger.info("Synonym expansion: %s", synonym_map)
+
     id_results: list[dict] = []
     kw_results: list[dict] = []
     specific_keywords: list[str] = []
     if identifiers:
         id_results = await _identifier_search(identifiers, pool)
     if keywords:
-        kw_results, specific_keywords = await _broad_keyword_search(keywords, pool)
+        kw_results, specific_keywords = await _broad_keyword_search(
+            keywords, pool, synonym_keywords=synonym_added,
+        )
 
     max_sim = max(
         (float(c["similarity"]) for c in candidates),
