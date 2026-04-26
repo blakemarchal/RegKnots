@@ -104,6 +104,8 @@ class AdminStats(BaseModel):
     subs_monthly: int
     subs_annual: int
     subs_paused: int
+    # Sprint D6.10 — feeds the admin milestone-celebration trigger
+    paid_users_alltime: int
 
 
 @router.get("/role")
@@ -175,6 +177,19 @@ async def get_stats(
             f"SELECT COUNT(*) FROM users u "
             f"WHERE subscription_tier = 'pro' AND subscription_status = 'active'{uf}"
         )
+        # Sprint D6.10 — milestone celebration counter. Inclusive of all
+        # paid tiers (mate, captain, legacy pro) and any subscription
+        # state short of fully wiped (active, past_due, paused). Frontend
+        # uses this against a localStorage'd "highest milestone seen" to
+        # decide whether to fire confetti on /admin load. The count can
+        # technically decrease (churn), but each admin device only fires
+        # each milestone once, so a temporary regression is harmless —
+        # the celebration just doesn't re-fire.
+        paid_users_alltime = await conn.fetchval(
+            f"SELECT COUNT(*) FROM users u "
+            f"WHERE subscription_tier IN ('mate', 'captain', 'pro') "
+            f"  AND subscription_status IN ('active', 'past_due', 'paused'){uf}"
+        )
         trial_active = await conn.fetchval(
             f"SELECT COUNT(*) FROM users u "
             f"WHERE trial_ends_at > NOW() AND subscription_tier = 'free'{uf}"
@@ -241,6 +256,7 @@ async def get_stats(
         subs_monthly=sub_row["monthly"] or 0,
         subs_annual=sub_row["annual"] or 0,
         subs_paused=sub_row["paused"] or 0,
+        paid_users_alltime=paid_users_alltime or 0,
     )
 
 

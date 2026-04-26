@@ -7,6 +7,7 @@ import { AppHeader } from '@/components/AppHeader'
 import { useAuthStore } from '@/lib/auth'
 import { apiRequest } from '@/lib/api'
 import { PilotSurveyModal } from '@/components/PilotSurveyModal'
+import { MilestoneCelebration } from '@/components/MilestoneCelebration'
 import {
   LineChart, Line, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
@@ -32,6 +33,7 @@ interface AdminStats {
   subs_monthly: number
   subs_annual: number
   subs_paused: number
+  paid_users_alltime: number
 }
 
 interface AdminUser {
@@ -777,6 +779,7 @@ function AdminContent() {
 
   return (
     <div className="flex flex-col min-h-dvh bg-[#0a0e1a]">
+      <MilestoneCelebration paidUsersAlltime={stats?.paid_users_alltime ?? null} />
       <AppHeader title="Admin" trailing={
         isReadOnly ? (
           <span className="font-mono text-[10px] font-bold px-2 py-0.5 rounded-full

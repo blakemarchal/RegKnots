@@ -95,6 +95,14 @@
   to   { opacity: 1; transform: translateY(0); }
 }
 
+/* Sprint D6.10 — milestone celebration toast entry. Slight overshoot
+   for a "bounce in" feel; the cubic-bezier in the component selector
+   does most of the work. */
+@keyframes milestoneIn {
+  from { opacity: 0; transform: translate(-50%, -16px) scale(0.95); }
+  to   { opacity: 1; transform: translate(-50%, 0)     scale(1);    }
+}
+
 /* ── Thin scrollbar ────────────────────────────────────────────────────────── */
 @layer utilities {
   .scrollbar-thin::-webkit-scrollbar        { width: 3px; }
