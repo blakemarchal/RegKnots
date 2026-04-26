@@ -816,6 +816,12 @@ function AdminContent() {
                 </span>
               )}
             </div>
+            <a
+              href="/admin/traffic"
+              className="font-mono text-xs text-[#2dd4bf] hover:underline"
+            >
+              Traffic →
+            </a>
           </div>
 
           {/* ── Tab bar ──────────────────────────────────────────────── */}

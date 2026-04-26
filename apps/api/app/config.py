@@ -64,6 +64,12 @@ class Settings(BaseSettings):
     # File uploads
     upload_dir: str = str(_REPO_ROOT / "data" / "uploads" / "documents")
 
+    # Sprint D6.7 — Caddy access-log analytics. Path to the directory
+    # holding `regknots-access.log` and its rotated siblings. Set to ""
+    # in dev (no Caddy running locally) — the /admin/traffic endpoint
+    # returns an empty summary in that case instead of erroring.
+    caddy_access_log_dir: str = Field(default="/var/log/caddy", validation_alias="CADDY_ACCESS_LOG_DIR")
+
     # Monitoring
     sentry_dsn: str = Field(default="", validation_alias="SENTRY_DSN")
     sentry_auth_token: str = Field(default="", validation_alias="SENTRY_AUTH_TOKEN")

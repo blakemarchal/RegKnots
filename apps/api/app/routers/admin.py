@@ -2494,3 +2494,38 @@ async def get_audit_log(
         )
         for r in rows
     ]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Sprint D6.7 — Caddy access-log analytics
+# Free, no GeoIP, no third-party. See app/traffic_analytics.py.
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.get("/traffic")
+async def get_traffic(
+    _admin: Annotated[CurrentUser, Depends(require_admin)],
+    days: int = Query(default=7, ge=1, le=30),
+) -> dict[str, Any]:
+    """Return a rollup of Caddy access logs for the last N days.
+
+    Returns an empty summary in dev (no log directory) so the UI can
+    render a friendly empty-state instead of erroring.
+    """
+    import dataclasses
+    from app.traffic_analytics import get_traffic_summary
+
+    log_dir = settings.caddy_access_log_dir
+    if not log_dir:
+        from app.traffic_analytics import TrafficSummary
+        from datetime import datetime, timedelta, timezone
+        until = datetime.now(tz=timezone.utc)
+        since = until - timedelta(days=days)
+        empty = TrafficSummary(
+            since=since.isoformat(),
+            until=until.isoformat(),
+            log_files_scanned=[],
+        )
+        return dataclasses.asdict(empty)
+
+    summary = await get_traffic_summary(log_dir=log_dir, days=days)
+    return dataclasses.asdict(summary)
