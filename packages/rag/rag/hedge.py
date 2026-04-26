@@ -45,7 +45,15 @@ HEDGE_PATTERNS: list[str] = [
 
     # "not present in" / "outside the scope" / explicit corpus admissions
     r"not present in\s+(?:the|my|any)",
-    r"outside (?:the scope of|my|the retrieved)",
+    r"outside (?:the scope of|the retrieved)",
+    # "outside my X" — only hedge if X is a corpus-specific noun.
+    # Deliberately excludes "knowledge" because the system-prompt intro
+    # boilerplate says "won't guess at requirements outside my knowledge
+    # base" in every "Who are you?" response — that's self-description,
+    # not a hedge. Real corpus hedges in production use "verified",
+    # "retrieved", "regulation", etc. (verified against prod 2026-04-25:
+    # 0 legitimate uses of any of these vs 3 boilerplate intros).
+    r"outside my\s+(?:verified|retrieved|regulation|regulatory|corpus|context)",
     r"not available in\s+(?:my|the|this)",
 
     # "context does not/doesn't contain/include/cover/address" — with up
