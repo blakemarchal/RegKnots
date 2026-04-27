@@ -441,7 +441,14 @@ async def _on_subscription_change(subscription, pool) -> None:
 
 
 async def _on_invoice_paid(invoice, pool) -> None:
-    """Handle invoice.paid — update current_period_end.
+    """Handle invoice.paid — update current_period_end + record to ledger.
+
+    Two responsibilities:
+      1. Bump the user's current_period_end + reactivate (existing).
+      2. Sprint D6.14 — insert a row into billing_events so partner-
+         tithe aggregations have an authoritative per-invoice ledger.
+         Skips silently if the user can't be matched (event arrived
+         before checkout completed); the event will retry from Stripe.
 
     This event can arrive BEFORE checkout.session.completed finishes,
     so we try multiple lookup strategies and never return 400 to Stripe.
@@ -504,9 +511,127 @@ async def _on_invoice_paid(invoice, pool) -> None:
                 "Invoice paid matched no user: customer_id=%s subscription_id=%s (may arrive before checkout completes)",
                 customer_id, subscription_id,
             )
+            return  # Skip ledger insert — Stripe will retry the event
+
+        # ── Sprint D6.14 — partner-tithe ledger insert ───────────────────
+        # Done after the user-row update so we can safely look up the
+        # user's referral_source / tier / billing_interval at the moment
+        # of payment.
+        await _record_billing_event(invoice, sub, subscription_id, customer_id, pool)
     except Exception as exc:
         # Log but don't raise — always return 200 to Stripe to prevent infinite retries
         logger.error("Failed to process invoice.paid: %s", exc)
+
+
+async def _record_billing_event(invoice, sub, subscription_id, customer_id, pool) -> None:
+    """Insert a row into billing_events for this paid invoice.
+
+    Idempotent via UNIQUE (stripe_invoice_id) — if Stripe redelivers the
+    webhook the second insert will conflict and we silently skip.
+    """
+    invoice_id = getattr(invoice, "id", None)
+    if not invoice_id:
+        logger.warning("invoice.paid without id — skipping ledger insert")
+        return
+
+    amount_paid = int(getattr(invoice, "amount_paid", 0) or 0)
+    amount_total = int(getattr(invoice, "amount_due", 0) or amount_paid)
+    currency = (getattr(invoice, "currency", None) or "usd").lower()
+
+    paid_at_ts = getattr(invoice, "status_transitions", None)
+    paid_at = None
+    if paid_at_ts:
+        paid_at_unix = getattr(paid_at_ts, "paid_at", None) or getattr(invoice, "created", None)
+        if paid_at_unix:
+            paid_at = datetime.fromtimestamp(paid_at_unix, tz=timezone.utc)
+    if paid_at is None:
+        # Fallback to invoice.created (already a unix ts)
+        created = getattr(invoice, "created", None)
+        if created:
+            paid_at = datetime.fromtimestamp(created, tz=timezone.utc)
+        else:
+            paid_at = datetime.now(tz=timezone.utc)
+
+    # Period boundaries — Stripe API places these on the subscription's
+    # first item in newer API versions.
+    period_start = period_end = None
+    period_start_ts = getattr(invoice, "period_start", None)
+    period_end_ts = getattr(invoice, "period_end", None)
+    if period_start_ts:
+        period_start = datetime.fromtimestamp(period_start_ts, tz=timezone.utc)
+    if period_end_ts:
+        period_end = datetime.fromtimestamp(period_end_ts, tz=timezone.utc)
+    # Fallback to subscription items[0] if invoice didn't carry them
+    if not period_start or not period_end:
+        items = getattr(sub, "items", None)
+        if items:
+            data = getattr(items, "data", None) or []
+            if data:
+                item = data[0]
+                if not period_start and getattr(item, "current_period_start", None):
+                    period_start = datetime.fromtimestamp(item.current_period_start, tz=timezone.utc)
+                if not period_end and getattr(item, "current_period_end", None):
+                    period_end = datetime.fromtimestamp(item.current_period_end, tz=timezone.utc)
+
+    # Look up user metadata (referral_source, tier, billing_interval) at
+    # payment time. If the user can't be found we skip — the user-row
+    # update upstream already returned without raising in that case.
+    row = await pool.fetchrow(
+        """
+        SELECT id, referral_source, subscription_tier, billing_interval
+        FROM users
+        WHERE stripe_subscription_id = $1
+           OR stripe_customer_id = $2
+        LIMIT 1
+        """,
+        subscription_id,
+        customer_id,
+    )
+    if not row:
+        logger.warning(
+            "billing_events: no user found for invoice %s (sub=%s cust=%s) — skipping ledger insert",
+            invoice_id, subscription_id, customer_id,
+        )
+        return
+
+    try:
+        await pool.execute(
+            """
+            INSERT INTO billing_events (
+                user_id, stripe_invoice_id, stripe_subscription_id, stripe_customer_id,
+                amount_paid_cents, amount_total_cents, currency,
+                period_start, period_end, paid_at,
+                referral_source, subscription_tier, billing_interval
+            ) VALUES (
+                $1, $2, $3, $4,
+                $5, $6, $7,
+                $8, $9, $10,
+                $11, $12, $13
+            )
+            ON CONFLICT (stripe_invoice_id) DO NOTHING
+            """,
+            row["id"],
+            invoice_id,
+            subscription_id,
+            customer_id,
+            amount_paid,
+            amount_total,
+            currency,
+            period_start,
+            period_end,
+            paid_at,
+            row["referral_source"],
+            row["subscription_tier"],
+            row["billing_interval"],
+        )
+        logger.info(
+            "billing_events: recorded invoice %s ($%.2f %s) for user %s referral=%s",
+            invoice_id, amount_paid / 100.0, currency.upper(), row["id"], row["referral_source"],
+        )
+    except Exception as exc:
+        # Don't tank the whole webhook — the user-row update already
+        # succeeded; ledger gap is recoverable via backfill.
+        logger.error("billing_events: insert failed for invoice %s: %s", invoice_id, exc)
 
 
 async def _on_invoice_payment_failed(invoice, pool) -> None:

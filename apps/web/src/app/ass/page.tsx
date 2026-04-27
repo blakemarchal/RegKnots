@@ -8,21 +8,23 @@ import { useAuthStore } from '@/lib/auth'
 
 // Sprint D6.13 — "atseastories" personal landing page (route /ass).
 //
-// Jake runs the @atseastories Instagram (~21k mariner followers, meme-
-// flavoured) and plugged RegKnot in late April 2026, generating the
-// traffic bump that signed our first wave of paid users. This page
-// gives his audience a dedicated landing pad with promo pricing and a
-// voice that matches the meme energy of his channel — leaning into
-// the unpolished-sailor tone while keeping the product pitch
-// professional under the hood.
+// @atseastories is a maritime meme Instagram (~21k mariner followers)
+// that plugged RegKnot in late April 2026, generating the traffic
+// bump that signed our first wave of paid users. The channel operator
+// is intentionally anonymous to his followers; this page therefore
+// only references the "atseastories" handle and never the operator's
+// real name. We're paying him 10% via a private service agreement
+// (not advertised on this page).
 //
 // The URL itself is the running joke (atseastories → /ass). We
 // acknowledge it once in the hero and then move on; the body stays in
-// the same tone as /captainkarynn but a bit saltier.
+// the same tone as /captainkarynn but a bit saltier to match the
+// channel's meme energy.
 //
 // Same Stripe promo prices + referral attribution flow as
 // /womenoffshore and /captainkarynn. referral_source = 'atseastories'
-// so signups from this URL roll up cleanly in the admin.
+// so signups from this URL roll up cleanly in the admin partner-tithe
+// view.
 
 type PromoPlan = 'mate_promo' | 'captain_promo' | 'mate_annual' | 'captain_annual'
 
@@ -279,7 +281,7 @@ export default function AtSeaStoriesPage() {
             <span className="text-[#2dd4bf]">The tool isn’t.</span>
           </h1>
           <p className="font-mono text-base md:text-lg text-[#6b7594] max-w-xl mx-auto leading-relaxed mb-6">
-            Jake sent you. He runs the memes; we run the regulations.
+            @atseastories sent you. They run the memes; we run the regulations.
             RegKnot is a chat tool that answers compliance questions with cited paragraphs from
             CFR, SOLAS, COLREGs, MARPOL, IMDG, STCW, ISM, NVICs — the whole stack a working
             mariner actually has to keep straight. No fluff, no fake guarantees.
@@ -288,7 +290,7 @@ export default function AtSeaStoriesPage() {
           <div className="inline-flex items-center gap-2 mb-2 px-3 py-2 rounded-lg
             bg-amber-950/30 border border-amber-800/30">
             <span className="font-mono text-xs uppercase tracking-wider text-amber-400">
-              Jake’s rate · 25% off monthly
+              atseastories rate · 25% off monthly
             </span>
           </div>
         </div>
@@ -310,9 +312,9 @@ export default function AtSeaStoriesPage() {
                 Master Unlimited · Active Containership Captain · RegKnot Co-founder
               </p>
               <p className="font-mono text-sm text-[#f0ece4]/80 leading-relaxed mb-3">
-                If you’re here from atseastories, hi. Jake gave us a plug a couple weeks back
+                If you’re here from atseastories, hi. They gave us a plug a couple weeks back
                 and it brought a wave of you in, which is honestly why this page exists.
-                We figured we’d give his crowd a real discount instead of just saying thanks.
+                We figured we’d give the crowd a real discount instead of just saying thanks.
               </p>
               <p className="font-mono text-sm text-[#f0ece4]/80 leading-relaxed">
                 I built RegKnot with my brother because I’m the one who has to actually
@@ -465,8 +467,7 @@ export default function AtSeaStoriesPage() {
             department. Email us through the in-app support page and we’ll see it.
           </p>
           <p className="font-mono text-sm text-[#6b7594] leading-relaxed mb-4">
-            And to Jake — thanks for the plug, brother. Next time we hand you a beer it’s
-            on us.
+            And to whoever runs atseastories — thanks for the plug. Next round’s on us.
           </p>
           <p className="font-mono text-sm text-[#6b7594] leading-relaxed">
             — Karynn & Blake

@@ -8,6 +8,7 @@ import { useAuthStore } from '@/lib/auth'
 import { apiRequest } from '@/lib/api'
 import { PilotSurveyModal } from '@/components/PilotSurveyModal'
 import { MilestoneCelebration } from '@/components/MilestoneCelebration'
+import { PartnersPanel } from '@/components/admin/PartnersPanel'
 import {
   LineChart, Line, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
@@ -267,7 +268,7 @@ function AdminContent() {
   }, [])
 
   // ── Tab state ───────────────────────────────────────────────────────────
-  type AdminTab = 'overview' | 'users' | 'content' | 'email' | 'data' | 'jobs' | 'system'
+  type AdminTab = 'overview' | 'users' | 'content' | 'email' | 'data' | 'jobs' | 'system' | 'partners'
   const [activeTab, setActiveTab] = useState<AdminTab>(() => {
     if (typeof window === 'undefined') return 'overview'
     const stored = window.localStorage.getItem('admin_active_tab') as AdminTab | null
@@ -832,6 +833,7 @@ function AdminContent() {
             {([
               { key: 'overview', label: 'Overview' },
               { key: 'users', label: 'Users' },
+              { key: 'partners', label: 'Partners' },
               { key: 'data', label: 'Data' },
               { key: 'jobs', label: 'Jobs' },
               { key: 'email', label: 'Email' },
@@ -2089,6 +2091,7 @@ function AdminContent() {
           {activeTab === 'data' && <DataTab />}
           {activeTab === 'jobs' && <JobsTab />}
           {activeTab === 'system' && <SystemTab />}
+          {activeTab === 'partners' && <PartnersPanel />}
 
         </div>
       </main>
