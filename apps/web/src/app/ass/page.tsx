@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { CompassRose } from '@/components/CompassRose'
+import { CorpusBadges } from '@/components/CorpusBadges'
 import { apiRequest } from '@/lib/api'
 import { useAuthStore } from '@/lib/auth'
 
@@ -39,7 +40,7 @@ const PRICING = {
     badge: '25% off',
     features: [
       '100 messages per month',
-      'CFR 33 / 46 / 49, SOLAS, COLREGs, NVICs, STCW, ISM, ERG',
+      'Full reg corpus — IMO conventions, U.S. CFR + USC, USCG circulars, ERG (see below)',
       'MARPOL + IMDG Code (Convention text + amendments)',
       'Vessel profile + chat history',
     ],
@@ -283,8 +284,8 @@ export default function AtSeaStoriesPage() {
           <p className="font-mono text-base md:text-lg text-[#6b7594] max-w-xl mx-auto leading-relaxed mb-6">
             @atseastories sent you. They run the memes; we run the regulations.
             RegKnot is a chat tool that answers compliance questions with cited paragraphs from
-            CFR, SOLAS, COLREGs, MARPOL, IMDG, STCW, ISM, NVICs — the whole stack a working
-            mariner actually has to keep straight. No fluff, no fake guarantees.
+            the whole stack a working mariner actually has to keep straight — IMO conventions,
+            U.S. federal regs, USCG circulars, the ERG. No fluff, no fake guarantees.
           </p>
 
           <div className="inline-flex items-center gap-2 mb-2 px-3 py-2 rounded-lg
@@ -451,6 +452,14 @@ export default function AtSeaStoriesPage() {
 
       {/* ── Sample answers carousel ─────────────────────────────────────── */}
       <SampleAnswerCarousel />
+
+      {/* ── Corpus badges — what we know ────────────────────────────────── */}
+      <section className="px-5 pb-20 bg-[#0a0e1a]">
+        <CorpusBadges
+          heading="What we know"
+          subhead="Every reg in our index, sorted by where it comes from. Click any chip to open the source."
+        />
+      </section>
 
       {/* ── Closing pitch ─────────────────────────────────────────────────
           Lighter close than /captainkarynn — this audience came in via a

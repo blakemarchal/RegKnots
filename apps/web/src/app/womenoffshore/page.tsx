@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { CompassRose } from '@/components/CompassRose'
+import { CorpusBadges } from '@/components/CorpusBadges'
 import { apiRequest } from '@/lib/api'
 import { useAuthStore } from '@/lib/auth'
 
@@ -28,7 +29,7 @@ const PRICING = {
     badge: '25% off',
     features: [
       '100 messages per month',
-      'CFR 33 / 46 / 49, SOLAS, COLREGs, NVICs, STCW, ISM, ERG',
+      'Full reg corpus — IMO conventions, U.S. CFR + USC, USCG circulars, ERG (see below)',
       '46 USC + WHO IHR (port health & seamen\u2019s law)',
       'Vessel profile + chat history',
     ],
@@ -438,6 +439,14 @@ export default function WomenOffshorePage() {
 
       {/* ── Sample answers carousel (Sprint D6.3c) ───────────────────── */}
       <SampleAnswerCarousel />
+
+      {/* ── Corpus badges — what we know ────────────────────────────────── */}
+      <section className="px-5 pb-20 bg-[#0a0e1a]">
+        <CorpusBadges
+          heading="What we know"
+          subhead="Every reg in our index, sorted by where it comes from. Click any chip to open the source."
+        />
+      </section>
 
       {/* ── Charity context ─────────────────────────────────────────────── */}
       <section className="px-5 pb-24 bg-[#0a0e1a]">

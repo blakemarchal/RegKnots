@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { CompassRose } from '@/components/CompassRose'
+import { CorpusBadges } from '@/components/CorpusBadges'
 import { apiRequest } from '@/lib/api'
 import { useAuthStore } from '@/lib/auth'
 import type { BillingStatus } from '@/lib/auth'
@@ -36,7 +37,7 @@ const TIER_FEATURES: Record<Tier, { headline: string; perks: string[] }> = {
     headline: 'For mariners with occasional compliance questions.',
     perks: [
       '100 messages per month',
-      'CFR 33 / 46 / 49, SOLAS, COLREGs, NVICs, STCW, ISM, ERG',
+      'Full reg corpus — IMO conventions, U.S. CFR + USC, USCG circulars, ERG (see below)',
       '46 USC + WHO IHR (port health & seamen’s law)',
       'Vessel profile + chat history',
       'Cited regulation answers, not summaries',
@@ -345,6 +346,13 @@ export default function PricingPage() {
           maritime charities — see{' '}
           <Link href="/giving" className="text-[#2dd4bf] hover:underline">our giving page</Link>.
         </p>
+
+        <div className="mt-16 mb-8">
+          <CorpusBadges
+            heading="What we know"
+            subhead="Every reg in our index, sorted by where it comes from. Click any chip to open the source."
+          />
+        </div>
       </main>
     </div>
   )

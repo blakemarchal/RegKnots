@@ -4,6 +4,7 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { CompassRose } from '@/components/CompassRose'
 import { ContactModal } from '@/components/ContactModal'
+import { CorpusBadges } from '@/components/CorpusBadges'
 
 // ── Static citation chip (non-interactive, landing page only) ─────────────────
 function StaticChip({ label }: { label: string }) {
@@ -176,7 +177,7 @@ export default function LandingPage() {
           style={{ animationFillMode: 'both' }}
         >
           Cited answers from the actual regulation texts — not AI guesswork.
-          Titles 33, 46 &amp; 49 + COLREGs, NVICs, SOLAS 2024, STCW, ISM Code &amp; ERG — current, vessel-specific, and plain English.
+          IMO conventions, U.S. CFR &amp; USC, USCG circulars, ERG, WHO IHR — current, vessel-specific, and plain English.
         </p>
 
         {/* CTAs */}
@@ -247,11 +248,12 @@ export default function LandingPage() {
           {/* Body */}
           <div className="flex flex-col gap-5">
             <p className="font-mono text-[#6b7594] leading-relaxed text-sm md:text-base">
-              U.S. commercial mariners navigate an overlapping web of Titles 33, 46, and 49 — plus COLREGs, NVICs, SOLAS, STCW, the ISM Code, and the ERG —
-              thousands of sections that cross-reference each other, change without warning,
-              and vary by vessel type, tonnage, route, and cargo. One missed detail during a
-              Coast Guard inspection means deficiency citations, vessel detention, or costly
-              litigation.
+              U.S. commercial mariners navigate an overlapping web of regs — CFR Titles 33/46/49,
+              the IMO conventions (SOLAS, MARPOL, IMDG, COLREGs, STCW, ISM), USCG circulars and
+              bulletins, the NMC, ERG, and WHO IHR. Thousands of sections that cross-reference
+              each other, change without warning, and vary by vessel type, tonnage, route, and
+              cargo. One missed detail during a Coast Guard inspection means deficiency citations,
+              vessel detention, or costly litigation.
             </p>
             <p className="font-mono text-[#6b7594] leading-relaxed text-sm md:text-base">
               RegKnot was built by an Unlimited Licensed Captain and her engineer brother.
@@ -279,7 +281,7 @@ export default function LandingPage() {
               See It In Action
             </h2>
             <p className="font-mono text-[#6b7594] mt-3 text-sm md:text-base">
-              Ask a real compliance question — CFR, COLREGs, NVICs, STCW, ISM, or the ERG. Get a real cited answer.
+              Ask a real compliance question — CFR, SOLAS, MARPOL, IMDG, COLREGs, NVICs, STCW, ISM, or the ERG. Get a real cited answer.
             </p>
           </div>
 
@@ -398,14 +400,24 @@ export default function LandingPage() {
             <StepCard
               n="03"
               title="Ask anything"
-              desc="Get instant cited answers, 24/7. Every response references exact CFR sections, NVICs, SOLAS, STCW, ISM Code, and ERG entries you can verify."
+              desc="Get instant cited answers, 24/7. Every response references exact CFR sections, IMO convention paragraphs (SOLAS, MARPOL, IMDG, COLREGs, STCW, ISM), USCG circulars, ERG entries — anything you can verify."
             />
           </div>
         </div>
       </section>
 
       {/* ══════════════════════════════════════════════════════════════════════
-          SECTION 5 — PRICING
+          SECTION 5 — CORPUS BADGES — what's in the index
+      ══════════════════════════════════════════════════════════════════════ */}
+      <section className="px-5 md:px-10 py-20 md:py-28 border-t border-white/5">
+        <CorpusBadges
+          heading="What we know"
+          subhead="Every reg in our index, sorted by where it comes from. Click any chip to open the source."
+        />
+      </section>
+
+      {/* ══════════════════════════════════════════════════════════════════════
+          SECTION 6 — PRICING
       ══════════════════════════════════════════════════════════════════════ */}
       <section className="px-5 md:px-10 py-20 md:py-28">
         <div className="max-w-3xl mx-auto">
@@ -469,8 +481,7 @@ export default function LandingPage() {
               priceSub={plan === 'monthly' ? 'per month' : 'per month, billed $179.88/year'}
               features={[
                 '100 messages per month',
-                'CFR 33 / 46 / 49, SOLAS, COLREGs, NVICs, STCW, ISM, ERG',
-                '46 USC + WHO IHR (port health & seamen’s law)',
+                'Full reg corpus — IMO conventions, U.S. CFR + USC, USCG circulars, ERG (see below)',
                 'Vessel profile + chat history',
                 'Cited regulation answers, not summaries',
               ]}
