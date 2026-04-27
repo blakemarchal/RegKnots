@@ -50,6 +50,12 @@ SOURCE_GROUPS: dict[str, tuple[str, ...]] = {
     "nvic": ("nvic",),
     "stcw": ("stcw", "stcw_supplement"),
     "ism": ("ism", "ism_supplement"),
+    # MARPOL (International Convention for the Prevention of Pollution
+    # from Ships) — Sprint D6.11. Distinct group so pollution / oil
+    # discharge / IOPP / sewage / garbage / Annex VI air-emissions
+    # queries reliably surface MARPOL convention text alongside the U.S.
+    # CFR domestic implementation in 33 CFR Subchapter O.
+    "marpol": ("marpol", "marpol_supplement"),
     "erg": ("erg",),
     # NMC policy letters + checklists share a group so the credentialing
     # corpus draws candidates together (mirrors the CFR group's 3 titles).
@@ -223,6 +229,66 @@ _NMC_ABBR_RE = re.compile(
     re.IGNORECASE,
 )
 
+# MARPOL — International Convention for the Prevention of Pollution from
+# Ships. Detection covers Annex-specific keywords (oil discharge, NLS,
+# sewage, garbage, air emissions), MEPC-issued amendment vocabulary, and
+# the certificate / record-book artifacts that MARPOL governs.
+_MARPOL_TERMS: tuple[str, ...] = (
+    "marpol",
+    # Annex I — Oil. Includes reorderings ("oil discharge"/"discharge of
+    # oil") because mariners ask both ways. Substring matching means
+    # both orderings need explicit terms.
+    "oil discharge", "discharge of oil", "discharge limit",
+    "oily mixture", "oily water separator", "ows",
+    "oil record book", "iopp", "iopp certificate",
+    "international oil pollution prevention",
+    "oil pollution prevention", "pollution by oil", "oil pollution",
+    "oily water", "oily bilge", "machinery space bilge", "bilge slop",
+    "ballast tank", "segregated ballast", "slop tank", "crude oil washing",
+    "double hull", "oil tanker construction",
+    # Annex II — Noxious liquid substances (chemical tankers)
+    "nls", "noxious liquid substances", "chemical tanker", "p&a manual",
+    "procedures and arrangements manual", "cargo record book",
+    "prewash procedure",
+    # Annex III — Harmful packaged substances
+    "harmful substances in packaged form",
+    # Annex IV — Sewage
+    "sewage discharge", "sewage system", "ispp",
+    "international sewage pollution prevention", "marine sanitation device",
+    "comminuter",
+    # Annex V — Garbage
+    "garbage record book", "garbage discharge", "garbage management plan",
+    "food waste discharge", "plastic discharge",
+    # Annex VI — Air emissions
+    "air pollution", "air emissions", "sox emissions", "nox emissions",
+    "sulphur content", "sulfur content", "fuel oil sulphur", "fuel oil sulfur",
+    "low sulphur", "low sulfur", "scrubber", "exhaust gas cleaning",
+    "iapp", "iapp certificate", "international air pollution prevention",
+    "emission control area", "eca", "secaca", "emissions control area",
+    "marpol annex vi", "annex vi",
+    # Annex VI carbon intensity (Sprint MEPC.328 era)
+    "eedi", "eexi", "cii", "carbon intensity indicator",
+    "energy efficiency design index", "energy efficiency existing ship index",
+    "iee certificate", "international energy efficiency",
+    "fuel oil consumption data", "ship fuel oil consumption database",
+    "bunker delivery note",
+    # Pollution incidents / reports
+    "pollution incident", "spill report", "smpep",
+    "shipboard marine pollution emergency plan",
+    "shipboard oil pollution emergency plan", "sopep",
+    # MEPC resolution vocabulary
+    "mepc", "marine environment protection committee",
+)
+_MARPOL_ABBR_RE = re.compile(
+    # Conservative abbreviation matchers — only flag when the abbreviation
+    # is unambiguously MARPOL-domain. "ECA" alone is too risky outside
+    # context, but "MARPOL Annex VI" / "EEDI" / "EEXI" / "IOPP" / "IAPP" /
+    # "ISPP" are distinctive.
+    r"\b(?:iopp|iapp|ispp|sopep|smpep|eedi|eexi|secaca|nls)\b",
+    re.IGNORECASE,
+)
+
+
 # USCG bulletin / GovDelivery — MSIBs, port security zones, NMC
 # announcements, enforcement priorities, environmental advisories,
 # weather/navigation alerts. Broader than NMC credentialing.
@@ -286,6 +352,9 @@ def _source_affinity(query: str) -> dict[str, float]:
     if any(t in q for t in _USCG_BULLETIN_TERMS) or _USCG_BULLETIN_ABBR_RE.search(q):
         boosts["uscg_bulletin"] = 0.20
 
+    if any(t in q for t in _MARPOL_TERMS) or _MARPOL_ABBR_RE.search(q):
+        boosts["marpol"] = 0.20
+
     if "cfr" in q or "code of federal" in q:
         boosts["cfr"] = 0.15
         if any(
@@ -312,6 +381,17 @@ _IDENTIFIER_PATTERNS: list[tuple[str, re.Pattern]] = [
     ("solas_reg",    re.compile(r"\bSOLAS\s+(Ch\.?)?([IVX]+-\d+)(?:\s*(?:Reg\.?\s*|/)(\d+))?\b", re.IGNORECASE)),
     ("nvic_number",  re.compile(r"\bNVIC\s+(\d{2}-\d{2})\b", re.IGNORECASE)),
     ("ism_section",  re.compile(r"\bISM\s+(?:Code\s+)?(\d+(?:\.\d+)?)\b", re.IGNORECASE)),
+    # MARPOL — explicit "MARPOL Annex <roman>" + optional Regulation number.
+    # The "MARPOL" prefix is required here so we don't false-match SOLAS or
+    # ISM annexes (each of those has its own annex structure). Bare "Annex"
+    # queries will still be served via the _MARPOL_TERMS source-affinity
+    # boost when other MARPOL keywords are present.
+    ("marpol_annex", re.compile(
+        r"\bMARPOL\s+Annex\s+([IVX]+)"
+        r"(?:\s+(?:Reg(?:ulation)?\.?\s*)?(\d+(?:\.\d+)?))?\b",
+        re.IGNORECASE,
+    )),
+    ("mepc_resolution", re.compile(r"\bMEPC\.(\d+)\((\d+)\)\b", re.IGNORECASE)),
 ]
 
 
@@ -369,6 +449,30 @@ def _extract_identifiers(query: str) -> list[dict]:
                     "type": id_type,
                     "value": f"ISM {m.group(1)}",
                     "pattern": m.group(1),
+                })
+            elif id_type == "marpol_annex":
+                annex_roman = m.group(1).upper()
+                reg_num = m.group(2)
+                # Always anchor on "Annex <roman>"; if a regulation
+                # number is also present, search for that too as a
+                # second identifier.
+                identifiers.append({
+                    "type": id_type,
+                    "value": f"Annex {annex_roman}",
+                    "pattern": f"Annex {annex_roman}",
+                })
+                if reg_num:
+                    identifiers.append({
+                        "type": "marpol_regulation",
+                        "value": f"Regulation {reg_num}",
+                        "pattern": f"Regulation {reg_num}",
+                    })
+            elif id_type == "mepc_resolution":
+                ident = f"MEPC.{m.group(1)}({m.group(2)})"
+                identifiers.append({
+                    "type": id_type,
+                    "value": ident,
+                    "pattern": ident,
                 })
     return identifiers
 

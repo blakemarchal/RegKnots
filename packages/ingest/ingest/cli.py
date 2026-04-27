@@ -57,6 +57,24 @@ _PDF_SOURCE_CONFIG: dict[str, dict] = {
         "text_dir": _DATA_RAW / "ism" / "extracted",
         "adapter":  "ingest.sources.ism_supplement",
     },
+    "marpol": {
+        # Sprint D6.11 — MARPOL Consolidated Edition 2022. Two-stage
+        # source: scripts/ocr_marpol_screenshots.py + scripts/
+        # consolidate_marpol_pages.py produce extracted/<range>.txt
+        # files (the IMO e-Publications viewer doesn't permit PDF
+        # export, so we OCR Chrome screenshots). headers.txt lives at
+        # the top-level marpol/ directory; the adapter walks
+        # extracted/*.txt one level down.
+        "text_dir": _DATA_RAW / "marpol",
+        "adapter":  "ingest.sources.marpol",
+    },
+    "marpol_supplement": {
+        # Multi-PDF: errata Dec 2023 + supplements May 2024, Aug 2025,
+        # Jan 2026, Mar 2026. Adapter splits each PDF by MEPC resolution
+        # heading.
+        "raw_dir": _DATA_RAW / "marpol" / "supplements",
+        "adapter": "ingest.sources.marpol_supplement",
+    },
     "nmc_checklist": {
         "nmc_source": "nmc_checklist",
         "raw_dir": _DATA_RAW / "nmc",
