@@ -56,6 +56,13 @@ SOURCE_GROUPS: dict[str, tuple[str, ...]] = {
     # queries reliably surface MARPOL convention text alongside the U.S.
     # CFR domestic implementation in 33 CFR Subchapter O.
     "marpol": ("marpol", "marpol_supplement"),
+    # IMDG Code (International Maritime Dangerous Goods Code) — Sprint
+    # D6.12. Distinct group so dangerous-goods classification, packing,
+    # consignment, segregation, and stowage queries reliably surface
+    # the IMDG text alongside the U.S. domestic 49 CFR HazMat regs and
+    # ERG response guides. UN-number identifier matching already serves
+    # both ERG and IMDG via per-source diversification.
+    "imdg": ("imdg",),
     "erg": ("erg",),
     # NMC policy letters + checklists share a group so the credentialing
     # corpus draws candidates together (mirrors the CFR group's 3 titles).
@@ -289,6 +296,72 @@ _MARPOL_ABBR_RE = re.compile(
 )
 
 
+# IMDG Code — International Maritime Dangerous Goods Code. Detection
+# covers classification (Class 1-9 + sub-class), packing/transport
+# vocabulary, dangerous-goods-list artefacts (UN numbers handled
+# separately via _IDENTIFIER_PATTERNS), and the EmS / MFAG / segregation
+# vocabulary distinctive to IMDG vs ERG (which is response-side, not
+# loading/transport-side).
+_IMDG_TERMS: tuple[str, ...] = (
+    "imdg", "imdg code",
+    # The phrase "dangerous goods" is distinctive enough to anchor on —
+    # it's the canonical operational term IMDG governs. SOLAS Ch.VII
+    # also uses it but is short; IMDG owns the substantive treatment.
+    "dangerous goods", "dangerous good",
+    "shipping dangerous", "carriage of dangerous",
+    "hazmat shipping", "hazmat declaration",
+    # Class taxonomy — sub-class numbers are MUCH more specific than
+    # bare "Class 4" which collides with vessel-class CFR usage.
+    "class 1.1", "class 1.2", "class 1.3", "class 1.4", "class 1.5", "class 1.6",
+    "class 2.1", "class 2.2", "class 2.3",
+    "class 3",  # flammable liquids — distinctive enough to keep
+    "class 4.1", "class 4.2", "class 4.3",
+    "class 5.1", "class 5.2",
+    "class 6.1", "class 6.2",
+    "class 7",  # radioactive
+    "class 8",  # corrosive
+    "class 9",  # miscellaneous
+    "explosives", "flammable liquid", "flammable solid",
+    "flammable gas", "non-flammable gas", "toxic gas",
+    "spontaneously combustible", "dangerous when wet", "self-reactive",
+    "oxidizing substance", "organic peroxide",
+    "infectious substance", "radioactive material",
+    "corrosive substance", "miscellaneous dangerous",
+    # Packaging / consignment vocabulary
+    "packing group", "pg i", "pg ii", "pg iii",
+    "packaging instruction", "pack inst", "ibc instruction",
+    "portable tank", "tank instruction", "tank code",
+    "imdg packaging", "outer packaging", "inner packaging",
+    "intermediate bulk container", "ibc",
+    "limited quantity", "excepted quantity",
+    "marine pollutant",
+    "proper shipping name", "psn",
+    "subsidiary risk", "subsidiary hazard",
+    # Stowage / segregation
+    "stowage code", "segregation",
+    "stowage category", "segregation table", "segregation group",
+    "away from", "separated from", "separated by a complete compartment",
+    "separated longitudinally",
+    # Documents / declarations
+    "dangerous goods declaration", "dg declaration",
+    "container packing certificate", "vehicle packing certificate",
+    "shipper declaration",
+    # Emergency response (specifically the IMDG sub-codes — ERG itself
+    # has its own affinity)
+    "emergency schedule", "ems guide", "ems code",
+    "medical first aid", "mfag",
+    # Compliance / training
+    "dangerous goods training", "imdg training",
+)
+_IMDG_ABBR_RE = re.compile(
+    # Conservative — only IMDG-distinctive abbreviations. "EmS" + DGL
+    # codes (F-A through F-H, S-A through S-Z), MFAG, IBC are
+    # unambiguous in the maritime regulatory domain.
+    r"\b(?:imdg|ems|mfag)\b|\b(?:F|S)-[A-Z]\b",
+    re.IGNORECASE,
+)
+
+
 # USCG bulletin / GovDelivery — MSIBs, port security zones, NMC
 # announcements, enforcement priorities, environmental advisories,
 # weather/navigation alerts. Broader than NMC credentialing.
@@ -355,6 +428,12 @@ def _source_affinity(query: str) -> dict[str, float]:
     if any(t in q for t in _MARPOL_TERMS) or _MARPOL_ABBR_RE.search(q):
         boosts["marpol"] = 0.20
 
+    if any(t in q for t in _IMDG_TERMS) or _IMDG_ABBR_RE.search(q):
+        boosts["imdg"] = 0.20
+        # Hazmat queries that boost IMDG often benefit from ERG too —
+        # response/transport are adjacent. Boost ERG modestly.
+        boosts.setdefault("erg", 0.10)
+
     if "cfr" in q or "code of federal" in q:
         boosts["cfr"] = 0.15
         if any(
@@ -392,6 +471,14 @@ _IDENTIFIER_PATTERNS: list[tuple[str, re.Pattern]] = [
         re.IGNORECASE,
     )),
     ("mepc_resolution", re.compile(r"\bMEPC\.(\d+)\((\d+)\)\b", re.IGNORECASE)),
+    # IMDG — Special Provision number (SP119, SP163, etc.). These are
+    # short cross-references in the Dangerous Goods List that point to
+    # provisions in Chapter 3.3.
+    ("imdg_sp",      re.compile(r"\bSP\s*(\d{1,4})\b")),
+    # IMDG — EmS (Emergency Schedule) code. F-X for fire schedules,
+    # S-X for spill schedules. Distinctive enough to anchor on as an
+    # identifier without ambiguity.
+    ("imdg_ems",     re.compile(r"\bEmS\s*([FS]-[A-Z])\b", re.IGNORECASE)),
 ]
 
 
@@ -473,6 +560,23 @@ def _extract_identifiers(query: str) -> list[dict]:
                     "type": id_type,
                     "value": ident,
                     "pattern": ident,
+                })
+            elif id_type == "imdg_sp":
+                # Match both compact "SP119" and spaced "SP 119" forms in
+                # the corpus by using the trailing digits as the search
+                # pattern. Trigram fallback handles either rendering.
+                num = m.group(1)
+                identifiers.append({
+                    "type": id_type,
+                    "value": f"SP{num}",
+                    "pattern": f"SP{num}",
+                })
+            elif id_type == "imdg_ems":
+                code = m.group(1).upper()
+                identifiers.append({
+                    "type": id_type,
+                    "value": f"EmS {code}",
+                    "pattern": code,
                 })
     return identifiers
 

@@ -49,6 +49,15 @@ _PDF_SOURCE_CONFIG: dict[str, dict] = {
         "pdf":     _DATA_RAW / "erg" / "ERG2024-Eng-Web-a.pdf",
         "adapter": "ingest.sources.erg",
     },
+    "imdg": {
+        # Sprint D6.12 — IMDG Code 2024 Edition (Vol 1 + Vol 2, Amend 42-24).
+        # Two-stage source: scripts/ocr_imdg_screenshots.py +
+        # scripts/consolidate_imdg_pages.py produce the per-page-range
+        # text files (the IMO e-Publications viewer doesn't permit PDF
+        # export). Same text-dir convention as MARPOL/SOLAS.
+        "text_dir": _DATA_RAW / "imdg",
+        "adapter":  "ingest.sources.imdg",
+    },
     "ism": {
         "text_dir": _DATA_RAW / "ism" / "extracted",
         "adapter":  "ingest.sources.ism",
