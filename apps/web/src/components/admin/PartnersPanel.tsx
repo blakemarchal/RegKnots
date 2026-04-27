@@ -1,49 +1,57 @@
 'use client'
 
-// Sprint D6.14 — Partners admin tab.
+// Sprint D6.14b — Partners admin tab.
 //
-// Renders the partner-tithe overview from /admin/partner-tithes:
-//   - Top: cross-partner totals (revenue / tithe / paid / outstanding)
-//   - Per-partner cards: stats + "Mark paid" inline form
-//   - Monthly breakdown table
-//   - Recent payouts ledger (with delete-on-typo)
-//
-// All amounts are stored and transmitted in CENTS to avoid floating-
-// point drift; we format to dollars in the UI only.
+// Renders /admin/partner-tithes against the new partner-first schema:
+//   - Partners are the entities receiving money.
+//   - Each partner can be fed by multiple referral_source rules
+//     (direct routing for /womenoffshore + /ass; default-pool split
+//     for everything else, including /captainkarynn and unattributed).
+//   - "Mark paid" records a payout against a partner_id.
 
 import { useCallback, useEffect, useState } from 'react'
 import { apiRequest } from '@/lib/api'
 
 // ── Types (mirror backend Pydantic) ──────────────────────────────────────────
 
-interface PartnerSummary {
-  referral_source: string
-  partner_name: string
+interface PartnerRoute {
+  referral_source: string | null  // null = default pool
+  weight: number
   tithe_pct: number
+  total_weight: number
+}
+
+interface TithePartnerSummary {
+  id: number
+  name: string
   active: boolean
   notes: string | null
   payout_method: string | null
   payout_contact: string | null
-  revenue_alltime_cents: number
-  tithe_alltime_cents: number
+  routes: PartnerRoute[]
+  accrued_alltime_cents: number
   paid_out_cents: number
   outstanding_cents: number
-  invoice_count: number
   payout_count: number
 }
 
-interface MonthlyBreakdown {
+interface MonthlyPartnerAccrual {
+  month: string  // 'YYYY-MM'
+  partner_id: number
+  partner_name: string
+  accrued_cents: number
+}
+
+interface MonthlyChannelRevenue {
   month: string
   referral_source: string | null
-  partner_name: string | null
   revenue_cents: number
-  tithe_cents: number
   invoice_count: number
 }
 
 interface PartnerPayoutEntry {
   id: string
-  referral_source: string
+  partner_id: number
   partner_name_at_time: string
   amount_cents: number
   currency: string
@@ -54,8 +62,9 @@ interface PartnerPayoutEntry {
 }
 
 interface PartnerTithesResponse {
-  partners: PartnerSummary[]
-  monthly: MonthlyBreakdown[]
+  partners: TithePartnerSummary[]
+  monthly_partner_accrual: MonthlyPartnerAccrual[]
+  monthly_channel_revenue: MonthlyChannelRevenue[]
   recent_payouts: PartnerPayoutEntry[]
   total_revenue_alltime_cents: number
   total_tithe_alltime_cents: number
@@ -66,24 +75,20 @@ interface PartnerTithesResponse {
 // ── Formatters ───────────────────────────────────────────────────────────────
 
 function fmtUSD(cents: number): string {
-  // Always show two decimals for ledger clarity; partner tithes are
-  // typically small dollar amounts where rounding to whole dollars
-  // would be confusing.
-  const dollars = cents / 100
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
     currency: 'USD',
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
-  }).format(dollars)
+  }).format(cents / 100)
 }
 
 function fmtMonth(iso: string): string {
-  // 'YYYY-MM' → 'Apr 2026'
   const [y, m] = iso.split('-').map(Number)
   if (!y || !m) return iso
-  const d = new Date(Date.UTC(y, m - 1, 1))
-  return d.toLocaleDateString('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' })
+  return new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString('en-US', {
+    month: 'short', year: 'numeric', timeZone: 'UTC',
+  })
 }
 
 function fmtPaidAt(iso: string): string {
@@ -92,13 +97,22 @@ function fmtPaidAt(iso: string): string {
   })
 }
 
+function describeRoute(route: PartnerRoute): string {
+  const channel = route.referral_source ?? 'default pool'
+  const share = route.total_weight > 0
+    ? Math.round((route.weight / route.total_weight) * 100)
+    : 0
+  const pctOfTithe = (route.tithe_pct * route.weight / Math.max(1, route.total_weight)).toFixed(2)
+  return `${channel} → ${share}% share (${pctOfTithe}% of revenue)`
+}
+
 // ── Top-level panel ──────────────────────────────────────────────────────────
 
 export function PartnersPanel() {
   const [data, setData] = useState<PartnerTithesResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [recordingFor, setRecordingFor] = useState<string | null>(null)
+  const [recordingFor, setRecordingFor] = useState<number | null>(null)
 
   const refresh = useCallback(async () => {
     setLoading(true)
@@ -116,11 +130,7 @@ export function PartnersPanel() {
   useEffect(() => { refresh() }, [refresh])
 
   if (loading && !data) {
-    return (
-      <div className="font-mono text-sm text-[#6b7594] py-8 text-center">
-        Loading partner tithes…
-      </div>
-    )
+    return <div className="font-mono text-sm text-[#6b7594] py-8 text-center">Loading partner tithes…</div>
   }
   if (error) {
     return (
@@ -133,12 +143,12 @@ export function PartnersPanel() {
 
   return (
     <div className="flex flex-col gap-6">
-      {/* ── Cross-partner totals ──────────────────────────────────────── */}
+      {/* Cross-totals */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <StatCard
           label="Revenue (all-time)"
           value={fmtUSD(data.total_revenue_alltime_cents)}
-          hint="From partner-attributed signups only"
+          hint="All paid invoices"
         />
         <StatCard
           label="Tithe accrued"
@@ -158,7 +168,7 @@ export function PartnersPanel() {
         />
       </div>
 
-      {/* ── Per-partner cards ──────────────────────────────────────────── */}
+      {/* Per-partner cards */}
       <section>
         <h2 className="font-display text-lg font-bold text-[#f0ece4] mb-3 tracking-wide">
           Partners
@@ -166,34 +176,39 @@ export function PartnersPanel() {
         <div className="grid gap-4">
           {data.partners.map((p) => (
             <PartnerCard
-              key={p.referral_source}
+              key={p.id}
               partner={p}
-              recording={recordingFor === p.referral_source}
-              onStartRecord={() => setRecordingFor(p.referral_source)}
+              recording={recordingFor === p.id}
+              onStartRecord={() => setRecordingFor(p.id)}
               onCancelRecord={() => setRecordingFor(null)}
-              onRecorded={async () => {
-                setRecordingFor(null)
-                await refresh()
-              }}
+              onRecorded={async () => { setRecordingFor(null); await refresh() }}
             />
           ))}
           {data.partners.length === 0 && (
             <div className="font-mono text-xs text-[#6b7594] px-4 py-4 bg-white/3 rounded border border-white/8 text-center">
-              No partners configured. Seed the referral_partners table to add channels.
+              No partners configured.
             </div>
           )}
         </div>
       </section>
 
-      {/* ── Monthly breakdown ─────────────────────────────────────────── */}
+      {/* Monthly per-partner accrual */}
       <section>
         <h2 className="font-display text-lg font-bold text-[#f0ece4] mb-3 tracking-wide">
-          Monthly breakdown <span className="font-mono text-xs text-[#6b7594]">(last 12 months)</span>
+          Monthly per-partner accrual <span className="font-mono text-xs text-[#6b7594]">(last 12 months)</span>
         </h2>
-        <MonthlyTable rows={data.monthly} />
+        <MonthlyPartnerTable rows={data.monthly_partner_accrual} partners={data.partners} />
       </section>
 
-      {/* ── Recent payouts ────────────────────────────────────────────── */}
+      {/* Monthly channel revenue */}
+      <section>
+        <h2 className="font-display text-lg font-bold text-[#f0ece4] mb-3 tracking-wide">
+          Revenue by channel <span className="font-mono text-xs text-[#6b7594]">(input side, last 12 months)</span>
+        </h2>
+        <MonthlyChannelTable rows={data.monthly_channel_revenue} />
+      </section>
+
+      {/* Recent payouts */}
       <section>
         <h2 className="font-display text-lg font-bold text-[#f0ece4] mb-3 tracking-wide">
           Recent payouts
@@ -225,7 +240,7 @@ function StatCard({ label, value, hint, accent }: {
   )
 }
 
-// ── Per-partner card with inline "Mark paid" form ────────────────────────────
+// ── Per-partner card ─────────────────────────────────────────────────────────
 
 function PartnerCard({
   partner,
@@ -234,7 +249,7 @@ function PartnerCard({
   onCancelRecord,
   onRecorded,
 }: {
-  partner: PartnerSummary
+  partner: TithePartnerSummary
   recording: boolean
   onStartRecord: () => void
   onCancelRecord: () => void
@@ -247,24 +262,27 @@ function PartnerCard({
         <div className="flex-1 min-w-0">
           <div className="flex items-baseline gap-2 flex-wrap">
             <p className="font-display text-base font-bold text-[#f0ece4] tracking-wide">
-              {partner.partner_name}
+              {partner.name}
             </p>
-            <span className="font-mono text-[10px] text-[#6b7594]">
-              {partner.referral_source}
-            </span>
             {!partner.active && (
               <span className="font-mono text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-[#6b7594]/15 text-[#6b7594]">
                 inactive
               </span>
             )}
-            <span className="font-mono text-[10px] text-[#2dd4bf]">
-              {partner.tithe_pct.toFixed(2)}% rate
-            </span>
           </div>
           {partner.notes && (
             <p className="font-mono text-[11px] text-[#6b7594] mt-1 leading-relaxed">
               {partner.notes}
             </p>
+          )}
+          {partner.routes.length > 0 && (
+            <ul className="mt-2 space-y-0.5">
+              {partner.routes.map((r, i) => (
+                <li key={i} className="font-mono text-[10px] text-[#2dd4bf]/80">
+                  {describeRoute(r)}
+                </li>
+              ))}
+            </ul>
           )}
         </div>
         <div className="flex flex-col items-end">
@@ -274,9 +292,8 @@ function PartnerCard({
           }`}>{fmtUSD(owed)}</p>
         </div>
       </div>
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-px bg-white/8">
-        <MiniStat label="Revenue" value={fmtUSD(partner.revenue_alltime_cents)} sub={`${partner.invoice_count} invoice${partner.invoice_count === 1 ? '' : 's'}`} />
-        <MiniStat label="Tithe" value={fmtUSD(partner.tithe_alltime_cents)} sub={`@ ${partner.tithe_pct.toFixed(0)}%`} />
+      <div className="grid grid-cols-3 gap-px bg-white/8">
+        <MiniStat label="Accrued (all-time)" value={fmtUSD(partner.accrued_alltime_cents)} />
         <MiniStat label="Paid out" value={fmtUSD(partner.paid_out_cents)} sub={`${partner.payout_count} payout${partner.payout_count === 1 ? '' : 's'}`} />
         <MiniStat label="Outstanding" value={fmtUSD(owed)} accent={owed > 0} />
       </div>
@@ -284,7 +301,7 @@ function PartnerCard({
         {!recording ? (
           <div className="flex items-center justify-between gap-3">
             <p className="font-mono text-[11px] text-[#6b7594]">
-              Send a payout? Mark it here to keep the ledger straight.
+              Sent a payout? Mark it here to keep the ledger straight.
             </p>
             <button
               onClick={onStartRecord}
@@ -299,7 +316,7 @@ function PartnerCard({
           </div>
         ) : (
           <RecordPayoutForm
-            referral_source={partner.referral_source}
+            partner_id={partner.id}
             suggestedAmountCents={owed}
             onCancel={onCancelRecord}
             onRecorded={onRecorded}
@@ -330,20 +347,17 @@ function MiniStat({ label, value, sub, accent }: {
 // ── Inline "Mark paid" form ──────────────────────────────────────────────────
 
 function RecordPayoutForm({
-  referral_source,
+  partner_id,
   suggestedAmountCents,
   onCancel,
   onRecorded,
 }: {
-  referral_source: string
+  partner_id: number
   suggestedAmountCents: number
   onCancel: () => void
   onRecorded: () => Promise<void>
 }) {
-  // Default to today's date in YYYY-MM-DD format
   const today = new Date().toISOString().slice(0, 10)
-  // Default amount = the outstanding balance, formatted as a dollar
-  // string for the input. Operator can override if they sent a partial.
   const [amountStr, setAmountStr] = useState((suggestedAmountCents / 100).toFixed(2))
   const [paidAt, setPaidAt] = useState(today)
   const [notes, setNotes] = useState('')
@@ -363,12 +377,9 @@ function RecordPayoutForm({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          referral_source,
+          partner_id,
           amount_cents: cents,
           currency: 'usd',
-          // Convert YYYY-MM-DD into an ISO timestamp at noon UTC so it
-          // doesn't accidentally back-date to the prior day in the
-          // operator's timezone.
           paid_at: `${paidAt}T12:00:00Z`,
           notes: notes.trim() || null,
         }),
@@ -384,13 +395,9 @@ function RecordPayoutForm({
     <div className="flex flex-col gap-3">
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <label className="flex flex-col gap-1">
-          <span className="font-mono text-[10px] uppercase tracking-wider text-[#6b7594]">
-            Amount (USD)
-          </span>
+          <span className="font-mono text-[10px] uppercase tracking-wider text-[#6b7594]">Amount (USD)</span>
           <input
-            type="number"
-            step="0.01"
-            min="0.01"
+            type="number" step="0.01" min="0.01"
             value={amountStr}
             onChange={(e) => setAmountStr(e.target.value)}
             className="bg-[#0a0e1a] border border-white/10 rounded px-2 py-1.5
@@ -398,9 +405,7 @@ function RecordPayoutForm({
           />
         </label>
         <label className="flex flex-col gap-1">
-          <span className="font-mono text-[10px] uppercase tracking-wider text-[#6b7594]">
-            Paid date
-          </span>
+          <span className="font-mono text-[10px] uppercase tracking-wider text-[#6b7594]">Paid date</span>
           <input
             type="date"
             value={paidAt}
@@ -409,10 +414,8 @@ function RecordPayoutForm({
               font-mono text-sm text-[#f0ece4] focus:outline-none focus:border-[#2dd4bf]"
           />
         </label>
-        <label className="flex flex-col gap-1 sm:col-span-1">
-          <span className="font-mono text-[10px] uppercase tracking-wider text-[#6b7594]">
-            Notes (optional)
-          </span>
+        <label className="flex flex-col gap-1">
+          <span className="font-mono text-[10px] uppercase tracking-wider text-[#6b7594]">Notes (optional)</span>
           <input
             type="text"
             value={notes}
@@ -449,9 +452,66 @@ function RecordPayoutForm({
   )
 }
 
-// ── Monthly breakdown table ──────────────────────────────────────────────────
+// ── Monthly per-partner accrual table ────────────────────────────────────────
 
-function MonthlyTable({ rows }: { rows: MonthlyBreakdown[] }) {
+function MonthlyPartnerTable({ rows, partners }: {
+  rows: MonthlyPartnerAccrual[]
+  partners: TithePartnerSummary[]
+}) {
+  if (rows.length === 0) {
+    return (
+      <div className="font-mono text-xs text-[#6b7594] px-4 py-4 bg-white/3 rounded border border-white/8 text-center">
+        No accruals in the last 12 months yet.
+      </div>
+    )
+  }
+  // Pivot: months as rows, partners as columns.
+  const months = Array.from(new Set(rows.map(r => r.month))).sort().reverse()
+  const partnerCols = partners.slice().sort((a, b) => a.name.localeCompare(b.name))
+  const cell = new Map<string, number>()
+  for (const r of rows) cell.set(`${r.month}|${r.partner_id}`, r.accrued_cents)
+  return (
+    <div className="rounded-lg border border-white/8 bg-white/3 overflow-x-auto">
+      <table className="w-full font-mono text-xs">
+        <thead className="bg-white/5">
+          <tr className="text-left">
+            <th className="px-3 py-2 text-[#6b7594] font-normal uppercase tracking-wider text-[10px]">Month</th>
+            {partnerCols.map(p => (
+              <th key={p.id} className="px-3 py-2 text-[#6b7594] font-normal uppercase tracking-wider text-[10px] text-right">
+                {p.name}
+              </th>
+            ))}
+            <th className="px-3 py-2 text-[#6b7594] font-normal uppercase tracking-wider text-[10px] text-right">Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          {months.map(m => {
+            let monthTotal = 0
+            return (
+              <tr key={m} className="border-t border-white/8">
+                <td className="px-3 py-2 text-[#f0ece4]">{fmtMonth(m)}</td>
+                {partnerCols.map(p => {
+                  const v = cell.get(`${m}|${p.id}`) ?? 0
+                  monthTotal += v
+                  return (
+                    <td key={p.id} className="px-3 py-2 text-right tabular-nums text-[#2dd4bf]/90">
+                      {v > 0 ? fmtUSD(v) : <span className="text-[#6b7594]/50">—</span>}
+                    </td>
+                  )
+                })}
+                <td className="px-3 py-2 text-right tabular-nums text-[#f0ece4]">{fmtUSD(monthTotal)}</td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+// ── Monthly channel revenue table ────────────────────────────────────────────
+
+function MonthlyChannelTable({ rows }: { rows: MonthlyChannelRevenue[] }) {
   if (rows.length === 0) {
     return (
       <div className="font-mono text-xs text-[#6b7594] px-4 py-4 bg-white/3 rounded border border-white/8 text-center">
@@ -460,7 +520,7 @@ function MonthlyTable({ rows }: { rows: MonthlyBreakdown[] }) {
     )
   }
   // Group by month for visual grouping.
-  const byMonth = new Map<string, MonthlyBreakdown[]>()
+  const byMonth = new Map<string, MonthlyChannelRevenue[]>()
   for (const r of rows) {
     const list = byMonth.get(r.month) ?? []
     list.push(r)
@@ -475,48 +535,22 @@ function MonthlyTable({ rows }: { rows: MonthlyBreakdown[] }) {
             <th className="px-3 py-2 text-[#6b7594] font-normal uppercase tracking-wider text-[10px]">Channel</th>
             <th className="px-3 py-2 text-[#6b7594] font-normal uppercase tracking-wider text-[10px] text-right">Invoices</th>
             <th className="px-3 py-2 text-[#6b7594] font-normal uppercase tracking-wider text-[10px] text-right">Revenue</th>
-            <th className="px-3 py-2 text-[#6b7594] font-normal uppercase tracking-wider text-[10px] text-right">Tithe</th>
           </tr>
         </thead>
         <tbody>
-          {Array.from(byMonth.entries()).map(([month, monthRows], idx) => {
-            const total = monthRows.reduce((acc, r) => ({
-              revenue: acc.revenue + r.revenue_cents,
-              tithe: acc.tithe + r.tithe_cents,
-              count: acc.count + r.invoice_count,
-            }), { revenue: 0, tithe: 0, count: 0 })
-            return (
-              <>
-                {monthRows.map((r, j) => (
-                  <tr key={`${month}-${r.referral_source ?? 'none'}`}
-                      className={`${j === 0 ? 'border-t border-white/8' : ''}`}>
-                    <td className="px-3 py-2 text-[#f0ece4]">
-                      {j === 0 ? fmtMonth(month) : ''}
-                    </td>
-                    <td className="px-3 py-2 text-[#f0ece4]/80">
-                      {r.referral_source
-                        ? <span>{r.partner_name ?? r.referral_source} <span className="text-[#6b7594] text-[10px]">({r.referral_source})</span></span>
-                        : <span className="text-[#6b7594]">unattributed</span>}
-                    </td>
-                    <td className="px-3 py-2 text-right text-[#f0ece4]/80 tabular-nums">{r.invoice_count}</td>
-                    <td className="px-3 py-2 text-right text-[#f0ece4] tabular-nums">{fmtUSD(r.revenue_cents)}</td>
-                    <td className="px-3 py-2 text-right text-[#2dd4bf] tabular-nums">
-                      {r.referral_source ? fmtUSD(r.tithe_cents) : '—'}
-                    </td>
-                  </tr>
-                ))}
-                {monthRows.length > 1 && (
-                  <tr className="bg-white/2 text-[#6b7594]">
-                    <td className="px-3 py-1.5 text-[10px] uppercase tracking-wider">Total</td>
-                    <td className="px-3 py-1.5"></td>
-                    <td className="px-3 py-1.5 text-right tabular-nums text-[10px]">{total.count}</td>
-                    <td className="px-3 py-1.5 text-right tabular-nums text-[10px]">{fmtUSD(total.revenue)}</td>
-                    <td className="px-3 py-1.5 text-right tabular-nums text-[10px]">{fmtUSD(total.tithe)}</td>
-                  </tr>
-                )}
-              </>
-            )
-          })}
+          {Array.from(byMonth.entries()).map(([month, monthRows]) => (
+            monthRows.map((r, j) => (
+              <tr key={`${month}-${r.referral_source ?? 'none'}`}
+                  className={j === 0 ? 'border-t border-white/8' : ''}>
+                <td className="px-3 py-2 text-[#f0ece4]">{j === 0 ? fmtMonth(month) : ''}</td>
+                <td className="px-3 py-2 text-[#f0ece4]/80">
+                  {r.referral_source ?? <span className="text-[#6b7594]">unattributed (default pool)</span>}
+                </td>
+                <td className="px-3 py-2 text-right text-[#f0ece4]/80 tabular-nums">{r.invoice_count}</td>
+                <td className="px-3 py-2 text-right text-[#f0ece4] tabular-nums">{fmtUSD(r.revenue_cents)}</td>
+              </tr>
+            ))
+          ))}
         </tbody>
       </table>
     </div>
@@ -569,13 +603,8 @@ function PayoutsTable({ payouts, onDeleted }: {
           {payouts.map((p) => (
             <tr key={p.id} className="border-t border-white/8">
               <td className="px-3 py-2 text-[#f0ece4] tabular-nums">{fmtPaidAt(p.paid_at)}</td>
-              <td className="px-3 py-2 text-[#f0ece4]/80">
-                {p.partner_name_at_time}
-                <span className="text-[#6b7594] text-[10px] ml-1.5">({p.referral_source})</span>
-              </td>
-              <td className="px-3 py-2 text-right text-[#2dd4bf] tabular-nums">
-                {fmtUSD(p.amount_cents)}
-              </td>
+              <td className="px-3 py-2 text-[#f0ece4]/80">{p.partner_name_at_time}</td>
+              <td className="px-3 py-2 text-right text-[#2dd4bf] tabular-nums">{fmtUSD(p.amount_cents)}</td>
               <td className="px-3 py-2 text-[#9ca5be] max-w-xs truncate" title={p.notes ?? ''}>
                 {p.notes ?? <span className="text-[#6b7594]/50">—</span>}
               </td>

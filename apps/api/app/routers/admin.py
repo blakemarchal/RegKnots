@@ -2548,49 +2548,71 @@ async def get_traffic(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Sprint D6.14 — Partner tithe tracking
+# Sprint D6.14b — Partner tithe tracking (redesigned for default-pool
+# distribution).
 #
-# Three tables drive this:
-#   referral_partners — config: which referral_source maps to which
-#                       partner name, at what tithe percentage.
-#   billing_events    — per-invoice ledger populated by the
-#                       stripe_service invoice.paid webhook.
-#   partner_payouts   — manual payout records ("we sent X dollars to Y
-#                       partner on Z date").
+# Schema (migration 0055):
+#   tithe_partners   — named beneficiaries (one row per real-world entity).
+#   tithe_rules      — distribution rules: maps a referral_source (or NULL
+#                      for the catch-all default pool) to one or more
+#                      partners with relative weights.
+#   billing_events   — per-invoice ledger populated by stripe_service
+#                      invoice.paid webhook.
+#   partner_payouts  — manual payout records, FK to tithe_partners.id.
+#
+# Routing semantics: an invoice's revenue routes to the partner(s)
+# matched by the rule(s) for its referral_source. If no explicit rule
+# exists for that source, it falls into the default pool (rules with
+# referral_source IS NULL). Each partner's accrued tithe is the sum
+# across every rule it appears in.
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-class PartnerSummary(BaseModel):
-    referral_source: str
-    partner_name: str
+class PartnerRoute(BaseModel):
+    """One leg of a partner's tithe distribution: which referral_source
+    feeds it, at what weight, at what tithe %."""
+    referral_source: str | None  # None = default pool
+    weight: int
     tithe_pct: float
+    # Sum of weights across all partners on the same referral_source —
+    # tells the operator "you get weight/total_weight of this pool".
+    total_weight: int
+
+
+class TithePartnerSummary(BaseModel):
+    id: int
+    name: str
     active: bool
     notes: str | None
     payout_method: str | None
     payout_contact: str | None
-    # All-time numbers (cents)
-    revenue_alltime_cents: int
-    tithe_alltime_cents: int
+    routes: list[PartnerRoute]
+    # All-time accrual computed across all matching rules
+    accrued_alltime_cents: int
     paid_out_cents: int
     outstanding_cents: int
-    # Counts
-    invoice_count: int
     payout_count: int
 
 
-class MonthlyBreakdown(BaseModel):
-    """One row per (month, referral_source) pair, plus a totals row."""
+class MonthlyPartnerAccrual(BaseModel):
+    """Accrued tithe per partner per month."""
     month: str  # 'YYYY-MM'
-    referral_source: str | None  # None for the unattributed bucket
-    partner_name: str | None
+    partner_id: int
+    partner_name: str
+    accrued_cents: int
+
+
+class MonthlyChannelRevenue(BaseModel):
+    """Revenue per channel per month — the input side of the tithe."""
+    month: str
+    referral_source: str | None
     revenue_cents: int
-    tithe_cents: int
     invoice_count: int
 
 
 class PartnerPayoutEntry(BaseModel):
     id: str
-    referral_source: str
+    partner_id: int
     partner_name_at_time: str
     amount_cents: int
     currency: str
@@ -2601,14 +2623,63 @@ class PartnerPayoutEntry(BaseModel):
 
 
 class PartnerTithesResponse(BaseModel):
-    partners: list[PartnerSummary]
-    monthly: list[MonthlyBreakdown]
+    partners: list[TithePartnerSummary]
+    monthly_partner_accrual: list[MonthlyPartnerAccrual]
+    monthly_channel_revenue: list[MonthlyChannelRevenue]
     recent_payouts: list[PartnerPayoutEntry]
-    # Quick totals across all partners
-    total_revenue_alltime_cents: int
+    # Cross-totals
+    total_revenue_alltime_cents: int  # sum of partner-attributed + default-pool revenue
     total_tithe_alltime_cents: int
     total_paid_out_cents: int
     total_outstanding_cents: int
+
+
+# SQL fragment that builds the per-partner accrual.
+# Logic:
+#   1. For each billing_event, decide the rule's referral_source key:
+#      its own value if any rule explicitly matches, else NULL (default).
+#   2. Sum up revenue by that effective key.
+#   3. For each (effective_key, rule) pair, partner_share =
+#      revenue * tithe_pct/100 * weight / total_weight_for_this_key.
+#   4. Aggregate per partner.
+#
+# `events` is parameterised so the same logic powers both all-time and
+# monthly aggregations — caller plugs in the desired billing_events
+# subquery.
+def _build_partner_accrual_cte(events_alias: str = "be_filtered") -> str:
+    return f"""
+    explicit_sources AS (
+        SELECT DISTINCT referral_source
+        FROM tithe_rules
+        WHERE referral_source IS NOT NULL
+    ),
+    events_with_key AS (
+        SELECT
+            e.*,
+            CASE
+                WHEN e.referral_source IS NOT NULL
+                     AND e.referral_source IN (SELECT referral_source FROM explicit_sources)
+                THEN e.referral_source
+                ELSE NULL
+            END AS effective_key
+        FROM {events_alias} e
+    ),
+    pool_revenue AS (
+        SELECT
+            effective_key,
+            SUM(amount_paid_cents)::BIGINT AS revenue_cents
+        FROM events_with_key
+        GROUP BY effective_key
+    ),
+    rules_with_totals AS (
+        SELECT
+            r.id, r.referral_source, r.partner_id, r.weight, r.tithe_pct,
+            SUM(r.weight) OVER (
+                PARTITION BY COALESCE(r.referral_source, '__default__')
+            ) AS total_weight
+        FROM tithe_rules r
+    )
+    """
 
 
 @router.get("/partner-tithes", response_model=PartnerTithesResponse)
@@ -2616,126 +2687,200 @@ async def get_partner_tithes(
     _admin: Annotated[CurrentUser, Depends(require_admin)],
     months: int = Query(default=12, ge=1, le=36),
 ) -> PartnerTithesResponse:
-    """Return everything the Partners admin tab needs in one round-trip.
-
-    Aggregates billing_events + partner_payouts under each
-    referral_partners row and returns:
-      - per-partner summary (revenue, tithe, paid out, outstanding)
-      - monthly breakdown (rev + tithe per partner per month)
-      - recent payouts (for the audit ledger view)
-      - cross-partner totals
-    """
+    """Return the Partners admin-tab payload in one round-trip."""
     pool = await get_pool()
     async with pool.acquire() as conn:
-        # ── Per-partner summary ──────────────────────────────────────────
+        # ── Partners + their routing legs ────────────────────────────────
+        # Each partner can appear in multiple rules; the routes array
+        # tells the UI "Women Offshore is fed by /womenoffshore at 100%".
         partner_rows = await conn.fetch(
             """
             SELECT
-                rp.referral_source,
-                rp.partner_name,
-                rp.tithe_pct,
-                rp.active,
-                rp.notes,
-                rp.payout_method,
-                rp.payout_contact,
-                COALESCE(rev.revenue_cents, 0)        AS revenue_cents,
-                COALESCE(rev.invoice_count, 0)        AS invoice_count,
-                COALESCE(po.paid_cents, 0)            AS paid_cents,
-                COALESCE(po.payout_count, 0)          AS payout_count
-            FROM referral_partners rp
+                p.id, p.name, p.active, p.notes,
+                p.payout_method, p.payout_contact,
+                COALESCE(json_agg(
+                    json_build_object(
+                        'referral_source', r.referral_source,
+                        'weight',          r.weight,
+                        'tithe_pct',       r.tithe_pct,
+                        'total_weight',    rt.total_weight
+                    ) ORDER BY r.referral_source NULLS LAST
+                ) FILTER (WHERE r.id IS NOT NULL), '[]'::json) AS routes
+            FROM tithe_partners p
+            LEFT JOIN tithe_rules r ON r.partner_id = p.id
             LEFT JOIN (
-                SELECT referral_source,
-                       SUM(amount_paid_cents)::BIGINT AS revenue_cents,
-                       COUNT(*)                       AS invoice_count
-                FROM billing_events
-                WHERE referral_source IS NOT NULL
-                GROUP BY referral_source
-            ) rev ON rev.referral_source = rp.referral_source
-            LEFT JOIN (
-                SELECT referral_source,
-                       SUM(amount_cents)::BIGINT AS paid_cents,
-                       COUNT(*)                  AS payout_count
-                FROM partner_payouts
-                GROUP BY referral_source
-            ) po ON po.referral_source = rp.referral_source
-            ORDER BY rp.referral_source
+                SELECT
+                    id,
+                    SUM(weight) OVER (
+                        PARTITION BY COALESCE(referral_source, '__default__')
+                    ) AS total_weight
+                FROM tithe_rules
+            ) rt ON rt.id = r.id
+            GROUP BY p.id
+            ORDER BY p.name
             """
         )
-        partners: list[PartnerSummary] = []
-        total_revenue = total_tithe = total_paid = 0
+
+        # ── All-time partner accrual ─────────────────────────────────────
+        # Pure SQL: compute revenue per pool, distribute by weight.
+        accrual_alltime_rows = await conn.fetch(
+            f"""
+            WITH be_filtered AS (
+                SELECT amount_paid_cents, referral_source FROM billing_events
+            ),
+            {_build_partner_accrual_cte()}
+            SELECT
+                rwt.partner_id,
+                COALESCE(SUM(
+                    pr.revenue_cents
+                    * rwt.tithe_pct / 100.0
+                    * rwt.weight
+                    / NULLIF(rwt.total_weight, 0)
+                ), 0)::BIGINT AS accrued_cents
+            FROM rules_with_totals rwt
+            LEFT JOIN pool_revenue pr
+                ON COALESCE(pr.effective_key, '__default__') = COALESCE(rwt.referral_source, '__default__')
+            GROUP BY rwt.partner_id
+            """
+        )
+        accrued_by_partner = {r["partner_id"]: int(r["accrued_cents"]) for r in accrual_alltime_rows}
+
+        # ── Payouts paid per partner ─────────────────────────────────────
+        paid_rows = await conn.fetch(
+            """
+            SELECT partner_id,
+                   SUM(amount_cents)::BIGINT AS paid_cents,
+                   COUNT(*)                  AS payout_count
+            FROM partner_payouts
+            GROUP BY partner_id
+            """
+        )
+        paid_by_partner = {
+            r["partner_id"]: (int(r["paid_cents"]), int(r["payout_count"]))
+            for r in paid_rows
+        }
+
+        # ── Build partner summaries ──────────────────────────────────────
+        import json as _json
+        partners: list[TithePartnerSummary] = []
+        total_tithe = total_paid = 0
         for r in partner_rows:
-            tithe_pct = float(r["tithe_pct"])
-            revenue = int(r["revenue_cents"])
-            # Tithe is computed from gross paid revenue × pct.
-            tithe = int(round(revenue * tithe_pct / 100.0))
-            paid = int(r["paid_cents"])
-            outstanding = max(0, tithe - paid)
-            total_revenue += revenue
-            total_tithe += tithe
+            routes_raw = r["routes"]
+            if isinstance(routes_raw, str):
+                routes_raw = _json.loads(routes_raw)
+            routes = [
+                PartnerRoute(
+                    referral_source=rt["referral_source"],
+                    weight=int(rt["weight"]),
+                    tithe_pct=float(rt["tithe_pct"]),
+                    total_weight=int(rt["total_weight"]),
+                )
+                for rt in routes_raw
+            ]
+            accrued = accrued_by_partner.get(r["id"], 0)
+            paid, payout_count = paid_by_partner.get(r["id"], (0, 0))
+            outstanding = max(0, accrued - paid)
+            total_tithe += accrued
             total_paid += paid
-            partners.append(PartnerSummary(
-                referral_source=r["referral_source"],
-                partner_name=r["partner_name"],
-                tithe_pct=tithe_pct,
+            partners.append(TithePartnerSummary(
+                id=r["id"],
+                name=r["name"],
                 active=r["active"],
                 notes=r["notes"],
                 payout_method=r["payout_method"],
                 payout_contact=r["payout_contact"],
-                revenue_alltime_cents=revenue,
-                tithe_alltime_cents=tithe,
+                routes=routes,
+                accrued_alltime_cents=accrued,
                 paid_out_cents=paid,
                 outstanding_cents=outstanding,
-                invoice_count=int(r["invoice_count"]),
-                payout_count=int(r["payout_count"]),
+                payout_count=payout_count,
             ))
 
-        # ── Monthly breakdown ────────────────────────────────────────────
-        # Includes both attributed AND unattributed revenue. The
-        # unattributed bucket lets the admin see total MRR-equivalent
-        # alongside partner-attributed slices in the same table.
-        monthly_rows = await conn.fetch(
+        # ── Total revenue (input side, all-time) ─────────────────────────
+        total_revenue_row = await conn.fetchrow(
+            "SELECT COALESCE(SUM(amount_paid_cents), 0)::BIGINT AS total FROM billing_events"
+        )
+        total_revenue = int(total_revenue_row["total"])
+
+        # ── Monthly per-partner accrual ──────────────────────────────────
+        monthly_partner_rows = await conn.fetch(
+            f"""
+            WITH be_filtered AS (
+                SELECT
+                    amount_paid_cents,
+                    referral_source,
+                    TO_CHAR(DATE_TRUNC('month', paid_at AT TIME ZONE 'UTC'), 'YYYY-MM') AS month
+                FROM billing_events
+                WHERE paid_at >= (NOW() - ($1::int || ' months')::interval)
+            ),
+            {_build_partner_accrual_cte()},
+            -- Recompute pool_revenue PER MONTH (override the CTE above)
+            pool_revenue_monthly AS (
+                SELECT effective_key, month,
+                       SUM(amount_paid_cents)::BIGINT AS revenue_cents
+                FROM events_with_key
+                GROUP BY effective_key, month
+            )
+            SELECT
+                pr.month,
+                rwt.partner_id,
+                p.name AS partner_name,
+                SUM(
+                    pr.revenue_cents
+                    * rwt.tithe_pct / 100.0
+                    * rwt.weight
+                    / NULLIF(rwt.total_weight, 0)
+                )::BIGINT AS accrued_cents
+            FROM pool_revenue_monthly pr
+            JOIN rules_with_totals rwt
+                ON COALESCE(rwt.referral_source, '__default__') = COALESCE(pr.effective_key, '__default__')
+            JOIN tithe_partners p ON p.id = rwt.partner_id
+            GROUP BY pr.month, rwt.partner_id, p.name
+            ORDER BY pr.month DESC, p.name
+            """,
+            months,
+        )
+        monthly_partner_accrual = [
+            MonthlyPartnerAccrual(
+                month=r["month"],
+                partner_id=r["partner_id"],
+                partner_name=r["partner_name"],
+                accrued_cents=int(r["accrued_cents"]),
+            )
+            for r in monthly_partner_rows
+        ]
+
+        # ── Monthly per-channel revenue (input side) ─────────────────────
+        monthly_channel_rows = await conn.fetch(
             """
             SELECT
-                TO_CHAR(DATE_TRUNC('month', be.paid_at AT TIME ZONE 'UTC'), 'YYYY-MM') AS month,
-                be.referral_source,
-                rp.partner_name,
-                rp.tithe_pct,
-                SUM(be.amount_paid_cents)::BIGINT AS revenue_cents,
-                COUNT(*)                          AS invoice_count
-            FROM billing_events be
-            LEFT JOIN referral_partners rp ON rp.referral_source = be.referral_source
-            WHERE be.paid_at >= (NOW() - ($1::int || ' months')::interval)
-            GROUP BY 1, 2, 3, 4
+                TO_CHAR(DATE_TRUNC('month', paid_at AT TIME ZONE 'UTC'), 'YYYY-MM') AS month,
+                referral_source,
+                SUM(amount_paid_cents)::BIGINT AS revenue_cents,
+                COUNT(*)                       AS invoice_count
+            FROM billing_events
+            WHERE paid_at >= (NOW() - ($1::int || ' months')::interval)
+            GROUP BY 1, 2
             ORDER BY 1 DESC, 2 NULLS LAST
             """,
             months,
         )
-        monthly: list[MonthlyBreakdown] = []
-        for r in monthly_rows:
-            tithe_pct = float(r["tithe_pct"]) if r["tithe_pct"] is not None else 0.0
-            revenue = int(r["revenue_cents"])
-            tithe = int(round(revenue * tithe_pct / 100.0))
-            monthly.append(MonthlyBreakdown(
+        monthly_channel_revenue = [
+            MonthlyChannelRevenue(
                 month=r["month"],
                 referral_source=r["referral_source"],
-                partner_name=r["partner_name"],
-                revenue_cents=revenue,
-                tithe_cents=tithe,
+                revenue_cents=int(r["revenue_cents"]),
                 invoice_count=int(r["invoice_count"]),
-            ))
+            )
+            for r in monthly_channel_rows
+        ]
 
-        # ── Recent payouts (audit ledger) ───────────────────────────────
+        # ── Recent payouts ───────────────────────────────────────────────
         payout_rows = await conn.fetch(
             """
             SELECT
-                pp.id,
-                pp.referral_source,
-                pp.partner_name_at_time,
-                pp.amount_cents,
-                pp.currency,
-                pp.paid_at,
-                pp.notes,
-                pp.created_at,
+                pp.id, pp.partner_id, pp.partner_name_at_time,
+                pp.amount_cents, pp.currency, pp.paid_at, pp.notes, pp.created_at,
                 u.email AS created_by_email
             FROM partner_payouts pp
             LEFT JOIN users u ON u.id = pp.created_by_user_id
@@ -2746,7 +2891,7 @@ async def get_partner_tithes(
         recent_payouts = [
             PartnerPayoutEntry(
                 id=str(r["id"]),
-                referral_source=r["referral_source"],
+                partner_id=int(r["partner_id"]),
                 partner_name_at_time=r["partner_name_at_time"],
                 amount_cents=int(r["amount_cents"]),
                 currency=r["currency"],
@@ -2758,21 +2903,21 @@ async def get_partner_tithes(
             for r in payout_rows
         ]
 
-    total_outstanding = max(0, total_tithe - total_paid)
     return PartnerTithesResponse(
         partners=partners,
-        monthly=monthly,
+        monthly_partner_accrual=monthly_partner_accrual,
+        monthly_channel_revenue=monthly_channel_revenue,
         recent_payouts=recent_payouts,
         total_revenue_alltime_cents=total_revenue,
         total_tithe_alltime_cents=total_tithe,
         total_paid_out_cents=total_paid,
-        total_outstanding_cents=total_outstanding,
+        total_outstanding_cents=max(0, total_tithe - total_paid),
     )
 
 
 class RecordPayoutRequest(BaseModel):
-    referral_source: str
-    amount_cents: int  # in the partner's currency (defaults usd)
+    partner_id: int
+    amount_cents: int
     currency: str = "usd"
     paid_at: str | None = None  # ISO-8601; defaults to now
     notes: str | None = None
@@ -2788,26 +2933,20 @@ async def record_partner_payout(
     admin: Annotated[CurrentUser, Depends(require_write_admin)],
     body: RecordPayoutRequest,
 ) -> RecordPayoutResponse:
-    """Mark a manual payout to a partner. Audit-logged.
-
-    The amount is recorded in cents in the partner's currency. Future
-    automation can replace this manual entry with a Stripe Connect
-    transfer or similar — the schema is the same either way.
-    """
+    """Mark a manual payout to a partner. Audit-logged."""
     if body.amount_cents <= 0:
         raise HTTPException(status_code=400, detail="amount_cents must be positive")
     pool = await get_pool()
     async with pool.acquire() as conn:
         partner = await conn.fetchrow(
-            "SELECT partner_name, active FROM referral_partners WHERE referral_source = $1",
-            body.referral_source,
+            "SELECT name FROM tithe_partners WHERE id = $1",
+            body.partner_id,
         )
         if partner is None:
             raise HTTPException(
                 status_code=404,
-                detail=f"Unknown referral_source: {body.referral_source!r}",
+                detail=f"Unknown partner_id: {body.partner_id}",
             )
-        # Even if the partner is now inactive, allow back-dated payouts.
         paid_at_dt: datetime | None = None
         if body.paid_at:
             try:
@@ -2820,13 +2959,13 @@ async def record_partner_payout(
         row = await conn.fetchrow(
             """
             INSERT INTO partner_payouts (
-                referral_source, partner_name_at_time, amount_cents, currency,
+                partner_id, partner_name_at_time, amount_cents, currency,
                 paid_at, notes, created_by_user_id
             ) VALUES ($1, $2, $3, $4, $5, $6, $7)
             RETURNING id
             """,
-            body.referral_source,
-            partner["partner_name"],
+            body.partner_id,
+            partner["name"],
             body.amount_cents,
             body.currency.lower(),
             paid_at_dt,
@@ -2835,8 +2974,9 @@ async def record_partner_payout(
         )
     await audit_log(
         pool, admin, "record_partner_payout",
-        target_id=body.referral_source,
+        target_id=str(body.partner_id),
         details={
+            "partner_name": partner["name"],
             "amount_cents": body.amount_cents,
             "currency": body.currency,
             "paid_at": paid_at_dt.isoformat(),
@@ -2855,11 +2995,7 @@ async def delete_partner_payout(
     admin: Annotated[CurrentUser, Depends(require_write_admin)],
     payout_id: str,
 ) -> DeletePayoutResponse:
-    """Remove a recorded payout — for typo corrections only.
-
-    The audit log captures every delete so accidental removal is
-    recoverable via the audit trail.
-    """
+    """Remove a recorded payout — for typo corrections only. Audit-logged."""
     try:
         payout_uuid = uuid.UUID(payout_id)
     except ValueError:
@@ -2867,7 +3003,8 @@ async def delete_partner_payout(
     pool = await get_pool()
     async with pool.acquire() as conn:
         existing = await conn.fetchrow(
-            "SELECT referral_source, amount_cents, currency FROM partner_payouts WHERE id = $1",
+            "SELECT partner_id, partner_name_at_time, amount_cents, currency "
+            "FROM partner_payouts WHERE id = $1",
             payout_uuid,
         )
         if existing is None:
@@ -2877,7 +3014,8 @@ async def delete_partner_payout(
         pool, admin, "delete_partner_payout",
         target_id=str(payout_uuid),
         details={
-            "referral_source": existing["referral_source"],
+            "partner_id": int(existing["partner_id"]),
+            "partner_name": existing["partner_name_at_time"],
             "amount_cents": int(existing["amount_cents"]),
             "currency": existing["currency"],
         },

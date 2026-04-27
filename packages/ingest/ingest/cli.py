@@ -58,6 +58,13 @@ _PDF_SOURCE_CONFIG: dict[str, dict] = {
         "text_dir": _DATA_RAW / "imdg",
         "adapter":  "ingest.sources.imdg",
     },
+    "imdg_supplement": {
+        # Sprint D6.12b — IMDG errata + supplement publications.
+        # Multi-PDF directory; one Section per PDF. Currently covers
+        # December 2025 errata (corrections to Amendment 42-24).
+        "raw_dir": _DATA_RAW / "imdg" / "supplements",
+        "adapter": "ingest.sources.imdg_supplement",
+    },
     "ism": {
         "text_dir": _DATA_RAW / "ism" / "extracted",
         "adapter":  "ingest.sources.ism",

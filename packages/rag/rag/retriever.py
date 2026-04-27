@@ -62,7 +62,8 @@ SOURCE_GROUPS: dict[str, tuple[str, ...]] = {
     # the IMDG text alongside the U.S. domestic 49 CFR HazMat regs and
     # ERG response guides. UN-number identifier matching already serves
     # both ERG and IMDG via per-source diversification.
-    "imdg": ("imdg",),
+    # Sprint D6.12b — adds imdg_supplement (errata + future supplements).
+    "imdg": ("imdg", "imdg_supplement"),
     "erg": ("erg",),
     # NMC policy letters + checklists share a group so the credentialing
     # corpus draws candidates together (mirrors the CFR group's 3 titles).
