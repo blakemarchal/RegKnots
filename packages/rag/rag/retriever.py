@@ -463,7 +463,25 @@ _IDENTIFIER_PATTERNS: list[tuple[str, re.Pattern]] = [
     # confident hallucination Karynn used for marketing.
     ("un_number",    re.compile(r"\b(UN|NA)[\s\-]?(\d{4})\b", re.IGNORECASE)),
     ("erg_guide",    re.compile(r"\b(?:ERG\s+)?Guide\s+(\d{3})\b", re.IGNORECASE)),
-    ("cfr_section",  re.compile(r"\b(\d{1,2})\s*CFR\s*([\d.]+(?:-[\d]+)?)\b", re.IGNORECASE)),
+    # Sprint D6.16b — extend the CFR section regex to match temporary
+    # safety/anchorage zone notation (33 CFR 147.T01-0277) which the
+    # original `[\d.]+(?:-[\d]+)?` form truncated to "147". Without this
+    # the T-zone tables (5 of the 217 corpus heavy-table chunks) couldn't
+    # be reached via the keyword bypass when a user typed the full
+    # citation. Standard sections like "35.10-5" still match cleanly.
+    ("cfr_section",  re.compile(
+        r"\b(\d{1,2})\s*CFR\s*([\d.]+(?:T\d+-\d+)?(?:-[\d]+)?)\b",
+        re.IGNORECASE,
+    )),
+    # Sprint D6.16b — Packing Instructions for hazmat. CFR stores them as
+    # "PI 510"; IMDG stores them as "P001" / "P200" / "P301". Anchored on
+    # the "PI" or "Packing Instruction" prefix so bare "P510" mid-prose
+    # doesn't false-match. We emit two search patterns per hit (one for
+    # each storage form) inside _extract_identifiers.
+    ("packing_instr", re.compile(
+        r"\b(?:PI\s*|Packing\s+Instruction\s+P?)(\d{3})\b",
+        re.IGNORECASE,
+    )),
     ("colregs_rule", re.compile(r"\b(?:COLREGs?\s+)?Rule\s+(\d{1,2})\b", re.IGNORECASE)),
     ("solas_reg",    re.compile(r"\bSOLAS\s+(Ch\.?)?([IVX]+-\d+)(?:\s*(?:Reg\.?\s*|/)(\d+))?\b", re.IGNORECASE)),
     ("nvic_number",  re.compile(r"\bNVIC\s+(\d{2}-\d{2})\b", re.IGNORECASE)),
@@ -604,6 +622,22 @@ def _extract_identifiers(query: str) -> list[dict]:
                     "type": id_type,
                     "value": f"EmS {code}",
                     "pattern": code,
+                })
+            elif id_type == "packing_instr":
+                num = m.group(1)
+                # CFR storage: "PI 510" — substring match is safe.
+                identifiers.append({
+                    "type": "packing_instr_pi",
+                    "value": f"PI {num}",
+                    "pattern": f"PI {num}",
+                })
+                # IMDG storage: "P510" — use \m...\M word boundaries so
+                # "P200" doesn't match "P2001" or "approxP200" prose.
+                identifiers.append({
+                    "type": "packing_instr_p",
+                    "value": f"P{num}",
+                    "pattern": f"P{num}",
+                    "regex": True,
                 })
     return identifiers
 

@@ -11,6 +11,13 @@ Strategy:
 
 Each chunk_text is prefixed with "[{section_number}] {section_title}"
 so every embedding is self-contained even when split across chunks.
+
+Sprint D6.16b — IMDG 3.2 Dangerous Goods List sections take a tabular
+fast-path that emits one chunk per UN-numbered row. Diluting an
+embedding across 9-50 unrelated UN entries (the previous chunker
+default) was the root cause of the UN-2734 hallucination, even after
+the keyword bypass was fixed. Per-row chunking gives vector retrieval
+a fair shot at surfacing single rows.
 """
 
 import hashlib
@@ -26,6 +33,14 @@ _ENCODER = tiktoken.get_encoding("cl100k_base")
 MAX_TOKENS = 512
 OVERLAP_TOKENS = 50
 
+# Sprint D6.16b — IMDG DGL row pattern. Captures lines that look like:
+#   "  2734    Amines, liquid, corrosive, flammable, n.o.s."
+# i.e. optional leading whitespace, exactly four digits, two-or-more
+# spaces, then the proper shipping name running to end of line. The
+# 2-space gap is what distinguishes a UN row from prose that happens
+# to start with a 4-digit year ("2024 amendments to the IMDG Code...").
+_IMDG_DGL_ROW_RE = re.compile(r"^\s*(\d{4})\s{2,}(.+?)\s*$", re.MULTILINE)
+
 
 # ── Public API ───────────────────────────────────────────────────────────────
 
@@ -34,6 +49,16 @@ def chunk_section(section: Section) -> list[Chunk]:
     text = section.full_text.strip()
     if not text:
         return []
+
+    # Sprint D6.16b — IMDG DGL fast-path: one chunk per UN row. Only
+    # fires for IMDG 3.2 sections; everything else uses the standard
+    # paragraph-/sentence-aware chunker below.
+    if _is_imdg_dgl(section):
+        rows = _chunk_imdg_dgl(section)
+        if rows:
+            return rows
+        # No UN rows extracted (header-only section, frontmatter, etc.) —
+        # fall through to the default chunker so we still emit something.
 
     header = _make_header(section)
     header_tokens = _count(header)
@@ -51,6 +76,65 @@ def chunk_section(section: Section) -> list[Chunk]:
 
     units = _split_into_units(text, content_budget)
     return _pack_chunks(section, header, units, content_budget)
+
+
+# ── IMDG DGL per-row chunking (Sprint D6.16b) ───────────────────────────────
+
+def _is_imdg_dgl(section: Section) -> bool:
+    """Detect IMDG 3.2 Dangerous Goods List sections.
+
+    The DGL is split across many Sections at ingest time (one per page
+    range), but every one of them carries section_number="IMDG 3.2" and
+    source="imdg". That's enough to route deterministically.
+    """
+    return section.source == "imdg" and section.section_number == "IMDG 3.2"
+
+
+def _chunk_imdg_dgl(section: Section) -> list[Chunk]:
+    """Emit one chunk per UN row in an IMDG 3.2 section.
+
+    Non-row lines (chapter headers, search-term annotations, page
+    markers) are dropped — they don't belong with any single UN entry
+    and aren't worth their own chunk for vector retrieval.
+
+    Each row chunk's text takes the form:
+      "[IMDG 3.2] UN <number> — <proper shipping name>"
+
+    so every embedding is anchored to exactly one UN identity. Returns
+    [] if no rows match (caller falls back to default chunking).
+    """
+    text = section.full_text or ""
+    chunks: list[Chunk] = []
+    seen_un: set[str] = set()
+    for m in _IMDG_DGL_ROW_RE.finditer(text):
+        un_number = m.group(1)
+        shipping_name = m.group(2).strip()
+        # Skip pathological short matches (OCR noise) and duplicates
+        # within the same section (rare but defensive).
+        if not shipping_name or un_number in seen_un:
+            continue
+        seen_un.add(un_number)
+        # Embed-friendly format: identifier first, then the descriptive
+        # name. The UN prefix is added so vector queries that say
+        # "UN 2734" share a token with the chunk; bare-number queries
+        # also still match via the line-anchored "<number>" form below.
+        chunk_text = f"[IMDG 3.2] UN {un_number} — {shipping_name}\n{un_number}    {shipping_name}"
+        chunks.append(Chunk(
+            source                = section.source,
+            title_number          = section.title_number,
+            section_number        = section.section_number,
+            section_title         = section.section_title,
+            chunk_index           = len(chunks),
+            chunk_text            = chunk_text,
+            content_hash          = hashlib.sha256(chunk_text.encode("utf-8")).hexdigest(),
+            token_count           = _count(chunk_text),
+            up_to_date_as_of      = section.up_to_date_as_of,
+            parent_section_number = section.parent_section_number,
+            published_date        = section.published_date,
+            expires_date          = section.expires_date,
+            superseded_by         = section.superseded_by,
+        ))
+    return chunks
 
 
 # ── Internal helpers ─────────────────────────────────────────────────────────
