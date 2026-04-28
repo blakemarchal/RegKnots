@@ -80,6 +80,13 @@ SOURCE_GROUPS: dict[str, tuple[str, ...]] = {
     # WHO IHR (international health / port sanitation) — its own group so
     # port-health queries reliably surface IHR content. Sprint D5.4.
     "who": ("who_ihr",),
+    # UK Maritime and Coastguard Agency notices — Sprint D6.18. RegKnots'
+    # first non-US national-flag corpus. MGN is authoritative MCA guidance
+    # (Tier 2, parallels NVIC). MSN carries the binding technical detail of
+    # statutory instruments (Tier 1, parallels CFR section text). Grouped
+    # together so any "UK" / non-US-flag / Channel-route query that surfaces
+    # one type also draws candidates from the other for cross-coverage.
+    "mca": ("mca_mgn", "mca_msn"),
 }
 
 # Per-group candidate pool sizes. CFR is larger because it covers three
@@ -387,6 +394,35 @@ _USCG_BULLETIN_ABBR_RE = re.compile(
 )
 
 
+# UK Maritime and Coastguard Agency notices — Sprint D6.18. Terms that
+# anchor a query to UK-flag / EU / non-US-jurisdiction context. Country /
+# flag / route names live here; the citation-form abbreviations (MGN, MSN)
+# are matched separately because they're unambiguous identifiers and
+# should bypass the rest of the affinity logic.
+_MCA_TERMS: tuple[str, ...] = (
+    # Agency / authority
+    "mca", "maritime and coastguard agency", "mcga",
+    "uk flag", "british flag", "united kingdom flag", "red ensign",
+    # UK-specific instruments and concepts
+    "merchant shipping notice", "marine guidance note", "boatmaster",
+    "uk merchant shipping", "merchant shipping act",
+    # UK / EU geography that signals jurisdiction
+    "channel crossing", "english channel", "dover", "dunkerque", "calais",
+    "portsmouth", "felixstowe", "southampton", "harwich",
+    "irish sea", "north sea uk", "thames estuary",
+    "uk territorial waters", "uk waters",
+    # Common UK-flag operational queries
+    "mlc 2006 uk", "stcw uk implementation",
+)
+_MCA_ABBR_RE = re.compile(
+    # Citation form: "MGN 71", "MGN 71 (M+F)", "MSN 1676 Amendment 4".
+    # Also "MIN" (Marine Information Note) — not in our corpus yet but the
+    # abbreviation is unambiguous in maritime context, so cheap to recognize.
+    r"\b(?:MGN|MSN|MIN)\s*\d{1,4}\b",
+    re.IGNORECASE,
+)
+
+
 def _source_affinity(query: str) -> dict[str, float]:
     """Return a boost value per source group based on query keywords.
 
@@ -434,6 +470,20 @@ def _source_affinity(query: str) -> dict[str, float]:
         # Hazmat queries that boost IMDG often benefit from ERG too —
         # response/transport are adjacent. Boost ERG modestly.
         boosts.setdefault("erg", 0.10)
+
+    # Sprint D6.18 — UK MCA boost. Note: vessel-flag-driven scoping is
+    # handled by the system prompt (D6.17 JURISDICTIONAL APPLICABILITY
+    # section, which sees flag_state in the vessel_profile block). This
+    # affinity boost is just for query-text-driven cases — explicit MGN/
+    # MSN citations, UK geography mentions, "MCA" mentions. It's NOT a
+    # substitute for flag-state filtering and is intentionally narrower
+    # than CFR's (no broad "uk" boost without supporting context).
+    if any(t in q for t in _MCA_TERMS) or _MCA_ABBR_RE.search(q):
+        boosts["mca"] = 0.20
+        # UK ferry queries often span MCA + IMO instruments (SOLAS, STCW,
+        # ISM, MARPOL) since UK implements the IMO conventions. Modest
+        # supplementary boost so the international context surfaces too.
+        boosts.setdefault("solas", 0.10)
 
     if "cfr" in q or "code of federal" in q:
         boosts["cfr"] = 0.15

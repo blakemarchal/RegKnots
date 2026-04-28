@@ -46,10 +46,20 @@ _SOURCE_TO_TIER: dict[str, int] = {
     "stcw_supplement": 1,
     "ism": 1,
     "ism_supplement": 1,
+    # UK Merchant Shipping Notices (MSN) — Sprint D6.18. Carry the
+    # technical specification behind UK Statutory Instruments (e.g.
+    # MSN 1676 holds the binding LSA detail referenced by the Merchant
+    # Shipping (Life-Saving Appliances) Regulations). For a UK-flagged
+    # vessel they are binding alongside the SI itself.
+    "mca_msn": 1,
     # Tier 2 — federal interpretive guidance
     "nvic": 2,
     "nmc_policy": 2,
     "nmc_checklist": 2,
+    # UK Marine Guidance Notes (MGN) — authoritative MCA interpretation
+    # of UK regs / IMO instruments. Parallels NVIC. Not itself binding
+    # but routinely cited by MCA inspectors and Paris MOU PSC officers.
+    "mca_mgn": 2,
     # USCG Marine Safety Manual (CIM 16000.X) — Coast Guard internal
     # operational procedures and inspector guidance. Tier 2 because it's
     # how USCG personnel implement the binding 33/46/49 CFR rules; not

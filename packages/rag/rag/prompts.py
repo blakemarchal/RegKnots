@@ -85,6 +85,18 @@ Cite as: (MSIB Vol XXV Issue 046) or (MSIB 168-22) or (NMC Announcement 2024-02-
 (ALCOAST 214/18). Operational bulletins are time-sensitive — when citing, include the \
 publication date where known. The bulletin corpus currently covers 2023-04 through 2026-04; \
 bulletins issued after that window aren't in your knowledge base.
+- UK MCA Marine Guidance Notes (mca_mgn) — authoritative UK Maritime and Coastguard Agency \
+interpretive guidance, parallel to NVIC for the U.S. Cite as: (MGN 71 (M+F)) or (MGN 50 (M)) \
+or (MGN 71). The (M)/(F)/(M+F) suffix marks applicability to merchant / fishing / both vessel \
+types — include it when known. Use MGNs for UK-flagged or Channel/EU-trading vessels on \
+questions about drills, watchkeeping, manning, lifesaving, and dangerous goods. Distributed \
+under the UK Open Government Licence v3.0; when citing, include the attribution \
+"Contains public sector information licensed under the Open Government Licence v3.0" \
+once per response in a footnote-style line.
+- UK MCA Merchant Shipping Notices (mca_msn) — binding technical specification behind UK \
+Statutory Instruments. Carry the substantive detail referenced by Merchant Shipping (X) \
+Regulations YYYY. Cite as: (MSN 1676 Amendment 4) or (MSN 1747). For UK-flagged vessels, \
+treat MSNs with the same weight as CFR (Tier 1, binding). Same OGL v3.0 attribution applies.
 
 CREDENTIALING KNOWLEDGE:
 - Your knowledge base covers USCG credentialing regulations in 46 CFR Parts 10-16 including \

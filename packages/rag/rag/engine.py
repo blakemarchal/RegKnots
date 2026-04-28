@@ -173,6 +173,25 @@ _ISM_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Sprint D6.18 — UK MCA notices. The citation form the LLM emits should
+# match the canonical section_number stored in the regulations table.
+# Examples (all matched):
+#   "MGN 71"                      → "MGN 71"
+#   "MGN 71 (M+F)"                → "MGN 71 (M+F)"
+#   "MGN 50 (M)"                  → "MGN 50 (M)"
+#   "MSN 1676"                    → "MSN 1676"
+#   "MSN 1676 Amendment 4"        → "MSN 1676 Amendment 4"
+#   "(MSN 1790)"                  → "MSN 1790"
+# Groups: (1) kind (MGN/MSN), (2) number, (3) suffix or None,
+#         (4) amendment number or None.
+_MCA_RE = re.compile(
+    r"\(?(MGN|MSN)\s+(\d{1,4})"
+    r"(?:\s*\(([MF](?:\+[MF])?)\))?"
+    r"(?:\s+Amendment\s+(\d+))?"
+    r"\)?",
+    re.IGNORECASE,
+)
+
 _VESSEL_UPDATE_RE = re.compile(
     r"\[VESSEL_UPDATE\]\s*\n(.*?)\n\[/VESSEL_UPDATE\]",
     re.DOTALL,
@@ -439,6 +458,31 @@ def _extract_all_text_citations(answer: str) -> list[_TextCitation]:
             found[display] = _TextCitation(
                 display=display,
                 candidates=[("ism", f"ISM {num}%")],
+            )
+
+    # ── UK MCA notices (MGN / MSN) — Sprint D6.18 ─────────────────────────
+    # Verification uses LIKE patterns because the canonical
+    # section_number ("MGN 71 (M+F)") is what's in the DB but the LLM
+    # may cite without the suffix ("MGN 71") or with an Amendment tag.
+    # The LIKE wildcards on either side accept any of those forms.
+    for m in _MCA_RE.finditer(answer):
+        kind = m.group(1).upper()        # MGN or MSN
+        num = m.group(2)
+        suffix = m.group(3)              # M / F / M+F or None
+        amendment = m.group(4)           # "4" or None
+        # Canonical display matches the LLM-emitted form.
+        display = f"{kind} {num}"
+        if suffix:
+            display += f" ({suffix.upper()})"
+        if amendment:
+            display += f" Amendment {amendment}"
+        if display not in found:
+            source_code = f"mca_{kind.lower()}"
+            # LIKE pattern: "MGN 71%" matches with or without suffix /
+            # amendment in the stored section_number.
+            found[display] = _TextCitation(
+                display=display,
+                candidates=[(source_code, f"{kind} {num}%")],
             )
 
     return list(found.values())

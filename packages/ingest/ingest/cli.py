@@ -105,6 +105,18 @@ _PDF_SOURCE_CONFIG: dict[str, dict] = {
         "raw_dir": _DATA_RAW / "nvic",
         "adapter": "ingest.sources.nvic",
     },
+    # Sprint D6.18 — UK MCA notices, two sources sharing one adapter
+    # (mirrors the nmc_policy / nmc_checklist split).
+    "mca_mgn": {
+        "mca_kind": "mgn",
+        "raw_dir": _DATA_RAW / "mca",
+        "adapter": "ingest.sources.mca",
+    },
+    "mca_msn": {
+        "mca_kind": "msn",
+        "raw_dir": _DATA_RAW / "mca",
+        "adapter": "ingest.sources.mca",
+    },
     "solas": {
         "text_dir": _DATA_RAW / "solas",
         "adapter":  "ingest.sources.solas",
@@ -488,6 +500,37 @@ async def _run_pdf_source(
                 console=console,
                 enrich=enrich,
             )
+
+        # Sprint D6.18 — MCA: discover-and-download once (idempotent for
+        # both kinds; second run is a no-op), then parse for the kind
+        # requested by this source. Mirrors NMC's split-source pattern
+        # but with a real download phase up front.
+        if "mca_kind" in cfg:
+            mca_kind = cfg["mca_kind"]
+            mca_source = f"mca_{mca_kind}"
+            console.print(
+                f"  [cyan]Phase 1:[/cyan] Downloading curated MCA notices into {raw_dir}…"
+            )
+            dl_success, dl_failures = adapter.discover_and_download(
+                raw_dir, _DATA_FAILED, console
+            )
+            if dl_success == 0 and dl_failures == 0:
+                console.print(f"  [yellow]No MCA notices found — aborting[/yellow]")
+                return IngestResult(source=mca_source, errors=1)
+            source_date = adapter.get_source_date(raw_dir)
+            section_loader = lambda: adapter.parse_source(raw_dir, mca_kind)  # noqa: E731
+            result = await run_pdf_pipeline(
+                source=mca_source,
+                mode=mode,
+                section_loader=section_loader,
+                source_date=source_date,
+                pool=pool,
+                cfg=settings,
+                console=console,
+                enrich=enrich,
+            )
+            result.errors += dl_failures
+            return result
 
         # NVIC-style: adapter-driven discovery + download before parsing.
         console.print(f"  [cyan]Phase 1:[/cyan] Discovering and downloading {source.upper()} documents…")
