@@ -12,7 +12,10 @@ const pwaConfig = withPWA({
   cacheStartUrl: false,
   reloadOnOnline: false,
   workboxOptions: {
-    cacheId: "regknots-v12",
+    // D6.23e — bumped from v12 → v13 to force cleanupOutdatedCaches()
+    // to delete stale start-url caches in any clients that still load
+    // the old SW before Providers.tsx unregisters it.
+    cacheId: "regknots-v13",
     skipWaiting: true,
     cleanupOutdatedCaches: true,
     // Exclude everything from precache — SW does zero caching
