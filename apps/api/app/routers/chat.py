@@ -19,6 +19,7 @@ as normal HTTP error responses.
 import asyncio
 import json
 import logging
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Annotated
@@ -603,13 +604,35 @@ async def _apply_vessel_update(pool: asyncpg.Pool, vessel_id: uuid.UUID, update:
         # next conversation turn loads it into the prompt without the
         # user having to re-edit the vessel record.
         "flag_state": "flag_state",
+        # Sprint D6.17b — gross_tonnage persists when the agent asks
+        # the user to confirm an implausible tonnage value (the
+        # TONNAGE PLAUSIBILITY CHECK in the system prompt).
+        "gross_tonnage": "gross_tonnage",
     }
 
     for update_key, db_column in field_mapping.items():
-        if update_key in update:
-            sets.append(f"{db_column} = ${idx}")
-            params.append(update[update_key])
-            idx += 1
+        if update_key not in update:
+            continue
+        value = update[update_key]
+        # Sprint D6.17b — gross_tonnage is NUMERIC(12,2); the LLM may
+        # emit it as "35290", "35,290", or even "35290 GT". Strip
+        # punctuation/units and coerce; on parse failure, drop the
+        # field rather than corrupt the existing value.
+        if update_key == "gross_tonnage":
+            try:
+                cleaned = re.sub(r"[^0-9.\-]", "", str(value))
+                if not cleaned:
+                    raise ValueError(f"empty after cleaning: {value!r}")
+                value = float(cleaned)
+            except (ValueError, TypeError) as exc:
+                logger.warning(
+                    "VESSEL_UPDATE gross_tonnage skipped (unparseable %r): %s",
+                    update[update_key], exc,
+                )
+                continue
+        sets.append(f"{db_column} = ${idx}")
+        params.append(value)
+        idx += 1
 
     if "key_equipment" in update:
         sets.append(f"key_equipment = ${idx}")
