@@ -454,7 +454,14 @@ def _source_affinity(query: str) -> dict[str, float]:
 # search when they are detected.
 
 _IDENTIFIER_PATTERNS: list[tuple[str, re.Pattern]] = [
-    ("un_number",    re.compile(r"\b(UN|NA)(\d{4})\b", re.IGNORECASE)),
+    # Sprint D6.16 — accept optional whitespace OR hyphen between the
+    # "UN" prefix and the four-digit number. Real-world queries write
+    # "UN 2734", "UN-2734", and "UN2734" interchangeably; the original
+    # pattern only matched the compact form, which is why a real
+    # mariner asking about "UN 2734 and UN1202" had only the second
+    # number trigger the keyword-search bypass — leading to the
+    # confident hallucination Karynn used for marketing.
+    ("un_number",    re.compile(r"\b(UN|NA)[\s\-]?(\d{4})\b", re.IGNORECASE)),
     ("erg_guide",    re.compile(r"\b(?:ERG\s+)?Guide\s+(\d{3})\b", re.IGNORECASE)),
     ("cfr_section",  re.compile(r"\b(\d{1,2})\s*CFR\s*([\d.]+(?:-[\d]+)?)\b", re.IGNORECASE)),
     ("colregs_rule", re.compile(r"\b(?:COLREGs?\s+)?Rule\s+(\d{1,2})\b", re.IGNORECASE)),
@@ -495,10 +502,29 @@ def _extract_identifiers(query: str) -> list[dict]:
             if id_type == "un_number":
                 prefix = m.group(1).upper()
                 number = m.group(2)
+                # Sprint D6.16 — emit TWO patterns per UN number:
+                #   1. Compact "UN2734" — matches CFR storage style
+                #      (e.g., "UN2734  I  8, 3" in 49 CFR 172.101).
+                #   2. Bare "2734" with word-boundary regex — matches
+                #      IMDG / ERG storage style which omits the "UN"
+                #      prefix in tabular rows (e.g., "2734 Amines,
+                #      liquid, corrosive..." in IMDG 3.2 or
+                #      "2734 132 Amines..." in ERG Yellow). Restricted
+                #      to imdg / imdg_supplement / erg sources to
+                #      avoid false positives where a 4-digit number
+                #      like "1202" appears as a section number, year,
+                #      or paragraph reference in unrelated regs.
                 identifiers.append({
                     "type": id_type,
                     "value": f"{prefix}{number}",
                     "pattern": f"{prefix}{number}",
+                })
+                identifiers.append({
+                    "type": "un_number_bare",
+                    "value": f"{prefix} {number}",
+                    "pattern": number,
+                    "regex": True,
+                    "source_filter": ("imdg", "imdg_supplement", "erg"),
                 })
             elif id_type == "erg_guide":
                 identifiers.append({
@@ -663,22 +689,54 @@ async def _identifier_search(
 ) -> list[dict]:
     """Search regulations by text for structured identifiers (high confidence).
 
+    Per-identifier dict keys honored:
+      pattern        — the substring (or regex, see below) to search for
+      regex          — if truthy, `pattern` is a regex compiled with
+                       PostgreSQL's POSIX-extended syntax. Used for
+                       bare-number UN matching with word boundaries
+                       so "2734" doesn't match "12734" or "1.2.7.34".
+      source_filter  — optional tuple of source codes; when set, search
+                       is restricted to those sources only. Used for
+                       bare-number UN searches against imdg/erg where
+                       the "UN" prefix is omitted in tabular storage.
+
     Returns results in the same dict format as vector search.
     """
     results: list[dict] = []
     seen_ids: set = set()
     for ident in identifiers:
-        rows = await pool.fetch(
-            """
-            SELECT id, source, section_number, section_title, full_text,
-                   0.0 AS similarity
-            FROM regulations
-            WHERE full_text ILIKE '%' || $1 || '%'
-            LIMIT $2
-            """,
-            ident["pattern"],
-            limit,
-        )
+        is_regex = bool(ident.get("regex"))
+        source_filter = ident.get("source_filter")
+        pattern = ident["pattern"]
+        if is_regex:
+            # \m and \M are PostgreSQL word-boundary operators in the
+            # POSIX-extended regex flavour. Wrap the pattern so e.g.
+            # "2734" only matches the standalone digits.
+            sql = (
+                "SELECT id, source, section_number, section_title, full_text, "
+                "       0.0 AS similarity "
+                "FROM regulations "
+                "WHERE full_text ~ $1"
+                + (" AND source = ANY($3) " if source_filter else " ")
+                + "LIMIT $2"
+            )
+            args: list = [r"\m" + pattern + r"\M", limit]
+            if source_filter:
+                args.append(list(source_filter))
+            rows = await pool.fetch(sql, *args)
+        else:
+            sql = (
+                "SELECT id, source, section_number, section_title, full_text, "
+                "       0.0 AS similarity "
+                "FROM regulations "
+                "WHERE full_text ILIKE '%' || $1 || '%' "
+                + ("AND source = ANY($3) " if source_filter else "")
+                + "LIMIT $2"
+            )
+            args = [pattern, limit]
+            if source_filter:
+                args.append(list(source_filter))
+            rows = await pool.fetch(sql, *args)
         for r in rows:
             if r["id"] not in seen_ids:
                 seen_ids.add(r["id"])

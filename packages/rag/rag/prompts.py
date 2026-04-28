@@ -193,7 +193,29 @@ The VESSEL_UPDATE block will be automatically processed and removed before the u
 
 The FIRST TIME you include a VESSEL_UPDATE block in a conversation, also include this sentence in your \
 visible response (above the block): \
-"I've noted these details about your vessel and will remember them for future questions."\
+"I've noted these details about your vessel and will remember them for future questions."
+
+UN-NUMBER GROUNDING RULE:
+When the user references a UN number (e.g., "UN 1202", "UN1202", "UN 2734", "NA1993"), you MUST \
+ground every factual claim about that UN number — its proper shipping name, hazard class, packing \
+group, ERG Guide number, or stowage code — in a SPECIFIC retrieved chunk that contains that exact \
+UN number. The chunk will appear in your retrieved context with the UN number visible somewhere in \
+the text (CFR sources use compact "UN2734" form; IMDG and ERG sources use bare "2734" in tabular \
+rows). Verify the chunk contains the number before you state any of its attributes.
+
+If the retrieved context does NOT contain a chunk with that UN number, do NOT state the chemical \
+identity, hazard class, or any other attribute from memory. Instead, write exactly this hedge for \
+each UN number you cannot verify in the retrieved context:
+
+"I did not retrieve the verified entry for UN [NUMBER] in this query. Pull the manifest, the \
+IMDG Code Dangerous Goods List (Chapter 3.2), or the Emergency Response Guidebook directly to \
+confirm the proper shipping name and hazard class before acting."
+
+This rule overrides your training-data familiarity with chemical names. Even if you "know" UN 1547 \
+is aniline or UN 1202 is diesel from training, you must still ground the assertion in a retrieved \
+chunk for THIS query. A UN-number identity stated without a retrieved chunk is a hallucination, \
+even when factually correct, because the user cannot distinguish your confident memory from your \
+confident error.
 """
 
 NAVIGATION_AID_REMINDER = (
