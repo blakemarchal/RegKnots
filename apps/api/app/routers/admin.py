@@ -3021,3 +3021,351 @@ async def delete_partner_payout(
         },
     )
     return DeletePayoutResponse(ok=True)
+
+
+# ── Chat review (Sprint D6.21) ───────────────────────────────────────────────
+#
+# Admin/QA endpoints for inspecting user conversations. Replaces the ad-hoc
+# psql queries we've been running during the multi-flag corpus rollout.
+#
+# Design:
+#   GET /admin/chats             — paginated list with filters (user, vessel
+#                                  flag, date range, has_unverified, hedged)
+#   GET /admin/chats/{conv_id}   — full conversation thread + per-message
+#                                  metadata (model, tokens, citations,
+#                                  unverified citations, hedge phrase, vessel
+#                                  profile snapshot at query time)
+#
+# Internal users are excluded by default via the `exclude_internal` flag
+# threaded through both endpoints, matching the rest of the admin surface.
+
+class ChatListItem(BaseModel):
+    conversation_id: str
+    user_id: str
+    user_email: str
+    user_name: str | None
+    is_internal: bool
+    vessel_id: str | None
+    vessel_name: str | None
+    vessel_type: str | None
+    flag_state: str | None
+    title: str | None
+    message_count: int
+    has_unverified: bool
+    has_hedge: bool
+    last_model: str | None
+    created_at: str
+    last_message_at: str | None
+
+
+class ChatListResponse(BaseModel):
+    items: list[ChatListItem]
+    total: int
+    limit: int
+    offset: int
+
+
+@router.get("/chats", response_model=ChatListResponse)
+async def list_chats(
+    _admin: Annotated[CurrentUser, Depends(require_admin)],
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    exclude_internal: bool = Query(default=True),
+    flag_state: str | None = Query(default=None, description="Exact flag-state filter (e.g. 'United States')"),
+    has_unverified: bool | None = Query(default=None, description="Filter to chats with unverified citations"),
+    has_hedge: bool | None = Query(default=None, description="Filter to chats whose answer hedged on retrieval"),
+    user_email: str | None = Query(default=None, description="Substring match on user email"),
+) -> ChatListResponse:
+    """List recent conversations for admin review.
+
+    Joins conversations → users → vessels for context, plus left-joins
+    citation_errors and retrieval_misses to surface forensic flags
+    cheaply (boolean per conversation, not per message).
+    """
+    pool = await get_pool()
+
+    where: list[str] = []
+    params: list[Any] = []
+    idx = 1
+
+    def _add(clause: str, value: Any) -> None:
+        nonlocal idx
+        where.append(clause.replace("%P", f"${idx}"))
+        params.append(value)
+        idx += 1
+
+    if exclude_internal:
+        where.append("u.is_internal IS NOT TRUE")
+    if flag_state:
+        _add("v.flag_state = %P", flag_state)
+    if user_email:
+        _add("u.email ILIKE '%' || %P || '%'", user_email)
+    if has_unverified is True:
+        where.append("EXISTS (SELECT 1 FROM citation_errors ce WHERE ce.conversation_id = c.id)")
+    elif has_unverified is False:
+        where.append("NOT EXISTS (SELECT 1 FROM citation_errors ce WHERE ce.conversation_id = c.id)")
+    if has_hedge is True:
+        where.append("EXISTS (SELECT 1 FROM retrieval_misses rm WHERE rm.conversation_id = c.id)")
+    elif has_hedge is False:
+        where.append("NOT EXISTS (SELECT 1 FROM retrieval_misses rm WHERE rm.conversation_id = c.id)")
+
+    where_clause = ("WHERE " + " AND ".join(where)) if where else ""
+
+    # Total count (separate query so pagination math is correct)
+    total_row = await pool.fetchrow(
+        f"""
+        SELECT count(DISTINCT c.id) AS n
+        FROM conversations c
+        JOIN users u ON u.id = c.user_id
+        LEFT JOIN vessels v ON v.id = c.vessel_id
+        {where_clause}
+        """,
+        *params,
+    )
+    total = int(total_row["n"]) if total_row else 0
+
+    rows = await pool.fetch(
+        f"""
+        SELECT c.id AS conversation_id,
+               c.user_id,
+               u.email AS user_email,
+               u.full_name AS user_name,
+               u.is_internal,
+               c.vessel_id,
+               v.name AS vessel_name,
+               v.vessel_type,
+               v.flag_state,
+               c.title,
+               c.created_at,
+               (SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id) AS message_count,
+               (SELECT MAX(m.created_at) FROM messages m WHERE m.conversation_id = c.id) AS last_message_at,
+               (SELECT m.model_used FROM messages m
+                WHERE m.conversation_id = c.id AND m.role = 'assistant'
+                ORDER BY m.created_at DESC LIMIT 1) AS last_model,
+               EXISTS (SELECT 1 FROM citation_errors ce WHERE ce.conversation_id = c.id) AS has_unverified,
+               EXISTS (SELECT 1 FROM retrieval_misses rm WHERE rm.conversation_id = c.id) AS has_hedge
+        FROM conversations c
+        JOIN users u ON u.id = c.user_id
+        LEFT JOIN vessels v ON v.id = c.vessel_id
+        {where_clause}
+        ORDER BY COALESCE(
+            (SELECT MAX(m.created_at) FROM messages m WHERE m.conversation_id = c.id),
+            c.created_at
+        ) DESC
+        LIMIT ${idx} OFFSET ${idx + 1}
+        """,
+        *params, limit, offset,
+    )
+    items = [
+        ChatListItem(
+            conversation_id=str(r["conversation_id"]),
+            user_id=str(r["user_id"]),
+            user_email=r["user_email"],
+            user_name=r["user_name"],
+            is_internal=bool(r["is_internal"]),
+            vessel_id=str(r["vessel_id"]) if r["vessel_id"] else None,
+            vessel_name=r["vessel_name"],
+            vessel_type=r["vessel_type"],
+            flag_state=r["flag_state"],
+            title=r["title"],
+            message_count=int(r["message_count"] or 0),
+            has_unverified=bool(r["has_unverified"]),
+            has_hedge=bool(r["has_hedge"]),
+            last_model=r["last_model"],
+            created_at=r["created_at"].isoformat() if r["created_at"] else "",
+            last_message_at=r["last_message_at"].isoformat() if r["last_message_at"] else None,
+        )
+        for r in rows
+    ]
+    return ChatListResponse(items=items, total=total, limit=limit, offset=offset)
+
+
+class ChatMessageDetail(BaseModel):
+    id: str
+    role: str
+    content: str
+    model_used: str | None
+    tokens_used: int | None
+    cited_regulations: list[dict]      # [{source, section_number, section_title}]
+    unverified_citations: list[str]    # display strings, from citation_errors
+    hedge_phrase: str | None
+    created_at: str
+
+
+class VesselSnapshot(BaseModel):
+    id: str | None
+    name: str | None
+    vessel_type: str | None
+    flag_state: str | None
+    route_types: list[str]
+    cargo_types: list[str]
+    gross_tonnage: float | None
+    subchapter: str | None
+    route_limitations: str | None
+
+
+class ChatDetail(BaseModel):
+    conversation_id: str
+    user_id: str
+    user_email: str
+    user_name: str | None
+    is_internal: bool
+    title: str | None
+    created_at: str
+    vessel: VesselSnapshot | None
+    messages: list[ChatMessageDetail]
+
+
+@router.get("/chats/{conversation_id}", response_model=ChatDetail)
+async def get_chat(
+    conversation_id: str,
+    _admin: Annotated[CurrentUser, Depends(require_admin)],
+) -> ChatDetail:
+    """Full conversation thread + per-message forensic metadata.
+
+    The vessel snapshot is the CURRENT vessel record (not historic — we
+    don't snapshot at query time). When reviewing old chats, the vessel
+    profile may have evolved since the conversation occurred, which is
+    a known limitation; flag if we ever need point-in-time replay.
+    """
+    pool = await get_pool()
+    try:
+        conv_uuid = uuid.UUID(conversation_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"invalid uuid: {exc}")
+
+    head = await pool.fetchrow(
+        """
+        SELECT c.id, c.user_id, c.vessel_id, c.title, c.created_at,
+               u.email, u.full_name, u.is_internal,
+               v.id AS v_id, v.name AS v_name, v.vessel_type, v.flag_state,
+               v.route_types, v.cargo_types, v.gross_tonnage, v.subchapter,
+               v.route_limitations
+        FROM conversations c
+        JOIN users u ON u.id = c.user_id
+        LEFT JOIN vessels v ON v.id = c.vessel_id
+        WHERE c.id = $1
+        """,
+        conv_uuid,
+    )
+    if not head:
+        raise HTTPException(status_code=404, detail="conversation not found")
+
+    msg_rows = await pool.fetch(
+        """
+        SELECT id, role, content, model_used, tokens_used,
+               cited_regulation_ids, created_at
+        FROM messages
+        WHERE conversation_id = $1
+        ORDER BY created_at ASC
+        """,
+        conv_uuid,
+    )
+
+    # Citation lookup (single batched query for all message IDs).
+    all_reg_ids: list[uuid.UUID] = []
+    for m in msg_rows:
+        for rid in (m["cited_regulation_ids"] or []):
+            all_reg_ids.append(rid)
+    reg_lookup: dict[uuid.UUID, dict] = {}
+    if all_reg_ids:
+        reg_rows = await pool.fetch(
+            "SELECT DISTINCT id, source, section_number, section_title "
+            "FROM regulations WHERE id = ANY($1::uuid[])",
+            all_reg_ids,
+        )
+        reg_lookup = {
+            r["id"]: {
+                "source": r["source"],
+                "section_number": r["section_number"],
+                "section_title": r["section_title"],
+            }
+            for r in reg_rows
+        }
+
+    # citation_errors per conversation (we don't have per-message linkage;
+    # surface them as a conversation-level signal on the assistant turn(s)).
+    err_rows = await pool.fetch(
+        """
+        SELECT message_content, unverified_citation, model_used, created_at
+        FROM citation_errors
+        WHERE conversation_id = $1
+        ORDER BY created_at ASC
+        """,
+        conv_uuid,
+    )
+    # Group by approximate matching: an unverified citation belongs to the
+    # assistant turn whose content starts with the same first 200 chars.
+    err_by_prefix: dict[str, list[str]] = {}
+    for er in err_rows:
+        key = (er["message_content"] or "")[:200]
+        err_by_prefix.setdefault(key, []).append(er["unverified_citation"])
+
+    # retrieval_misses per conversation.
+    miss_rows = await pool.fetch(
+        """
+        SELECT hedge_phrase, query, created_at
+        FROM retrieval_misses
+        WHERE conversation_id = $1
+        ORDER BY created_at ASC
+        """,
+        conv_uuid,
+    )
+    miss_phrases: list[str] = [m["hedge_phrase"] for m in miss_rows if m["hedge_phrase"]]
+
+    messages: list[ChatMessageDetail] = []
+    for m in msg_rows:
+        cited = [
+            reg_lookup[rid] for rid in (m["cited_regulation_ids"] or [])
+            if rid in reg_lookup
+        ]
+        unverified: list[str] = []
+        if m["role"] == "assistant":
+            content_key = (m["content"] or "")[:200]
+            unverified = err_by_prefix.get(content_key, [])
+        # Hedge phrase: assigned to the FIRST assistant turn that contains
+        # the phrase. Coarse — refine if multi-turn hedge tracking matters.
+        hedge_phrase: str | None = None
+        if m["role"] == "assistant" and miss_phrases:
+            for phrase in miss_phrases:
+                if phrase and phrase.lower() in (m["content"] or "").lower():
+                    hedge_phrase = phrase
+                    break
+        messages.append(ChatMessageDetail(
+            id=str(m["id"]),
+            role=m["role"],
+            content=m["content"] or "",
+            model_used=m["model_used"],
+            tokens_used=int(m["tokens_used"]) if m["tokens_used"] is not None else None,
+            cited_regulations=cited,
+            unverified_citations=unverified,
+            hedge_phrase=hedge_phrase,
+            created_at=m["created_at"].isoformat() if m["created_at"] else "",
+        ))
+
+    vessel: VesselSnapshot | None = None
+    if head["v_id"]:
+        gt = head["gross_tonnage"]
+        vessel = VesselSnapshot(
+            id=str(head["v_id"]),
+            name=head["v_name"],
+            vessel_type=head["vessel_type"],
+            flag_state=head["flag_state"],
+            route_types=list(head["route_types"] or []),
+            cargo_types=list(head["cargo_types"] or []),
+            gross_tonnage=float(gt) if gt is not None else None,
+            subchapter=head["subchapter"],
+            route_limitations=head["route_limitations"],
+        )
+
+    return ChatDetail(
+        conversation_id=str(head["id"]),
+        user_id=str(head["user_id"]),
+        user_email=head["email"],
+        user_name=head["full_name"],
+        is_internal=bool(head["is_internal"]),
+        title=head["title"],
+        created_at=head["created_at"].isoformat() if head["created_at"] else "",
+        vessel=vessel,
+        messages=messages,
+    )
