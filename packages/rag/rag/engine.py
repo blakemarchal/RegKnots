@@ -178,6 +178,22 @@ _VESSEL_UPDATE_RE = re.compile(
     re.DOTALL,
 )
 
+# Sprint D6.16 — UN-number grounding verifier (Fix 5).
+# Pairs with the retriever's bare-number bypass and the prompt's UN-NUMBER
+# GROUNDING RULE. Catches the residual case where the LLM mentions a UN
+# number that was NOT in any retrieved chunk and ALSO didn't apply the
+# prompt-defined hedge — i.e., a confident hallucination from training-data
+# memory that slipped past both retrieval and the system prompt.
+_UN_IN_ANSWER_RE = re.compile(r"\b(UN|NA)[\s\-]?(\d{4})\b", re.IGNORECASE)
+# Hedge phrases the system prompt instructs the model to use when it can't
+# verify a UN-number. Matches the verbatim hedge plus reasonable variants
+# the model may produce ("could not verify", "not in retrieved context").
+_UN_HEDGE_PHRASE_RE = re.compile(
+    r"did not retrieve|not in the retrieved|cannot verify|could not verify|"
+    r"do not have (?:a |the )?verified entry|no verified entry",
+    re.IGNORECASE,
+)
+
 
 def _extract_vessel_update(answer: str) -> tuple[str, dict | None]:
     """Extract and remove VESSEL_UPDATE block from answer text.
@@ -565,6 +581,72 @@ def _strip_unverified_citations(answer: str, unverified: list[str]) -> str:
     return answer.strip()
 
 
+def _verify_un_claims(answer: str, chunks: list[dict]) -> list[str]:
+    """Sprint D6.16 — return UN numbers mentioned in `answer` that are not
+    grounded in any retrieved chunk and are not hedged via the prompt-defined
+    "did not retrieve" phrasing.
+
+    A UN number is "grounded" if any retrieved chunk's full_text contains
+    EITHER:
+      * compact form  — "UN2734" / "UN-2734" / "UN 2734" (CFR storage style)
+      * line-anchored — "2734" at the start of a line, optionally indented
+        (IMDG / ERG tabular row storage style)
+
+    We deliberately do NOT count bare 4-digit substrings appearing mid-line,
+    since dates ("2024"), section numbers, paragraph references, etc. would
+    produce false positives that mask real hallucinations.
+
+    A UN number that is mentioned but ungrounded is acceptable iff the answer
+    contains a hedge phrase (see `_UN_HEDGE_PHRASE_RE`) within 250 characters
+    of the mention — that's the prompt-instructed escape hatch.
+
+    Returns the list of UN numbers (e.g. ["2734", "1547"]) that should trigger
+    a regeneration. Empty list means everything checked out.
+    """
+    if not answer:
+        return []
+
+    # Collect numbers as they appear in the answer along with their position.
+    answer_mentions: list[tuple[str, int]] = []
+    seen: set[str] = set()
+    for m in _UN_IN_ANSWER_RE.finditer(answer):
+        number = m.group(2)
+        if number not in seen:
+            seen.add(number)
+            answer_mentions.append((number, m.start()))
+    if not answer_mentions:
+        return []
+
+    hedge_positions = [m.start() for m in _UN_HEDGE_PHRASE_RE.finditer(answer)]
+
+    ungrounded: list[str] = []
+    for number, pos in answer_mentions:
+        compact_re = re.compile(
+            rf"\b(?:UN|NA)[\s\-]?{re.escape(number)}\b",
+            re.IGNORECASE,
+        )
+        line_anchored_re = re.compile(rf"(?m)^\s*{re.escape(number)}\b")
+
+        grounded = False
+        for chunk in chunks:
+            text = chunk.get("full_text") or ""
+            if compact_re.search(text) or line_anchored_re.search(text):
+                grounded = True
+                break
+
+        if grounded:
+            continue
+
+        # Ungrounded — but maybe the answer hedged. Accept any hedge phrase
+        # within 250 chars of the UN-number mention as compliance with the
+        # prompt-defined fallback.
+        hedged = any(abs(pos - hp) <= 250 for hp in hedge_positions)
+        if not hedged:
+            ungrounded.append(number)
+
+    return ungrounded
+
+
 def _flatten_doc_value(v: object) -> str:
     """Recursively flatten nested dicts/lists from Claude Vision extractions."""
     if isinstance(v, dict):
@@ -695,20 +777,40 @@ async def _regenerate_answer(
     model_used: str,
     anthropic_client: AsyncAnthropic,
     openai_api_key: str,
+    ungrounded_un_numbers: list[str] | None = None,
 ) -> tuple[str, int, int] | None:
     """Call Claude (or the GPT-4o fallback) again with a corrective instruction.
 
     Returns (answer, input_tokens, output_tokens) or None if regeneration fails.
     Routes to whichever backend produced the original answer — if the first
     response came from the GPT-4o fallback, the regeneration goes there too.
+
+    `ungrounded_un_numbers` carries Sprint D6.16 UN-grounding violations —
+    UN numbers the model claimed an identity for without a supporting chunk.
     """
+    instruction_parts: list[str] = []
+    if unverified:
+        instruction_parts.append(
+            "Your previous answer referenced the following regulation sections that do not exist "
+            "in our verified database:\n"
+            + "\n".join(f"- {s}" for s in unverified)
+        )
+    if ungrounded_un_numbers:
+        instruction_parts.append(
+            "Your previous answer also stated facts about the following UN numbers WITHOUT "
+            "any supporting chunk in the retrieved context:\n"
+            + "\n".join(f"- UN {n}" for n in ungrounded_un_numbers)
+            + "\n\nFor each UN number above, the verified context does NOT contain its proper "
+            "shipping name, hazard class, packing group, or ERG Guide. Do NOT restate any "
+            "attribute of these UN numbers from training-data memory. Instead, for each one, "
+            "write the verbatim hedge from the system prompt's UN-NUMBER GROUNDING RULE."
+        )
     corrective_instruction = (
-        "Your previous answer referenced the following regulation sections that do not exist "
-        "in our verified database:\n"
-        + "\n".join(f"- {s}" for s in unverified)
+        "\n\n".join(instruction_parts)
         + "\n\nRewrite your answer using ONLY the regulation context provided below. "
-        "Do not reference any regulations that are not explicitly present in the provided context. "
-        "If you cannot fully answer the question with the verified context alone, say so honestly.\n\n"
+        "Do not reference any regulations or UN-number identities that are not explicitly "
+        "present in the provided context. If you cannot fully answer the question with the "
+        "verified context alone, say so honestly.\n\n"
         f"Verified regulation context:\n{context_str}\n\n"
         f"Original question: {query}"
     )
@@ -791,6 +893,7 @@ async def _finalize_answer(
     context_str: str,
     anthropic_client: AsyncAnthropic,
     openai_api_key: str,
+    chunks: list[dict] | None = None,
 ) -> tuple[str, list[CitedRegulation], list[str], dict | None, int, int, bool]:
     """Vessel-update extraction, citation verification, regeneration, cleanup.
 
@@ -815,7 +918,14 @@ async def _finalize_answer(
         dict.fromkeys(unverified_from_context + unverified_from_text)
     )
 
-    if not all_unverified:
+    # Sprint D6.16 Fix 5 — UN-claim grounding check. Catches the case where
+    # the model produced a confident UN-number identity (e.g. "UN 2734 =
+    # Aniline") without any retrieved chunk supporting it. Treats this like
+    # an unverified citation: triggers the same regeneration path, with a
+    # corrective instruction that lists the offending UN numbers.
+    ungrounded_un = _verify_un_claims(answer, chunks or [])
+
+    if not all_unverified and not ungrounded_un:
         return answer, verified_cited, [], vessel_update, 0, 0, False
 
     # DEFENSIVE LOG — WARNING level so it survives any future INFO-level
@@ -824,26 +934,35 @@ async def _finalize_answer(
     # either the code isn't actually deployed or control flow never reached
     # here. Either way it's the first thing to check next time.
     logger.warning(
-        "REGEN: Entering regeneration — %d unverified citation(s): %s",
+        "REGEN: Entering regeneration — %d unverified citation(s): %s; "
+        "%d ungrounded UN claim(s): %s",
         len(all_unverified),
         all_unverified,
+        len(ungrounded_un),
+        ungrounded_un,
     )
 
     # Log the ORIGINAL answer's bad citations for forensics, regardless of
     # whether regeneration ultimately succeeds. message_content is truncated
-    # inside _log_citation_errors.
-    await _log_citation_errors(
-        unverified=all_unverified,
-        conversation_id=conversation_id,
-        answer=answer,
-        model_used=model_used,
-        pool=pool,
-    )
+    # inside _log_citation_errors. Ungrounded UN-numbers are recorded in the
+    # same table with a "UN <NUMBER> (ungrounded)" tag so existing dashboards
+    # surface them alongside citation errors without a schema change.
+    citation_log_entries = list(all_unverified) + [
+        f"UN {n} (ungrounded)" for n in ungrounded_un
+    ]
+    if citation_log_entries:
+        await _log_citation_errors(
+            unverified=citation_log_entries,
+            conversation_id=conversation_id,
+            answer=answer,
+            model_used=model_used,
+            pool=pool,
+        )
 
     logger.info(
-        "Regenerating answer due to %d unverified citation(s): %s",
+        "Regenerating answer due to %d unverified citation(s) + %d ungrounded UN claim(s)",
         len(all_unverified),
-        all_unverified,
+        len(ungrounded_un),
     )
     regen = await _regenerate_answer(
         query=query,
@@ -852,13 +971,19 @@ async def _finalize_answer(
         model_used=model_used,
         anthropic_client=anthropic_client,
         openai_api_key=openai_api_key,
+        ungrounded_un_numbers=ungrounded_un,
     )
 
     if regen is None:
         # Regeneration unavailable — fall back to the legacy strip + disclaim path.
         logger.warning("Regeneration failed; falling back to strip + disclaim")
-        answer = _strip_unverified_citations(answer, all_unverified) + _UNVERIFIED_DISCLAIMER
-        return answer, verified_cited, all_unverified, vessel_update, 0, 0, False
+        if all_unverified:
+            answer = _strip_unverified_citations(answer, all_unverified)
+        answer = answer + _UNVERIFIED_DISCLAIMER
+        final_unverified = all_unverified + [
+            f"UN {n} (ungrounded)" for n in ungrounded_un
+        ]
+        return answer, verified_cited, final_unverified, vessel_update, 0, 0, False
 
     new_answer, regen_in, regen_out = regen
     # Pull any (unlikely) VESSEL_UPDATE block from the regenerated answer; only
@@ -868,29 +993,40 @@ async def _finalize_answer(
         vessel_update = new_vessel_update
 
     # Second pass: re-verify on the regenerated answer. Context cited list is
-    # unchanged so its verification status carries over.
+    # unchanged so its verification status carries over. Re-run UN-claim check
+    # too — if the regen still hallucinates a UN identity, we want to know.
     new_text_citations = _extract_all_text_citations(new_answer)
     unverified_from_text_2 = await _verify_text_citations(new_text_citations, pool)
     all_unverified_2 = list(
         dict.fromkeys(unverified_from_context + unverified_from_text_2)
     )
+    ungrounded_un_2 = _verify_un_claims(new_answer, chunks or [])
 
-    if not all_unverified_2:
+    if not all_unverified_2 and not ungrounded_un_2:
         logger.info("Regeneration complete — clean on second pass")
         return new_answer, verified_cited, [], vessel_update, regen_in, regen_out, True
 
-    # Second attempt still has hallucinated citations. Strip + disclaim here
-    # and bail — no recursive regeneration.
+    # Second attempt still has issues. Strip citation references and bail —
+    # no recursive regeneration. UN-grounding violations are surfaced through
+    # the unverified list (tagged form) but not stripped from text, since the
+    # answer may still be useful with a disclaimer.
     logger.warning(
-        "Regeneration complete — %d unverified citation(s) remain on second pass: %s",
+        "Regeneration complete — %d unverified citation(s) + %d ungrounded UN(s) remain: cites=%s un=%s",
         len(all_unverified_2),
+        len(ungrounded_un_2),
         all_unverified_2,
+        ungrounded_un_2,
     )
-    new_answer = _strip_unverified_citations(new_answer, all_unverified_2) + _UNVERIFIED_DISCLAIMER
+    if all_unverified_2:
+        new_answer = _strip_unverified_citations(new_answer, all_unverified_2)
+    new_answer = new_answer + _UNVERIFIED_DISCLAIMER
+    final_unverified = all_unverified_2 + [
+        f"UN {n} (ungrounded)" for n in ungrounded_un_2
+    ]
     return (
         new_answer,
         verified_cited,
-        all_unverified_2,
+        final_unverified,
         vessel_update,
         regen_in,
         regen_out,
@@ -1112,6 +1248,7 @@ async def chat(
         context_str=context_str,
         anthropic_client=anthropic_client,
         openai_api_key=openai_api_key,
+        chunks=chunks,
     )
     input_tokens += regen_in
     output_tokens += regen_out
@@ -1369,6 +1506,7 @@ async def chat_with_progress(
         context_str=context_str,
         anthropic_client=anthropic_client,
         openai_api_key=openai_api_key,
+        chunks=chunks,
     )
     input_tokens += regen_in
     output_tokens += regen_out
