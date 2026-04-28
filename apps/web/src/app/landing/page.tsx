@@ -177,7 +177,9 @@ export default function LandingPage() {
           style={{ animationFillMode: 'both' }}
         >
           Cited answers from the actual regulation texts — not AI guesswork.
-          IMO conventions, U.S. CFR &amp; USC, USCG circulars, ERG, WHO IHR — current, vessel-specific, and plain English.
+          The IMO conventions, U.S. CFR &amp; USCG guidance, plus flag-state regs from
+          the UK, Australia, Singapore, Hong Kong, Norway, Liberia, Marshall Islands, and Bahamas —
+          current, vessel-specific, and plain English.
         </p>
 
         {/* CTAs */}
@@ -242,18 +244,20 @@ export default function LandingPage() {
           {/* Headline */}
           <h2 className="font-display font-black text-[#f0ece4] leading-tight tracking-tight
             text-[clamp(32px,6vw,56px)] mb-8">
-            CFRs are complex.<br />Getting cited shouldn&apos;t be.
+            The regs are complex.<br />Getting cited shouldn&apos;t be.
           </h2>
 
           {/* Body */}
           <div className="flex flex-col gap-5">
             <p className="font-mono text-[#6b7594] leading-relaxed text-sm md:text-base">
-              U.S. commercial mariners navigate an overlapping web of regs — CFR Titles 33/46/49,
-              the IMO conventions (SOLAS, MARPOL, IMDG, COLREGs, STCW, ISM), USCG circulars and
-              bulletins, the NMC, ERG, and WHO IHR. Thousands of sections that cross-reference
-              each other, change without warning, and vary by vessel type, tonnage, route, and
-              cargo. One missed detail during a Coast Guard inspection means deficiency citations,
-              vessel detention, or costly litigation.
+              Commercial mariners navigate an overlapping web of regs — the IMO conventions
+              (SOLAS, MARPOL, IMDG, COLREGs, STCW, ISM, plus the IGC, IBC, HSC and Load Lines codes),
+              the U.S. CFR Titles 33/46/49 and USCG guidance, and a growing set of flag-state
+              regulators (UK MCA, AMSA Australia, Singapore MPA, Hong Kong, Norway NMA, Liberia,
+              Marshall Islands, Bahamas). Thousands of sections that cross-reference each other,
+              change without warning, and vary by vessel type, tonnage, flag, route, and cargo.
+              One missed detail during an inspection means deficiency citations, vessel detention,
+              or costly litigation.
             </p>
             <p className="font-mono text-[#6b7594] leading-relaxed text-sm md:text-base">
               RegKnot was built by an Unlimited Licensed Captain and her engineer brother.
@@ -573,6 +577,9 @@ export default function LandingPage() {
             >
               Contact Us
             </button>
+            <a href="/coverage" className="font-mono text-xs text-[#6b7594] hover:text-[#f0ece4]/80 transition-colors">
+              Coverage
+            </a>
             <a href="/terms" className="font-mono text-xs text-[#6b7594] hover:text-[#f0ece4]/80 transition-colors">
               Terms
             </a>

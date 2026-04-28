@@ -15,7 +15,7 @@
 interface CorpusSource {
   short: string
   full: string
-  category: 'international' | 'us_federal' | 'reference'
+  category: 'international' | 'us_federal' | 'flag_state' | 'reference'
   url?: string
 }
 
@@ -57,6 +57,89 @@ const CORPUS: CorpusSource[] = [
     full: 'International Safety Management Code',
     category: 'international',
     url: 'https://www.imo.org/en/OurWork/HumanElement/Pages/ISMCode.aspx',
+  },
+  {
+    short: 'HSC Code',
+    full: 'International Code of Safety for High-Speed Craft (HSC Code 2000)',
+    category: 'international',
+    url: 'https://www.imo.org/en/OurWork/Safety/Pages/HSC.aspx',
+  },
+  {
+    short: 'IGC Code',
+    full: 'International Code for the Construction and Equipment of Ships Carrying Liquefied Gases in Bulk',
+    category: 'international',
+    url: 'https://www.imo.org/en/OurWork/Safety/Pages/IGC-Code.aspx',
+  },
+  {
+    short: 'IBC Code',
+    full: 'International Bulk Chemicals Code',
+    category: 'international',
+  },
+  {
+    short: 'CSS Code',
+    full: 'Code of Safe Practice for Cargo Stowage and Securing',
+    category: 'international',
+  },
+  {
+    short: 'Load Lines',
+    full: 'International Convention on Load Lines (1966 + 1988 Protocol)',
+    category: 'international',
+  },
+  {
+    short: 'IACS UR',
+    full: 'IACS Unified Requirements (technical class-society standards)',
+    category: 'international',
+    url: 'https://iacs.org.uk/resolutions/unified-requirements',
+  },
+
+  // ── Non-U.S. flag-state regulators ────────────────────────────────────
+  {
+    short: 'UK MCA',
+    full: 'UK Maritime and Coastguard Agency — Marine Guidance Notes (MGN) and Merchant Shipping Notices (MSN)',
+    category: 'flag_state',
+    url: 'https://www.gov.uk/government/organisations/maritime-and-coastguard-agency',
+  },
+  {
+    short: 'AMSA',
+    full: 'Australian Maritime Safety Authority — Marine Orders',
+    category: 'flag_state',
+    url: 'https://www.amsa.gov.au/about/regulations-and-standards/marine-orders',
+  },
+  {
+    short: 'MPA SG',
+    full: 'Maritime and Port Authority of Singapore — Shipping Circulars and Port Marine Circulars',
+    category: 'flag_state',
+    url: 'https://www.mpa.gov.sg/',
+  },
+  {
+    short: 'HK MD',
+    full: 'Hong Kong Marine Department — Merchant Shipping Information Notes (MSIN)',
+    category: 'flag_state',
+    url: 'https://www.mardep.gov.hk/',
+  },
+  {
+    short: 'NMA Norway',
+    full: 'Norwegian Maritime Authority (Sjøfartsdirektoratet) — RSR/RSV/SM circulars',
+    category: 'flag_state',
+    url: 'https://www.sdir.no/en/',
+  },
+  {
+    short: 'LISCR',
+    full: 'Liberian International Ship and Corporate Registry — Marine Notices',
+    category: 'flag_state',
+    url: 'https://www.liscr.com/',
+  },
+  {
+    short: 'RMI / IRI',
+    full: 'Republic of the Marshall Islands / International Registries — Marine Notices',
+    category: 'flag_state',
+    url: 'https://www.register-iri.com/',
+  },
+  {
+    short: 'BMA',
+    full: 'Bahamas Maritime Authority — Marine Notices',
+    category: 'flag_state',
+    url: 'https://www.bahamasmaritime.com/',
   },
 
   // ── U.S. federal (statute, regulation, USCG guidance) ────────────────
@@ -125,12 +208,13 @@ const CORPUS: CorpusSource[] = [
 ]
 
 const CATEGORY_LABELS: Record<CorpusSource['category'], string> = {
-  international: 'International conventions',
+  international: 'International conventions & references',
   us_federal: 'U.S. federal',
+  flag_state: 'Non-U.S. flag-state regulators',
   reference: 'Reference & emergency',
 }
 
-const CATEGORY_ORDER: CorpusSource['category'][] = ['international', 'us_federal', 'reference']
+const CATEGORY_ORDER: CorpusSource['category'][] = ['international', 'us_federal', 'flag_state', 'reference']
 
 // ── Chip ─────────────────────────────────────────────────────────────────────
 
@@ -224,17 +308,15 @@ function CategorizedView({ heading, subhead, className }: Pick<Props, 'heading' 
 /**
  * Returns the corpus as a comma-separated prose string. Used inside
  * other paragraphs where chips would be too heavy.
- *
- * Example:
- *   "U.S. CFR 33/46/49 + 46 USC, the IMO conventions (SOLAS, MARPOL,
- *   IMDG, COLREGs, STCW, ISM), USCG circulars and bulletins, NMC, ERG,
- *   and WHO IHR"
  */
 export function corpusInlineString(): string {
   return (
-    'U.S. CFR 33/46/49 + 46 USC, the IMO conventions (SOLAS, MARPOL, '
-    + 'IMDG, COLREGs, STCW, ISM), USCG circulars and bulletins, NMC, '
-    + 'ERG, and WHO IHR'
+    'the IMO conventions (SOLAS, MARPOL, IMDG, COLREGs, STCW, ISM, '
+    + 'plus HSC/IGC/IBC/CSS/Load Lines and IACS class standards), '
+    + 'U.S. CFR 33/46/49 + 46 USC + USCG guidance, '
+    + 'and flag-state regulations from the UK, Australia, Singapore, '
+    + 'Hong Kong, Norway, Liberia, Marshall Islands, and Bahamas, '
+    + 'plus ERG and WHO IHR'
   )
 }
 
