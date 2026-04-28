@@ -27,7 +27,9 @@ export function EmptyState({ onPrompt, isNewConversation, vessel = null }: Props
         Maritime Compliance Co-Pilot
       </p>
       <p className="text-sm text-[#6b7594] max-w-xs mb-10 leading-relaxed">
-        Ask anything about U.S. maritime regulations. Cited answers from CFR, SOLAS, COLREGs, STCW, ISM, ERG, and USCG guidance.
+        Ask anything about maritime regulations. Cited answers from the IMO conventions,
+        U.S. CFR, and flag-state regulators (UK, Australia, Singapore, Hong Kong,
+        Norway, Liberia, Marshall Islands, Bahamas).
       </p>
 
       {/* Suggested prompts — only on a fresh new conversation */}

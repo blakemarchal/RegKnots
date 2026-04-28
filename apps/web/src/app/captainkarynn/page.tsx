@@ -35,7 +35,7 @@ const PRICING = {
     badge: '25% off',
     features: [
       '100 messages per month',
-      'Full reg corpus — IMO conventions, U.S. CFR + USC, USCG circulars, ERG (see below)',
+      'Full reg corpus (see below)',
       '46 USC + WHO IHR (port health & seamen’s law)',
       'Vessel profile + chat history',
     ],

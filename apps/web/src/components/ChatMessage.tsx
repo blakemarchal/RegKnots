@@ -322,10 +322,16 @@ export function ChatMessage({ message, onCitationTap }: Props) {
   const isUser = message.role === 'user'
 
   if (isUser) {
+    // Sprint D6.23c — Karynn requested copy-on-question so she can re-ask
+    // or rephrase without retyping. Copy button lives below the bubble,
+    // right-aligned to mirror the message's right-alignment.
     return (
-      <div className="flex justify-end px-4 py-1.5 animate-[fadeSlideIn_0.2s_ease-out]">
+      <div className="flex flex-col items-end px-4 py-1.5 animate-[fadeSlideIn_0.2s_ease-out]">
         <div className="max-w-[82%] px-4 py-3 rounded-2xl rounded-tr-sm bg-[#1a3254] text-[#f0ece4] text-sm leading-relaxed">
           {message.content}
+        </div>
+        <div className="mt-0.5 -mr-2.5">
+          <CopyMessageButton content={message.content} />
         </div>
       </div>
     )
