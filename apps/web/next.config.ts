@@ -4,23 +4,28 @@ import withPWA from "@ducanh2912/next-pwa";
 
 const nextConfig: NextConfig = {};
 
+// Sprint D6.23f — DISABLE next-pwa entirely. The generated workbox SW
+// was caching `/` content under a NetworkFirst start-url cache, and
+// existing PWA users kept seeing the stale page even after we set
+// runtimeCaching: []. We're shipping a custom self-destructing sw.js
+// in /public/sw.js (committed by hand) that wipes caches and
+// unregisters itself — the browser fetches /sw.js direct on each
+// navigation (SW spec), bypassing the existing SW's fetch handler,
+// so the kill SW WILL install + activate even on stuck PWA clients.
+//
+// This also stops next-pwa from regenerating sw.js during build, so
+// the static kill SW survives every future deploy.
 const pwaConfig = withPWA({
   dest: "public",
-  // Register SW manually after hydration to avoid MessagePort
-  // interference during React hydration (React error #418).
+  disable: true,
   register: false,
   cacheStartUrl: false,
   reloadOnOnline: false,
   workboxOptions: {
-    // D6.23e — bumped from v12 → v13 to force cleanupOutdatedCaches()
-    // to delete stale start-url caches in any clients that still load
-    // the old SW before Providers.tsx unregisters it.
-    cacheId: "regknots-v13",
+    cacheId: "regknots-kill",
     skipWaiting: true,
     cleanupOutdatedCaches: true,
-    // Exclude everything from precache — SW does zero caching
     exclude: [/./],
-    // No runtimeCaching rules — SW is a no-op
     runtimeCaching: [],
   },
 })(nextConfig);

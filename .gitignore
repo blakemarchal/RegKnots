@@ -54,11 +54,11 @@ data/eval/*/
 !data/eval/*/summary.json
 packages/ingest/data/
 
-# PWA
-public/sw.js
+# PWA — generated workbox files (kept ignored). The hand-written
+# /sw.js is now committed so the build can't regenerate it; see
+# Sprint D6.23f notes on next.config.ts (`disable: true`).
 public/workbox-*.js
 public/swe-worker-*.js
-apps/web/public/sw.js
 apps/web/public/workbox-*.js
 apps/web/public/fallback-*.js
 apps/web/public/swe-worker-*.js
