@@ -680,6 +680,16 @@ def _build_chat_messages(
         lines = [f"- Name: {vessel_profile.get('vessel_name', 'Unknown')}"]
         if vessel_profile.get("vessel_type"):
             lines.append(f"- Type: {vessel_profile['vessel_type']}")
+        # Sprint D6.17 — Flag state is the primary jurisdictional signal.
+        # Always render it (even when "Unknown") so the LLM can apply the
+        # AUTHORITY AND APPLICABILITY rules in the system prompt: U.S.-flag
+        # vessels get CFR-led answers; non-U.S. flags get SOLAS-led answers
+        # with CFR demoted; "Unknown" triggers a clarifying question.
+        # Previously this field was loaded into the DB but never reached the
+        # prompt — Rashad's Channel ferry got a 46 CFR-led answer because of
+        # this gap.
+        if vessel_profile.get("flag_state"):
+            lines.append(f"- Flag state: {vessel_profile['flag_state']}")
         if vessel_profile.get("route_types"):
             lines.append(f"- Routes: {', '.join(vessel_profile['route_types'])}")
         if vessel_profile.get("cargo_types"):

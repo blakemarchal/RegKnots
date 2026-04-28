@@ -170,7 +170,7 @@ async def _run_chat_preflight(
     if body.vessel_id:
         row = await pool.fetchrow(
             """
-            SELECT name, vessel_type, route_types, cargo_types, gross_tonnage,
+            SELECT name, vessel_type, flag_state, route_types, cargo_types, gross_tonnage,
                    subchapter, inspection_certificate_type, manning_requirement,
                    key_equipment, route_limitations, additional_details
             FROM vessels
@@ -183,6 +183,7 @@ async def _run_chat_preflight(
             raw_profile = {
                 "vessel_name": row["name"],
                 "vessel_type": row["vessel_type"],
+                "flag_state": row["flag_state"],
                 "route_types": list(row["route_types"] or []),
                 "cargo_types": list(row["cargo_types"] or []),
                 "gross_tonnage": row["gross_tonnage"],
@@ -598,6 +599,10 @@ async def _apply_vessel_update(pool: asyncpg.Pool, vessel_id: uuid.UUID, update:
         "inspection_certificate_type": "inspection_certificate_type",
         "manning_requirement": "manning_requirement",
         "route_limitations": "route_limitations",
+        # Sprint D6.17 — flag_state persists from VESSEL_UPDATE so the
+        # next conversation turn loads it into the prompt without the
+        # user having to re-edit the vessel record.
+        "flag_state": "flag_state",
     }
 
     for update_key, db_column in field_mapping.items():
