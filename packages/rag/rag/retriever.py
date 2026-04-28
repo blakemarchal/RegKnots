@@ -87,6 +87,16 @@ SOURCE_GROUPS: dict[str, tuple[str, ...]] = {
     # together so any "UK" / non-US-flag / Channel-route query that surfaces
     # one type also draws candidates from the other for cross-coverage.
     "mca": ("mca_mgn", "mca_msn"),
+    # AMSA Marine Orders — Sprint D6.20. Australia's primary maritime
+    # regulatory instruments, made under the Navigation Act 2012.
+    # Tier 1 binding for AU-flagged vessels and vessels in AU waters.
+    "amsa": ("amsa_mo",),
+    # LISCR Marine Notices — Sprint D6.20. Liberian flag-state guidance.
+    # Tier 2 — interpretive layer above the IMO instruments.
+    "liscr": ("liscr_mn",),
+    # IRI Marine Notices — Sprint D6.20. Marshall Islands flag-state
+    # guidance. Same posture as LISCR.
+    "iri": ("iri_mn",),
 }
 
 # Per-group candidate pool sizes. CFR is larger because it covers three

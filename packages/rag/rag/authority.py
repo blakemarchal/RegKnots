@@ -52,6 +52,20 @@ _SOURCE_TO_TIER: dict[str, int] = {
     # Shipping (Life-Saving Appliances) Regulations). For a UK-flagged
     # vessel they are binding alongside the SI itself.
     "mca_msn": 1,
+    # AMSA Marine Orders — Sprint D6.20. Australia's primary maritime
+    # regulatory instruments, made under the Navigation Act 2012.
+    # Tier 1 (binding) for Australian-flagged vessels and for any
+    # vessel in Australian waters or calling at an Australian port.
+    "amsa_mo": 1,
+    # LISCR Marine Notices — Sprint D6.20. Liberian flag-state
+    # implementation guidance for IMO conventions. Tier 2 (interpretive
+    # guidance) — they tell Liberian-flagged vessels HOW to comply with
+    # the binding IMO instruments; the IMO instruments themselves remain
+    # the Tier 1 source.
+    "liscr_mn": 2,
+    # IRI Marine Notices — Sprint D6.20. Marshall Islands flag-state
+    # implementation guidance. Same posture as LISCR — Tier 2.
+    "iri_mn": 2,
     # Tier 2 — federal interpretive guidance
     "nvic": 2,
     "nmc_policy": 2,

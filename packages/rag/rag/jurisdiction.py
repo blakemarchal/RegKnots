@@ -52,6 +52,12 @@ SOURCE_TO_JURISDICTIONS: dict[str, list[str]] = {
     # UK national
     "mca_mgn":          ["uk"],
     "mca_msn":          ["uk"],
+    # Australian national
+    "amsa_mo":          ["au"],
+    # Liberian (LISCR) national
+    "liscr_mn":         ["lr"],
+    # Marshall Islands (IRI) national
+    "iri_mn":           ["mh"],
     # International (universal — bind every flag on intl voyages)
     "solas":            ["intl"],
     "solas_supplement": ["intl"],

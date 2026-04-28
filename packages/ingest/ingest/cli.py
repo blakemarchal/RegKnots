@@ -117,6 +117,25 @@ _PDF_SOURCE_CONFIG: dict[str, dict] = {
         "raw_dir": _DATA_RAW / "mca",
         "adapter": "ingest.sources.mca",
     },
+    # Sprint D6.20 — AMSA Marine Orders. Two-step adapter: AMSA landing
+    # page → discover legislation.gov.au series ID → fetch /latest/text.
+    "amsa_mo": {
+        "raw_dir": _DATA_RAW / "amsa",
+        "adapter": "ingest.sources.amsa",
+    },
+    # Sprint D6.20 — Liberian (LISCR) Marine Notices. Direct PDF
+    # downloads from www.liscr.com on a deterministic per-code URL.
+    "liscr_mn": {
+        "raw_dir": _DATA_RAW / "liscr",
+        "adapter": "ingest.sources.liscr",
+    },
+    # Sprint D6.20 — Republic of the Marshall Islands (IRI) Marine
+    # Notices. Direct PDF downloads from www.register-iri.com on a
+    # deterministic per-MN-code URL.
+    "iri_mn": {
+        "raw_dir": _DATA_RAW / "iri",
+        "adapter": "ingest.sources.iri_rmi",
+    },
     "solas": {
         "text_dir": _DATA_RAW / "solas",
         "adapter":  "ingest.sources.solas",
