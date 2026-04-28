@@ -97,6 +97,11 @@ SOURCE_GROUPS: dict[str, tuple[str, ...]] = {
     # IRI Marine Notices — Sprint D6.20. Marshall Islands flag-state
     # guidance. Same posture as LISCR.
     "iri": ("iri_mn",),
+    # Sprint D6.22 — fourth-wave national flags.
+    "mpa": ("mpa_sc",),
+    "mardep": ("mardep_msin",),
+    "tc": ("tc_ssb",),
+    "bma": ("bma_mn",),
 }
 
 # Per-group candidate pool sizes. CFR is larger because it covers three

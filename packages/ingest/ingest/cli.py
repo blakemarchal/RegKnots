@@ -136,6 +136,23 @@ _PDF_SOURCE_CONFIG: dict[str, dict] = {
         "raw_dir": _DATA_RAW / "iri",
         "adapter": "ingest.sources.iri_rmi",
     },
+    # Sprint D6.22 — fourth-wave national-flag corpus expansion.
+    "mpa_sc": {
+        "raw_dir": _DATA_RAW / "mpa",
+        "adapter": "ingest.sources.mpa",
+    },
+    "mardep_msin": {
+        "raw_dir": _DATA_RAW / "mardep_hk",
+        "adapter": "ingest.sources.mardep_hk",
+    },
+    "tc_ssb": {
+        "raw_dir": _DATA_RAW / "tc_canada",
+        "adapter": "ingest.sources.tc_canada",
+    },
+    "bma_mn": {
+        "raw_dir": _DATA_RAW / "bma",
+        "adapter": "ingest.sources.bma",
+    },
     "solas": {
         "text_dir": _DATA_RAW / "solas",
         "adapter":  "ingest.sources.solas",

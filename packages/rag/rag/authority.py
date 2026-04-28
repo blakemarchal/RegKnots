@@ -66,6 +66,19 @@ _SOURCE_TO_TIER: dict[str, int] = {
     # IRI Marine Notices — Sprint D6.20. Marshall Islands flag-state
     # implementation guidance. Same posture as LISCR — Tier 2.
     "iri_mn": 2,
+    # Singapore MPA Shipping Circulars — Sprint D6.22. Singapore-flag
+    # binding regulatory guidance. Tier 1 for SG-flag.
+    "mpa_sc": 1,
+    # Hong Kong Marine Department MSINs — Sprint D6.22. HK-flag binding
+    # technical guidance equivalent to UK MSNs. Tier 1.
+    "mardep_msin": 1,
+    # Transport Canada Ship Safety Bulletins — Sprint D6.22. Advisory
+    # bulletins (binding regs live in CSA + Marine Personnel Regs which
+    # are not in this corpus). Tier 2.
+    "tc_ssb": 2,
+    # Bahamas Maritime Authority Marine Notices — Sprint D6.22. Open
+    # registry guidance, same posture as LISCR/IRI. Tier 2.
+    "bma_mn": 2,
     # Tier 2 — federal interpretive guidance
     "nvic": 2,
     "nmc_policy": 2,

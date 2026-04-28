@@ -169,6 +169,14 @@ _SOURCE_TO_JURISDICTIONS: dict[str, list[str]] = {
     "liscr_mn":         ["lr"],
     # Marshall Islands (IRI) national
     "iri_mn":           ["mh"],
+    # Singapore (Sprint D6.22)
+    "mpa_sc":           ["sg"],
+    # Hong Kong (Sprint D6.22)
+    "mardep_msin":      ["hk"],
+    # Canada (Sprint D6.22)
+    "tc_ssb":           ["ca"],
+    # Bahamas (Sprint D6.22)
+    "bma_mn":           ["bs"],
     # International (universal)
     "solas":            ["intl"],
     "solas_supplement": ["intl"],
