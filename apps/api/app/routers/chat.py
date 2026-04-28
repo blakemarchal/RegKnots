@@ -527,6 +527,16 @@ async def chat_stream_endpoint(
 
     async def event_generator():
         final_data: dict | None = None
+        # Sprint D6.23d — emit a `started` event up front carrying the
+        # conversation_id, so the client can persist a "pending question"
+        # marker keyed by conversation_id BEFORE the slow generation runs.
+        # That makes phone-lock / network-blip recovery work for new
+        # conversations (not just existing ones) — the client's recovery
+        # poll has the conversation id from the moment the request lands.
+        yield (
+            "event: started\n"
+            f"data: {json.dumps({'conversation_id': str(conversation_id)})}\n\n"
+        )
         try:
             async for event in chat_with_progress(
                 query=body.query,

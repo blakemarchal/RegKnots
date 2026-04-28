@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import type { Message } from '@/types/chat'
 import { sendMessageStream } from '@/lib/mockApi'
@@ -56,6 +56,17 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
   const [verifyRequiredMsg, setVerifyRequiredMsg] = useState<string | null>(null)
   const [resendStatus, setResendStatus] = useState<string | null>(null)
   const [vesselNudgeDismissed, setVesselNudgeDismissed] = useState(false)
+
+  // ── Sprint D6.23d — connection-lost recovery ──────────────────────────────
+  // When the SSE stream drops mid-generation (phone-locked, network blip,
+  // tab-backgrounded on iOS), the answer is still being generated and
+  // persisted server-side. The recovery logic polls /conversations/:id/messages
+  // for up to 90s looking for the assistant message that lands when generation
+  // completes. The pending-question state is mirrored to localStorage so the
+  // recovery survives a full page reload (user kills app → reopens later).
+  const [recovering, setRecovering] = useState(false)
+  const [recoveryFailed, setRecoveryFailed] = useState(false)
+  const recoveryAbortRef = useRef<AbortController | null>(null)
 
   const router = useRouter()
   const { canInstall, install } = usePwa()
@@ -151,6 +162,160 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
     handlePrompt(initialQuery)
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── Recovery helpers ──────────────────────────────────────────────────────
+  //
+  // localStorage shape: regknots:pending_chat:<conversation_id> →
+  //   { query: string, sentAt: number(ms epoch) }
+  // Cleared on success (done event) or when the recovery loop succeeds.
+
+  const pendingKey = useCallback(
+    (convId: string) => `regknots:pending_chat:${convId}`,
+    [],
+  )
+
+  const writePending = useCallback(
+    (convId: string, query: string) => {
+      try {
+        localStorage.setItem(
+          pendingKey(convId),
+          JSON.stringify({ query, sentAt: Date.now() }),
+        )
+      } catch {
+        // localStorage may be unavailable in private mode — recovery still
+        // works for the in-memory case (visibility-change handler).
+      }
+    },
+    [pendingKey],
+  )
+
+  const clearPending = useCallback(
+    (convId: string) => {
+      try {
+        localStorage.removeItem(pendingKey(convId))
+      } catch {
+        // ignore
+      }
+    },
+    [pendingKey],
+  )
+
+  /**
+   * Poll the server for an assistant message that arrived after `sentAt`.
+   * Returns true on success (state has been updated), false on timeout.
+   */
+  const recoveryLoop = useCallback(
+    async (convId: string, sentAt: number): Promise<boolean> => {
+      setRecovering(true)
+      setRecoveryFailed(false)
+      const abort = new AbortController()
+      recoveryAbortRef.current = abort
+      const startedAt = Date.now()
+      const deadline = 90_000  // 90s window
+
+      try {
+        while (Date.now() - startedAt < deadline) {
+          if (abort.signal.aborted) return false
+          try {
+            const rows = await apiRequest<ConversationMessage[]>(
+              `/conversations/${convId}/messages`,
+            )
+            const last = rows[rows.length - 1]
+            if (
+              last
+              && last.role === 'assistant'
+              && new Date(last.created_at).getTime() >= sentAt
+            ) {
+              // Hydrate the full conversation from the server (preserves
+              // exact message ordering, citations, and content the server
+              // saved — supersedes whatever optimistic state we had).
+              const restored: Message[] = rows.map((r) => ({
+                id: crypto.randomUUID(),
+                role: r.role as 'user' | 'assistant',
+                content: r.content,
+                citations: r.cited_regulations,
+              }))
+              setMessages(restored)
+              setConversationId(convId)
+              clearPending(convId)
+              setRecovering(false)
+              setRecoveryFailed(false)
+              return true
+            }
+          } catch {
+            // Network blip during a poll; keep trying until the deadline.
+          }
+          // 5-second poll interval, abortable
+          await new Promise<void>((resolve) => {
+            const t = setTimeout(resolve, 5_000)
+            abort.signal.addEventListener('abort', () => {
+              clearTimeout(t)
+              resolve()
+            })
+          })
+        }
+      } finally {
+        recoveryAbortRef.current = null
+      }
+
+      // Timed out
+      setRecovering(false)
+      setRecoveryFailed(true)
+      return false
+    },
+    [clearPending],
+  )
+
+  // On mount: if there's a pending question for this conversation in
+  // localStorage, immediately enter recovery mode.
+  useEffect(() => {
+    if (!initialConversationId) return
+    let raw: string | null = null
+    try {
+      raw = localStorage.getItem(pendingKey(initialConversationId))
+    } catch {
+      return
+    }
+    if (!raw) return
+    try {
+      const parsed = JSON.parse(raw) as { query: string; sentAt: number }
+      // Only attempt recovery if it was sent in the last ~5 minutes; older
+      // entries are stale and we just clear them.
+      if (Date.now() - parsed.sentAt > 5 * 60 * 1000) {
+        clearPending(initialConversationId)
+        return
+      }
+      void recoveryLoop(initialConversationId, parsed.sentAt)
+    } catch {
+      try { localStorage.removeItem(pendingKey(initialConversationId)) } catch { /* ignore */ }
+    }
+  }, [initialConversationId, pendingKey, recoveryLoop, clearPending])
+
+  // When the page is foregrounded after being hidden, kick the recovery
+  // poll if we have a pending question. This catches the iOS Safari case
+  // where the JS engine was throttled while the phone was locked.
+  useEffect(() => {
+    function onVisibility() {
+      if (document.hidden) return
+      if (!conversationId) return
+      let raw: string | null = null
+      try { raw = localStorage.getItem(pendingKey(conversationId)) } catch { return }
+      if (!raw) return
+      if (recovering) return  // already polling
+      try {
+        const parsed = JSON.parse(raw) as { sentAt: number }
+        if (Date.now() - parsed.sentAt > 5 * 60 * 1000) {
+          clearPending(conversationId)
+          return
+        }
+        void recoveryLoop(conversationId, parsed.sentAt)
+      } catch {
+        // ignore
+      }
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => document.removeEventListener('visibilitychange', onVisibility)
+  }, [conversationId, recovering, pendingKey, recoveryLoop, clearPending])
+
   const handleSend = useCallback(async () => {
     const query = input.trim()
     if (!query || loading) return
@@ -166,6 +331,12 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
     setLoading(true)
     setProgressMsg(null)
 
+    // Sprint D6.23d — capture sentAt up front so the recovery loop can
+    // identify whether a server-side assistant message arrived after this
+    // exact send (vs. a leftover from a prior turn).
+    const sentAt = Date.now()
+    let resolvedConvId: string | null = conversationId
+
     try {
       const currentVesselId = useAuthStore.getState().activeVesselId
       await sendMessageStream(
@@ -174,6 +345,7 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
         currentVesselId,
         (status) => setProgressMsg(status),
         (data) => {
+          resolvedConvId = data.conversation_id
           setConversationId(data.conversation_id)
           const assistantMsg: Message = {
             id: crypto.randomUUID(),
@@ -182,8 +354,17 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
             citations: data.cited_regulations,
           }
           setMessages(prev => [...prev, assistantMsg])
+          // Generation succeeded — drop the pending marker.
+          clearPending(data.conversation_id)
           // Refresh billing status in background after each message
           apiRequest<BillingStatus>('/billing/status').then(setBilling).catch(() => {})
+        },
+        (startedConvId) => {
+          // First server event: persist pending marker keyed by conv id so
+          // a later phone-lock / network blip can recover the answer.
+          resolvedConvId = startedConvId
+          setConversationId(startedConvId)
+          writePending(startedConvId, query)
         },
       )
     } catch (err) {
@@ -212,12 +393,23 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
         setMessages(prev => prev.slice(0, -1))
         return
       }
+      // Sprint D6.23d — instead of "Connection lost", enter recovery mode
+      // if we know the conversation_id and the server is likely still
+      // generating. The pending-question marker survives a page reload.
+      if (resolvedConvId) {
+        // Don't add a placeholder bubble — the recovery banner above the
+        // input bar surfaces the in-flight state instead.
+        setProgressMsg(null)
+        setLoading(false)
+        void recoveryLoop(resolvedConvId, sentAt)
+        return
+      }
       setMessages(prev => [
         ...prev,
         {
           id: crypto.randomUUID(),
           role: 'assistant',
-          content: 'Connection lost. Please try again.',
+          content: 'Connection lost before your question reached the server. Please try again.',
           citations: [],
         },
       ])
@@ -225,7 +417,7 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
       setProgressMsg(null)
       setLoading(false)
     }
-  }, [input, loading, conversationId, router, setBilling])
+  }, [input, loading, conversationId, router, setBilling, writePending, clearPending, recoveryLoop])
 
   function handlePrompt(text: string) {
     setInput(text)
@@ -240,12 +432,15 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
       setMessages([userMsg])
       setLoading(true)
       setProgressMsg(null)
+      const sentAt = Date.now()
+      let resolvedConvId: string | null = null
       sendMessageStream(
         text,
         null,
         useAuthStore.getState().activeVesselId,
         (status) => setProgressMsg(status),
         (data) => {
+          resolvedConvId = data.conversation_id
           setConversationId(data.conversation_id)
           const assistantMsg: Message = {
             id: crypto.randomUUID(),
@@ -254,14 +449,33 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
             citations: data.cited_regulations,
           }
           setMessages(prev => [...prev, assistantMsg])
+          clearPending(data.conversation_id)
           // Refresh billing status in background
           apiRequest<BillingStatus>('/billing/status').then(setBilling).catch(() => {})
         },
+        (startedConvId) => {
+          // Server confirmed receipt — persist the pending marker so a
+          // phone-lock or network blip can recover the answer.
+          resolvedConvId = startedConvId
+          setConversationId(startedConvId)
+          writePending(startedConvId, text)
+        },
       )
         .catch(() => {
+          if (resolvedConvId) {
+            setProgressMsg(null)
+            setLoading(false)
+            void recoveryLoop(resolvedConvId, sentAt)
+            return
+          }
           setMessages(prev => [
             ...prev,
-            { id: crypto.randomUUID(), role: 'assistant', content: 'Connection lost. Please try again.', citations: [] },
+            {
+              id: crypto.randomUUID(),
+              role: 'assistant',
+              content: 'Connection lost before your question reached the server. Please try again.',
+              citations: [],
+            },
           ])
         })
         .finally(() => {
@@ -509,6 +723,32 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
         {rateLimitMsg && (
           <p className="px-4 py-2 font-mono text-xs text-amber-400 bg-amber-950/30 border-t border-amber-800/20">
             {rateLimitMsg}
+          </p>
+        )}
+        {/* Sprint D6.23d — Recovery banner shown when the SSE connection
+            dropped mid-generation. The server is still working; we poll
+            until the answer lands or we hit the 90s timeout. */}
+        {recovering && (
+          <p className="px-4 py-2 font-mono text-xs text-[#2dd4bf] bg-[#2dd4bf]/8 border-t border-[#2dd4bf]/20 flex items-center gap-2">
+            <svg className="w-3 h-3 animate-spin flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M21 12a9 9 0 1 1-6.219-8.56" strokeLinecap="round" />
+            </svg>
+            Hang tight — your answer will appear when you&apos;re back online.
+          </p>
+        )}
+        {recoveryFailed && (
+          <p className="px-4 py-2 font-mono text-xs text-amber-400 bg-amber-950/30 border-t border-amber-800/20 flex items-center justify-between gap-2">
+            <span>Couldn&apos;t recover the answer automatically. Pull-to-refresh to check, or send again.</span>
+            <button
+              onClick={() => setRecoveryFailed(false)}
+              aria-label="Dismiss"
+              className="flex-shrink-0 text-[#6b7594] hover:text-[#f0ece4]"
+            >
+              <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="18" y1="6" x2="6" y2="18" />
+                <line x1="6" y1="6" x2="18" y2="18" />
+              </svg>
+            </button>
           </p>
         )}
         {verifyRequiredMsg && (

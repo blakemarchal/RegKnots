@@ -45,6 +45,7 @@ export async function sendMessageStream(
   vesselId: string | null | undefined,
   onStatus: (message: string) => void,
   onDone: (data: ChatStreamDone) => void,
+  onStarted?: (conversationId: string) => void,
 ): Promise<void> {
   const body = JSON.stringify({
     query,
@@ -115,7 +116,16 @@ export async function sendMessageStream(
 
         if (!eventType || !dataLine) continue
 
-        if (eventType === 'status') {
+        if (eventType === 'started') {
+          if (onStarted) {
+            try {
+              const parsed = JSON.parse(dataLine) as { conversation_id?: string }
+              if (parsed.conversation_id) onStarted(parsed.conversation_id)
+            } catch {
+              // ignore — recovery still works without it for existing conversations
+            }
+          }
+        } else if (eventType === 'status') {
           try {
             onStatus(JSON.parse(dataLine) as string)
           } catch {
