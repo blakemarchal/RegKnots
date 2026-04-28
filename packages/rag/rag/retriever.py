@@ -770,6 +770,7 @@ async def _identifier_search(
     identifiers: list[dict],
     pool: asyncpg.Pool,
     limit: int = 5,
+    allowed_jurisdictions: list[str] | None = None,
 ) -> list[dict]:
     """Search regulations by text for structured identifiers (high confidence).
 
@@ -784,43 +785,43 @@ async def _identifier_search(
                        bare-number UN searches against imdg/erg where
                        the "UN" prefix is omitted in tabular storage.
 
+    Sprint D6.19 — `allowed_jurisdictions`, when set, intersects against
+    chunk.jurisdictions via the && (overlap) operator. Same severance
+    contract as the vector path.
+
     Returns results in the same dict format as vector search.
     """
     results: list[dict] = []
     seen_ids: set = set()
+    juris_clause = " AND jurisdictions && $JN::text[] " if allowed_jurisdictions else ""
     for ident in identifiers:
         is_regex = bool(ident.get("regex"))
         source_filter = ident.get("source_filter")
         pattern = ident["pattern"]
+        # Build the parameter list and clause, then renumber the JN
+        # placeholder to match its position. Order: $1=pattern,
+        # $2=limit, $3=source_filter (optional), $N=juris (optional).
+        args: list = [pattern if not is_regex else (r"\m" + pattern + r"\M"), limit]
+        clauses: list[str] = []
         if is_regex:
-            # \m and \M are PostgreSQL word-boundary operators in the
-            # POSIX-extended regex flavour. Wrap the pattern so e.g.
-            # "2734" only matches the standalone digits.
-            sql = (
-                "SELECT id, source, section_number, section_title, full_text, "
-                "       0.0 AS similarity "
-                "FROM regulations "
-                "WHERE full_text ~ $1"
-                + (" AND source = ANY($3) " if source_filter else " ")
-                + "LIMIT $2"
-            )
-            args: list = [r"\m" + pattern + r"\M", limit]
-            if source_filter:
-                args.append(list(source_filter))
-            rows = await pool.fetch(sql, *args)
+            clauses.append("full_text ~ $1")
         else:
-            sql = (
-                "SELECT id, source, section_number, section_title, full_text, "
-                "       0.0 AS similarity "
-                "FROM regulations "
-                "WHERE full_text ILIKE '%' || $1 || '%' "
-                + ("AND source = ANY($3) " if source_filter else "")
-                + "LIMIT $2"
-            )
-            args = [pattern, limit]
-            if source_filter:
-                args.append(list(source_filter))
-            rows = await pool.fetch(sql, *args)
+            clauses.append("full_text ILIKE '%' || $1 || '%'")
+        next_idx = 3
+        if source_filter:
+            clauses.append(f"source = ANY(${next_idx})")
+            args.append(list(source_filter))
+            next_idx += 1
+        if allowed_jurisdictions:
+            clauses.append(f"jurisdictions && ${next_idx}::text[]")
+            args.append(list(allowed_jurisdictions))
+            next_idx += 1
+        sql = (
+            "SELECT id, source, section_number, section_title, full_text, "
+            "       0.0 AS similarity "
+            "FROM regulations WHERE " + " AND ".join(clauses) + " LIMIT $2"
+        )
+        rows = await pool.fetch(sql, *args)
         for r in rows:
             if r["id"] not in seen_ids:
                 seen_ids.add(r["id"])
@@ -833,6 +834,7 @@ async def _broad_keyword_search(
     pool: asyncpg.Pool,
     limit: int = 5,
     synonym_keywords: set[str] | None = None,
+    allowed_jurisdictions: list[str] | None = None,
 ) -> tuple[list[dict], list[str]]:
     """Search regulations by text for broad keywords (lower confidence).
 
@@ -881,28 +883,56 @@ async def _broad_keyword_search(
 
         passed_keywords.append(kw)
 
-        rows = await pool.fetch(
-            """
-            SELECT id, source, section_number, section_title, full_text,
-                   0.0 AS similarity
-            FROM (
-                SELECT DISTINCT ON (source)
-                    id, source, section_number, section_title, full_text
-                FROM regulations
-                WHERE full_text ILIKE '%' || $1 || '%'
-                ORDER BY source,
-                         (length(full_text)
+        # Sprint D6.19 — jurisdiction filter applied inside the inner
+        # subquery so DISTINCT ON sees only allowed-jurisdiction chunks.
+        if allowed_jurisdictions is not None:
+            rows = await pool.fetch(
+                """
+                SELECT id, source, section_number, section_title, full_text,
+                       0.0 AS similarity
+                FROM (
+                    SELECT DISTINCT ON (source)
+                        id, source, section_number, section_title, full_text
+                    FROM regulations
+                    WHERE full_text ILIKE '%' || $1 || '%'
+                      AND jurisdictions && $3::text[]
+                    ORDER BY source,
+                             (length(full_text)
+                              - length(replace(lower(full_text), lower($1), ''))
+                             ) DESC
+                ) sub
+                ORDER BY (length(full_text)
                           - length(replace(lower(full_text), lower($1), ''))
                          ) DESC
-            ) sub
-            ORDER BY (length(full_text)
-                      - length(replace(lower(full_text), lower($1), ''))
-                     ) DESC
-            LIMIT $2
-            """,
-            kw,
-            limit,
-        )
+                LIMIT $2
+                """,
+                kw,
+                limit,
+                allowed_jurisdictions,
+            )
+        else:
+            rows = await pool.fetch(
+                """
+                SELECT id, source, section_number, section_title, full_text,
+                       0.0 AS similarity
+                FROM (
+                    SELECT DISTINCT ON (source)
+                        id, source, section_number, section_title, full_text
+                    FROM regulations
+                    WHERE full_text ILIKE '%' || $1 || '%'
+                    ORDER BY source,
+                             (length(full_text)
+                              - length(replace(lower(full_text), lower($1), ''))
+                             ) DESC
+                ) sub
+                ORDER BY (length(full_text)
+                          - length(replace(lower(full_text), lower($1), ''))
+                         ) DESC
+                LIMIT $2
+                """,
+                kw,
+                limit,
+            )
         for r in rows:
             if r["id"] not in seen_ids:
                 seen_ids.add(r["id"])
@@ -918,21 +948,47 @@ async def _fetch_group(
     vec_literal: str,
     group_sources: list[str],
     candidates: int,
+    allowed_jurisdictions: list[str] | None = None,
 ) -> list[dict]:
-    rows = await pool.fetch(
-        """
-        SELECT id, source, section_number, section_title, full_text,
-               1 - (embedding <=> $1::vector) AS similarity
-        FROM regulations
-        WHERE embedding IS NOT NULL
-          AND source = ANY($3)
-        ORDER BY embedding <=> $1::vector
-        LIMIT $2
-        """,
-        vec_literal,
-        candidates,
-        group_sources,
-    )
+    """Fetch top-K candidates from one source group.
+
+    Sprint D6.19 — when `allowed_jurisdictions` is provided, the SQL
+    intersects against the chunk's `jurisdictions` array using the &&
+    (overlap) operator, backed by the GIN index on jurisdictions.
+    None = no filter (preserve generic-query default behavior).
+    """
+    if allowed_jurisdictions is not None:
+        rows = await pool.fetch(
+            """
+            SELECT id, source, section_number, section_title, full_text,
+                   1 - (embedding <=> $1::vector) AS similarity
+            FROM regulations
+            WHERE embedding IS NOT NULL
+              AND source = ANY($3)
+              AND jurisdictions && $4::text[]
+            ORDER BY embedding <=> $1::vector
+            LIMIT $2
+            """,
+            vec_literal,
+            candidates,
+            group_sources,
+            allowed_jurisdictions,
+        )
+    else:
+        rows = await pool.fetch(
+            """
+            SELECT id, source, section_number, section_title, full_text,
+                   1 - (embedding <=> $1::vector) AS similarity
+            FROM regulations
+            WHERE embedding IS NOT NULL
+              AND source = ANY($3)
+            ORDER BY embedding <=> $1::vector
+            LIMIT $2
+            """,
+            vec_literal,
+            candidates,
+            group_sources,
+        )
     return [dict(r) for r in rows]
 
 
@@ -968,23 +1024,52 @@ async def retrieve(
 
     vec_literal = await _embed_query(openai_api_key, query)
 
+    # Sprint D6.19 — D3 jurisdiction filter. Computes the per-query
+    # allow-set from {base ∪ flag-derived ∪ query-explicit}. Returns
+    # None for the "no signal" case (generic question, no profile),
+    # which preserves D6.17 behavior — no SQL filter is applied and the
+    # prompt-side rules handle the answer.
+    from rag.jurisdiction import allowed_jurisdictions as _allowed_juris_fn
+    juris_allow = _allowed_juris_fn(query, vessel_profile)
+    juris_list = list(juris_allow) if juris_allow is not None else None
+    if juris_list is not None:
+        logger.info("Jurisdiction filter active: %s", sorted(juris_list))
+
     if sources:
         # Explicit source filter — single query, no diversification.
         fetch_limit = max(limit * 3, 20)
-        rows = await pool.fetch(
-            """
-            SELECT id, source, section_number, section_title, full_text,
-                   1 - (embedding <=> $1::vector) AS similarity
-            FROM regulations
-            WHERE embedding IS NOT NULL
-              AND source = ANY($3)
-            ORDER BY embedding <=> $1::vector
-            LIMIT $2
-            """,
-            vec_literal,
-            fetch_limit,
-            sources,
-        )
+        if juris_list is not None:
+            rows = await pool.fetch(
+                """
+                SELECT id, source, section_number, section_title, full_text,
+                       1 - (embedding <=> $1::vector) AS similarity
+                FROM regulations
+                WHERE embedding IS NOT NULL
+                  AND source = ANY($3)
+                  AND jurisdictions && $4::text[]
+                ORDER BY embedding <=> $1::vector
+                LIMIT $2
+                """,
+                vec_literal,
+                fetch_limit,
+                sources,
+                juris_list,
+            )
+        else:
+            rows = await pool.fetch(
+                """
+                SELECT id, source, section_number, section_title, full_text,
+                       1 - (embedding <=> $1::vector) AS similarity
+                FROM regulations
+                WHERE embedding IS NOT NULL
+                  AND source = ANY($3)
+                ORDER BY embedding <=> $1::vector
+                LIMIT $2
+                """,
+                vec_literal,
+                fetch_limit,
+                sources,
+            )
         # Deduplicate by section_number — keep top _MAX_CHUNKS_PER_SECTION
         # chunks per section. Sprint D5.5: was "top 1" which suppressed
         # multi-chunk sections' specific-answer chunks behind their intro
@@ -1022,7 +1107,7 @@ async def retrieve(
                 continue
             n = _CANDIDATES_PER_GROUP.get(group_name, _DEFAULT_CANDIDATES_PER_GROUP)
             active_groups.append(group_name)
-            tasks.append(_fetch_group(pool, vec_literal, present, n))
+            tasks.append(_fetch_group(pool, vec_literal, present, n, juris_list))
 
         results_per_group = await asyncio.gather(*tasks)
 
@@ -1099,10 +1184,11 @@ async def retrieve(
     kw_results: list[dict] = []
     specific_keywords: list[str] = []
     if identifiers:
-        id_results = await _identifier_search(identifiers, pool)
+        id_results = await _identifier_search(identifiers, pool, allowed_jurisdictions=juris_list)
     if keywords:
         kw_results, specific_keywords = await _broad_keyword_search(
             keywords, pool, synonym_keywords=synonym_added,
+            allowed_jurisdictions=juris_list,
         )
 
     max_sim = max(

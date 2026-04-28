@@ -21,9 +21,9 @@ _UPSERT_SQL = """
     INSERT INTO regulations (
         source, source_version, title, section_number, section_title,
         full_text, chunk_index, embedding, up_to_date_as_of, content_hash,
-        published_date, expires_date, superseded_by
+        published_date, expires_date, superseded_by, jurisdictions
     )
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8::vector, $9, $10, $11, $12, $13)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8::vector, $9, $10, $11, $12, $13, $14::text[])
     ON CONFLICT (source, section_number, chunk_index) DO UPDATE SET
         source_version   = EXCLUDED.source_version,
         section_title    = EXCLUDED.section_title,
@@ -33,8 +33,10 @@ _UPSERT_SQL = """
         content_hash     = EXCLUDED.content_hash,
         published_date   = EXCLUDED.published_date,
         expires_date     = EXCLUDED.expires_date,
-        superseded_by    = EXCLUDED.superseded_by
+        superseded_by    = EXCLUDED.superseded_by,
+        jurisdictions    = EXCLUDED.jurisdictions
     WHERE regulations.content_hash IS DISTINCT FROM EXCLUDED.content_hash
+       OR regulations.jurisdictions IS DISTINCT FROM EXCLUDED.jurisdictions
 """
 
 _BATCH_SIZE = 500
@@ -117,6 +119,8 @@ async def record_version_change(
 # ── Row serialisation ────────────────────────────────────────────────────────
 
 def _to_row(c: EmbeddedChunk) -> tuple:
+    # Sprint D6.19 — derive jurisdictions from source.
+    juris = _jurisdictions_for_source(c.source)
     return (
         c.source,
         c.up_to_date_as_of.isoformat(),          # source_version
@@ -131,9 +135,57 @@ def _to_row(c: EmbeddedChunk) -> tuple:
         c.published_date,                        # nullable freshness column
         c.expires_date,                          # nullable freshness column
         c.superseded_by,                         # nullable freshness column
+        juris,                                   # jurisdictions text[]
     )
 
 
 def _vec(embedding: list[float]) -> str:
     """Serialise a float list to pgvector literal format: '[x,x,...]'"""
     return "[" + ",".join(f"{x:.8f}" for x in embedding) + "]"
+
+
+# Sprint D6.19 — source → jurisdiction tags. KEEP IN SYNC with
+#   apps/api/alembic/versions/0058_add_jurisdictions_column.py
+#   packages/rag/rag/jurisdiction.py SOURCE_TO_JURISDICTIONS
+# All three are authoritative for their layer (DB on backfill, retriever
+# on read, ingest on write). Adding a new source means updating all three.
+_SOURCE_TO_JURISDICTIONS: dict[str, list[str]] = {
+    # US national
+    "cfr_33":           ["us"],
+    "cfr_46":           ["us"],
+    "cfr_49":           ["us"],
+    "usc_46":           ["us"],
+    "nvic":             ["us"],
+    "nmc_policy":       ["us"],
+    "nmc_checklist":    ["us"],
+    "uscg_msm":         ["us"],
+    "uscg_bulletin":    ["us"],
+    # UK national
+    "mca_mgn":          ["uk"],
+    "mca_msn":          ["uk"],
+    # International (universal)
+    "solas":            ["intl"],
+    "solas_supplement": ["intl"],
+    "colregs":          ["intl"],
+    "stcw":             ["intl"],
+    "stcw_supplement":  ["intl"],
+    "ism":              ["intl"],
+    "ism_supplement":   ["intl"],
+    "marpol":           ["intl"],
+    "marpol_supplement":["intl"],
+    "imdg":             ["intl"],
+    "imdg_supplement":  ["intl"],
+    "who_ihr":          ["intl"],
+    # ERG — US DOT publication, internationally referenced; dual-tagged.
+    "erg":              ["us", "intl"],
+}
+
+
+def _jurisdictions_for_source(source: str) -> list[str]:
+    """Default to ['intl'] when an unknown source is encountered.
+
+    Unknown source-defaulted to a non-empty array (rather than []) so
+    the chunk is never accidentally invisible — '∅ && X' is always
+    false, which would suppress under every allow-set.
+    """
+    return _SOURCE_TO_JURISDICTIONS.get(source, ["intl"])
