@@ -3301,17 +3301,20 @@ async def get_chat(
         key = (er["message_content"] or "")[:200]
         err_by_prefix.setdefault(key, []).append(er["unverified_citation"])
 
-    # retrieval_misses per conversation.
+    # retrieval_misses per conversation. Column is hedge_phrase_matched
+    # (the regex group that triggered detect_hedge), not hedge_phrase.
     miss_rows = await pool.fetch(
         """
-        SELECT hedge_phrase, query, created_at
+        SELECT hedge_phrase_matched, query, created_at
         FROM retrieval_misses
         WHERE conversation_id = $1
         ORDER BY created_at ASC
         """,
         conv_uuid,
     )
-    miss_phrases: list[str] = [m["hedge_phrase"] for m in miss_rows if m["hedge_phrase"]]
+    miss_phrases: list[str] = [
+        m["hedge_phrase_matched"] for m in miss_rows if m["hedge_phrase_matched"]
+    ]
 
     messages: list[ChatMessageDetail] = []
     for m in msg_rows:
