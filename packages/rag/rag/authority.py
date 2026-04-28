@@ -79,6 +79,25 @@ _SOURCE_TO_TIER: dict[str, int] = {
     # Bahamas Maritime Authority Marine Notices — Sprint D6.22. Open
     # registry guidance, same posture as LISCR/IRI. Tier 2.
     "bma_mn": 2,
+    # Norway NMA circulars — Sprint D6.23. Tier 1 binding for NO-flag.
+    "nma_rsv": 1,
+    # IACS Unified Requirements — Sprint D6.23. Domain technical
+    # reference standard (class survey scope). Tier 4 — same protection
+    # ERG gets: authoritative within domain, doesn't outrank SOLAS for
+    # questions outside class-survey scope.
+    "iacs_ur": 4,
+    # IMO codes that supplement SOLAS — Sprint D6.23. Tier 1 binding
+    # for the vessel types they govern (peers of SOLAS, not subordinate).
+    "imo_css": 1,
+    "imo_loadlines": 1,
+    "imo_igc": 1,
+    "imo_ibc": 1,
+    "imo_hsc": 1,
+    # IAMSAR Vol III — reference manual for shipboard SAR. Tier 4.
+    "imo_iamsar": 4,
+    # MOU PSC reports + deficiency codes — Tier 3 time-sensitive
+    # operational notices. Always cite with publication date.
+    "mou_psc": 3,
     # Tier 2 — federal interpretive guidance
     "nvic": 2,
     "nmc_policy": 2,

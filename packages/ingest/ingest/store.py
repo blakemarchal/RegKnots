@@ -177,6 +177,17 @@ _SOURCE_TO_JURISDICTIONS: dict[str, list[str]] = {
     "tc_ssb":           ["ca"],
     # Bahamas (Sprint D6.22)
     "bma_mn":           ["bs"],
+    # Norway (Sprint D6.23)
+    "nma_rsv":          ["no"],
+    # Tier D international references (Sprint D6.23)
+    "iacs_ur":          ["intl"],
+    "imo_css":          ["intl"],
+    "imo_loadlines":    ["intl"],
+    "imo_igc":          ["intl"],
+    "imo_ibc":          ["intl"],
+    "imo_hsc":          ["intl"],
+    "imo_iamsar":       ["intl"],
+    "mou_psc":          ["intl"],
     # International (universal)
     "solas":            ["intl"],
     "solas_supplement": ["intl"],

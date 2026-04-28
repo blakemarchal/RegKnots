@@ -66,6 +66,19 @@ SOURCE_TO_JURISDICTIONS: dict[str, list[str]] = {
     "tc_ssb":           ["ca"],
     # Bahamas (Sprint D6.22)
     "bma_mn":           ["bs"],
+    # Norway (Sprint D6.23) — first non-English flag (but content is in English)
+    "nma_rsv":          ["no"],
+    # Sprint D6.23 — Tier D international references. All tagged 'intl'
+    # because they bind/reference every flag that has adopted the
+    # underlying IMO instruments.
+    "iacs_ur":          ["intl"],
+    "imo_css":          ["intl"],
+    "imo_loadlines":    ["intl"],
+    "imo_igc":          ["intl"],
+    "imo_ibc":          ["intl"],
+    "imo_hsc":          ["intl"],
+    "imo_iamsar":       ["intl"],
+    "mou_psc":          ["intl"],
     # International (universal — bind every flag on intl voyages)
     "solas":            ["intl"],
     "solas_supplement": ["intl"],

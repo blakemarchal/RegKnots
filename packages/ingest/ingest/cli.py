@@ -153,6 +153,49 @@ _PDF_SOURCE_CONFIG: dict[str, dict] = {
         "raw_dir": _DATA_RAW / "bma",
         "adapter": "ingest.sources.bma",
     },
+    # Sprint D6.23 — Norway NMA (English-published circulars).
+    "nma_rsv": {
+        "raw_dir": _DATA_RAW / "nma_norway",
+        "adapter": "ingest.sources.nma_norway",
+    },
+    # Sprint D6.23 — Tier D international references.
+    "iacs_ur": {
+        "raw_dir": _DATA_RAW / "iacs",
+        "adapter": "ingest.sources.iacs",
+    },
+    "imo_css": {
+        "raw_dir": _DATA_RAW / "imo_css",
+        "adapter": "ingest.sources.imo_codes",
+        "imo_code": "css",
+    },
+    "imo_loadlines": {
+        "raw_dir": _DATA_RAW / "imo_loadlines",
+        "adapter": "ingest.sources.imo_codes",
+        "imo_code": "loadlines",
+    },
+    "imo_igc": {
+        "raw_dir": _DATA_RAW / "imo_igc",
+        "adapter": "ingest.sources.imo_codes",
+        "imo_code": "igc",
+    },
+    "imo_ibc": {
+        "raw_dir": _DATA_RAW / "imo_ibc",
+        "adapter": "ingest.sources.imo_codes",
+        "imo_code": "ibc",
+    },
+    "imo_hsc": {
+        "raw_dir": _DATA_RAW / "imo_hsc",
+        "adapter": "ingest.sources.imo_codes",
+        "imo_code": "hsc",
+    },
+    "imo_iamsar": {
+        "raw_dir": _DATA_RAW / "imo_iamsar",
+        "adapter": "ingest.sources.imo_iamsar",
+    },
+    "mou_psc": {
+        "raw_dir": _DATA_RAW / "mou_psc",
+        "adapter": "ingest.sources.mou_psc",
+    },
     "solas": {
         "text_dir": _DATA_RAW / "solas",
         "adapter":  "ingest.sources.solas",
@@ -536,6 +579,36 @@ async def _run_pdf_source(
                 console=console,
                 enrich=enrich,
             )
+
+        # Sprint D6.23 — IMO codes: single adapter, code-keyed. Each
+        # imo_<code> source has its own raw_dir and passes imo_code
+        # to the adapter so it knows which curated doc set to fetch.
+        if "imo_code" in cfg:
+            imo_code = cfg["imo_code"]
+            imo_source = f"imo_{imo_code}"
+            console.print(
+                f"  [cyan]Phase 1:[/cyan] Downloading IMO {imo_code.upper()} into {raw_dir}…"
+            )
+            dl_success, dl_failures = adapter.discover_and_download(
+                raw_dir, _DATA_FAILED, console, imo_code,
+            )
+            if dl_success == 0 and dl_failures == 0:
+                console.print(f"  [yellow]No IMO {imo_code} docs found — aborting[/yellow]")
+                return IngestResult(source=imo_source, errors=1)
+            source_date = adapter.get_source_date(raw_dir)
+            section_loader = lambda: adapter.parse_source(raw_dir, imo_code)  # noqa: E731
+            result = await run_pdf_pipeline(
+                source=imo_source,
+                mode=mode,
+                section_loader=section_loader,
+                source_date=source_date,
+                pool=pool,
+                cfg=settings,
+                console=console,
+                enrich=enrich,
+            )
+            result.errors += dl_failures
+            return result
 
         # Sprint D6.18 — MCA: discover-and-download once (idempotent for
         # both kinds; second run is a no-op), then parse for the kind

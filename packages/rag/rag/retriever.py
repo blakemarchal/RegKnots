@@ -102,6 +102,19 @@ SOURCE_GROUPS: dict[str, tuple[str, ...]] = {
     "mardep": ("mardep_msin",),
     "tc": ("tc_ssb",),
     "bma": ("bma_mn",),
+    # Sprint D6.23 — Norway + Tier D international references.
+    "nma": ("nma_rsv",),
+    # IACS class society in its own group so technical-class queries
+    # can find UR content without crowding the IMO instrument groups.
+    "iacs": ("iacs_ur",),
+    # IMO codes share a group — they're peer instruments to SOLAS that
+    # bind specific vessel types (HSC for fast craft, IGC/IBC for
+    # gas/chemical tankers, Load Lines universal, CSS via SOLAS Ch.VI).
+    "imo_codes": ("imo_css", "imo_loadlines", "imo_igc", "imo_ibc", "imo_hsc"),
+    # IMO reference manuals (operational guidance, not binding rule).
+    "imo_ref": ("imo_iamsar",),
+    # Port State Control regimes (Tokyo MOU + Paris MOU).
+    "mou": ("mou_psc",),
 }
 
 # Per-group candidate pool sizes. CFR is larger because it covers three
