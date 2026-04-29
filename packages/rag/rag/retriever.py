@@ -586,6 +586,65 @@ _IDENTIFIER_PATTERNS: list[tuple[str, re.Pattern]] = [
 ]
 
 
+# Sprint D6.24 — implicit MARPOL Annex inference.
+#
+# In our corpus "Annex N" with a Roman numeral is unambiguous: only
+# MARPOL is organized by numbered annexes (I oil, II NLS, III packaged
+# pollutants, IV sewage, V garbage, VI air). SOLAS uses "Chapter",
+# STCW uses "Chapter", ISM uses "Section", IBC/IGC use appendices.
+# So when a user types "annex V exemptions" without writing the word
+# MARPOL, treating it as MARPOL Annex V is high-confidence inference,
+# not a guess.
+#
+# Triggered by: bare `Annex (I|II|III|IV|V|VI)` with no explicit
+# instrument prefix elsewhere in the query.
+#
+# Skipped when: the query already mentions another IMO/national
+# instrument by name (MARPOL, SOLAS, STCW, ISM, IBC, IGC, HSC, BWM,
+# IMDG, MCA, AMSA, NMA, USCG, etc.). In those cases the explicit
+# patterns above pick it up — or the user genuinely meant something
+# else.
+#
+# Documented case driving this: 2026-04-29 user 2ndmate09 asked
+# "What are the annex V exemptions for throwing plastic overboard"
+# and got "MARPOL Annex V is not in the retrieved context" because
+# the existing `marpol_annex` pattern requires the literal "MARPOL"
+# prefix. Vector retrieval was distracted by COLREGs Rule 38
+# (Exemptions), 46 CFR 199.610 (Exemptions), and 46 CFR 108.597
+# (Line-throwing appliance) — all reasonable matches for "exemptions"
+# and "throwing" but none answered the question.
+_BARE_ANNEX_RE = re.compile(
+    r"\bAnnex\s+(I|II|III|IV|V|VI)\b",
+    re.IGNORECASE,
+)
+_OTHER_INSTRUMENT_RE = re.compile(
+    r"\b(?:MARPOL|SOLAS|STCW|ISM|IBC|IGC|HSC|BWM|IMDG|"
+    r"MCA|AMSA|LISCR|IRI|MPA|HKMD|NMA|BMA|CFR|USCG|NVIC|"
+    r"NMC|MSM|MSIB|ALCOAST|Polar\s+Code)\b",
+    re.IGNORECASE,
+)
+
+
+def _detect_implicit_marpol_annexes(query: str) -> list[str]:
+    """Return Roman numerals from bare "Annex N" mentions when no
+    other instrument is explicitly named in the query.
+
+    Returns empty list if the query already contains MARPOL or another
+    instrument prefix — those cases are handled by the explicit
+    `marpol_annex` (and friends) patterns above.
+    """
+    if _OTHER_INSTRUMENT_RE.search(query):
+        return []
+    annexes: list[str] = []
+    seen: set[str] = set()
+    for m in _BARE_ANNEX_RE.finditer(query):
+        roman = m.group(1).upper()
+        if roman not in seen:
+            seen.add(roman)
+            annexes.append(roman)
+    return annexes
+
+
 def _extract_identifiers(query: str) -> list[dict]:
     """Scan query for known regulation identifier patterns.
 
@@ -717,6 +776,32 @@ def _extract_identifiers(query: str) -> list[dict]:
                     "pattern": f"P{num}",
                     "regex": True,
                 })
+
+    # Sprint D6.24 — implicit MARPOL Annex inference. Runs AFTER the
+    # explicit pattern loop so we can check whether the explicit
+    # `marpol_annex` already matched (don't emit duplicates).
+    #
+    # IMPORTANT: uses regex with PostgreSQL `\m...\M` word boundaries
+    # + a source_filter to ('marpol', 'marpol_supplement'). Without
+    # word-bounds, "Annex V" substring-matches "Annex VI" chunks too,
+    # so a query about Annex V (garbage) would surface Annex VI (air
+    # pollution) content. Without the source filter, the bypass would
+    # also pull in AMSA Marine Order 95 / CFR sections that reference
+    # MARPOL Annex V, drowning out the convention text itself.
+    explicit_annex_values = {
+        i["value"] for i in identifiers if i.get("type") == "marpol_annex"
+    }
+    for annex_roman in _detect_implicit_marpol_annexes(query):
+        annex_value = f"Annex {annex_roman}"
+        if annex_value in explicit_annex_values:
+            continue
+        identifiers.append({
+            "type": "marpol_annex_implicit",
+            "value": annex_value,
+            "pattern": annex_value,
+            "regex": True,
+            "source_filter": ("marpol", "marpol_supplement"),
+        })
     return identifiers
 
 

@@ -60,6 +60,21 @@ SYNONYM_DICT: dict[str, tuple[str, ...]] = {
     "lifejacket": ("lifesaving appliance", "personal flotation"),
     "log": ("logbook", "official logbook", "deck log"),
     "mob": ("person overboard", "man overboard"),
+    # Sprint D6.24 — added on documented evidence:
+    # 2026-04-29 user 2ndmate09 (chat title "Maritime Stability
+    # Requirements CFR Compliance Guide") asked "Which cfr has
+    # stability requirements" and got "None of the retrieved sources
+    # address vessel stability requirements" — but 46 CFR Subchapter S
+    # (Subdivision and Stability) contains exactly that, plus AMSA MO 12
+    # and the IGC + HSC Codes cover stability extensively.
+    # Frequency-checked 2026-04-29:
+    #   subdivision and stability  214 chunks  (Subchapter S formal title)
+    #   damage stability           208 chunks  (post-casualty stability)
+    #   intact stability           125 chunks  (operational loading)
+    # Bare "stability" alone matches 1,401 chunks — too broad to add
+    # directly as a search term; staying with targeted 2-word phrases
+    # keeps the candidate pool focused on the user's intent.
+    "stability": ("subdivision and stability", "damage stability", "intact stability"),
 }
 
 
