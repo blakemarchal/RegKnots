@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 22 16" width="28" height="20" preserveAspectRatio="xMidYMid slice">
+  <rect width="22" height="16" fill="#ef2b2d"/>
+  <rect x="6" width="2" height="16" fill="#fff"/>
+  <rect y="7" width="22" height="2" fill="#fff"/>
+  <rect x="6.5" width="1" height="16" fill="#002868"/>
+  <rect y="7.5" width="22" height="1" fill="#002868"/>
+</svg>

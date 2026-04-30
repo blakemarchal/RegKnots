@@ -385,8 +385,56 @@ export default function LandingPage() {
             animate-[heroFadeUp_0.8s_ease-out_0.55s]"
           style={{ animationFillMode: 'both' }}
         >
-          14-day free trial · 50 messages · No credit card required
+          7-day free trial · 50 messages · No credit card required
         </p>
+
+        {/* Flag strip — D6.25, jurisdictions covered */}
+        <div
+          className="flex flex-col items-center gap-2 mt-8
+            animate-[heroFadeUp_0.8s_ease-out_0.65s]"
+          style={{ animationFillMode: 'both' }}
+        >
+          <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-[#6b7594]">
+            Coverage
+          </p>
+          <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-2 max-w-md">
+            {[
+              { cc: 'us', label: 'United States' },
+              { cc: 'gb', label: 'United Kingdom' },
+              { cc: 'au', label: 'Australia' },
+              { cc: 'no', label: 'Norway' },
+              { cc: 'sg', label: 'Singapore' },
+              { cc: 'hk', label: 'Hong Kong' },
+              { cc: 'bs', label: 'Bahamas' },
+              { cc: 'lr', label: 'Liberia' },
+              { cc: 'mh', label: 'Marshall Islands' },
+            ].map((f) => (
+              <span
+                key={f.cc}
+                title={f.label}
+                aria-label={f.label}
+                className="inline-block w-7 h-5 overflow-hidden rounded-sm
+                  border border-white/10 bg-[#0f1525] shadow-sm"
+              >
+                <img
+                  src={`/brand/flags/${f.cc}.svg`}
+                  alt={f.label}
+                  width={28}
+                  height={20}
+                  loading="lazy"
+                  className="block w-full h-full object-cover"
+                />
+              </span>
+            ))}
+            <span
+              className="font-mono text-[10px] font-bold uppercase tracking-wider
+                px-2 py-0.5 rounded border border-[#2dd4bf]/40 text-[#2dd4bf]/85"
+              title="International conventions: SOLAS, STCW, COLREGs, MARPOL, ISM, IMDG, BWM, Polar Code, IGC, IBC, HSC"
+            >
+              IMO
+            </span>
+          </div>
+        </div>
 
         {/* Scroll indicator */}
         <button

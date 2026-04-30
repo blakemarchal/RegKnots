@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 22 11" width="28" height="20" preserveAspectRatio="xMidYMid slice">
+  <g>
+    <rect width="22" height="1" fill="#bf0a30"/>
+    <rect y="1" width="22" height="1" fill="#fff"/>
+    <rect y="2" width="22" height="1" fill="#bf0a30"/>
+    <rect y="3" width="22" height="1" fill="#fff"/>
+    <rect y="4" width="22" height="1" fill="#bf0a30"/>
+    <rect y="5" width="22" height="1" fill="#fff"/>
+    <rect y="6" width="22" height="1" fill="#bf0a30"/>
+    <rect y="7" width="22" height="1" fill="#fff"/>
+    <rect y="8" width="22" height="1" fill="#bf0a30"/>
+    <rect y="9" width="22" height="1" fill="#fff"/>
+    <rect y="10" width="22" height="1" fill="#bf0a30"/>
+  </g>
+  <rect width="6.3" height="6" fill="#002868"/>
+  <polygon fill="#fff" points="3.15,1.2 3.6,2.4 4.85,2.4 3.85,3.2 4.25,4.4 3.15,3.65 2.05,4.4 2.45,3.2 1.45,2.4 2.7,2.4"/>
+</svg>

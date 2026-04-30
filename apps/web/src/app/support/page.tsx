@@ -63,7 +63,7 @@ const FAQ_ITEMS: FaqItem[] = [
   {
     category: 'Account & Billing',
     q: 'What does the free trial include?',
-    a: 'The 14-day free trial gives you 50 messages to test RegKnot with your real compliance questions. All regulation sources and features are available during the trial. No credit card required to start.',
+    a: 'The 7-day free trial gives you 50 messages to test RegKnot with your real compliance questions. All regulation sources and features are available during the trial. No credit card required to start.',
   },
   {
     category: 'Account & Billing',

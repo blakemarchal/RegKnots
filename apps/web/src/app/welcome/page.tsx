@@ -740,6 +740,12 @@ function WelcomeContent() {
                 <ComingUpWidget visible={true} compact={false} />
               )}
 
+              {/* Sprint D6.25 — feature-highlight cards (skippable). The "Open
+                  Chat" button below remains the primary CTA; engaging with a
+                  card is opt-in. We track which feature gets the first click
+                  via the existing page-load referrer in Caddy logs. */}
+              <FeatureHighlightCards />
+
               <button onClick={goToChat} className={primaryBtn}>
                 Open Chat
               </button>
@@ -838,6 +844,101 @@ function ErrorBox({ msg }: { msg: string }) {
     <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-3">
       <p className="font-mono text-xs text-red-400">{msg}</p>
     </div>
+  )
+}
+
+// ── Feature highlight cards (Sprint D6.25) ────────────────────────────────
+//
+// Surfaces RegKnot features beyond chat that new users typically don't
+// discover on their own. Per admin counts on 2026-04-30: Credentials Tracker
+// (10), Compliance Log (1), PSC Checklist (1), Vessel Dossier (7) all
+// chronically under-used. This is the lowest-friction nudge — sit right
+// above the "Open Chat" CTA so engagement is opt-in.
+//
+// Tracking — we'll measure click-through via Caddy access logs filtered on
+// `Referer: /welcome` for each card's destination route. No new instrumentation
+// required.
+function FeatureHighlightCards() {
+  const cards = [
+    {
+      href: '/credentials',
+      icon: (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="3" y="5" width="18" height="14" rx="2" />
+          <path d="M3 9h18" />
+          <path d="M7 14h4" />
+        </svg>
+      ),
+      title: 'Credentials Tracker',
+      desc: 'Log MMC, STCW, medical, TWIC. Get expiry alerts before they bite.',
+    },
+    {
+      href: '/log',
+      icon: (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M4 4h12a4 4 0 0 1 4 4v12H8a4 4 0 0 1-4-4V4z" />
+          <path d="M8 9h8" />
+          <path d="M8 13h6" />
+        </svg>
+      ),
+      title: 'Compliance Log',
+      desc: 'Document compliance checks for an audit trail you control.',
+    },
+    {
+      href: '/psc-checklist',
+      icon: (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="5" y="3" width="14" height="18" rx="2" />
+          <path d="M9 8l2 2 4-4" />
+          <path d="M9 14h6" />
+          <path d="M9 17h4" />
+        </svg>
+      ),
+      title: 'PSC Checklist',
+      desc: 'Walk through Port State Control prep before your next port call.',
+    },
+    {
+      href: '/vessel-dossier',
+      icon: (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M3 17h18" />
+          <path d="M5 17l1-7h12l1 7" />
+          <path d="M9 10V6a3 3 0 1 1 6 0v4" />
+        </svg>
+      ),
+      title: 'Vessel Dossier',
+      desc: 'Build a one-page vessel profile in 60 seconds — share with auditors.',
+    },
+  ]
+  return (
+    <section className="flex flex-col gap-2">
+      <p className="font-mono text-xs text-[#6b7594] uppercase tracking-wider">
+        While you&apos;re here — try one of these
+      </p>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        {cards.map((c) => (
+          <a
+            key={c.href}
+            href={c.href}
+            className="group flex items-start gap-3 bg-[#111827] border border-white/8 rounded-xl p-3
+              hover:border-[#2dd4bf]/40 hover:bg-[#152033] transition-colors"
+          >
+            <span className="flex-shrink-0 w-8 h-8 rounded-lg bg-[#2dd4bf]/10 text-[#2dd4bf]
+              flex items-center justify-center group-hover:bg-[#2dd4bf]/20 transition-colors">
+              <span className="block w-5 h-5">{c.icon}</span>
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="font-display text-sm font-bold text-[#f0ece4] leading-tight">{c.title}</p>
+              <p className="font-mono text-[11px] text-[#6b7594] leading-snug mt-0.5">{c.desc}</p>
+            </div>
+            <svg className="flex-shrink-0 w-4 h-4 text-[#6b7594] group-hover:text-[#2dd4bf] transition-colors mt-1"
+              viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="9 18 15 12 9 6" />
+            </svg>
+          </a>
+        ))}
+      </div>
+    </section>
   )
 }
 

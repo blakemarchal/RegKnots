@@ -268,7 +268,7 @@ function AdminContent() {
   }, [])
 
   // ── Tab state ───────────────────────────────────────────────────────────
-  type AdminTab = 'overview' | 'users' | 'chats' | 'content' | 'email' | 'data' | 'jobs' | 'system' | 'partners'
+  type AdminTab = 'overview' | 'users' | 'chats' | 'content' | 'email' | 'data' | 'jobs' | 'system' | 'partners' | 'features'
   const [activeTab, setActiveTab] = useState<AdminTab>(() => {
     if (typeof window === 'undefined') return 'overview'
     const stored = window.localStorage.getItem('admin_active_tab') as AdminTab | null
@@ -835,6 +835,7 @@ function AdminContent() {
               { key: 'users', label: 'Users' },
               { key: 'chats', label: 'Chats' },
               { key: 'partners', label: 'Partners' },
+              { key: 'features', label: 'Features' },
               { key: 'data', label: 'Data' },
               { key: 'jobs', label: 'Jobs' },
               { key: 'email', label: 'Email' },
@@ -2094,6 +2095,7 @@ function AdminContent() {
           {activeTab === 'system' && <SystemTab />}
           {activeTab === 'partners' && <PartnersPanel />}
           {activeTab === 'chats' && <ChatsTab />}
+          {activeTab === 'features' && <FeaturesTab />}
 
         </div>
       </main>
@@ -3136,6 +3138,153 @@ function SystemTab() {
           </div>
         </>
       )}
+    </div>
+  )
+}
+
+// ── Features tab (Sprint D6.25) ───────────────────────────────────────────
+//
+// Shows adoption signal for the four under-discovered features (Credentials,
+// Compliance Log, PSC Checklist, Vessel Dossier) plus Vessels overall.
+// Sourced from /admin/feature-usage — no new instrumentation required, just
+// counts off the existing tables.
+
+interface FeatureTotal {
+  feature: string
+  total_records: number
+  distinct_users: number
+  last_created_at: string | null
+}
+
+interface FeatureUserRow {
+  user_id: string
+  email: string
+  full_name: string | null
+  credentials: number
+  compliance_logs: number
+  psc_checklists: number
+  vessels: number
+  vessel_documents: number
+  last_activity_at: string | null
+}
+
+function FeaturesTab() {
+  const [totals, setTotals] = useState<FeatureTotal[]>([])
+  const [users, setUsers] = useState<FeatureUserRow[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [excludeInternal, setExcludeInternal] = useState(true)
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const params = new URLSearchParams({
+        exclude_internal: String(excludeInternal),
+        limit: '50',
+      })
+      const r = await apiRequest<{ totals: FeatureTotal[]; top_users: FeatureUserRow[] }>(
+        `/admin/feature-usage?${params.toString()}`,
+      )
+      setTotals(r.totals)
+      setUsers(r.top_users)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to load feature usage')
+    } finally {
+      setLoading(false)
+    }
+  }, [excludeInternal])
+
+  useEffect(() => { load() }, [load])
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-4">
+        <p className="font-mono text-xs text-[#6b7594]">
+          Counts straight off each feature's table. Use this to gauge whether the
+          feature highlight cards on /welcome are nudging adoption over time.
+        </p>
+        <label className="flex items-center gap-1 text-xs font-mono whitespace-nowrap">
+          <input
+            type="checkbox"
+            checked={excludeInternal}
+            onChange={(e) => setExcludeInternal(e.target.checked)}
+          />
+          Exclude internal
+        </label>
+      </div>
+
+      {error && (
+        <div className="bg-[#111827] rounded-xl border border-red-500/30 px-4 py-3 mb-4">
+          <p className="font-mono text-xs text-red-400">{error}</p>
+        </div>
+      )}
+
+      {/* Per-feature totals */}
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-8">
+        {loading && totals.length === 0
+          ? Array.from({ length: 5 }).map((_, i) => (
+              <div key={i} className="bg-[#111827] rounded-xl border border-white/8 px-4 py-3 h-[88px] animate-pulse" />
+            ))
+          : totals.map((t) => (
+              <div key={t.feature} className="bg-[#111827] rounded-xl border border-white/8 px-4 py-3">
+                <p className="font-mono text-[10px] uppercase tracking-wider text-[#6b7594] truncate">
+                  {t.feature}
+                </p>
+                <p className="font-display text-2xl font-bold text-[#f0ece4] mt-1">
+                  {t.total_records}
+                </p>
+                <p className="font-mono text-[10px] text-[#6b7594] mt-1">
+                  {t.distinct_users} {t.distinct_users === 1 ? 'user' : 'users'}
+                  {t.last_created_at && (
+                    <> · last {fmtRelative(t.last_created_at)}</>
+                  )}
+                </p>
+              </div>
+            ))}
+      </div>
+
+      {/* Per-user breakdown */}
+      <h3 className="font-mono text-xs uppercase tracking-wider text-[#6b7594] mb-2">
+        Top users (any feature)
+      </h3>
+      <div className="bg-[#111827] rounded-xl border border-white/8 overflow-hidden">
+        <table className="w-full text-xs font-mono">
+          <thead>
+            <tr className="bg-[#0d1224] text-[#6b7594]">
+              <th className="text-left px-3 py-2">User</th>
+              <th className="text-right px-3 py-2">Creds</th>
+              <th className="text-right px-3 py-2">Logs</th>
+              <th className="text-right px-3 py-2">PSC</th>
+              <th className="text-right px-3 py-2">Vessels</th>
+              <th className="text-right px-3 py-2">Docs</th>
+              <th className="text-right px-3 py-2">Last activity</th>
+            </tr>
+          </thead>
+          <tbody>
+            {loading && users.length === 0 && (
+              <tr><td colSpan={7} className="px-3 py-6 text-center text-[#6b7594]">Loading…</td></tr>
+            )}
+            {!loading && users.length === 0 && (
+              <tr><td colSpan={7} className="px-3 py-6 text-center text-[#6b7594]">No users have engaged any feature yet.</td></tr>
+            )}
+            {users.map((u) => (
+              <tr key={u.user_id} className="border-t border-white/5 hover:bg-white/[0.02]">
+                <td className="px-3 py-2">
+                  <div className="text-[#f0ece4] truncate max-w-[280px]">{u.email}</div>
+                  {u.full_name && <div className="text-[#6b7594] truncate max-w-[280px]">{u.full_name}</div>}
+                </td>
+                <td className="text-right px-3 py-2 text-[#f0ece4]">{u.credentials || '—'}</td>
+                <td className="text-right px-3 py-2 text-[#f0ece4]">{u.compliance_logs || '—'}</td>
+                <td className="text-right px-3 py-2 text-[#f0ece4]">{u.psc_checklists || '—'}</td>
+                <td className="text-right px-3 py-2 text-[#f0ece4]">{u.vessels || '—'}</td>
+                <td className="text-right px-3 py-2 text-[#f0ece4]">{u.vessel_documents || '—'}</td>
+                <td className="text-right px-3 py-2 text-[#6b7594]">{fmtRelative(u.last_activity_at)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   )
 }

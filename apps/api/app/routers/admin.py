@@ -1611,6 +1611,196 @@ async def messages_per_day(
     ]
 
 
+# ── Feature usage (Sprint D6.25) ─────────────────────────────────────────────
+#
+# Per-feature totals + per-user breakdown for Credentials Tracker, Compliance
+# Log, PSC Checklist, Vessel Dossier, Vessels. Sourced directly from each
+# feature's table — no new instrumentation. The point is to answer "is anyone
+# actually using this?" before we sink more design time into these surfaces.
+
+
+class FeatureUsageTotal(BaseModel):
+    feature: str
+    total_records: int
+    distinct_users: int
+    last_created_at: str | None
+
+
+class FeatureUsageUserRow(BaseModel):
+    user_id: str
+    email: str
+    full_name: str | None
+    credentials: int
+    compliance_logs: int
+    psc_checklists: int
+    vessels: int
+    vessel_documents: int
+    last_activity_at: str | None
+
+
+class FeatureUsageReport(BaseModel):
+    totals: list[FeatureUsageTotal]
+    top_users: list[FeatureUsageUserRow]
+
+
+@router.get("/feature-usage", response_model=FeatureUsageReport)
+async def feature_usage(
+    _admin: Annotated[CurrentUser, Depends(require_admin)],
+    exclude_internal: bool = Query(default=False),
+    limit: int = Query(default=25, ge=1, le=200),
+) -> FeatureUsageReport:
+    """Snapshot of feature engagement across the user base.
+
+    `totals` rolls up each feature: total records, distinct users who
+    have at least one, and last-touch timestamp. `top_users` ranks
+    individuals by total records-touched across all features so we can
+    spot power users and dead accounts at a glance.
+
+    Adoption today is sparse (single-digit usage on most features)
+    so we expect totals to be small for a while — that's the point of
+    the panel.
+    """
+    pool = await get_pool()
+
+    # Each feature has its own table; query them in parallel-ish via UNION
+    # for the totals roll-up. The exclude_internal filter joins users so
+    # we can drop admin/internal noise from the metric.
+    totals_rows = await pool.fetch(
+        """
+        WITH excl AS (
+            SELECT id FROM users
+            WHERE $1 = TRUE AND (is_internal IS TRUE OR is_admin IS TRUE)
+        )
+        SELECT 'Credentials Tracker' AS feature,
+               COUNT(*) AS total_records,
+               COUNT(DISTINCT user_id) AS distinct_users,
+               MAX(created_at) AS last_created_at
+        FROM user_credentials
+        WHERE user_id NOT IN (SELECT id FROM excl)
+        UNION ALL
+        SELECT 'Compliance Log',
+               COUNT(*),
+               COUNT(DISTINCT user_id),
+               MAX(created_at)
+        FROM compliance_logs
+        WHERE user_id NOT IN (SELECT id FROM excl)
+        UNION ALL
+        SELECT 'PSC Checklist',
+               COUNT(*),
+               COUNT(DISTINCT user_id),
+               MAX(created_at)
+        FROM psc_checklists
+        WHERE user_id NOT IN (SELECT id FROM excl)
+        UNION ALL
+        SELECT 'Vessels',
+               COUNT(*),
+               COUNT(DISTINCT user_id),
+               MAX(created_at)
+        FROM vessels
+        WHERE user_id NOT IN (SELECT id FROM excl)
+        UNION ALL
+        SELECT 'Vessel Dossier (documents)',
+               COUNT(*),
+               COUNT(DISTINCT v.user_id),
+               MAX(vd.created_at)
+        FROM vessel_documents vd
+        JOIN vessels v ON v.id = vd.vessel_id
+        WHERE v.user_id NOT IN (SELECT id FROM excl)
+        """,
+        exclude_internal,
+    )
+
+    # Per-user breakdown — single query joining all feature tables via
+    # subquery counts. last_activity_at is the max across all five
+    # features so we can sort "who's active where."
+    top_users_rows = await pool.fetch(
+        """
+        SELECT
+            u.id AS user_id,
+            u.email,
+            u.full_name,
+            COALESCE(cred.cnt, 0) AS credentials,
+            COALESCE(clog.cnt, 0) AS compliance_logs,
+            COALESCE(psc.cnt, 0) AS psc_checklists,
+            COALESCE(ves.cnt, 0) AS vessels,
+            COALESCE(vdoc.cnt, 0) AS vessel_documents,
+            GREATEST(
+                COALESCE(cred.last_at, '1900-01-01'::timestamptz),
+                COALESCE(clog.last_at, '1900-01-01'::timestamptz),
+                COALESCE(psc.last_at, '1900-01-01'::timestamptz),
+                COALESCE(ves.last_at, '1900-01-01'::timestamptz),
+                COALESCE(vdoc.last_at, '1900-01-01'::timestamptz)
+            ) AS last_activity_at
+        FROM users u
+        LEFT JOIN (
+            SELECT user_id, COUNT(*) cnt, MAX(created_at) last_at
+            FROM user_credentials GROUP BY user_id
+        ) cred ON cred.user_id = u.id
+        LEFT JOIN (
+            SELECT user_id, COUNT(*) cnt, MAX(created_at) last_at
+            FROM compliance_logs GROUP BY user_id
+        ) clog ON clog.user_id = u.id
+        LEFT JOIN (
+            SELECT user_id, COUNT(*) cnt, MAX(created_at) last_at
+            FROM psc_checklists GROUP BY user_id
+        ) psc ON psc.user_id = u.id
+        LEFT JOIN (
+            SELECT user_id, COUNT(*) cnt, MAX(created_at) last_at
+            FROM vessels GROUP BY user_id
+        ) ves ON ves.user_id = u.id
+        LEFT JOIN (
+            SELECT v.user_id, COUNT(*) cnt, MAX(vd.created_at) last_at
+            FROM vessel_documents vd
+            JOIN vessels v ON v.id = vd.vessel_id
+            GROUP BY v.user_id
+        ) vdoc ON vdoc.user_id = u.id
+        WHERE
+            (COALESCE(cred.cnt,0) + COALESCE(clog.cnt,0)
+             + COALESCE(psc.cnt,0) + COALESCE(ves.cnt,0)
+             + COALESCE(vdoc.cnt,0)) > 0
+            AND ($1 = FALSE OR (u.is_internal IS NOT TRUE AND u.is_admin IS NOT TRUE))
+        ORDER BY
+            (COALESCE(cred.cnt,0) + COALESCE(clog.cnt,0)
+             + COALESCE(psc.cnt,0) + COALESCE(ves.cnt,0)
+             + COALESCE(vdoc.cnt,0)) DESC,
+            last_activity_at DESC
+        LIMIT $2
+        """,
+        exclude_internal,
+        limit,
+    )
+
+    return FeatureUsageReport(
+        totals=[
+            FeatureUsageTotal(
+                feature=r["feature"],
+                total_records=r["total_records"] or 0,
+                distinct_users=r["distinct_users"] or 0,
+                last_created_at=r["last_created_at"].isoformat()
+                if r["last_created_at"]
+                else None,
+            )
+            for r in totals_rows
+        ],
+        top_users=[
+            FeatureUsageUserRow(
+                user_id=str(r["user_id"]),
+                email=r["email"],
+                full_name=r["full_name"],
+                credentials=r["credentials"],
+                compliance_logs=r["compliance_logs"],
+                psc_checklists=r["psc_checklists"],
+                vessels=r["vessels"],
+                vessel_documents=r["vessel_documents"],
+                last_activity_at=r["last_activity_at"].isoformat()
+                if r["last_activity_at"] and r["last_activity_at"].year > 1900
+                else None,
+            )
+            for r in top_users_rows
+        ],
+    )
+
+
 # ── Support tickets ──────────────────────────────────────────────────────────
 
 

@@ -1,0 +1,54 @@
+<!-- RegKnot business card — front (3.5" x 2" @ 300 DPI = 1050 x 600 px).
+     Bleed: 1/8" all sides included. Safe area is the inner 950 x 500 region. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1050 600" width="1050" height="600">
+  <!-- Background — Navy -->
+  <rect width="1050" height="600" fill="#0a0e1a"/>
+
+  <!-- Subtle compass grid backdrop -->
+  <g stroke="#2dd4bf" stroke-width="0.6" fill="none" opacity="0.10">
+    <circle cx="850" cy="300" r="220"/>
+    <circle cx="850" cy="300" r="155"/>
+    <circle cx="850" cy="300" r="90"/>
+    <line x1="630" y1="300" x2="1070" y2="300"/>
+    <line x1="850" y1="80"  x2="850" y2="520"/>
+    <line x1="694" y1="144" x2="1006" y2="456"/>
+    <line x1="694" y1="456" x2="1006" y2="144"/>
+  </g>
+
+  <!-- Brand mark (right side) — based on /brand/logo-mark-teal-transparent.svg -->
+  <g transform="translate(720,170) scale(2.2)" stroke="#2dd4bf" fill="none">
+    <circle cx="60" cy="60" r="56" stroke-width="0.5" stroke-dasharray="3 7"/>
+    <circle cx="60" cy="60" r="34" stroke-width="0.5"/>
+    <line x1="60" y1="4" x2="60" y2="116" stroke-width="0.5"/>
+    <line x1="4" y1="60" x2="116" y2="60" stroke-width="0.5"/>
+    <line x1="20" y1="20" x2="100" y2="100" stroke-width="0.3"/>
+    <line x1="100" y1="20" x2="20" y2="100" stroke-width="0.3"/>
+    <path d="M60 6 L65 52 L60 57 L55 52 Z" fill="#2dd4bf" stroke="none"/>
+    <path d="M60 114 L65 68 L60 63 L55 68 Z" fill="#2dd4bf" fill-opacity="0.45" stroke="none"/>
+    <path d="M114 60 L68 65 L63 60 L68 55 Z" fill="#2dd4bf" fill-opacity="0.45" stroke="none"/>
+    <path d="M6 60 L52 65 L57 60 L52 55 Z" fill="#2dd4bf" fill-opacity="0.45" stroke="none"/>
+    <circle cx="60" cy="60" r="4" fill="#2dd4bf" stroke="none"/>
+    <circle cx="60" cy="60" r="9" stroke-width="0.8"/>
+  </g>
+
+  <!-- Wordmark + tagline (left side) -->
+  <g font-family="'Barlow Condensed', 'Barlow Semi Condensed', 'Oswald', 'Arial Narrow', Impact, sans-serif">
+    <text x="80" y="240" font-size="92" font-weight="800" letter-spacing="2" fill="#f0ece4">RegKnot</text>
+    <text x="80" y="290" font-size="22" font-weight="500" letter-spacing="6" fill="#94a3b8" text-transform="uppercase">MARITIME COMPLIANCE CO-PILOT</text>
+  </g>
+
+  <!-- Divider stripe -->
+  <rect x="80" y="320" width="60" height="3" fill="#2dd4bf"/>
+
+  <!-- Name + role placeholders — Karynn fills in for print -->
+  <g font-family="'Barlow Condensed', 'Oswald', 'Arial Narrow', Impact, sans-serif">
+    <text x="80" y="378" font-size="38" font-weight="700" fill="#f0ece4" letter-spacing="0.5">Karynn Marchal</text>
+    <text x="80" y="410" font-size="18" font-weight="500" fill="#94a3b8" letter-spacing="3">CO-FOUNDER · MARINER</text>
+  </g>
+
+  <!-- Contact -->
+  <g font-family="'IBM Plex Mono', 'Courier New', monospace" font-size="16" fill="#f0ece4">
+    <text x="80" y="480">karynn@regknot.com</text>
+    <text x="80" y="510">regknot.com</text>
+  </g>
+</svg>
