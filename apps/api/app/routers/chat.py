@@ -299,14 +299,16 @@ async def _run_chat_preflight(
     is_new_conversation = conversation_id is None
     history: list[ChatMessage] = []
 
+    conversation_title: str | None = None  # Sprint D6.29 — soft jurisdictional anchor
     if conversation_id is not None:
         conv_row = await pool.fetchrow(
-            "SELECT id, vessel_id FROM conversations WHERE id = $1 AND user_id = $2",
+            "SELECT id, vessel_id, title FROM conversations WHERE id = $1 AND user_id = $2",
             conversation_id,
             uuid.UUID(current_user.user_id),
         )
         if not conv_row:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
+        conversation_title = conv_row.get("title")
 
         # Update conversation if vessel changed mid-conversation
         current_vessel_id = conv_row["vessel_id"]
@@ -342,7 +344,16 @@ async def _run_chat_preflight(
             body.vessel_id,
         )
 
-    return vessel_profile, conversation_id, history, is_new_conversation, credential_context
+    # Sprint D6.30 — soft jurisdictional fingerprint from prior queries.
+    # Computed unconditionally; returns None for new or mixed-interest users
+    # in which case the prompt block is skipped.
+    from rag.jurisdiction_priors import fingerprint_for_user
+    fingerprint = await fingerprint_for_user(pool, uuid.UUID(current_user.user_id))
+
+    return (
+        vessel_profile, conversation_id, history, is_new_conversation,
+        credential_context, conversation_title, fingerprint,
+    )
 
 
 async def _persist_chat_outcome(
@@ -462,9 +473,10 @@ async def chat_endpoint(
     from rag.engine import chat
     from rag.models import ChatResponse
 
-    vessel_profile, conversation_id, history, is_new_conversation, credential_context = await _run_chat_preflight(
-        body, current_user, pool
-    )
+    (
+        vessel_profile, conversation_id, history, is_new_conversation,
+        credential_context, conversation_title, fingerprint,
+    ) = await _run_chat_preflight(body, current_user, pool)
 
     anthropic_client: AsyncAnthropic = request.app.state.anthropic
     openai_api_key: str = request.app.state.openai_api_key
@@ -478,6 +490,8 @@ async def chat_endpoint(
         openai_api_key=openai_api_key,
         conversation_id=conversation_id,
         credential_context=credential_context,
+        conversation_title=conversation_title,
+        fingerprint_summary=fingerprint,
     )
 
     await _persist_chat_outcome(
@@ -517,9 +531,10 @@ async def chat_stream_endpoint(
     """
     from rag.engine import chat_with_progress
 
-    vessel_profile, conversation_id, history, is_new_conversation, credential_context = await _run_chat_preflight(
-        body, current_user, pool
-    )
+    (
+        vessel_profile, conversation_id, history, is_new_conversation,
+        credential_context, conversation_title, fingerprint,
+    ) = await _run_chat_preflight(body, current_user, pool)
 
     anthropic_client: AsyncAnthropic = request.app.state.anthropic
     openai_api_key: str = request.app.state.openai_api_key
@@ -547,6 +562,8 @@ async def chat_stream_endpoint(
                 openai_api_key=openai_api_key,
                 conversation_id=conversation_id,
                 credential_context=credential_context,
+                conversation_title=conversation_title,
+                fingerprint_summary=fingerprint,
             ):
                 event_type = event["event"]
                 payload = event["data"]

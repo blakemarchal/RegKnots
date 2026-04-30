@@ -708,12 +708,22 @@ def _build_chat_messages(
     vessel_profile: dict | None,
     context_str: str,
     credential_context: str | None = None,
+    conversation_title: str | None = None,
+    fingerprint_summary: str | None = None,
+    user_role: str | None = None,
+    user_jurisdiction_focus: str | None = None,
 ) -> list[dict]:
     """Construct the Claude API message list for a chat turn.
 
     Handles history truncation, vessel profile block construction, credential
     context injection, document extraction inclusion, and the final user
     message with retrieval context.
+
+    Sprint D6.29/D6.30/D6.31 — `conversation_title`, `fingerprint_summary`,
+    `user_role`, and `user_jurisdiction_focus` carry the layered soft
+    jurisdictional priors documented in the SOFT JURISDICTIONAL CONTEXT
+    section of the system prompt. All four are optional; the prompt rules
+    only apply blocks that are populated.
     """
     history = conversation_history[-_MAX_HISTORY:]
     messages = [{"role": msg.role, "content": msg.content} for msg in history]
@@ -796,10 +806,36 @@ def _build_chat_messages(
         )
         logger.info("Including credential context in prompt")
 
+    # Sprint D6.29 — soft jurisdictional context block. Each of the four
+    # signals below is independent; render only those that are populated.
+    # The system prompt's SOFT JURISDICTIONAL CONTEXT section describes how
+    # to apply them with the priority order (current-query keywords beat
+    # vessel profile beats chat title beats history beats fingerprint).
+    soft_context_lines: list[str] = []
+    if conversation_title:
+        soft_context_lines.append(f"- Chat title: {conversation_title}")
+    if user_role:
+        soft_context_lines.append(f"- User role: {user_role}")
+    if user_jurisdiction_focus:
+        soft_context_lines.append(f"- User jurisdiction focus: {user_jurisdiction_focus}")
+    if fingerprint_summary:
+        soft_context_lines.append(f"- {fingerprint_summary}")
+    soft_context_block = ""
+    if soft_context_lines:
+        soft_context_block = (
+            "Soft jurisdictional context (use as priors when ambiguous; never override "
+            "explicit current-query keywords or vessel profile):\n"
+            + "\n".join(soft_context_lines) + "\n\n"
+        )
+        logger.info(
+            "Including soft jurisdictional context: %d signals", len(soft_context_lines)
+        )
+
     user_content = (
         f"{NAVIGATION_AID_REMINDER}\n\n"
         f"{vessel_block}"
         f"{credential_block}"
+        f"{soft_context_block}"
         f"Regulation context:\n{context_str}\n\n"
         f"Question: {query}"
     )
@@ -1195,6 +1231,10 @@ async def chat(
     openai_api_key: str,
     conversation_id: UUID,
     credential_context: str | None = None,
+    conversation_title: str | None = None,
+    fingerprint_summary: str | None = None,
+    user_role: str | None = None,
+    user_jurisdiction_focus: str | None = None,
 ) -> ChatResponse:
     """Run the full RAG pipeline and return a ChatResponse.
 
@@ -1245,7 +1285,13 @@ async def chat(
     context_str, cited = build_context(chunks)
 
     # 4. Construct messages
-    messages = _build_chat_messages(query, conversation_history, vessel_profile, context_str, credential_context)
+    messages = _build_chat_messages(
+        query, conversation_history, vessel_profile, context_str, credential_context,
+        conversation_title=conversation_title,
+        fingerprint_summary=fingerprint_summary,
+        user_role=user_role,
+        user_jurisdiction_focus=user_jurisdiction_focus,
+    )
 
     # 5. Call Claude — fall back to OpenAI GPT-4o on Anthropic API failures.
     # Followup turns escalate to Opus regardless of route score (Sprint D6.4).
@@ -1444,6 +1490,10 @@ async def chat_with_progress(
     openai_api_key: str,
     conversation_id: UUID,
     credential_context: str | None = None,
+    conversation_title: str | None = None,
+    fingerprint_summary: str | None = None,
+    user_role: str | None = None,
+    user_jurisdiction_focus: str | None = None,
 ) -> AsyncIterator[dict]:
     """Same RAG pipeline as chat() but yields lightweight progress events.
 
@@ -1501,7 +1551,13 @@ async def chat_with_progress(
         }
 
     # Stage 4: Construct messages and call Claude
-    messages = _build_chat_messages(query, conversation_history, vessel_profile, context_str, credential_context)
+    messages = _build_chat_messages(
+        query, conversation_history, vessel_profile, context_str, credential_context,
+        conversation_title=conversation_title,
+        fingerprint_summary=fingerprint_summary,
+        user_role=user_role,
+        user_jurisdiction_focus=user_jurisdiction_focus,
+    )
 
     yield {"event": "status", "data": "Consulting compliance engine…"}
     # Sprint D6.4 — followup turns escalate to Opus.
