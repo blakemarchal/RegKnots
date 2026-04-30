@@ -39,8 +39,36 @@ const CREDENTIAL_TYPES = [
   { value: 'other', label: 'Other' },
 ]
 
-type Step = 1 | 2 | 3 | 4  // 4 = success
+// Sprint D6.31 — added Step 0 for persona + jurisdiction_focus. Step 0
+// runs first; users who pick a non-mariner persona see the vessel step
+// (Step 1) marked as optional. The 4 = success step stays at the end.
+type Step = 0 | 1 | 2 | 3 | 4
 type Path = 'unchosen' | 'coi' | 'manual'
+
+// Persona options — match VALID_PERSONAS in the API.
+const PERSONA_OPTIONS = [
+  { value: 'mariner_shipboard',     label: 'Mariner / shipboard' },
+  { value: 'teacher_instructor',    label: 'Teacher / instructor' },
+  { value: 'shore_side_compliance', label: 'Shore-side compliance' },
+  { value: 'legal_consultant',      label: 'Maritime attorney / consultant' },
+  { value: 'cadet_student',         label: 'Cadet / student' },
+  { value: 'other',                 label: 'Other' },
+]
+
+// Jurisdiction focus options — US floated to top per design call.
+// All 9 flag-state corpora exposed plus an "international mixed" catch-all.
+const JURISDICTION_OPTIONS = [
+  { value: 'us',                   label: 'United States' },
+  { value: 'uk',                   label: 'United Kingdom' },
+  { value: 'au',                   label: 'Australia' },
+  { value: 'no',                   label: 'Norway' },
+  { value: 'sg',                   label: 'Singapore' },
+  { value: 'hk',                   label: 'Hong Kong' },
+  { value: 'bs',                   label: 'Bahamas' },
+  { value: 'lr',                   label: 'Liberia' },
+  { value: 'mh',                   label: 'Marshall Islands' },
+  { value: 'international_mixed',  label: 'International / mixed' },
+]
 
 interface CompletedSteps {
   vessel: boolean
@@ -121,13 +149,21 @@ function WelcomeContent() {
   const router = useRouter()
   const { addVessel, setActiveVessel } = useAuthStore()
 
-  const [step, setStep] = useState<Step>(1)
+  // Sprint D6.31 — Step 0 (persona + jurisdiction) is now the entry
+  // point. Existing users who skipped Step 0 historically will see Step
+  // 1 first as before; they can fill persona later via Account.
+  const [step, setStep] = useState<Step>(0)
   const [path, setPath] = useState<Path>('unchosen')
   const [completed, setCompleted] = useState<CompletedSteps>({
     vessel: false, coi: false, credential: false,
   })
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
+
+  // Step 0 — persona + jurisdiction focus
+  const [persona, setPersona] = useState<string>('')
+  const [jurisdictionFocus, setJurisdictionFocus] = useState<string>('')
+  const [personaSubmitting, setPersonaSubmitting] = useState(false)
 
   // ── Step 1 (COI upload) ─────────────────────────────────────────────
   const [coiPreview, setCoiPreview] = useState<PreviewExtraction | null>(null)
@@ -374,6 +410,43 @@ function WelcomeContent() {
 
   function goToChat() { router.replace('/') }
 
+  // ── Step 0 actions (Sprint D6.31) ──────────────────────────────────
+
+  /** Persist whatever the user picked for persona + jurisdiction_focus
+   *  (either may be empty — backend treats null as "leave unchanged")
+   *  and advance to Step 1. Failures are logged but don't block the
+   *  flow — onboarding shouldn't dead-end on a soft profile field. */
+  async function savePersonaAndContinue() {
+    setPersonaSubmitting(true)
+    setError(null)
+    try {
+      if (persona || jurisdictionFocus) {
+        await apiRequest('/onboarding/persona', {
+          method: 'POST',
+          body: JSON.stringify({
+            persona: persona || null,
+            jurisdiction_focus: jurisdictionFocus || null,
+          }),
+        })
+      }
+      setStep(1)
+    } catch (e) {
+      console.error('Failed to save persona', e)
+      // Don't block — let them proceed
+      setStep(1)
+    } finally {
+      setPersonaSubmitting(false)
+    }
+  }
+
+  function skipStep0() {
+    setStep(1)
+  }
+
+  /** Helper so Step 1 can detect a non-mariner persona and mark vessel
+   *  setup as optional. */
+  const isNonMariner = persona !== '' && persona !== 'mariner_shipboard'
+
   // ── Render ──────────────────────────────────────────────────────────
 
   return (
@@ -391,6 +464,9 @@ function WelcomeContent() {
           </div>
           {step < 4 && (
             <div className="flex items-center gap-1.5">
+              {/* Sprint D6.31 — Step 0 added; progression now 0..3.
+                  Step 0 is intentionally subtle (no separate dot) so it
+                  feels like a primer rather than a full wizard step. */}
               {[1, 2, 3].map((s) => (
                 <span
                   key={s}
@@ -399,7 +475,9 @@ function WelcomeContent() {
                   }`}
                 />
               ))}
-              <span className="font-mono text-[10px] text-[#6b7594] ml-2">Step {step} of 3</span>
+              <span className="font-mono text-[10px] text-[#6b7594] ml-2">
+                {step === 0 ? 'Quick start' : `Step ${step} of 3`}
+              </span>
             </div>
           )}
         </div>
@@ -408,14 +486,74 @@ function WelcomeContent() {
       <main className="flex-1 overflow-y-auto px-4 py-6">
         <div className="max-w-md mx-auto flex flex-col gap-5">
 
+          {/* ── Step 0: Persona + jurisdiction (Sprint D6.31) ──────── */}
+          {step === 0 && (
+            <>
+              <div className="flex flex-col gap-1">
+                <h1 className="font-display text-2xl font-bold text-[#f0ece4]">A quick primer</h1>
+                <p className="font-mono text-xs text-[#6b7594] leading-relaxed">
+                  Two optional questions so RegKnot can scope answers to your role and primary
+                  jurisdiction. Both can be skipped or changed later from your account.
+                </p>
+              </div>
+
+              <section className="bg-[#111827] border border-white/8 rounded-xl p-5 flex flex-col gap-4">
+                <Field label="What's your role?">
+                  <SelectInput
+                    value={persona}
+                    onChange={setPersona}
+                    options={['Skip / pick later', ...PERSONA_OPTIONS.map((o) => o.label)]}
+                    optionValues={['', ...PERSONA_OPTIONS.map((o) => o.value)]}
+                  />
+                </Field>
+
+                <Field label="Primary jurisdiction (optional)">
+                  <SelectInput
+                    value={jurisdictionFocus}
+                    onChange={setJurisdictionFocus}
+                    options={['Skip', ...JURISDICTION_OPTIONS.map((o) => o.label)]}
+                    optionValues={['', ...JURISDICTION_OPTIONS.map((o) => o.value)]}
+                  />
+                </Field>
+
+                {error && <ErrorBox msg={error} />}
+
+                <div className="flex items-center gap-3 mt-1">
+                  <button
+                    onClick={savePersonaAndContinue}
+                    disabled={personaSubmitting}
+                    className={primaryBtn}
+                  >
+                    {personaSubmitting ? 'Saving…' : 'Continue'}
+                  </button>
+                  <button onClick={skipStep0} className={ghostBtn}>
+                    Skip
+                  </button>
+                </div>
+              </section>
+            </>
+          )}
+
           {/* ── Step 1: Path chooser ───────────────────────────────── */}
           {step === 1 && (
             <>
               <div className="flex flex-col gap-1">
-                <h1 className="font-display text-2xl font-bold text-[#f0ece4]">Welcome aboard</h1>
+                <h1 className="font-display text-2xl font-bold text-[#f0ece4]">
+                  {isNonMariner ? 'Set up a vessel? (optional)' : 'Welcome aboard'}
+                </h1>
                 <p className="font-mono text-xs text-[#6b7594] leading-relaxed">
-                  Let&apos;s set up your vessel so RegKnot can give you compliance answers tailored to it.
-                  This takes about 90 seconds.
+                  {isNonMariner ? (
+                    <>
+                      Since you picked a non-shipboard role, you don&apos;t need a vessel profile —
+                      RegKnot will scope answers to your jurisdiction. You can still add a vessel
+                      now if you teach about a specific ship or want to test against one.
+                    </>
+                  ) : (
+                    <>
+                      Let&apos;s set up your vessel so RegKnot can give you compliance answers tailored to it.
+                      This takes about 90 seconds.
+                    </>
+                  )}
                 </p>
               </div>
 
@@ -473,6 +611,27 @@ function WelcomeContent() {
                     <p className="font-mono text-sm text-[#f0ece4]">Enter vessel details manually</p>
                     <p className="font-mono text-[10px] text-[#6b7594] mt-0.5">Takes ~60 seconds</p>
                   </button>
+
+                  {/* Sprint D6.31 — non-mariners (teachers, students,
+                      shore-side, attorneys) can skip vessel setup
+                      entirely. The persona + jurisdiction_focus they
+                      picked at Step 0 already gives the prompt enough
+                      to scope answers. */}
+                  {isNonMariner && (
+                    <>
+                      <div className="flex items-center gap-3 mt-1">
+                        <div className="flex-1 h-px bg-white/8" />
+                        <p className="font-mono text-[10px] text-[#6b7594] uppercase tracking-wider">or</p>
+                        <div className="flex-1 h-px bg-white/8" />
+                      </div>
+                      <button
+                        onClick={() => { void finishOnboarding() }}
+                        className="font-mono text-xs text-[#6b7594] hover:text-[#f0ece4] transition-colors py-2"
+                      >
+                        Skip vessel setup &mdash; I&apos;ll go straight to chat
+                      </button>
+                    </>
+                  )}
                 </section>
               )}
 

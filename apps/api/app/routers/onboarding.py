@@ -41,6 +41,29 @@ class CompleteResponse(BaseModel):
     onboarding_completed_at: str
 
 
+# Sprint D6.31 — persona + jurisdiction_focus collected at Step 0 of the
+# welcome wizard. Both are optional; user can skip and remain NULL.
+
+VALID_PERSONAS = {
+    "mariner_shipboard",
+    "teacher_instructor",
+    "shore_side_compliance",
+    "legal_consultant",
+    "cadet_student",
+    "other",
+}
+
+VALID_JURISDICTION_FOCUS = {
+    "us", "uk", "au", "sg", "hk", "no", "lr", "mh", "bs",
+    "international_mixed",
+}
+
+
+class PersonaRequest(BaseModel):
+    persona: str | None = None
+    jurisdiction_focus: str | None = None
+
+
 @router.get("/status", response_model=StatusResponse)
 async def get_onboarding_status(
     user: Annotated[CurrentUser, Depends(get_current_user)],
@@ -110,3 +133,69 @@ async def reset_onboarding(
         _uuid.UUID(user.user_id),
     )
     return {"ok": True}
+
+
+@router.post("/persona", response_model=dict)
+async def update_persona(
+    body: PersonaRequest,
+    user: Annotated[CurrentUser, Depends(get_current_user)],
+) -> dict:
+    """Sprint D6.31 — set/update persona + jurisdiction_focus for this user.
+
+    Used by the welcome wizard's Step 0 and the account-page edit pane.
+    Both fields are independently optional; passing None for either keeps
+    the existing DB value unchanged.
+
+    Validates against the known enum sets to keep bogus values out — but
+    enforced in app code rather than via DB CHECK constraints so adding a
+    new persona or jurisdiction is a code-only change.
+    """
+    pool = await get_pool()
+    if body.persona is not None and body.persona not in VALID_PERSONAS:
+        from fastapi import HTTPException, status as http_status
+        raise HTTPException(
+            status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"persona must be one of: {', '.join(sorted(VALID_PERSONAS))}",
+        )
+    if (
+        body.jurisdiction_focus is not None
+        and body.jurisdiction_focus not in VALID_JURISDICTION_FOCUS
+    ):
+        from fastapi import HTTPException, status as http_status
+        raise HTTPException(
+            status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                "jurisdiction_focus must be one of: "
+                + ", ".join(sorted(VALID_JURISDICTION_FOCUS))
+            ),
+        )
+    # Use COALESCE so passing None on a field leaves it unchanged.
+    await pool.execute(
+        """
+        UPDATE users
+        SET persona = COALESCE($1, persona),
+            jurisdiction_focus = COALESCE($2, jurisdiction_focus)
+        WHERE id = $3
+        """,
+        body.persona,
+        body.jurisdiction_focus,
+        _uuid.UUID(user.user_id),
+    )
+    return {"ok": True}
+
+
+@router.get("/persona", response_model=dict)
+async def get_persona(
+    user: Annotated[CurrentUser, Depends(get_current_user)],
+) -> dict:
+    """Return current persona + jurisdiction_focus so the account page
+    can pre-fill its edit form."""
+    pool = await get_pool()
+    row = await pool.fetchrow(
+        "SELECT persona, jurisdiction_focus FROM users WHERE id = $1",
+        _uuid.UUID(user.user_id),
+    )
+    return {
+        "persona": row["persona"] if row else None,
+        "jurisdiction_focus": row["jurisdiction_focus"] if row else None,
+    }

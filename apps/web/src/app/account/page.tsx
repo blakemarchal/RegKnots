@@ -52,6 +52,14 @@ function AccountContent() {
   const [profileSaving, setProfileSaving] = useState(false)
   const [profileMsg, setProfileMsg] = useState<string | null>(null)
 
+  // Sprint D6.31 — persona + jurisdiction_focus. Fetched lazily after
+  // mount so existing users (NULL until they fill them) see the empty
+  // state and can populate retroactively.
+  const [persona, setPersona] = useState<string>('')
+  const [jurisdictionFocus, setJurisdictionFocus] = useState<string>('')
+  const [personaSaving, setPersonaSaving] = useState(false)
+  const [personaMsg, setPersonaMsg] = useState<string | null>(null)
+
   // ── Password ───────────────────────────────────────────────────
   const [currentPw, setCurrentPw] = useState('')
   const [newPw, setNewPw] = useState('')
@@ -92,7 +100,36 @@ function AccountContent() {
       .then(setNotifPrefs)
       .catch(() => {})
       .finally(() => setNotifLoading(false))
+    // Sprint D6.31 — pre-fill persona + jurisdiction from server.
+    apiRequest<{ persona: string | null; jurisdiction_focus: string | null }>(
+      '/onboarding/persona',
+    )
+      .then((r) => {
+        setPersona(r.persona ?? '')
+        setJurisdictionFocus(r.jurisdiction_focus ?? '')
+      })
+      .catch(() => {})
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function savePersona() {
+    setPersonaSaving(true)
+    setPersonaMsg(null)
+    try {
+      await apiRequest('/onboarding/persona', {
+        method: 'POST',
+        body: JSON.stringify({
+          persona: persona || null,
+          jurisdiction_focus: jurisdictionFocus || null,
+        }),
+      })
+      setPersonaMsg('Saved')
+      setTimeout(() => setPersonaMsg(null), 2000)
+    } catch (e) {
+      setPersonaMsg(e instanceof Error ? e.message : 'Failed to save')
+    } finally {
+      setPersonaSaving(false)
+    }
+  }
 
   async function saveNotifPrefs() {
     if (!notifPrefs) return
@@ -288,6 +325,73 @@ function AccountContent() {
               </button>
               {profileMsg && (
                 <p className="font-mono text-xs text-[#2dd4bf]">{profileMsg}</p>
+              )}
+            </div>
+          </section>
+
+          {/* ── How RegKnot scopes your answers (Sprint D6.31) ────── */}
+          <section className="bg-[#111827] border border-white/8 rounded-xl p-5 flex flex-col gap-4">
+            <div className="flex flex-col gap-1">
+              <p className="font-mono text-xs text-[#6b7594] uppercase tracking-wider">How we scope answers</p>
+              <p className="font-mono text-[11px] text-[#6b7594] leading-relaxed">
+                Optional. Helps RegKnot tailor regulatory answers when you don&apos;t have a specific
+                vessel selected.
+              </p>
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <label className="font-mono text-xs text-[#6b7594]">What&apos;s your role?</label>
+              <select
+                value={persona}
+                onChange={(e) => setPersona(e.target.value)}
+                className="font-mono w-full border border-white/10 rounded-lg px-3 py-2 text-sm
+                  outline-none focus:border-[#2dd4bf] transition-colors"
+                style={{ backgroundColor: '#0d1225', color: '#f0ece4' }}
+              >
+                <option value="" style={{ backgroundColor: '#111827', color: '#f0ece4' }}>Not set</option>
+                <option value="mariner_shipboard" style={{ backgroundColor: '#111827', color: '#f0ece4' }}>Mariner / shipboard</option>
+                <option value="teacher_instructor" style={{ backgroundColor: '#111827', color: '#f0ece4' }}>Teacher / instructor</option>
+                <option value="shore_side_compliance" style={{ backgroundColor: '#111827', color: '#f0ece4' }}>Shore-side compliance</option>
+                <option value="legal_consultant" style={{ backgroundColor: '#111827', color: '#f0ece4' }}>Maritime attorney / consultant</option>
+                <option value="cadet_student" style={{ backgroundColor: '#111827', color: '#f0ece4' }}>Cadet / student</option>
+                <option value="other" style={{ backgroundColor: '#111827', color: '#f0ece4' }}>Other</option>
+              </select>
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <label className="font-mono text-xs text-[#6b7594]">Primary jurisdiction</label>
+              <select
+                value={jurisdictionFocus}
+                onChange={(e) => setJurisdictionFocus(e.target.value)}
+                className="font-mono w-full border border-white/10 rounded-lg px-3 py-2 text-sm
+                  outline-none focus:border-[#2dd4bf] transition-colors"
+                style={{ backgroundColor: '#0d1225', color: '#f0ece4' }}
+              >
+                <option value="" style={{ backgroundColor: '#111827', color: '#f0ece4' }}>Not set</option>
+                <option value="us" style={{ backgroundColor: '#111827', color: '#f0ece4' }}>United States</option>
+                <option value="uk" style={{ backgroundColor: '#111827', color: '#f0ece4' }}>United Kingdom</option>
+                <option value="au" style={{ backgroundColor: '#111827', color: '#f0ece4' }}>Australia</option>
+                <option value="no" style={{ backgroundColor: '#111827', color: '#f0ece4' }}>Norway</option>
+                <option value="sg" style={{ backgroundColor: '#111827', color: '#f0ece4' }}>Singapore</option>
+                <option value="hk" style={{ backgroundColor: '#111827', color: '#f0ece4' }}>Hong Kong</option>
+                <option value="bs" style={{ backgroundColor: '#111827', color: '#f0ece4' }}>Bahamas</option>
+                <option value="lr" style={{ backgroundColor: '#111827', color: '#f0ece4' }}>Liberia</option>
+                <option value="mh" style={{ backgroundColor: '#111827', color: '#f0ece4' }}>Marshall Islands</option>
+                <option value="international_mixed" style={{ backgroundColor: '#111827', color: '#f0ece4' }}>International / mixed</option>
+              </select>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <button
+                onClick={savePersona}
+                disabled={personaSaving}
+                className="font-mono text-sm font-bold text-[#0a0e1a] bg-[#2dd4bf] hover:brightness-110
+                  disabled:opacity-50 rounded-lg px-4 py-2 transition-[filter] duration-150"
+              >
+                {personaSaving ? 'Saving...' : 'Save'}
+              </button>
+              {personaMsg && (
+                <p className="font-mono text-xs text-[#2dd4bf]">{personaMsg}</p>
               )}
             </div>
           </section>

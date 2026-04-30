@@ -350,9 +350,20 @@ async def _run_chat_preflight(
     from rag.jurisdiction_priors import fingerprint_for_user
     fingerprint = await fingerprint_for_user(pool, uuid.UUID(current_user.user_id))
 
+    # Sprint D6.31 — explicit user persona + jurisdiction_focus, declared
+    # in onboarding or account settings. Both nullable; the engine skips
+    # the prompt line for any field that's None.
+    persona_row = await pool.fetchrow(
+        "SELECT persona, jurisdiction_focus FROM users WHERE id = $1",
+        uuid.UUID(current_user.user_id),
+    )
+    user_persona = persona_row["persona"] if persona_row else None
+    user_jurisdiction_focus = persona_row["jurisdiction_focus"] if persona_row else None
+
     return (
         vessel_profile, conversation_id, history, is_new_conversation,
         credential_context, conversation_title, fingerprint,
+        user_persona, user_jurisdiction_focus,
     )
 
 
@@ -476,6 +487,7 @@ async def chat_endpoint(
     (
         vessel_profile, conversation_id, history, is_new_conversation,
         credential_context, conversation_title, fingerprint,
+        user_persona, user_jurisdiction_focus,
     ) = await _run_chat_preflight(body, current_user, pool)
 
     anthropic_client: AsyncAnthropic = request.app.state.anthropic
@@ -492,6 +504,8 @@ async def chat_endpoint(
         credential_context=credential_context,
         conversation_title=conversation_title,
         fingerprint_summary=fingerprint,
+        user_role=user_persona,
+        user_jurisdiction_focus=user_jurisdiction_focus,
     )
 
     await _persist_chat_outcome(
@@ -534,6 +548,7 @@ async def chat_stream_endpoint(
     (
         vessel_profile, conversation_id, history, is_new_conversation,
         credential_context, conversation_title, fingerprint,
+        user_persona, user_jurisdiction_focus,
     ) = await _run_chat_preflight(body, current_user, pool)
 
     anthropic_client: AsyncAnthropic = request.app.state.anthropic
@@ -564,6 +579,8 @@ async def chat_stream_endpoint(
                 credential_context=credential_context,
                 conversation_title=conversation_title,
                 fingerprint_summary=fingerprint,
+                user_role=user_persona,
+                user_jurisdiction_focus=user_jurisdiction_focus,
             ):
                 event_type = event["event"]
                 payload = event["data"]
