@@ -25,6 +25,21 @@ const ROLE_LABELS: Record<string, string> = Object.fromEntries(
   ROLE_OPTIONS.map((r) => [r.value, r.label]),
 )
 
+// Sprint D6.27 — translate the database `subscription_tier` value into
+// the user-facing tier name. Legacy 'pro' subscribers (early users from
+// before the Mate/Captain split) get mapped to 'Captain' since that's
+// the closest current equivalent. Falls back to a Title-Case of the raw
+// tier for any unknown future tier rather than rendering blank.
+function tierLabel(tier: string): string {
+  const map: Record<string, string> = {
+    pro: 'Captain',
+    captain: 'Captain',
+    mate: 'Mate',
+  }
+  if (map[tier]) return map[tier]
+  return tier.charAt(0).toUpperCase() + tier.slice(1)
+}
+
 function AccountContent() {
   const router = useRouter()
   // Sprint D6.5 — vessel list/edit/delete moved to the My Vessels sheet
@@ -310,13 +325,31 @@ function AccountContent() {
             <section className="bg-[#111827] border border-white/8 rounded-xl p-5 flex flex-col gap-3">
               <p className="font-mono text-xs text-[#6b7594] uppercase tracking-wider">Subscription</p>
               <p className="font-mono text-sm text-[#f0ece4]/80">
-                <span className="text-[#2dd4bf] font-bold">Pro</span>
-                {' — '}
-                {billing.price_amount
-                  ? billing.billing_interval === 'year'
-                    ? `$${Math.round(billing.price_amount / 100 / 12)}/month (Annual)`
-                    : `$${billing.price_amount / 100}/month`
-                  : 'Active'}
+                {/* Sprint D6.27 — fix three problems with the previous render:
+                    (1) tier was hard-coded as "Pro" — legacy label that no
+                        longer matches our pricing (Mate / Captain are current).
+                    (2) when billing_interval was null but price_amount was set
+                        (annual price stored as $348), it fell through to the
+                        else branch and printed "$348/month" — terrifying for
+                        any user. Now we only attach a /month suffix when we
+                        explicitly know it's a monthly plan; otherwise we show
+                        "Active" without a fabricated cadence.
+                    (3) annual plans now show monthly equivalent + total. */}
+                <span className="text-[#2dd4bf] font-bold">{tierLabel(billing.tier)}</span>
+                {(() => {
+                  const interval = billing.billing_interval
+                  const amount = billing.price_amount
+                  if (!amount) return ' — Active'
+                  const dollars = amount / 100
+                  if (interval === 'month') return ` — $${dollars.toFixed(0)}/month`
+                  if (interval === 'year') {
+                    const perMonth = Math.round(dollars / 12)
+                    return ` — $${perMonth}/month (Annual, $${dollars.toFixed(0)}/year)`
+                  }
+                  // Unknown interval — show total without cadence rather than
+                  // implying a per-month price we can't verify.
+                  return ' — Active'
+                })()}
               </p>
 
               {billing.cancel_at_period_end && billing.current_period_end && (
