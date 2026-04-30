@@ -17,6 +17,9 @@ interface CorpusSource {
   full: string
   category: 'international' | 'us_federal' | 'flag_state' | 'reference'
   url?: string
+  /** ISO 3166-1 alpha-2 country code; used to render the flag inside
+   *  flag_state chips. SVGs live in /brand/flags/<flagCC>.svg. */
+  flagCC?: string
 }
 
 // Adding a new source: drop a row in here. Both modes auto-pick it up.
@@ -93,52 +96,62 @@ const CORPUS: CorpusSource[] = [
   },
 
   // ── Non-U.S. flag-state regulators ────────────────────────────────────
+  // Sprint D6.26 — flagCC drives a small flag chip rendered inside each
+  // chip so users can scan the section by country at a glance.
   {
     short: 'UK MCA',
     full: 'UK Maritime and Coastguard Agency — Marine Guidance Notes (MGN) and Merchant Shipping Notices (MSN)',
     category: 'flag_state',
+    flagCC: 'gb',
     url: 'https://www.gov.uk/government/organisations/maritime-and-coastguard-agency',
   },
   {
     short: 'AMSA',
     full: 'Australian Maritime Safety Authority — Marine Orders',
     category: 'flag_state',
+    flagCC: 'au',
     url: 'https://www.amsa.gov.au/about/regulations-and-standards/marine-orders',
   },
   {
     short: 'MPA SG',
     full: 'Maritime and Port Authority of Singapore — Shipping Circulars and Port Marine Circulars',
     category: 'flag_state',
+    flagCC: 'sg',
     url: 'https://www.mpa.gov.sg/',
   },
   {
     short: 'HK MD',
     full: 'Hong Kong Marine Department — Merchant Shipping Information Notes (MSIN)',
     category: 'flag_state',
+    flagCC: 'hk',
     url: 'https://www.mardep.gov.hk/',
   },
   {
     short: 'NMA Norway',
     full: 'Norwegian Maritime Authority (Sjøfartsdirektoratet) — RSR/RSV/SM circulars',
     category: 'flag_state',
+    flagCC: 'no',
     url: 'https://www.sdir.no/en/',
   },
   {
     short: 'LISCR',
     full: 'Liberian International Ship and Corporate Registry — Marine Notices',
     category: 'flag_state',
+    flagCC: 'lr',
     url: 'https://www.liscr.com/',
   },
   {
     short: 'RMI / IRI',
     full: 'Republic of the Marshall Islands / International Registries — Marine Notices',
     category: 'flag_state',
+    flagCC: 'mh',
     url: 'https://www.register-iri.com/',
   },
   {
     short: 'BMA',
     full: 'Bahamas Maritime Authority — Marine Notices',
     category: 'flag_state',
+    flagCC: 'bs',
     url: 'https://www.bahamasmaritime.com/',
   },
 
@@ -229,9 +242,26 @@ function CorpusChip({ source }: { source: CorpusSource }) {
     whitespace-nowrap
   `.replace(/\s+/g, ' ').trim()
 
+  // Sprint D6.26 — render a small flag SVG inside flag_state chips so
+  // each non-US regulator carries its country flag inline. /brand/flags/
+  // SVGs are designed for a 28x20 box, so we scale down to 16x12 here.
   const content = (
-    <span title={source.full}>
-      {source.short}
+    <span title={source.full} className="inline-flex items-center gap-1.5">
+      {source.flagCC && (
+        <span className="inline-block w-4 h-3 overflow-hidden rounded-[2px]
+          border border-white/15 flex-shrink-0 bg-[#0f1525]">
+          <img
+            src={`/brand/flags/${source.flagCC}.svg`}
+            alt=""
+            aria-hidden="true"
+            width={16}
+            height={12}
+            loading="lazy"
+            className="block w-full h-full object-cover"
+          />
+        </span>
+      )}
+      <span>{source.short}</span>
     </span>
   )
 
@@ -288,8 +318,26 @@ function CategorizedView({ heading, subhead, className }: Pick<Props, 'heading' 
       <div className="flex flex-col gap-5 max-w-3xl mx-auto">
         {grouped.map(({ category, label, sources }) => (
           <div key={category}>
-            <p className="font-mono text-[10px] uppercase tracking-widest text-[#6b7594] mb-2.5">
-              {label}
+            <p className="font-mono text-[10px] uppercase tracking-widest text-[#6b7594] mb-2.5
+              flex items-center gap-2">
+              {/* Sprint D6.26 — US flag inline beside the "U.S. federal"
+                  heading mirrors the per-chip flags in the flag_state
+                  section, so the country signal is consistent across both. */}
+              {category === 'us_federal' && (
+                <span className="inline-block w-4 h-3 overflow-hidden rounded-[2px]
+                  border border-white/15 flex-shrink-0 bg-[#0f1525]">
+                  <img
+                    src="/brand/flags/us.svg"
+                    alt=""
+                    aria-hidden="true"
+                    width={16}
+                    height={12}
+                    loading="lazy"
+                    className="block w-full h-full object-cover"
+                  />
+                </span>
+              )}
+              <span>{label}</span>
             </p>
             <div className="flex flex-wrap gap-1.5">
               {sources.map((s) => (

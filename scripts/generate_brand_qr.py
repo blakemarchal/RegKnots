@@ -25,12 +25,12 @@ REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
 OUT_DIR = os.path.join(REPO_ROOT, "apps", "web", "public", "brand", "qr")
 
 QRS = [
-    ("regknot",        "https://regknot.com/?ref=qr-card"),
-    ("captainkarynn",  "https://regknot.com/captainkarynn?ref=qr-card"),
-    ("ass",            "https://regknot.com/ass?ref=qr-card"),
-    ("womenoffshore",  "https://regknot.com/womenoffshore?ref=qr-card"),
-    ("pricing",        "https://regknot.com/pricing?ref=qr-card"),
-    ("coverage",       "https://regknot.com/coverage?ref=qr-card"),
+    ("regknot",        "https://regknots.com/?ref=qr-card"),
+    ("captainkarynn",  "https://regknots.com/captainkarynn?ref=qr-card"),
+    ("ass",            "https://regknots.com/ass?ref=qr-card"),
+    ("womenoffshore",  "https://regknots.com/womenoffshore?ref=qr-card"),
+    ("pricing",        "https://regknots.com/pricing?ref=qr-card"),
+    ("coverage",       "https://regknots.com/coverage?ref=qr-card"),
 ]
 
 def main():
