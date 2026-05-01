@@ -83,11 +83,11 @@ const CORPUS: CorpusSource[] = [
     full: 'Code of Safe Practice for Cargo Stowage and Securing',
     category: 'international',
   },
-  {
-    short: 'Load Lines',
-    full: 'International Convention on Load Lines (1966 + 1988 Protocol)',
-    category: 'international',
-  },
+  // Sprint D6.36 — "Load Lines" temporarily removed from advertising.
+  // We have 4 chunks (MSC.375(93) 2014 amendments only); the 1966
+  // Convention + 1988 Protocol consolidated text isn't freely available
+  // online and the ingest can't yet stand behind a "Load Lines" chip
+  // claim. Re-add when we source the consolidated edition.
   {
     short: 'IACS UR',
     full: 'IACS Unified Requirements (technical class-society standards)',

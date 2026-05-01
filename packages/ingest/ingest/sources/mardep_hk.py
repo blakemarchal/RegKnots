@@ -101,20 +101,70 @@ _CURATED: list[MSINMeta] = [
 ]
 
 
+# Sprint D6.36 — auto-discovery extends the curated list by probing the
+# deterministic /msinYYNN.pdf URL pattern for additional notices in the
+# current and prior years. HKMD doesn't publish an index API, but the
+# URL scheme is predictable and 404s self-filter (we just skip them).
+# Discovered notices are added to the in-memory _CURATED list before
+# the download loop runs.
+_DISCOVERY_YEARS = (2024, 2025, 2026)
+_DISCOVERY_NUMBERS = range(1, 81)  # ~80 notices/year is the typical max
+
+
 # ── Public API ───────────────────────────────────────────────────────────────
+
+def _discover_additional(client: httpx.Client, console, known_codes: set[str]) -> list[MSINMeta]:
+    """Sprint D6.36 — probe the deterministic msinYYNN.pdf URL pattern
+    to find notices beyond the hand-curated list. HEAD requests are
+    cheap (a few kB per probe); only entries with valid PDF responses
+    are added. Each new entry gets a generic title that the parse phase
+    will replace with the PDF's actual content."""
+    discovered: list[MSINMeta] = []
+    probe_count = 0
+    for year in _DISCOVERY_YEARS:
+        yy = str(year)[-2:]
+        for n in _DISCOVERY_NUMBERS:
+            code = f"{year}/{n}"
+            if code in known_codes:
+                continue
+            url = f"{_BASE}/msin{yy}{str(n).zfill(2)}.pdf"
+            probe_count += 1
+            try:
+                resp = client.head(url, headers=_BROWSER_HEADERS, timeout=8.0)
+                if resp.status_code == 200:
+                    discovered.append(MSINMeta(
+                        code=code,
+                        title=f"HK MD MSIN {code}",
+                        effective_date=date(year, 1, 1),
+                        category="auto_discovered",
+                    ))
+            except Exception:
+                continue  # Best-effort probe; skip on any error
+    console.print(
+        f"  [cyan]Discovery:[/cyan] probed {probe_count} URLs, "
+        f"found {len(discovered)} new MSINs"
+    )
+    return discovered
+
 
 def discover_and_download(raw_dir: Path, failed_dir: Path, console) -> tuple[int, int]:
     raw_dir.mkdir(parents=True, exist_ok=True)
     failed_dir.mkdir(parents=True, exist_ok=True)
     success, failures = 0, 0
     with httpx.Client(timeout=_TIMEOUT, follow_redirects=True) as client:
-        for i, meta in enumerate(_CURATED, 1):
+        # Sprint D6.36 — extend the curated list with auto-discovered
+        # MSINs from the deterministic URL pattern.
+        known_codes = {m.code for m in _CURATED}
+        all_metas = _CURATED + _discover_additional(client, console, known_codes)
+
+        total = len(all_metas)
+        for i, meta in enumerate(all_metas, 1):
             out_path = raw_dir / f"{meta.filename_stub}.pdf"
             if out_path.exists() and out_path.stat().st_size > 5 * 1024:
                 success += 1
                 continue
             try:
-                console.print(f"  Downloading {meta.section_number} ({i}/{len(_CURATED)})…")
+                console.print(f"  Downloading {meta.section_number} ({i}/{total})…")
                 resp = client.get(meta.pdf_url, headers=_BROWSER_HEADERS)
                 resp.raise_for_status()
                 if not resp.content.startswith(b"%PDF"):
@@ -125,7 +175,7 @@ def discover_and_download(raw_dir: Path, failed_dir: Path, console) -> tuple[int
                 failures += 1
                 logger.warning("HKMD %s: download failed — %s", meta.section_number, exc)
                 _write_failure(meta, exc, failed_dir)
-            if i < len(_CURATED):
+            if i < total:
                 time.sleep(_REQUEST_DELAY)
 
     cache_path = raw_dir / "index.json"
@@ -133,7 +183,7 @@ def discover_and_download(raw_dir: Path, failed_dir: Path, console) -> tuple[int
         json.dumps([
             {"code": m.code, "title": m.title,
              "effective_date": m.effective_date.isoformat(), "category": m.category}
-            for m in _CURATED
+            for m in all_metas
         ], indent=2),
         encoding="utf-8",
     )

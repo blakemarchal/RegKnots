@@ -65,6 +65,15 @@ _PDF_SOURCE_CONFIG: dict[str, dict] = {
         "raw_dir": _DATA_RAW / "imdg" / "supplements",
         "adapter": "ingest.sources.imdg_supplement",
     },
+    "imdg_manual": {
+        # Sprint D6.36 — hand-curated IMDG 3.2 entries to fill gaps in the
+        # OCR-derived imdg ingest. Data lives in the module itself; no
+        # raw_dir needed. Seeds with ~30 high-traffic UN numbers
+        # (lithium batteries, common bulk-tanker cargoes, polymerizing
+        # substances, vehicle engines).
+        "raw_dir": _DATA_RAW / "imdg" / "manual",  # Unused but required by dispatch; created empty.
+        "adapter": "ingest.sources.imdg_manual",
+    },
     "ism": {
         "text_dir": _DATA_RAW / "ism" / "extracted",
         "adapter":  "ingest.sources.ism",
