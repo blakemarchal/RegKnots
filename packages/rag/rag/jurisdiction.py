@@ -68,6 +68,11 @@ SOURCE_TO_JURISDICTIONS: dict[str, list[str]] = {
     "bma_mn":           ["bs"],
     # France (Sprint D6.46) — first French-language flag-state pilot.
     "fr_transport":     ["fr"],
+    # Sprint D6.47 — multilingual flag-state expansion.
+    "bg_verkehr":       ["de"],
+    "dgmm_es":          ["es"],
+    "it_capitaneria":   ["it"],
+    "gr_ynanp":         ["gr"],
     # Norway (Sprint D6.23) — first non-English flag (but content is in English)
     "nma_rsv":          ["no"],
     # Sprint D6.23 — Tier D international references. All tagged 'intl'

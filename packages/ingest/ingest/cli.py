@@ -56,6 +56,24 @@ _PDF_SOURCE_CONFIG: dict[str, dict] = {
         "raw_dir": _DATA_RAW / "fr_transport",
         "adapter": "ingest.sources.fr_transport",
     },
+    # Sprint D6.47 — multilingual flag-state expansion via curated PDF
+    # lists (DE/ES/IT/EL). All four wrap ingest.sources.flag_curated.
+    "bg_verkehr": {
+        "raw_dir": _DATA_RAW / "bg_verkehr",
+        "adapter": "ingest.sources.bg_verkehr",
+    },
+    "dgmm_es": {
+        "raw_dir": _DATA_RAW / "dgmm_es",
+        "adapter": "ingest.sources.dgmm_es",
+    },
+    "it_capitaneria": {
+        "raw_dir": _DATA_RAW / "it_capitaneria",
+        "adapter": "ingest.sources.it_capitaneria",
+    },
+    "gr_ynanp": {
+        "raw_dir": _DATA_RAW / "gr_ynanp",
+        "adapter": "ingest.sources.gr_ynanp",
+    },
     "imdg": {
         # Sprint D6.12 — IMDG Code 2024 Edition (Vol 1 + Vol 2, Amend 42-24).
         # Two-stage source: scripts/ocr_imdg_screenshots.py +
