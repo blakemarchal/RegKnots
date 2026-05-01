@@ -197,6 +197,24 @@ _PDF_SOURCE_CONFIG: dict[str, dict] = {
         "adapter": "ingest.sources.imo_codes",
         "imo_code": "hsc",
     },
+    # Sprint D6.41 — three new IMO instruments (Polar Code, IGF Code, BWM
+    # Convention via implementing MEPC resolutions). All use the existing
+    # imo_codes adapter — no new module needed.
+    "imo_polar": {
+        "raw_dir": _DATA_RAW / "imo_polar",
+        "adapter": "ingest.sources.imo_codes",
+        "imo_code": "polar",
+    },
+    "imo_igf": {
+        "raw_dir": _DATA_RAW / "imo_igf",
+        "adapter": "ingest.sources.imo_codes",
+        "imo_code": "igf",
+    },
+    "imo_bwm": {
+        "raw_dir": _DATA_RAW / "imo_bwm",
+        "adapter": "ingest.sources.imo_codes",
+        "imo_code": "bwm",
+    },
     "imo_iamsar": {
         "raw_dir": _DATA_RAW / "imo_iamsar",
         "adapter": "ingest.sources.imo_iamsar",

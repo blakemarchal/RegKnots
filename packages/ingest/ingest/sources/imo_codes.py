@@ -139,6 +139,135 @@ _CURATED_BY_CODE: dict[str, list[CodeDocMeta]] = {
             parent_label="IMO HSC Code",
         ),
     ],
+
+    # Sprint D6.41 — Polar Code (standalone). Two parallel adoption resolutions
+    # (one MSC for safety, one MEPC for environment) plus their respective
+    # SOLAS / MARPOL implementing amendments. Together these are the full
+    # Polar Code as it actually applies to ships.
+    "polar": [
+        CodeDocMeta(
+            code="MSC.385(94)",
+            title="International Code for Ships Operating in Polar Waters (Polar Code) — adoption (safety)",
+            pdf_url=f"{_IMO_CDN}/MSCResolutions/MSC.385(94).pdf",
+            effective_date=date(2017, 1, 1),
+            parent_label="IMO Polar Code",
+        ),
+        CodeDocMeta(
+            code="MSC.386(94)",
+            title="Polar Code — SOLAS Chapter XIV implementing amendments",
+            pdf_url=f"{_IMO_CDN}/MSCResolutions/MSC.386(94).pdf",
+            effective_date=date(2017, 1, 1),
+            parent_label="IMO Polar Code",
+        ),
+        CodeDocMeta(
+            code="MEPC.264(68)",
+            title="International Code for Ships Operating in Polar Waters (Polar Code) — adoption (environment)",
+            pdf_url=f"{_IMO_CDN}/MEPCDocuments/MEPC.264(68).pdf",
+            effective_date=date(2017, 1, 1),
+            parent_label="IMO Polar Code",
+        ),
+        CodeDocMeta(
+            code="MEPC.265(68)",
+            title="Polar Code — MARPOL Annex I/II/IV/V implementing amendments",
+            pdf_url=f"{_IMO_CDN}/MEPCDocuments/MEPC.265(68).pdf",
+            effective_date=date(2017, 1, 1),
+            parent_label="IMO Polar Code",
+        ),
+    ],
+
+    # Sprint D6.41 — IGF Code (International Code of Safety for Ships using
+    # Gases or Other Low-flashpoint Fuels). Mandatory for LNG / LPG / methanol
+    # / ammonia / hydrogen-fueled ships under SOLAS Ch II-1 Part G. Adoption
+    # resolution + the SOLAS amendment that makes it mandatory.
+    "igf": [
+        CodeDocMeta(
+            code="MSC.391(95)",
+            title="International Code of Safety for Ships using Gases or Other Low-flashpoint Fuels (IGF Code) — adoption",
+            pdf_url=f"{_IMO_CDN}/MSCResolutions/MSC.391(95).pdf",
+            effective_date=date(2017, 1, 1),
+            parent_label="IMO IGF Code",
+        ),
+        CodeDocMeta(
+            code="MSC.392(95)",
+            title="IGF Code — SOLAS Chapter II-1 Part G mandatory-application amendments",
+            pdf_url=f"{_IMO_CDN}/MSCResolutions/MSC.392(95).pdf",
+            effective_date=date(2017, 1, 1),
+            parent_label="IMO IGF Code",
+        ),
+    ],
+
+    # Sprint D6.41 — BWM Convention (Ballast Water Management).
+    # Note: the IMO consolidated BWM Convention text itself is paywalled.
+    # The Convention's operational requirements (D-1 / D-2 standards, BWMS
+    # approval, biofouling, PSC sampling, type-approval-Code G8) are all
+    # in MEPC resolutions which ARE free. We ingest those — that's actually
+    # what mariners need to comply (the Convention itself is high-level;
+    # the resolutions are the implementation detail).
+    "bwm": [
+        CodeDocMeta(
+            code="MEPC.174(58)",
+            title="Guidelines for Approval of Ballast Water Management Systems (G8, original)",
+            pdf_url=f"{_IMO_CDN}/MEPCDocuments/MEPC.174(58).pdf",
+            effective_date=date(2008, 10, 10),
+            parent_label="IMO BWM Convention",
+        ),
+        CodeDocMeta(
+            code="MEPC.207(62)",
+            title="Guidelines for Control and Management of Ships' Biofouling",
+            pdf_url=f"{_IMO_CDN}/MEPCDocuments/MEPC.207(62).pdf",
+            effective_date=date(2011, 7, 15),
+            parent_label="IMO BWM Convention",
+        ),
+        CodeDocMeta(
+            code="MEPC.252(67)",
+            title="Guidelines for Port State Control under the BWM Convention",
+            pdf_url=f"{_IMO_CDN}/MEPCDocuments/MEPC.252(67).pdf",
+            effective_date=date(2014, 10, 17),
+            parent_label="IMO BWM Convention",
+        ),
+        CodeDocMeta(
+            code="MEPC.279(70)",
+            title="Code for Approval of Ballast Water Management Systems (BWMS Code) — adopting D-2 implementation",
+            pdf_url=f"{_IMO_CDN}/MEPCDocuments/MEPC.279(70).pdf",
+            effective_date=date(2016, 10, 28),
+            parent_label="IMO BWM Convention",
+        ),
+        CodeDocMeta(
+            code="MEPC.288(71)",
+            title="2017 BWM Convention amendments (revised Reg A-1, B-3 + others)",
+            pdf_url=f"{_IMO_CDN}/MEPCDocuments/MEPC.288(71).pdf",
+            effective_date=date(2017, 7, 7),
+            parent_label="IMO BWM Convention",
+        ),
+        CodeDocMeta(
+            code="MEPC.296(72)",
+            title="2018 Code for Approval of Ballast Water Management Systems (BWMS Code, revised G8)",
+            pdf_url=f"{_IMO_CDN}/MEPCDocuments/MEPC.296(72).pdf",
+            effective_date=date(2018, 4, 13),
+            parent_label="IMO BWM Convention",
+        ),
+        CodeDocMeta(
+            code="MEPC.300(72)",
+            title="2018 Amendments to the BWM Convention (Annex Reg E-1)",
+            pdf_url=f"{_IMO_CDN}/MEPCDocuments/MEPC.300(72).pdf",
+            effective_date=date(2018, 4, 13),
+            parent_label="IMO BWM Convention",
+        ),
+        CodeDocMeta(
+            code="MEPC.349(78)",
+            title="2022 Amendments to the BWMS Code (test methods + electronic record-book provisions)",
+            pdf_url=f"{_IMO_CDN}/MEPCDocuments/MEPC.349(78).pdf",
+            effective_date=date(2022, 6, 10),
+            parent_label="IMO BWM Convention",
+        ),
+        CodeDocMeta(
+            code="MEPC.380(80)",
+            title="2023 Amendments to the BWM Convention",
+            pdf_url=f"{_IMO_CDN}/MEPCDocuments/MEPC.380(80).pdf",
+            effective_date=date(2023, 7, 7),
+            parent_label="IMO BWM Convention",
+        ),
+    ],
 }
 
 # Source-code mapping back from the imo_code key
@@ -148,6 +277,9 @@ _CODE_TO_SOURCE = {
     "igc": "imo_igc",
     "ibc": "imo_ibc",
     "hsc": "imo_hsc",
+    "polar": "imo_polar",
+    "igf": "imo_igf",
+    "bwm": "imo_bwm",
 }
 
 

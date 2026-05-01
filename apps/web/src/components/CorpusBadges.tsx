@@ -83,6 +83,28 @@ const CORPUS: CorpusSource[] = [
     full: 'Code of Safe Practice for Cargo Stowage and Securing',
     category: 'international',
   },
+  // Sprint D6.41 — three IMO instruments added per the post-D6.36 corpus
+  // gap audit. BWM Convention is paywalled at the IMO consolidated text
+  // level, but the operational MEPC resolutions (D-1/D-2 standards, BWMS
+  // Code, biofouling guidelines, PSC sampling) are all free and ingested.
+  {
+    short: 'BWM',
+    full: 'Ballast Water Management Convention (via implementing MEPC resolutions: BWMS Code, D-1/D-2 standards, biofouling guidelines)',
+    category: 'international',
+    url: 'https://www.imo.org/en/About/Conventions/Pages/International-Convention-for-the-Control-and-Management-of-Ships%27-Ballast-Water-and-Sediments-(BWM).aspx',
+  },
+  {
+    short: 'Polar Code',
+    full: 'International Code for Ships Operating in Polar Waters (Polar Code) — MSC.385/.386 + MEPC.264/.265',
+    category: 'international',
+    url: 'https://www.imo.org/en/MediaCentre/HotTopics/polar/Pages/default.aspx',
+  },
+  {
+    short: 'IGF Code',
+    full: 'International Code of Safety for Ships using Gases or Other Low-flashpoint Fuels (IGF Code) — MSC.391 + MSC.392',
+    category: 'international',
+    url: 'https://www.imo.org/en/OurWork/Safety/Pages/IGF-Code.aspx',
+  },
   // Sprint D6.36 — "Load Lines" temporarily removed from advertising.
   // We have 4 chunks (MSC.375(93) 2014 amendments only); the 1966
   // Convention + 1988 Protocol consolidated text isn't freely available
