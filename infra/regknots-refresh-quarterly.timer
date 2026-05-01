@@ -1,0 +1,13 @@
+# Sprint D6.43 — quarterly corpus refresh timer.
+# Fires Jan/Apr/Jul/Oct 1st at 05:00 UTC.
+[Unit]
+Description=Quarterly RegKnots corpus refresh (IMO supplements)
+
+[Timer]
+OnCalendar=*-01,04,07,10-01 05:00:00 UTC
+Persistent=true
+RandomizedDelaySec=1h
+Unit=regknots-refresh-quarterly.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,13 @@
+# Sprint D6.43 — monthly corpus refresh timer.
+# Fires the 1st of every month at 04:00 UTC.
+[Unit]
+Description=Monthly RegKnots corpus refresh (flag-state regulators)
+
+[Timer]
+OnCalendar=*-*-01 04:00:00 UTC
+Persistent=true
+RandomizedDelaySec=30min
+Unit=regknots-refresh-monthly.service
+
+[Install]
+WantedBy=timers.target

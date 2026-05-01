@@ -1,0 +1,16 @@
+# Sprint D6.43 — quarterly corpus refresh (IMO supplements + slow-changers).
+[Unit]
+Description=RegKnots corpus quarterly refresh (IMO supplements + amendments)
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/opt/RegKnots
+ExecStart=/opt/RegKnots/scripts/corpus_refresh.sh quarterly
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

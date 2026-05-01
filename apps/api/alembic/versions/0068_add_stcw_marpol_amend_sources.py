@@ -1,32 +1,24 @@
-"""add imo_polar + imo_igf + imo_bwm + stcw_amend + marpol_amend source codes
+"""add stcw_amend + marpol_amend source codes
 
-Revision ID: 0067
-Revises: 0066
+Revision ID: 0068
+Revises: 0067
 Create Date: 2026-05-01
 
-Sprints D6.41 + D6.42 — five new source codes for the corpus gap audit
-identified in D6.36's wrap-up:
+Sprint D6.42 — STCW + MARPOL amendments since the consolidated editions
+that aren't covered by the existing supplement-PDF parsers.
 
-  imo_polar    — Polar Code (MSC.385/.386 + MEPC.264/.265)
-  imo_igf      — IGF Code (MSC.391 + MSC.392)
-  imo_bwm      — BWM Convention via implementing MEPC resolutions
-                 (Convention text itself is paywalled but the
-                 operational D-1/D-2 standards + BWMS Code +
-                 biofouling guidelines are all in free MEPC resolutions)
-  stcw_amend   — STCW amendments since the 2017 Consolidated Edition
-                 (MSC.503/.522, plus future MSC resolutions)
-  marpol_amend — MARPOL amendments since the 2022 Consolidated Edition
-                 (MEPC.328/.342/.353/.371/.376/.391, plus future)
+  stcw_amend   — MSC.503(105), MSC.522(106), and future STCW amendments
+  marpol_amend — MEPC.328/.342/.353/.371/.376/.391 and future amendments
 
-Pure additive change to the regulations.source check constraint.
+Pure additive change to regulations.source check constraint.
 """
 from typing import Sequence, Union
 
 from alembic import op
 
 
-revision: str = "0067"
-down_revision: Union[str, None] = "0066"
+revision: str = "0068"
+down_revision: Union[str, None] = "0067"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
@@ -41,10 +33,10 @@ def upgrade() -> None:
         "'imo_bwm', 'imo_css', 'imo_hsc', 'imo_iamsar', 'imo_ibc', 'imo_igc', "
         "'imo_igf', 'imo_loadlines', 'imo_polar', "
         "'iri_mn', 'ism', 'ism_supplement', "
-        "'liscr_mn', 'mardep_msin', 'marpol', 'marpol_supplement', "
+        "'liscr_mn', 'mardep_msin', 'marpol', 'marpol_amend', 'marpol_supplement', "
         "'mca_mgn', 'mca_msn', 'mou_psc', 'mpa_sc', 'nma_rsv', "
         "'nmc_checklist', 'nmc_policy', 'nvic', 'solas', 'solas_supplement', "
-        "'stcw', 'stcw_supplement', 'tc_ssb', 'uscg_bulletin', "
+        "'stcw', 'stcw_amend', 'stcw_supplement', 'tc_ssb', 'uscg_bulletin', "
         "'usc_46', 'who_ihr', 'uscg_msm'"
         "))"
     )
@@ -57,7 +49,8 @@ def downgrade() -> None:
         "CHECK (source IN ("
         "'amsa_mo', 'bma_mn', 'cfr_33', 'cfr_46', 'cfr_49', 'colregs', "
         "'erg', 'iacs_ur', 'imdg', 'imdg_supplement', "
-        "'imo_css', 'imo_hsc', 'imo_iamsar', 'imo_ibc', 'imo_igc', 'imo_loadlines', "
+        "'imo_bwm', 'imo_css', 'imo_hsc', 'imo_iamsar', 'imo_ibc', 'imo_igc', "
+        "'imo_igf', 'imo_loadlines', 'imo_polar', "
         "'iri_mn', 'ism', 'ism_supplement', "
         "'liscr_mn', 'mardep_msin', 'marpol', 'marpol_supplement', "
         "'mca_mgn', 'mca_msn', 'mou_psc', 'mpa_sc', 'nma_rsv', "

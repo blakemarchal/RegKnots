@@ -215,6 +215,18 @@ _PDF_SOURCE_CONFIG: dict[str, dict] = {
         "adapter": "ingest.sources.imo_codes",
         "imo_code": "bwm",
     },
+    # Sprint D6.42 — STCW + MARPOL amendments via individual MSC/MEPC
+    # resolutions, supplementing the existing supplement-PDF parsers.
+    "stcw_amend": {
+        "raw_dir": _DATA_RAW / "stcw_amend",
+        "adapter": "ingest.sources.imo_codes",
+        "imo_code": "stcw_amend",
+    },
+    "marpol_amend": {
+        "raw_dir": _DATA_RAW / "marpol_amend",
+        "adapter": "ingest.sources.imo_codes",
+        "imo_code": "marpol_amend",
+    },
     "imo_iamsar": {
         "raw_dir": _DATA_RAW / "imo_iamsar",
         "adapter": "ingest.sources.imo_iamsar",

@@ -203,6 +203,79 @@ _CURATED_BY_CODE: dict[str, list[CodeDocMeta]] = {
     # in MEPC resolutions which ARE free. We ingest those — that's actually
     # what mariners need to comply (the Convention itself is high-level;
     # the resolutions are the implementation detail).
+    # Sprint D6.41 — STCW amendments since the 2017 Consolidated Edition.
+    # The official IMO supplement PDF only includes MSC.540/541 (Jan 2025).
+    # These are the additional MSC resolutions that amend STCW between 2017
+    # and now. Stored under source='stcw_amend' so they're distinct from
+    # both the base 2017 edition (source='stcw') and the official 2025
+    # supplement (source='stcw_supplement').
+    "stcw_amend": [
+        CodeDocMeta(
+            code="MSC.503(105)",
+            title="STCW Code Part A amendments (2022) — competence/sea-service updates",
+            pdf_url=f"{_IMO_CDN}/MSCResolutions/MSC.503(105).pdf",
+            effective_date=date(2024, 1, 1),
+            parent_label="STCW Amendments",
+        ),
+        CodeDocMeta(
+            code="MSC.522(106)",
+            title="STCW Convention amendments (2022)",
+            pdf_url=f"{_IMO_CDN}/MSCResolutions/MSC.522(106).pdf",
+            effective_date=date(2024, 1, 1),
+            parent_label="STCW Amendments",
+        ),
+    ],
+
+    # Sprint D6.41 — MARPOL amendments since the 2022 Consolidated Edition.
+    # The official IMO supplement PDF (March 2026) covers a subset; these
+    # are additional MEPC resolutions covering CII/EEXI (Annex VI), revised
+    # Annex IV (sewage), and 2024 amendments. Stored under
+    # source='marpol_amend' alongside marpol_supplement.
+    "marpol_amend": [
+        CodeDocMeta(
+            code="MEPC.328(76)",
+            title="2021 Revised MARPOL Annex VI — Carbon Intensity Indicator (CII) + EEXI",
+            pdf_url=f"{_IMO_CDN}/MEPCDocuments/MEPC.328(76).pdf",
+            effective_date=date(2023, 1, 1),
+            parent_label="MARPOL Amendments",
+        ),
+        CodeDocMeta(
+            code="MEPC.342(77)",
+            title="2021 MARPOL amendments — onboard sampling + Annex VI",
+            pdf_url=f"{_IMO_CDN}/MEPCDocuments/MEPC.342(77).pdf",
+            effective_date=date(2023, 1, 1),
+            parent_label="MARPOL Amendments",
+        ),
+        CodeDocMeta(
+            code="MEPC.353(78)",
+            title="2022 MARPOL amendments — Annex I/II/IV",
+            pdf_url=f"{_IMO_CDN}/MEPCDocuments/MEPC.353(78).pdf",
+            effective_date=date(2024, 1, 1),
+            parent_label="MARPOL Amendments",
+        ),
+        CodeDocMeta(
+            code="MEPC.371(80)",
+            title="2023 Revised MARPOL Annex IV (Sewage)",
+            pdf_url=f"{_IMO_CDN}/MEPCDocuments/MEPC.371(80).pdf",
+            effective_date=date(2025, 1, 1),
+            parent_label="MARPOL Amendments",
+        ),
+        CodeDocMeta(
+            code="MEPC.376(80)",
+            title="2023 MARPOL Annex VI amendments — emission control areas",
+            pdf_url=f"{_IMO_CDN}/MEPCDocuments/MEPC.376(80).pdf",
+            effective_date=date(2025, 1, 1),
+            parent_label="MARPOL Amendments",
+        ),
+        CodeDocMeta(
+            code="MEPC.391(81)",
+            title="2024 MARPOL amendments",
+            pdf_url=f"{_IMO_CDN}/MEPCDocuments/MEPC.391(81).pdf",
+            effective_date=date(2025, 8, 1),
+            parent_label="MARPOL Amendments",
+        ),
+    ],
+
     "bwm": [
         CodeDocMeta(
             code="MEPC.174(58)",
@@ -280,6 +353,8 @@ _CODE_TO_SOURCE = {
     "polar": "imo_polar",
     "igf": "imo_igf",
     "bwm": "imo_bwm",
+    "stcw_amend": "stcw_amend",
+    "marpol_amend": "marpol_amend",
 }
 
 

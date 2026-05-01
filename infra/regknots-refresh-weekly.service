@@ -1,0 +1,20 @@
+# Sprint D6.43 — weekly corpus refresh service unit.
+# Pairs with regknots-refresh-weekly.timer.
+# Install: sudo cp infra/regknots-refresh-weekly.{service,timer} /etc/systemd/system/
+#          sudo systemctl daemon-reload
+#          sudo systemctl enable --now regknots-refresh-weekly.timer
+[Unit]
+Description=RegKnots corpus weekly refresh (CFR + USCG bulletins + NVIC)
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/opt/RegKnots
+ExecStart=/opt/RegKnots/scripts/corpus_refresh.sh weekly
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

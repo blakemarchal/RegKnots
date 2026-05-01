@@ -1,0 +1,15 @@
+# Sprint D6.43 — weekly corpus refresh timer.
+# Fires every Sunday at 03:30 UTC (low-traffic window).
+[Unit]
+Description=Weekly RegKnots corpus refresh (CFR + USCG)
+
+[Timer]
+# Every Sunday 03:30 UTC. Persistent=true means a missed run (machine
+# off, network down) is caught up on next boot.
+OnCalendar=Sun *-*-* 03:30:00 UTC
+Persistent=true
+RandomizedDelaySec=15min
+Unit=regknots-refresh-weekly.service
+
+[Install]
+WantedBy=timers.target

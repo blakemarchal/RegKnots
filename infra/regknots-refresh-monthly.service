@@ -1,0 +1,16 @@
+# Sprint D6.43 — monthly corpus refresh (flag-state regulators).
+[Unit]
+Description=RegKnots corpus monthly refresh (flag-state regulators)
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/opt/RegKnots
+ExecStart=/opt/RegKnots/scripts/corpus_refresh.sh monthly
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
