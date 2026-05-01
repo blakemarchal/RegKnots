@@ -453,6 +453,101 @@ export default function LandingPage() {
       </section>
 
       {/* ══════════════════════════════════════════════════════════════════════
+          SECTION 2.5 — WHY NOT JUST USE CHATGPT? (Sprint D6.39)
+
+          Direct response to the "what's the differentiator" feedback —
+          most users compare RegKnot to general-purpose AI tools and ask
+          why this is different. The 4 cards below are the honest answer:
+          citation discipline, licensed source texts, vessel-specific
+          scoping, and the mariner-built audit loop.
+      ══════════════════════════════════════════════════════════════════════ */}
+      <section className="bg-[#0a0e1a] px-5 md:px-10 py-20 md:py-28">
+        <div className="max-w-4xl mx-auto">
+          <p className="font-mono text-xs text-[#2dd4bf] uppercase tracking-[0.25em] mb-3">
+            How we&apos;re different
+          </p>
+          <h2 className="font-display font-black text-[#f0ece4] leading-tight tracking-tight
+            text-[clamp(28px,5vw,44px)] mb-4">
+            Why not just use ChatGPT?
+          </h2>
+          <p className="font-mono text-[#6b7594] leading-relaxed text-sm md:text-base mb-12 max-w-2xl">
+            Honest answer: for casual maritime questions, you can. For compliance answers
+            that need to hold up to a Coast Guard inspector or a port-state control deficiency
+            report, here&apos;s what general-purpose AI doesn&apos;t do.
+          </p>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-5">
+            {/* Card 1 — Citation discipline */}
+            <div className="bg-[#111827] border border-white/8 rounded-2xl p-6 md:p-7">
+              <div className="font-mono text-[10px] text-[#2dd4bf] uppercase tracking-widest mb-3">
+                01 — Citation discipline
+              </div>
+              <h3 className="font-display text-xl font-bold text-[#f0ece4] mb-3 leading-snug">
+                Every section we cite is verified against the actual text
+              </h3>
+              <p className="font-mono text-sm text-[#6b7594] leading-relaxed">
+                ChatGPT and Gemini will cheerfully invent a CFR section that doesn&apos;t exist.
+                RegKnot runs every citation through a verification pass before you see it.
+                If we can&apos;t ground a claim in the retrieved regulation text, we hedge instead
+                of guessing &mdash; and we tell you exactly what we couldn&apos;t verify.
+              </p>
+            </div>
+
+            {/* Card 2 — Licensed source texts */}
+            <div className="bg-[#111827] border border-white/8 rounded-2xl p-6 md:p-7">
+              <div className="font-mono text-[10px] text-[#2dd4bf] uppercase tracking-widest mb-3">
+                02 — Real source texts
+              </div>
+              <h3 className="font-display text-xl font-bold text-[#f0ece4] mb-3 leading-snug">
+                IMDG Code 2024, SOLAS Consolidated, STCW with current supplements
+              </h3>
+              <p className="font-mono text-sm text-[#6b7594] leading-relaxed">
+                IMO conventions are paywalled. General AI was trained on web summaries
+                and outdated copies. We&apos;ve ingested the licensed editions &mdash; the
+                IMDG Dangerous Goods List, the full SOLAS chapters, STCW with the latest
+                MSC resolutions, the ISM Code, plus 9 flag-state regulators. When you ask
+                about UN 3480 stowage, we have the actual row from Chapter 3.2.
+              </p>
+            </div>
+
+            {/* Card 3 — Vessel-specific scoping */}
+            <div className="bg-[#111827] border border-white/8 rounded-2xl p-6 md:p-7">
+              <div className="font-mono text-[10px] text-[#2dd4bf] uppercase tracking-widest mb-3">
+                03 — Vessel-specific scoping
+              </div>
+              <h3 className="font-display text-xl font-bold text-[#f0ece4] mb-3 leading-snug">
+                The answer changes based on your ship
+              </h3>
+              <p className="font-mono text-sm text-[#6b7594] leading-relaxed">
+                Subchapter L OSV vs Subchapter K small passenger vessel vs U.K.-flag bulker
+                in U.S. waters &mdash; the regulatory answer is different for each. RegKnot
+                reads your vessel profile (flag, tonnage, route, subchapter, cargo) and scopes
+                retrieval + answer accordingly. Generic LLMs give you the same one-size-fits-all
+                response no matter what you operate.
+              </p>
+            </div>
+
+            {/* Card 4 — Built by mariners */}
+            <div className="bg-[#111827] border border-white/8 rounded-2xl p-6 md:p-7">
+              <div className="font-mono text-[10px] text-[#2dd4bf] uppercase tracking-widest mb-3">
+                04 — Built by mariners, audited daily
+              </div>
+              <h3 className="font-display text-xl font-bold text-[#f0ece4] mb-3 leading-snug">
+                A Master Unlimited captain runs the audits
+              </h3>
+              <p className="font-mono text-sm text-[#6b7594] leading-relaxed">
+                Karynn holds an Unlimited Master license and reviews actual user answers
+                every few days, flagging anything off. When she finds a gap &mdash; a missed
+                Annex V exemption, a wrong jurisdictional cite &mdash; the prompt rules and
+                ingest pipeline get fixed within the week. This isn&apos;t a wrapper around an
+                API. It&apos;s a regulatory tool with a mariner in the loop.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ══════════════════════════════════════════════════════════════════════
           SECTION 3 — SAMPLE ANSWER
       ══════════════════════════════════════════════════════════════════════ */}
       <section id="in-action" className="px-5 md:px-10 py-20 md:py-28">

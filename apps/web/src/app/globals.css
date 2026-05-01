@@ -44,6 +44,99 @@
   }
 }
 
+/* ── Sprint D6.37 — Light mode override ───────────────────────────────────────
+   The app uses hardcoded hex Tailwind classes (bg-[#0a0e1a], text-[#f0ece4],
+   etc.) rather than theme tokens, so a clean variable-swap doesn't reach
+   most surfaces. Instead, we target the most-used hex classes directly under
+   [data-theme="light"] and override them.
+
+   Coverage rationale: this catches the foundation surfaces (page bg,
+   card bg, primary text) so a user toggling light mode immediately sees
+   most of the app render correctly. A future refactor can move components
+   to theme tokens for crisper light mode; this is the half-day version that
+   addresses Madden's eye-fatigue feedback now.
+
+   Color philosophy in light mode:
+     #0a0e1a navy    → #f0ece4 bone bg
+     #111827 charcoal → #ffffff white card surfaces
+     #1a2238 surface-mid / #1a2030 → #f5f1ea slightly-toned-bone surfaces
+     #0d1225 surface-dim → #e9e3d6 input-field bone
+     #f0ece4 off-white text → #0a0e1a navy text (legibility on bone)
+     teal accents stay (work on both backgrounds)
+     muted #6b7594 → #5b6478 (slight darken for contrast on bone)
+*/
+[data-theme="light"] html,
+[data-theme="light"] body {
+  background-color: #f0ece4 !important;
+  color: #0a0e1a !important;
+}
+
+[data-theme="light"] .bg-\[\#0a0e1a\],
+[data-theme="light"] .bg-\[\#0a0e1a\]\/80,
+[data-theme="light"] .bg-\[\#0a0e1a\]\/95 {
+  background-color: #f0ece4 !important;
+}
+
+[data-theme="light"] .bg-\[\#111827\],
+[data-theme="light"] .bg-\[\#111827\]\/80,
+[data-theme="light"] .bg-\[\#111827\]\/95 {
+  background-color: #ffffff !important;
+}
+
+[data-theme="light"] .bg-\[\#0d1225\],
+[data-theme="light"] .bg-\[\#0d1224\] {
+  background-color: #e9e3d6 !important;
+}
+
+[data-theme="light"] .bg-\[\#1a2030\],
+[data-theme="light"] .bg-\[\#1a2238\] {
+  background-color: #f5f1ea !important;
+}
+
+[data-theme="light"] .bg-\[\#152033\] {
+  background-color: #faf6ef !important;
+}
+
+[data-theme="light"] .bg-\[\#0f1525\] {
+  background-color: #faf6ef !important;
+}
+
+[data-theme="light"] .text-\[\#f0ece4\],
+[data-theme="light"] .text-\[\#f0ece4\]\/85,
+[data-theme="light"] .text-\[\#f0ece4\]\/80,
+[data-theme="light"] .text-\[\#f0ece4\]\/70,
+[data-theme="light"] .text-\[\#f0ece4\]\/60 {
+  color: #0a0e1a !important;
+}
+
+/* Muted text — bump contrast a touch on bone bg */
+[data-theme="light"] .text-\[\#6b7594\],
+[data-theme="light"] .text-\[\#6b7594\]\/60,
+[data-theme="light"] .text-\[\#6b7594\]\/80 {
+  color: #4a5366 !important;
+}
+
+/* Borders — gentle on bone */
+[data-theme="light"] .border-white\/8,
+[data-theme="light"] .border-white\/10,
+[data-theme="light"] .border-white\/15,
+[data-theme="light"] .border-white\/25 {
+  border-color: rgba(10, 14, 26, 0.12) !important;
+}
+
+[data-theme="light"] .divide-white\/5 > :not([hidden]) ~ :not([hidden]) {
+  border-color: rgba(10, 14, 26, 0.08) !important;
+}
+
+/* Grain overlay — drop opacity in light mode (less needed on bone) */
+[data-theme="light"] html::before {
+  opacity: 0.015 !important;
+}
+
+/* Subtle: keep teal accents at full saturation; they read well on both
+   backgrounds. The compass + brand mark already use teal #2dd4bf which
+   stays. */
+
 /* ── Keyframes ─────────────────────────────────────────────────────────────── */
 @keyframes fadeSlideIn {
   from { opacity: 0; transform: translateY(6px); }

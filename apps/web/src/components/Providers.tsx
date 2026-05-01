@@ -3,6 +3,24 @@
 import { useEffect } from 'react'
 import { HydrationGate } from './HydrationGate'
 import { NavigationProgress } from './NavigationProgress'
+import { apiRequest } from '@/lib/api'
+import { useAuthStore } from '@/lib/auth'
+
+// Sprint D6.37 — light/dark theme application.
+// Storage strategy: localStorage cache for synchronous apply (avoid flash
+// of wrong theme on page load), API source of truth refreshed on auth.
+const THEME_STORAGE_KEY = 'regknot_theme'
+type ThemePref = 'dark' | 'light' | 'auto'
+
+/** Apply the theme attribute to <html>. "auto" resolves via prefers-color-scheme. */
+function applyTheme(pref: ThemePref) {
+  if (typeof document === 'undefined') return
+  const resolved =
+    pref === 'auto'
+      ? (window.matchMedia?.('(prefers-color-scheme: light)').matches ? 'light' : 'dark')
+      : pref
+  document.documentElement.setAttribute('data-theme', resolved)
+}
 
 export function Providers({ children }: { children: React.ReactNode }) {
   // Sprint D6.23e — HOTFIX: PWA service worker was caching stale page
@@ -34,6 +52,34 @@ export function Providers({ children }: { children: React.ReactNode }) {
         .catch(() => { /* not fatal */ })
     }
   }, [])
+
+  // Sprint D6.37 — apply theme on mount. Read localStorage first
+  // (synchronous, no flash), then fetch the user's saved preference
+  // from the API once authenticated and reconcile.
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
+  useEffect(() => {
+    // Pass 1: localStorage (instant)
+    if (typeof window !== 'undefined') {
+      const cached = (localStorage.getItem(THEME_STORAGE_KEY) ?? 'dark') as ThemePref
+      applyTheme(cached)
+    }
+  }, [])
+
+  useEffect(() => {
+    // Pass 2: source-of-truth fetch when authenticated. Updates
+    // localStorage so subsequent loads are instant. Logged-out users
+    // retain their last cached choice (logout doesn't clear theme).
+    if (!isAuthenticated) return
+    apiRequest<{ theme_preference: string | null }>('/onboarding/persona')
+      .then((r) => {
+        const pref = (r.theme_preference ?? 'dark') as ThemePref
+        if (pref === 'dark' || pref === 'light' || pref === 'auto') {
+          localStorage.setItem(THEME_STORAGE_KEY, pref)
+          applyTheme(pref)
+        }
+      })
+      .catch(() => { /* keep cached theme on fetch failure */ })
+  }, [isAuthenticated])
 
   return (
     <HydrationGate>

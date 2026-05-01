@@ -57,9 +57,13 @@ function AccountContent() {
   // state and can populate retroactively.
   // Sprint D6.33 — verbosity_preference now lives in the same panel
   // and persists with the same Save button.
+  // Sprint D6.37 — theme_preference also lives in the same Save flow
+  // but applies to the document-root immediately on save (so the user
+  // sees the theme switch without reloading).
   const [persona, setPersona] = useState<string>('')
   const [jurisdictionFocus, setJurisdictionFocus] = useState<string>('')
   const [verbosityPreference, setVerbosityPreference] = useState<string>('')
+  const [themePreference, setThemePreference] = useState<string>('')
   const [personaSaving, setPersonaSaving] = useState(false)
   const [personaMsg, setPersonaMsg] = useState<string | null>(null)
 
@@ -103,16 +107,18 @@ function AccountContent() {
       .then(setNotifPrefs)
       .catch(() => {})
       .finally(() => setNotifLoading(false))
-    // Sprint D6.31/D6.33 — pre-fill persona + jurisdiction + verbosity.
+    // Sprint D6.31/D6.33/D6.37 — pre-fill persona + jurisdiction + verbosity + theme.
     apiRequest<{
       persona: string | null
       jurisdiction_focus: string | null
       verbosity_preference: string | null
+      theme_preference: string | null
     }>('/onboarding/persona')
       .then((r) => {
         setPersona(r.persona ?? '')
         setJurisdictionFocus(r.jurisdiction_focus ?? '')
         setVerbosityPreference(r.verbosity_preference ?? '')
+        setThemePreference(r.theme_preference ?? '')
       })
       .catch(() => {})
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
@@ -127,8 +133,21 @@ function AccountContent() {
           persona: persona || null,
           jurisdiction_focus: jurisdictionFocus || null,
           verbosity_preference: verbosityPreference || null,
+          theme_preference: themePreference || null,
         }),
       })
+      // Sprint D6.37 — apply theme immediately so the user sees the
+      // change without reloading. localStorage cache + DOM attribute
+      // both updated. Empty string = revert to "dark" default.
+      if (typeof window !== 'undefined') {
+        const themeToApply = themePreference || 'dark'
+        localStorage.setItem('regknot_theme', themeToApply)
+        const resolved =
+          themeToApply === 'auto'
+            ? (window.matchMedia?.('(prefers-color-scheme: light)').matches ? 'light' : 'dark')
+            : themeToApply
+        document.documentElement.setAttribute('data-theme', resolved)
+      }
       setPersonaMsg('Saved')
       setTimeout(() => setPersonaMsg(null), 2000)
     } catch (e) {
@@ -405,6 +424,26 @@ function AccountContent() {
               </select>
               <p className="font-mono text-[10px] text-[#6b7594] leading-relaxed mt-1">
                 You can also override per-message using the chips below the chat input.
+              </p>
+            </div>
+
+            {/* Sprint D6.37 — theme preference */}
+            <div className="flex flex-col gap-1">
+              <label className="font-mono text-xs text-[#6b7594]">Theme</label>
+              <select
+                value={themePreference}
+                onChange={(e) => setThemePreference(e.target.value)}
+                className="font-mono w-full border border-white/10 rounded-lg px-3 py-2 text-sm
+                  outline-none focus:border-[#2dd4bf] transition-colors"
+                style={{ backgroundColor: '#0d1225', color: '#f0ece4' }}
+              >
+                <option value="" style={{ backgroundColor: '#111827', color: '#f0ece4' }}>Dark (default)</option>
+                <option value="dark" style={{ backgroundColor: '#111827', color: '#f0ece4' }}>Dark &mdash; navy + bone</option>
+                <option value="light" style={{ backgroundColor: '#111827', color: '#f0ece4' }}>Light &mdash; bone + navy text</option>
+                <option value="auto" style={{ backgroundColor: '#111827', color: '#f0ece4' }}>Auto &mdash; follow system</option>
+              </select>
+              <p className="font-mono text-[10px] text-[#6b7594] leading-relaxed mt-1">
+                Light mode is best for daylight reading. Saved to your account so it persists across devices.
               </p>
             </div>
 

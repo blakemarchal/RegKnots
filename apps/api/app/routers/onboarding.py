@@ -62,11 +62,15 @@ VALID_JURISDICTION_FOCUS = {
 # the prompt. NULL or absent = "standard" (current behavior).
 VALID_VERBOSITY = {"brief", "standard", "detailed"}
 
+# Sprint D6.37 — UI theme preference. NULL = "dark" (current default).
+VALID_THEME = {"dark", "light", "auto"}
+
 
 class PersonaRequest(BaseModel):
     persona: str | None = None
     jurisdiction_focus: str | None = None
     verbosity_preference: str | None = None
+    theme_preference: str | None = None
 
 
 @router.get("/status", response_model=StatusResponse)
@@ -186,18 +190,32 @@ async def update_persona(
                 + ", ".join(sorted(VALID_VERBOSITY))
             ),
         )
+    if (
+        body.theme_preference is not None
+        and body.theme_preference not in VALID_THEME
+    ):
+        from fastapi import HTTPException, status as http_status
+        raise HTTPException(
+            status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                "theme_preference must be one of: "
+                + ", ".join(sorted(VALID_THEME))
+            ),
+        )
     # Use COALESCE so passing None on a field leaves it unchanged.
     await pool.execute(
         """
         UPDATE users
         SET persona = COALESCE($1, persona),
             jurisdiction_focus = COALESCE($2, jurisdiction_focus),
-            verbosity_preference = COALESCE($3, verbosity_preference)
-        WHERE id = $4
+            verbosity_preference = COALESCE($3, verbosity_preference),
+            theme_preference = COALESCE($4, theme_preference)
+        WHERE id = $5
         """,
         body.persona,
         body.jurisdiction_focus,
         body.verbosity_preference,
+        body.theme_preference,
         _uuid.UUID(user.user_id),
     )
     return {"ok": True}
@@ -211,11 +229,12 @@ async def get_persona(
     can pre-fill its edit form."""
     pool = await get_pool()
     row = await pool.fetchrow(
-        "SELECT persona, jurisdiction_focus, verbosity_preference FROM users WHERE id = $1",
+        "SELECT persona, jurisdiction_focus, verbosity_preference, theme_preference FROM users WHERE id = $1",
         _uuid.UUID(user.user_id),
     )
     return {
         "persona": row["persona"] if row else None,
         "jurisdiction_focus": row["jurisdiction_focus"] if row else None,
         "verbosity_preference": row["verbosity_preference"] if row else None,
+        "theme_preference": row["theme_preference"] if row else None,
     }
