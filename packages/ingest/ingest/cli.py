@@ -58,6 +58,12 @@ _PDF_SOURCE_CONFIG: dict[str, dict] = {
         "text_dir": _DATA_RAW / "imdg",
         "adapter":  "ingest.sources.imdg",
     },
+    "iacs_pr": {
+        # Sprint D6.44 — IACS Procedural Requirements via appbase.io
+        # public Elasticsearch index + Nuxt SSR PDF URL extraction.
+        "raw_dir": _DATA_RAW / "iacs_pr",
+        "adapter": "ingest.sources.iacs_pr",
+    },
     "imdg_supplement": {
         # Sprint D6.12b — IMDG errata + supplement publications.
         # Multi-PDF directory; one Section per PDF. Currently covers

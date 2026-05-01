@@ -59,7 +59,18 @@ class MNMeta:
 
     @property
     def parent_section_number(self) -> str:
-        return "BMA Marine Notices"
+        # Sprint D6.44 — parent now derives from category so non-MN
+        # publications (Information Notices, Safety Alerts, Yacht
+        # Notices, etc.) get correctly grouped in retrieval.
+        labels = {
+            "marine_notices":      "BMA Marine Notices",
+            "information_notices": "BMA Information Notices",
+            "safety_alerts":       "BMA Safety Alerts",
+            "yacht_notices":       "BMA Yacht Notices",
+            "technical_alerts":    "BMA Technical Alerts",
+            "bulletins":           "BMA Bulletins",
+        }
+        return labels.get(self.category, "BMA Marine Notices")
 
     @property
     def filename_stub(self) -> str:
@@ -122,6 +133,133 @@ _CURATED: list[MNMeta] = [
 ]
 
 
+# ── Sitemap-based discovery (Sprint D6.44) ──────────────────────────────────
+#
+# BMA publishes a Yoast SEO sitemap at /notices-sitemap.xml that catalogs
+# every notice landing page across all categories (marine-notices,
+# information-notices, safety-alerts, yacht-notices, technical-alerts,
+# bulletins). Each landing page embeds the PDF download URL in a
+# `<a href="...wp-content/uploads/.../<file>.pdf" class="...c-btn...">Download [PDF`
+# anchor. Two-stage discovery: list pages → extract PDF URLs.
+#
+# The hand-curated _CURATED list above is kept as a fallback for the case
+# where the sitemap fetch fails — we don't want to lose existing coverage
+# when BMA's site briefly hiccups.
+
+_SITEMAP_URL = "https://www.bahamasmaritime.com/notices-sitemap.xml"
+_PDF_REGEX = re.compile(
+    r'href=[\'"](https?://[^\'"]*?/wp-content/uploads/[^\'"]*?\.pdf)[\'"]',
+    re.IGNORECASE,
+)
+# Match `MN048`, `MN108-Hatches`, etc., or `BMA-Safety-Alert-21-04-...`
+_CODE_FROM_URL_REGEX = re.compile(
+    r'/(MN\d+|BMA[-_][^/]*|IN\d+|YN\d+|Y\d+)',
+    re.IGNORECASE,
+)
+# Match landing-page slugs like `mn092-enhanced-monitoring-programme`,
+# `bma-safety-alert-21-04-rope-access-fatal-fall`,
+# `in012-bma-technical-and-safety-alerts`, etc.
+_LANDING_CODE_REGEX = re.compile(
+    r'/notices/(?P<category>[^/]+)/(?P<slug>[^/]+)/?$',
+    re.IGNORECASE,
+)
+
+# Categories to ingest. Skipping vessels-sitemap (vessel registry data,
+# not regulatory). Order matters only for log readability.
+_CATEGORIES = [
+    "marine-notices",       # Primary: 102 MNs
+    "information-notices",  # 26 INs
+    "safety-alerts",        # 25 BMA Safety Alerts
+    "yacht-notices",        # 13 YNs / Yxxx
+    "technical-alerts",     # 5
+    "bulletins",            # 2
+]
+
+
+def _extract_landing_pages_from_sitemap(client: httpx.Client, console) -> list[tuple[str, str]]:
+    """Returns [(category, landing_page_url)]. Empty list on any error
+    so the curated list still runs. We tolerate sitemap failures."""
+    try:
+        resp = client.get(_SITEMAP_URL, headers=_BROWSER_HEADERS, timeout=15.0)
+        resp.raise_for_status()
+    except Exception as exc:
+        logger.warning("BMA sitemap fetch failed (%s); skipping discovery", exc)
+        console.print(f"  [yellow]BMA sitemap unreachable: {exc}[/yellow]")
+        return []
+
+    # Extract <loc>https://...</loc> URLs. Wraps regex over XML for simplicity
+    # — XML parsing would be marginally cleaner but the schema is dead simple.
+    locs = re.findall(r"<loc>([^<]+)</loc>", resp.text)
+    out: list[tuple[str, str]] = []
+    for url in locs:
+        m = _LANDING_CODE_REGEX.search(url)
+        if not m:
+            continue
+        category = m.group("category")
+        if category not in _CATEGORIES:
+            continue
+        out.append((category, url))
+    console.print(f"  [cyan]BMA sitemap:[/cyan] {len(out)} landing pages across {len(_CATEGORIES)} categories")
+    return out
+
+
+def _extract_pdf_url_from_landing(client: httpx.Client, landing_url: str) -> tuple[str, str] | None:
+    """Fetch the landing page and pull the PDF download anchor. Returns
+    (pdf_url, page_title) or None on failure."""
+    try:
+        resp = client.get(landing_url, headers=_BROWSER_HEADERS, timeout=15.0)
+        resp.raise_for_status()
+    except Exception as exc:
+        logger.warning("BMA landing fetch failed for %s: %s", landing_url, exc)
+        return None
+
+    pdf_match = _PDF_REGEX.search(resp.text)
+    if not pdf_match:
+        return None
+    pdf_url = pdf_match.group(1)
+
+    title_match = re.search(r"<title>([^<]+)</title>", resp.text, re.IGNORECASE)
+    page_title = (title_match.group(1) if title_match else "").split(" - ")[0].strip()
+    return (pdf_url, page_title)
+
+
+def _meta_from_landing(category: str, landing_url: str, pdf_url: str, page_title: str) -> MNMeta | None:
+    """Build an MNMeta from discovery output. Code is derived from the
+    PDF filename (MN108-..., BMA-Safety-Alert-21-04-..., IN012-...). Year
+    is inferred from the PDF URL path /YYYY/MM/. """
+    # Extract code from PDF filename
+    fname = pdf_url.rsplit("/", 1)[-1]
+    code_match = re.match(r"([A-Z]+[-_]?\d+(?:[-_]\d+)?)", fname, re.IGNORECASE)
+    if code_match:
+        code = code_match.group(1).replace("_", "-").upper()
+        # Normalize MN108 / mn108 / Mn-108 etc → MN108
+        code = re.sub(r"[-]+", "-", code)
+        # Drop trailing -1, -v1.0 etc that some files have
+        code = re.sub(r"-(v\d.*|rev\d.*|\d+)$", "", code, flags=re.IGNORECASE)
+    else:
+        # Fall back to landing slug if filename is malformed
+        slug_match = _LANDING_CODE_REGEX.search(landing_url)
+        code = slug_match.group("slug") if slug_match else fname
+
+    # Infer year from URL path: /wp-content/uploads/YYYY/MM/...
+    year_match = re.search(r"/uploads/(\d{4})/(\d{2})/", pdf_url)
+    if year_match:
+        try:
+            effective_date = date(int(year_match.group(1)), int(year_match.group(2)), 1)
+        except ValueError:
+            effective_date = SOURCE_DATE
+    else:
+        effective_date = SOURCE_DATE
+
+    return MNMeta(
+        code=code,
+        title=page_title or code,
+        pdf_url=pdf_url,
+        effective_date=effective_date,
+        category=category.replace("-", "_"),
+    )
+
+
 # ── Public API ───────────────────────────────────────────────────────────────
 
 def discover_and_download(raw_dir: Path, failed_dir: Path, console) -> tuple[int, int]:
@@ -129,13 +267,36 @@ def discover_and_download(raw_dir: Path, failed_dir: Path, console) -> tuple[int
     failed_dir.mkdir(parents=True, exist_ok=True)
     success, failures = 0, 0
     with httpx.Client(timeout=_TIMEOUT, follow_redirects=True) as client:
-        for i, meta in enumerate(_CURATED, 1):
+        # Sprint D6.44 — combine curated with sitemap-discovered. Curated
+        # serves as a guaranteed-coverage fallback if discovery fails.
+        # De-dupe by code so we don't double-count when both find the same
+        # notice.
+        all_metas: list[MNMeta] = list(_CURATED)
+        seen_codes = {m.code.upper() for m in all_metas}
+
+        landing_pages = _extract_landing_pages_from_sitemap(client, console)
+        for i, (category, landing_url) in enumerate(landing_pages, 1):
+            time.sleep(0.5)  # be polite to the BMA WP host
+            extracted = _extract_pdf_url_from_landing(client, landing_url)
+            if not extracted:
+                continue
+            pdf_url, page_title = extracted
+            meta = _meta_from_landing(category, landing_url, pdf_url, page_title)
+            if meta is None or meta.code.upper() in seen_codes:
+                continue
+            seen_codes.add(meta.code.upper())
+            all_metas.append(meta)
+        console.print(f"  [cyan]BMA discovery:[/cyan] {len(all_metas)} total notices ({len(_CURATED)} curated + {len(all_metas) - len(_CURATED)} discovered)")
+
+        # Phase 2 — download all PDFs
+        total = len(all_metas)
+        for i, meta in enumerate(all_metas, 1):
             out_path = raw_dir / f"{meta.filename_stub}.pdf"
             if out_path.exists() and out_path.stat().st_size > 5 * 1024:
                 success += 1
                 continue
             try:
-                console.print(f"  Downloading {meta.section_number} ({i}/{len(_CURATED)})…")
+                console.print(f"  Downloading {meta.section_number} ({i}/{total})…")
                 resp = client.get(meta.pdf_url, headers=_BROWSER_HEADERS)
                 resp.raise_for_status()
                 if not resp.content.startswith(b"%PDF"):
@@ -146,7 +307,7 @@ def discover_and_download(raw_dir: Path, failed_dir: Path, console) -> tuple[int
                 failures += 1
                 logger.warning("BMA %s: download failed — %s", meta.section_number, exc)
                 _write_failure(meta, exc, failed_dir)
-            if i < len(_CURATED):
+            if i < total:
                 time.sleep(_REQUEST_DELAY)
 
     cache_path = raw_dir / "index.json"
@@ -154,7 +315,7 @@ def discover_and_download(raw_dir: Path, failed_dir: Path, console) -> tuple[int
         json.dumps([
             {"code": m.code, "title": m.title, "pdf_url": m.pdf_url,
              "effective_date": m.effective_date.isoformat(), "category": m.category}
-            for m in _CURATED
+            for m in all_metas
         ], indent=2),
         encoding="utf-8",
     )

@@ -111,6 +111,12 @@ const CORPUS: CorpusSource[] = [
   // online and the ingest can't yet stand behind a "Load Lines" chip
   // claim. Re-add when we source the consolidated edition.
   {
+    short: 'IACS PR',
+    full: 'IACS Procedural Requirements (PR series) — class-society procedures for class entry, transfer of class, surveys, member audits, casualty investigation',
+    category: 'international',
+    url: 'https://iacs.org.uk/resolutions/procedural-requirements',
+  },
+  {
     short: 'IACS UR',
     full: 'IACS Unified Requirements (technical class-society standards)',
     category: 'international',
