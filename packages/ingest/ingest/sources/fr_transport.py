@@ -63,12 +63,21 @@ _TIMEOUT = 90.0   # 37 MB PDF — needs slack on slow connections
 _PDF_URL = "https://codes.droit.org/PDF/Code%20des%20transports.pdf"
 _PDF_FILENAME = "code_des_transports.pdf"
 
-# Article IDs in Code des transports look like "Article L5000-1" or
-# "Article R5000-1" (Réglementaire) or "D5000-1" (Décret) etc.
-# Partie V covers L5*, R5*, D5* — all numeric prefixes starting with 5.
+# Article IDs in the codes.droit.org PDF render as "L. 5000-1" /
+# "R. 5000-1" / "D. 5000-1" anchored at column 0, followed on the same
+# line by metadata (Ordonnance ref + Legif/Plan/Jp links), then blank
+# lines, then the indented article body. Partie V (Maritime) covers
+# all articles whose first numeric digit is 5.
 _ARTICLE_HEADER_RE = re.compile(
-    r"^Article\s+([LRD])(\d+)-(\d+(?:-\d+)?)\s*$",
-    re.MULTILINE | re.IGNORECASE,
+    r"^([LRD])\.\s+(\d+)-(\d+(?:-\d+)?)\s+",
+    re.MULTILINE,
+)
+# Lines we drop from article bodies — codes.droit.org footers, page
+# numbers, and the metadata strip on the article-header line itself.
+_NOISE_LINE_RE = re.compile(
+    r"(?m)^.*?(Legif\.|Jp\.Judi\.|Jp\.Admin\.|Juricaf|"
+    r"PARTIE LÉGISLATIVE|service-public\.fr|"
+    r"Code des transports$|^\s*p\.\s*\d+|^\s*Plan\s*$).*?$"
 )
 
 
@@ -185,30 +194,42 @@ def _extract_pdf_text(pdf_path: Path) -> str:
 
 
 def _split_into_articles(text: str) -> list[ArticleMeta]:
-    """Split the consolidated text on Article L/R/D headers.
+    """Split the consolidated text on L./R./D. article headers.
     Returns articles in document order. Each article's body runs from
-    the header line to the next header (or end of text)."""
+    after the header-line's trailing newline to the next header (or end
+    of text), with codes.droit.org noise lines stripped."""
     matches = list(_ARTICLE_HEADER_RE.finditer(text))
     out: list[ArticleMeta] = []
+    seen_ids: set[str] = set()
     for i, m in enumerate(matches):
         prefix = m.group(1).upper()
         partie = m.group(2)
         sub = m.group(3)
         article_id = f"{prefix}{partie}-{sub}"
+        if article_id in seen_ids:
+            continue  # PDF references the same article in multiple
+                      # tables of contents; first match wins.
+        seen_ids.add(article_id)
 
-        body_start = m.end()
+        # End-of-line of the header (first \n after match start) — skip
+        # past the metadata that lives on the same line as the article ID.
+        nl = text.find("\n", m.end())
+        body_start = nl + 1 if nl != -1 else m.end()
         body_end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
-        body_raw = text[body_start:body_end].strip()
+        body_raw = text[body_start:body_end]
 
-        # First non-empty line after header is treated as title; remainder
-        # is body. Many articles have no separate title — in that case
-        # title is empty and body holds everything.
-        lines = [l for l in body_raw.splitlines() if l.strip()]
-        title = lines[0].strip()[:200] if lines else ""
-        body = "\n".join(lines[1:]) if len(lines) > 1 else ""
+        # Strip codes.droit.org noise lines.
+        body_clean = _NOISE_LINE_RE.sub("", body_raw)
+
+        # Collapse runs of whitespace and blank lines.
+        lines = [l.strip() for l in body_clean.splitlines() if l.strip()]
+        if not lines:
+            continue
+        title = lines[0][:200]
+        body = "\n".join(lines)
         out.append(ArticleMeta(
             article_id=article_id,
             title=title,
-            body=body or title,
+            body=body,
         ))
     return out
