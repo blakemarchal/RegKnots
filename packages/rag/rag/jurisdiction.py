@@ -66,6 +66,8 @@ SOURCE_TO_JURISDICTIONS: dict[str, list[str]] = {
     "tc_ssb":           ["ca"],
     # Bahamas (Sprint D6.22)
     "bma_mn":           ["bs"],
+    # France (Sprint D6.46) — first French-language flag-state pilot.
+    "fr_transport":     ["fr"],
     # Norway (Sprint D6.23) — first non-English flag (but content is in English)
     "nma_rsv":          ["no"],
     # Sprint D6.23 — Tier D international references. All tagged 'intl'

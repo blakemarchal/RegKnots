@@ -21,9 +21,9 @@ _UPSERT_SQL = """
     INSERT INTO regulations (
         source, source_version, title, section_number, section_title,
         full_text, chunk_index, embedding, up_to_date_as_of, content_hash,
-        published_date, expires_date, superseded_by, jurisdictions
+        published_date, expires_date, superseded_by, jurisdictions, language
     )
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8::vector, $9, $10, $11, $12, $13, $14::text[])
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8::vector, $9, $10, $11, $12, $13, $14::text[], $15)
     ON CONFLICT (source, section_number, chunk_index) DO UPDATE SET
         source_version   = EXCLUDED.source_version,
         section_title    = EXCLUDED.section_title,
@@ -34,9 +34,11 @@ _UPSERT_SQL = """
         published_date   = EXCLUDED.published_date,
         expires_date     = EXCLUDED.expires_date,
         superseded_by    = EXCLUDED.superseded_by,
-        jurisdictions    = EXCLUDED.jurisdictions
+        jurisdictions    = EXCLUDED.jurisdictions,
+        language         = EXCLUDED.language
     WHERE regulations.content_hash IS DISTINCT FROM EXCLUDED.content_hash
        OR regulations.jurisdictions IS DISTINCT FROM EXCLUDED.jurisdictions
+       OR regulations.language IS DISTINCT FROM EXCLUDED.language
 """
 
 _BATCH_SIZE = 500
@@ -136,6 +138,7 @@ def _to_row(c: EmbeddedChunk) -> tuple:
         c.expires_date,                          # nullable freshness column
         c.superseded_by,                         # nullable freshness column
         juris,                                   # jurisdictions text[]
+        getattr(c, "language", "en"),            # ISO 639-1 (D6.46)
     )
 
 
@@ -177,6 +180,8 @@ _SOURCE_TO_JURISDICTIONS: dict[str, list[str]] = {
     "tc_ssb":           ["ca"],
     # Bahamas (Sprint D6.22)
     "bma_mn":           ["bs"],
+    # France (Sprint D6.46) — first French-language flag state.
+    "fr_transport":     ["fr"],
     # Norway (Sprint D6.23)
     "nma_rsv":          ["no"],
     # Tier D international references (Sprint D6.23)

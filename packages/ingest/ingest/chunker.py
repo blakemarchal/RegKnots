@@ -133,6 +133,7 @@ def _chunk_imdg_dgl(section: Section) -> list[Chunk]:
             published_date        = section.published_date,
             expires_date          = section.expires_date,
             superseded_by         = section.superseded_by,
+            language              = getattr(section, "language", "en"),
         ))
     return chunks
 
@@ -161,6 +162,7 @@ def _make_chunk(section: Section, idx: int, header: str, content: str) -> Chunk:
         published_date=section.published_date,
         expires_date=section.expires_date,
         superseded_by=section.superseded_by,
+        language=getattr(section, "language", "en"),
     )
 
 

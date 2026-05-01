@@ -61,6 +61,7 @@ class EmbedderClient:
                         published_date=chunk.published_date,
                         expires_date=chunk.expires_date,
                         superseded_by=chunk.superseded_by,
+                        language=getattr(chunk, "language", "en"),
                         embedding=embedding,
                     )
                 )

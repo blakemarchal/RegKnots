@@ -21,7 +21,7 @@ TITLE_NAMES: dict[int, str] = {
 }
 
 # Sources ingested from text/PDF/XML files (not eCFR API). title_number=0 for all.
-PDF_SOURCES: list[str] = ["amsa_mo", "bma_mn", "colregs", "erg", "iacs_pr", "iacs_ur", "imdg", "imdg_manual", "imdg_supplement", "imo_bwm", "imo_css", "imo_hsc", "imo_iamsar", "imo_ibc", "imo_igc", "imo_igf", "imo_loadlines", "imo_polar", "iri_mn", "ism", "ism_supplement", "liscr_mn", "mardep_msin", "marpol", "marpol_amend", "marpol_supplement", "mca_mgn", "mca_msn", "mou_psc", "mpa_sc", "nma_rsv", "nmc_checklist", "nmc_policy", "nvic", "solas", "solas_supplement", "stcw", "stcw_amend", "stcw_supplement", "tc_ssb", "usc_46", "uscg_bulletin", "uscg_msm", "who_ihr"]
+PDF_SOURCES: list[str] = ["amsa_mo", "bma_mn", "colregs", "erg", "fr_transport", "iacs_pr", "iacs_ur", "imdg", "imdg_manual", "imdg_supplement", "imo_bwm", "imo_css", "imo_hsc", "imo_iamsar", "imo_ibc", "imo_igc", "imo_igf", "imo_loadlines", "imo_polar", "iri_mn", "ism", "ism_supplement", "liscr_mn", "mardep_msin", "marpol", "marpol_amend", "marpol_supplement", "mca_mgn", "mca_msn", "mou_psc", "mpa_sc", "nma_rsv", "nmc_checklist", "nmc_policy", "nvic", "solas", "solas_supplement", "stcw", "stcw_amend", "stcw_supplement", "tc_ssb", "usc_46", "uscg_bulletin", "uscg_msm", "who_ihr"]
 
 
 # ── Data models ─────────────────────────────────────────────────────────────
@@ -41,6 +41,9 @@ class Section:
     published_date: Optional[date] = None
     expires_date: Optional[date] = None
     superseded_by: Optional[str] = None
+    # ISO 639-1 language code (added migration 0070). Defaults to "en"
+    # so existing English-only adapters keep working unchanged.
+    language: str = "en"
 
 
 @dataclass
@@ -59,6 +62,7 @@ class Chunk:
     published_date: Optional[date] = None
     expires_date: Optional[date] = None
     superseded_by: Optional[str] = None
+    language: str = "en"
 
 
 @dataclass
@@ -78,6 +82,7 @@ class EmbeddedChunk:
     published_date: Optional[date] = None
     expires_date: Optional[date] = None
     superseded_by: Optional[str] = None
+    language: str = "en"
 
 
 @dataclass

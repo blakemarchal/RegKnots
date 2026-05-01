@@ -49,6 +49,13 @@ _PDF_SOURCE_CONFIG: dict[str, dict] = {
         "pdf":     _DATA_RAW / "erg" / "ERG2024-Eng-Web-a.pdf",
         "adapter": "ingest.sources.erg",
     },
+    "fr_transport": {
+        # Sprint D6.46 — France Code des transports, Partie V (Maritime).
+        # First French-language flag-state pilot. Single-PDF mirror from
+        # codes.droit.org sliced on Article L5*/R5*/D5* boundaries.
+        "raw_dir": _DATA_RAW / "fr_transport",
+        "adapter": "ingest.sources.fr_transport",
+    },
     "imdg": {
         # Sprint D6.12 — IMDG Code 2024 Edition (Vol 1 + Vol 2, Amend 42-24).
         # Two-stage source: scripts/ocr_imdg_screenshots.py +

@@ -96,10 +96,14 @@ class CircularMeta:
 #    probe both paths and take whichever 200s.
 #  - SCs (Shipping Circulars): consistently at the root since at least
 #    2020. Older years 404 reliably so we narrow the sweep.
+#  - PMNs (Port Marine Notices): pattern pn<YY>-<NNN>.pdf at the root,
+#    sequenced 1-180+ per year. Started showing up 2024+.
 _PMC_YEARS = range(20, 27)   # 2020-2026 (older PCs aren't on the CDN)
 _PMC_NUMS  = range(1, 51)
 _SC_YEARS  = range(2020, 2027)
 _SC_NUMS   = range(1, 41)
+_PMN_YEARS = range(24, 27)   # 2024-2026 (older PMNs not on CDN)
+_PMN_NUMS  = range(1, 201)   # PMNs run higher per year (~170-200/yr)
 
 
 def _enumerate_pmc() -> list[tuple[str, CircularMeta]]:
@@ -136,8 +140,25 @@ def _enumerate_sc() -> list[tuple[str, CircularMeta]]:
     return out
 
 
+def _enumerate_pmn() -> list[tuple[str, CircularMeta]]:
+    """Port Marine Notices (PMN) — pn<YY>-<NNN>.pdf at the root path."""
+    out: list[tuple[str, CircularMeta]] = []
+    for yy in _PMN_YEARS:
+        year = 2000 + yy
+        for nnn in _PMN_NUMS:
+            url = f"{_BASE}/pn{yy:02d}-{nnn:03d}.pdf"
+            out.append((url, CircularMeta(
+                code=f"PMN {nnn:03d}/{year}",
+                title=f"Port Marine Notice {nnn:03d} of {year}",
+                pdf_url=url,
+                effective_date=date(year, 1, 1),
+                category="port_marine_notice",
+            )))
+    return out
+
+
 def _candidate_urls() -> list[tuple[str, CircularMeta]]:
-    return _enumerate_pmc() + _enumerate_sc()
+    return _enumerate_pmc() + _enumerate_sc() + _enumerate_pmn()
 
 
 # ── Public API ───────────────────────────────────────────────────────────────
