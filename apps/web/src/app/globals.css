@@ -137,6 +137,101 @@
    backgrounds. The compass + brand mark already use teal #2dd4bf which
    stays. */
 
+/* ── Sprint D6.40 — light mode polish ──────────────────────────────────────
+   Reports from spot-check: dropdowns still showed dark (inline styles win
+   over CSS), chat answer text unreadable, hamburger menu hard to see.
+   Fixes below target each: !important on attribute selectors beats inline
+   style for the select bg, additional text/border swaps catch the
+   remaining surfaces. */
+
+/* Inline-styled selects in account/welcome use style={{backgroundColor:
+   '#0d1225', color: '#f0ece4'}} — !important here wins over inline style. */
+[data-theme="light"] select[style*="0d1225"],
+[data-theme="light"] select {
+  background-color: #ffffff !important;
+  color: #0a0e1a !important;
+  border-color: rgba(10, 14, 26, 0.18) !important;
+}
+[data-theme="light"] select option {
+  background-color: #ffffff !important;
+  color: #0a0e1a !important;
+}
+
+/* Chat message bubbles. User-message bubble uses --color-user-blue
+   (#1a3254) — keep as-is in light mode (dark bubble on bone bg = clear
+   contrast). Assistant bubble uses neutral surface; needs to swap to
+   white-card with dark text. */
+[data-theme="light"] .text-\[\#f0ece4\]\/90,
+[data-theme="light"] .text-\[\#f0ece4\]\/95 {
+  color: #0a0e1a !important;
+}
+
+/* User-message bubble — keep dark navy bg, but force white text on top
+   so the question stays readable. The bubble class is bg-user-blue. */
+[data-theme="light"] .bg-user-blue {
+  background-color: #1a3254 !important;
+  color: #ffffff !important;
+}
+[data-theme="light"] .bg-user-blue * {
+  color: #ffffff !important;
+}
+
+/* ChatMessage assistant content — markdown body uses prose-invert which
+   relies on dark-mode foreground. Force prose body color to navy in
+   light mode. */
+[data-theme="light"] .prose-invert,
+[data-theme="light"] .prose-invert *:not(code):not(pre) {
+  color: #0a0e1a !important;
+}
+[data-theme="light"] .prose-invert h1,
+[data-theme="light"] .prose-invert h2,
+[data-theme="light"] .prose-invert h3,
+[data-theme="light"] .prose-invert h4,
+[data-theme="light"] .prose-invert strong {
+  color: #0a0e1a !important;
+}
+
+/* Hamburger menu icon + header icons — these use text-[#f0ece4] which
+   already gets swapped above, but the header bg in some places uses
+   slightly different shades. Catch the remaining ones. */
+[data-theme="light"] .text-white,
+[data-theme="light"] .text-white\/85,
+[data-theme="light"] .text-white\/90 {
+  color: #0a0e1a !important;
+}
+
+/* Bump muted text contrast a touch more on bone bg — Madden's
+   eye-fatigue feedback was about contrast specifically. */
+[data-theme="light"] .text-\[\#94a3b8\] {
+  color: #4a5366 !important;
+}
+
+/* Teal accents in light mode: switch to teal-dark for better contrast
+   on bone bg. The bright teal #2dd4bf was designed for navy bg.
+   Note: only swap text/border teal — keep teal background fills as-is
+   (e.g. CTA buttons) since white text on bright teal still reads OK. */
+[data-theme="light"] .text-\[\#2dd4bf\],
+[data-theme="light"] .text-\[\#2dd4bf\]\/70,
+[data-theme="light"] .text-\[\#2dd4bf\]\/80,
+[data-theme="light"] .text-\[\#2dd4bf\]\/85 {
+  color: #14b8a6 !important;
+}
+[data-theme="light"] .border-\[\#2dd4bf\]\/30,
+[data-theme="light"] .border-\[\#2dd4bf\]\/40,
+[data-theme="light"] .border-\[\#2dd4bf\]\/50 {
+  border-color: rgba(20, 184, 166, 0.45) !important;
+}
+
+/* Soften the page bg slightly — Madden suggested "softer background."
+   The original #f0ece4 is fine, but the white card surfaces (#ffffff)
+   feel too stark next to it. Bump card bg to a faint cream tint so the
+   contrast between page and cards is gentler. */
+[data-theme="light"] .bg-\[\#111827\],
+[data-theme="light"] .bg-\[\#111827\]\/80,
+[data-theme="light"] .bg-\[\#111827\]\/95 {
+  background-color: #fbf8f1 !important;  /* was #ffffff — slight cream */
+}
+
 /* ── Keyframes ─────────────────────────────────────────────────────────────── */
 @keyframes fadeSlideIn {
   from { opacity: 0; transform: translateY(6px); }

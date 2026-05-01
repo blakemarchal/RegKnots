@@ -370,14 +370,20 @@ async def get_stats(
 
     # Derived metrics. Defensive division: empty corpus on day 0 = 0%.
     answers_7d = answers_7d or 0
-    # Sprint D6.35 — affected_answers_7d is now the per-answer dedup count,
-    # not raw incidents. bad_answer_rate is bounded at 100% (still permits
-    # mild overcounting when a single answer is both cite-errored and
-    # hedged — acceptable; would require a more expensive JOIN to dedup
-    # across both tables and the upper bound is rarely binding).
+    # Sprint D6.35 + D6.40 — bad_answer_rate now means "answers that
+    # cite a regulation that doesn't exist" — actual factual errors.
+    # Hedges (the model declining to answer when corpus has no
+    # supporting chunk) are NOT bad answers; they're correct behavior
+    # under uncertainty. They're tracked separately as hedge_rate.
+    #
+    # Prior formula folded both into the same number, which inflated
+    # the rate from ~17% (real cite errors) to ~51% (everything that
+    # could conceivably be flagged). The combined number wasn't
+    # actionable because the two failure modes need different fixes:
+    #   - cite errors → tighten verification + regen pass
+    #   - hedges → expand corpus coverage
     bad_answer_rate_7d = (
-        min(100.0, 100.0 * (affected_answers_7d + retrieval_misses_7d) / answers_7d)
-        if answers_7d > 0 else 0.0
+        100.0 * affected_answers_7d / answers_7d if answers_7d > 0 else 0.0
     )
     hedge_rate_7d = (
         100.0 * retrieval_misses_7d / answers_7d
@@ -1861,7 +1867,7 @@ async def feature_usage(
         SELECT 'PSC Checklist',
                COUNT(*),
                COUNT(DISTINCT user_id),
-               MAX(created_at)
+               MAX(generated_at)
         FROM psc_checklists
         WHERE user_id NOT IN (SELECT id FROM excl)
         UNION ALL
@@ -1914,7 +1920,8 @@ async def feature_usage(
             FROM compliance_logs GROUP BY user_id
         ) clog ON clog.user_id = u.id
         LEFT JOIN (
-            SELECT user_id, COUNT(*) cnt, MAX(created_at) last_at
+            -- psc_checklists uses generated_at + updated_at, not created_at
+            SELECT user_id, COUNT(*) cnt, MAX(generated_at) last_at
             FROM psc_checklists GROUP BY user_id
         ) psc ON psc.user_id = u.id
         LEFT JOIN (

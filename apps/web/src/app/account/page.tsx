@@ -427,19 +427,20 @@ function AccountContent() {
               </p>
             </div>
 
-            {/* Sprint D6.37 — theme preference */}
+            {/* Sprint D6.37/D6.40 — theme preference. Empty value = "dark" by
+                default; the empty option was removed to avoid showing two
+                visually-identical "Dark" entries. */}
             <div className="flex flex-col gap-1">
               <label className="font-mono text-xs text-[#6b7594]">Theme</label>
               <select
-                value={themePreference}
+                value={themePreference || 'dark'}
                 onChange={(e) => setThemePreference(e.target.value)}
                 className="font-mono w-full border border-white/10 rounded-lg px-3 py-2 text-sm
                   outline-none focus:border-[#2dd4bf] transition-colors"
                 style={{ backgroundColor: '#0d1225', color: '#f0ece4' }}
               >
-                <option value="" style={{ backgroundColor: '#111827', color: '#f0ece4' }}>Dark (default)</option>
-                <option value="dark" style={{ backgroundColor: '#111827', color: '#f0ece4' }}>Dark &mdash; navy + bone</option>
-                <option value="light" style={{ backgroundColor: '#111827', color: '#f0ece4' }}>Light &mdash; bone + navy text</option>
+                <option value="dark" style={{ backgroundColor: '#111827', color: '#f0ece4' }}>Dark (default)</option>
+                <option value="light" style={{ backgroundColor: '#111827', color: '#f0ece4' }}>Light</option>
                 <option value="auto" style={{ backgroundColor: '#111827', color: '#f0ece4' }}>Auto &mdash; follow system</option>
               </select>
               <p className="font-mono text-[10px] text-[#6b7594] leading-relaxed mt-1">
