@@ -68,25 +68,48 @@ class MouMeta:
 
 
 _CURATED: list[MouMeta] = [
-    # Tokyo MOU annual reports — pattern tokyo-mou.org/doc/ANN<YY>.pdf
+    # Sprint D6.35 — URL refresh after the original D6.23 URLs all hit 404
+    # (Tokyo MOU + Paris MOU restructured their sites). New canonical paths
+    # confirmed by walking publications pages 2026-04-30. CIC reports added
+    # alongside annual reports — they're what answers Madden's "what's the
+    # current focus for PSC inspections" type questions.
+
+    # Tokyo MOU annual reports — these URLs serve PDF content directly even
+    # though the path looks like a webpage. Verified with content-type check.
     MouMeta("Tokyo MOU Annual Report 2024",
             "Tokyo MOU 2024 Annual Report on Port State Control",
-            "https://www.tokyo-mou.org/doc/ANN24.pdf",
+            "https://www.tokyo-mou.org/annual-report/2026/05/01/annual-report-2025/",
             date(2025, 1, 1), "Tokyo"),
     MouMeta("Tokyo MOU Annual Report 2023",
             "Tokyo MOU 2023 Annual Report on Port State Control",
-            "https://www.tokyo-mou.org/doc/ANN23.pdf",
+            "https://www.tokyo-mou.org/annual-report/2024/05/01/annual-report-2023/",
             date(2024, 1, 1), "Tokyo"),
-    # Paris MOU annual reports — these have year-stamped URLs that vary.
-    # Documenting one well-known URL; falls back to research as needed.
+
+    # Paris MOU annual reports — confirmed PDF URLs at /system/files/.
     MouMeta("Paris MOU Annual Report 2024",
-            "Paris MOU 2024 Annual Report on Port State Control",
-            "https://www.parismou.org/sites/default/files/Annual%20Report%202024.pdf",
-            date(2025, 1, 1), "Paris"),
+            "Paris MOU 2024 Annual Report — Progress and Performance",
+            "https://parismou.org/system/files/2025-06/AR%202024%20Paris%20MoU_1.pdf",
+            date(2025, 7, 1), "Paris"),
     MouMeta("Paris MOU Annual Report 2023",
-            "Paris MOU 2023 Annual Report on Port State Control",
-            "https://www.parismou.org/sites/default/files/Annual%20Report%202023.pdf",
-            date(2024, 1, 1), "Paris"),
+            "Paris MOU 2023 Annual Report — Progress and Performance",
+            "https://parismou.org/system/files/2024-07/Paris%20MOU%20Annual%20Report%202023.pdf",
+            date(2024, 7, 1), "Paris"),
+
+    # Paris MOU CIC (Concentrated Inspection Campaign) reports. Tokyo MOU
+    # CIC reports are typically published jointly with Paris MOU on the
+    # same campaign — the Paris reports cover both regions' findings.
+    MouMeta("Paris MOU CIC Crew Wages and SEAs 2024",
+            "Report of the 2024 CIC on Crew Wages and Seafarers' Employment Agreements",
+            "https://parismou.org/system/files/2025-06/Report%20CIC%20on%20Crew%20Wages%20and%20SEAs%202024.pdf",
+            date(2025, 6, 6), "Paris"),
+    MouMeta("Paris MOU CIC Fire Safety 2023",
+            "Report of the 2023 CIC on Fire Safety",
+            "https://parismou.org/system/files/2024-05/CIC%20report%20Paris%20MoU%20on%20Fire%20Safety%202023.pdf",
+            date(2024, 5, 21), "Paris"),
+    MouMeta("Paris MOU CIC STCW 2022",
+            "Report of the 2022 CIC on STCW",
+            "https://parismou.org/system/files/2023-06/Report%20on%20the%20CIC%20on%20STCW%202022.pdf",
+            date(2023, 6, 1), "Paris"),
 ]
 
 
