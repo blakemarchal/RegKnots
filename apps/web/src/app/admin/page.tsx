@@ -16,25 +16,52 @@ import {
 
 // ── Types ───────────────────────────────────────────────────────────────────────
 
+// Sprint D6.32 — restructured shape. See backend AdminStats model for the
+// section breakdown rationale. Frontend cards group by these sections.
+interface TierBreakdown {
+  mate: number
+  captain: number
+  pro_legacy: number
+}
+
+interface HedgeEvent {
+  created_at: string
+  user_email: string | null
+  query: string
+  hedge_phrase: string
+}
+
 interface AdminStats {
+  // Headline KPIs
   total_users: number
-  active_users_24h: number
   active_users_7d: number
-  total_conversations: number
-  total_messages: number
-  messages_today: number
-  messages_7d: number
-  pro_subscribers: number
+  questions_7d: number
+  bad_answer_rate_7d: number
+  // Subscriptions
+  subs_active: TierBreakdown
+  subs_past_due: number
+  subs_paused: number
   trial_active: number
   trial_expired: number
-  message_limit_reached: number
-  total_chunks: number
-  chunks_by_source: Record<string, number>
-  citation_errors_7d: number
   subs_monthly: number
   subs_annual: number
-  subs_paused: number
   paid_users_alltime: number
+  // Engagement
+  questions_today: number
+  avg_questions_per_active_user_7d: number
+  total_conversations: number
+  conversations_today: number
+  conversations_7d: number
+  active_users_24h: number
+  // Quality
+  citation_errors_7d: number
+  retrieval_misses_7d: number
+  hedge_rate_7d: number
+  message_limit_reached: number
+  recent_hedges: HedgeEvent[]
+  // Knowledge base
+  total_chunks: number
+  chunks_by_source: Record<string, number>
 }
 
 interface AdminUser {
@@ -883,45 +910,121 @@ function AdminContent() {
           )}
 
           {stats && (
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-8">
-              {/* Row 1 */}
-              <StatCard label="Total Users" value={stats.total_users} />
-              <StatCard label="Active (24h)" value={stats.active_users_24h} />
-              <StatCard label="Active (7d)" value={stats.active_users_7d} />
-              <StatCard label="Pro Subscribers" value={stats.pro_subscribers} />
-              {/* Row 2 */}
-              <StatCard label="Trial Active" value={stats.trial_active} />
-              <StatCard label="Trial Expired" value={stats.trial_expired} />
-              <StatCard label="Limit Reached" value={stats.message_limit_reached} />
-              <StatCard label="Citation Errors (7d)" value={stats.citation_errors_7d} />
-              {/* Row 3 */}
-              <StatCard label="Total Conversations" value={stats.total_conversations} />
-              <StatCard label="Total Messages" value={stats.total_messages} />
-              <StatCard label="Messages Today" value={stats.messages_today} />
-              <StatCard label="Messages (7d)" value={stats.messages_7d} />
-              {/* Row 4 — subscription breakdown */}
-              <div className="col-span-full bg-[#111827] rounded-xl border border-[#2dd4bf]/20 px-4 py-3">
-                <p className="font-mono text-[10px] text-[#6b7594] uppercase tracking-wider">
-                  Subscription Breakdown
+            <div className="flex flex-col gap-3 mb-8">
+              {/* ─────────── Row 1 — Headline KPIs ─────────── */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <StatCard label="Total Users" value={stats.total_users} />
+                <StatCard
+                  label="Active (7d)"
+                  value={
+                    stats.total_users > 0
+                      ? `${stats.active_users_7d} (${Math.round(100 * stats.active_users_7d / stats.total_users)}%)`
+                      : stats.active_users_7d
+                  }
+                />
+                <StatCard label="Questions (7d)" value={stats.questions_7d} />
+                <StatCard
+                  label="Bad-answer rate (7d)"
+                  value={`${stats.bad_answer_rate_7d}%`}
+                />
+              </div>
+
+              {/* ─────────── Row 2 — Subscriptions (consolidated) ─────────── */}
+              <div className="bg-[#111827] rounded-xl border border-[#2dd4bf]/20 px-5 py-4">
+                <p className="font-mono text-[10px] text-[#6b7594] uppercase tracking-wider mb-3">
+                  Subscriptions
                 </p>
-                <div className="flex flex-wrap gap-x-6 gap-y-1 mt-2">
-                  <span className="font-mono text-xs text-[#f0ece4]/80">
-                    <span className="text-[#2dd4bf]/70 uppercase tracking-wider text-[10px]">Monthly</span>{' '}
-                    <span className="font-bold text-[#2dd4bf] text-base ml-1">{stats.subs_monthly}</span>
+                <div className="grid grid-cols-2 md:grid-cols-5 gap-x-4 gap-y-2">
+                  <div>
+                    <p className="font-mono text-[10px] text-[#2dd4bf]/70 uppercase tracking-wider">Mate</p>
+                    <p className="font-display text-2xl font-bold text-[#2dd4bf]">{stats.subs_active.mate}</p>
+                  </div>
+                  <div>
+                    <p className="font-mono text-[10px] text-[#2dd4bf]/70 uppercase tracking-wider">Captain</p>
+                    <p className="font-display text-2xl font-bold text-[#2dd4bf]">{stats.subs_active.captain}</p>
+                  </div>
+                  <div>
+                    <p className="font-mono text-[10px] text-[#6b7594] uppercase tracking-wider">Pro (legacy)</p>
+                    <p className="font-display text-2xl font-bold text-[#f0ece4]/70">{stats.subs_active.pro_legacy}</p>
+                  </div>
+                  <div>
+                    <p className="font-mono text-[10px] text-[#f59e0b]/80 uppercase tracking-wider">Trial active</p>
+                    <p className="font-display text-2xl font-bold text-[#f59e0b]">{stats.trial_active}</p>
+                  </div>
+                  <div>
+                    <p className="font-mono text-[10px] text-[#ef4444]/80 uppercase tracking-wider">Past-due / paused</p>
+                    <p className="font-display text-2xl font-bold text-[#ef4444]">{stats.subs_past_due + stats.subs_paused}</p>
+                  </div>
+                </div>
+                <div className="border-t border-white/8 mt-4 pt-3 flex flex-wrap gap-x-6 gap-y-1 font-mono text-xs text-[#f0ece4]/70">
+                  <span>
+                    <span className="text-[#6b7594] uppercase tracking-wider text-[10px]">Total active paid:</span>{' '}
+                    <span className="font-bold text-[#f0ece4]">
+                      {stats.subs_active.mate + stats.subs_active.captain + stats.subs_active.pro_legacy}
+                    </span>
                   </span>
-                  <span className="font-mono text-xs text-[#f0ece4]/80">
-                    <span className="text-[#2dd4bf]/70 uppercase tracking-wider text-[10px]">Annual</span>{' '}
-                    <span className="font-bold text-[#2dd4bf] text-base ml-1">{stats.subs_annual}</span>
+                  <span>
+                    <span className="text-[#6b7594] uppercase tracking-wider text-[10px]">Monthly:</span>{' '}
+                    <span className="font-bold text-[#f0ece4]">{stats.subs_monthly}</span>
                   </span>
-                  <span className="font-mono text-xs text-[#f0ece4]/80">
-                    <span className="text-amber-400/70 uppercase tracking-wider text-[10px]">Paused</span>{' '}
-                    <span className="font-bold text-amber-400 text-base ml-1">{stats.subs_paused}</span>
+                  <span>
+                    <span className="text-[#6b7594] uppercase tracking-wider text-[10px]">Annual:</span>{' '}
+                    <span className="font-bold text-[#f0ece4]">{stats.subs_annual}</span>
+                  </span>
+                  <span>
+                    <span className="text-[#6b7594] uppercase tracking-wider text-[10px]">Trial expired:</span>{' '}
+                    <span className="font-bold text-[#f0ece4]">{stats.trial_expired}</span>
+                  </span>
+                  <span>
+                    <span className="text-[#6b7594] uppercase tracking-wider text-[10px]">Limit reached:</span>{' '}
+                    <span className="font-bold text-[#f0ece4]">{stats.message_limit_reached}</span>
                   </span>
                 </div>
               </div>
 
-              {/* Row 5 — wide card */}
-              <div className="col-span-full bg-[#111827] rounded-xl border border-white/8 px-4 py-3">
+              {/* ─────────── Row 3 — Engagement ─────────── */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <StatCard label="Questions Today" value={stats.questions_today} />
+                <StatCard label="Conversations (7d)" value={stats.conversations_7d} />
+                <StatCard
+                  label="Avg Q / active user"
+                  value={stats.avg_questions_per_active_user_7d}
+                />
+                <StatCard label="Active (24h)" value={stats.active_users_24h} />
+              </div>
+
+              {/* ─────────── Row 4 — Quality ─────────── */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <StatCard label="Citation Errors (7d)" value={stats.citation_errors_7d} />
+                <StatCard label="Retrieval Misses (7d)" value={stats.retrieval_misses_7d} />
+                <StatCard label="Hedge Rate (7d)" value={`${stats.hedge_rate_7d}%`} />
+                <StatCard label="Total Conversations" value={stats.total_conversations} />
+              </div>
+
+              {/* Recent hedges list (only when populated, to avoid cluttering empty days) */}
+              {stats.recent_hedges.length > 0 && (
+                <div className="bg-[#111827] rounded-xl border border-white/8 px-4 py-3">
+                  <p className="font-mono text-[10px] text-[#6b7594] uppercase tracking-wider mb-2">
+                    Recent hedges (last 5)
+                  </p>
+                  <div className="flex flex-col divide-y divide-white/5">
+                    {stats.recent_hedges.map((h, i) => (
+                      <div key={i} className="py-1.5 flex flex-col gap-0.5">
+                        <div className="flex items-center justify-between gap-2 text-[11px] font-mono">
+                          <span className="text-[#f0ece4]/85 truncate flex-1">{h.query}</span>
+                          <span className="text-[#6b7594] flex-shrink-0">{fmtRelative(h.created_at)}</span>
+                        </div>
+                        <div className="text-[10px] font-mono text-[#6b7594] truncate">
+                          {h.user_email ?? 'anon'} &middot; matched: <span className="text-amber-400/70">&ldquo;{h.hedge_phrase}&rdquo;</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* ─────────── Row 5 — Knowledge base (kept) ─────────── */}
+              <div className="bg-[#111827] rounded-xl border border-white/8 px-4 py-3">
                 <p className="font-mono text-[10px] text-[#6b7594] uppercase tracking-wider">
                   Regulation Chunks
                 </p>

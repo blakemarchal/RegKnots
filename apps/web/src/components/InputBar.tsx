@@ -3,14 +3,27 @@
 import { useRef, useEffect, type KeyboardEvent, type ChangeEvent } from 'react'
 import { useVoiceInput } from '@/lib/useVoiceInput'
 
+// Sprint D6.34 — per-message verbosity override.
+// undefined = use the user's saved default (users.verbosity_preference).
+// "brief" / "standard" / "detailed" override for THIS turn only.
+export type VerbosityOverride = 'brief' | 'standard' | 'detailed' | undefined
+
 interface Props {
   value: string
   onChange: (v: string) => void
   onSend: () => void
   loading: boolean
+  /** Optional verbosity override surfaced as 3 chips above the textarea.
+   *  When undefined, no chip is selected and the user's saved preference
+   *  governs. Selecting a chip applies for the next message only. */
+  verbosity?: VerbosityOverride
+  onVerbosityChange?: (v: VerbosityOverride) => void
 }
 
-export function InputBar({ value, onChange, onSend, loading }: Props) {
+export function InputBar({
+  value, onChange, onSend, loading,
+  verbosity, onVerbosityChange,
+}: Props) {
   const ref = useRef<HTMLTextAreaElement>(null)
 
   const { listening, supported, toggle } = useVoiceInput({
@@ -36,8 +49,43 @@ export function InputBar({ value, onChange, onSend, loading }: Props) {
 
   const canSend = !loading && value.trim().length > 0
 
+  // Sprint D6.34 — chip toggle. Clicking the active chip clears it
+  // (back to user default); clicking another chip switches the override.
+  function pickChip(next: VerbosityOverride) {
+    if (!onVerbosityChange) return
+    onVerbosityChange(verbosity === next ? undefined : next)
+  }
+
   return (
     <div className="px-3 pb-3 pt-1">
+      {onVerbosityChange && (
+        <div className="flex items-center gap-1.5 mb-1.5 px-1">
+          <VerbosityChip
+            label="Brief"
+            active={verbosity === 'brief'}
+            onClick={() => pickChip('brief')}
+          />
+          <VerbosityChip
+            label="Standard"
+            active={verbosity === 'standard'}
+            onClick={() => pickChip('standard')}
+          />
+          <VerbosityChip
+            label="Deep dive"
+            active={verbosity === 'detailed'}
+            onClick={() => pickChip('detailed')}
+          />
+          {verbosity && (
+            <button
+              onClick={() => onVerbosityChange(undefined)}
+              className="font-mono text-[10px] text-[#6b7594] hover:text-[#f0ece4] ml-1 transition-colors"
+              aria-label="Clear verbosity override"
+            >
+              clear
+            </button>
+          )}
+        </div>
+      )}
       <div className="flex items-end gap-2 px-3 py-2 rounded-2xl
         bg-[#0d1225] border border-white/10
         focus-within:border-teal/40 transition-colors duration-150">
@@ -107,5 +155,23 @@ export function InputBar({ value, onChange, onSend, loading }: Props) {
         Navigation aid only — not legal advice
       </p>
     </div>
+  )
+}
+
+// Sprint D6.34 — small toggle chip for per-message verbosity override.
+function VerbosityChip({
+  label, active, onClick,
+}: { label: string; active: boolean; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`font-mono text-[10px] px-2 py-0.5 rounded-full border transition-colors duration-150
+        ${active
+          ? 'border-teal/60 bg-teal/15 text-teal'
+          : 'border-white/10 text-[#6b7594] hover:text-[#f0ece4] hover:border-white/25'
+        }`}
+    >
+      {label}
+    </button>
   )
 }

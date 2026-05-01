@@ -712,6 +712,7 @@ def _build_chat_messages(
     fingerprint_summary: str | None = None,
     user_role: str | None = None,
     user_jurisdiction_focus: str | None = None,
+    user_verbosity: str | None = None,
 ) -> list[dict]:
     """Construct the Claude API message list for a chat turn.
 
@@ -831,11 +832,36 @@ def _build_chat_messages(
             "Including soft jurisdictional context: %d signals", len(soft_context_lines)
         )
 
+    # Sprint D6.33/D6.34 — response style preference. Per-message override
+    # ("verbosity" in the chat request body) is layered on top of the
+    # user's persistent preference (users.verbosity_preference) by the
+    # router; by the time we get here, user_verbosity is the effective
+    # value to apply for this turn.
+    verbosity_block = ""
+    if user_verbosity == "brief":
+        verbosity_block = (
+            "Response style for THIS answer: BRIEF.\n"
+            "- Aim for 2-3 focused paragraphs total.\n"
+            "- Lead with the single most important citation.\n"
+            "- Skip applicability tables and exhaustive subchapter breakdowns.\n"
+            "- End with one short sentence offering to expand if the user wants more depth.\n\n"
+        )
+    elif user_verbosity == "detailed":
+        verbosity_block = (
+            "Response style for THIS answer: DETAILED.\n"
+            "- The user values depth over brevity.\n"
+            "- Provide thorough, sectioned answers with applicability tables when relevant.\n"
+            "- Cover edge cases and cross-vessel-type variations.\n"
+            "- Cite multiple sources where they reinforce or qualify each other.\n\n"
+        )
+    # "standard" or None → no verbosity block, system prompt's defaults apply.
+
     user_content = (
         f"{NAVIGATION_AID_REMINDER}\n\n"
         f"{vessel_block}"
         f"{credential_block}"
         f"{soft_context_block}"
+        f"{verbosity_block}"
         f"Regulation context:\n{context_str}\n\n"
         f"Question: {query}"
     )
@@ -1235,6 +1261,7 @@ async def chat(
     fingerprint_summary: str | None = None,
     user_role: str | None = None,
     user_jurisdiction_focus: str | None = None,
+    user_verbosity: str | None = None,
 ) -> ChatResponse:
     """Run the full RAG pipeline and return a ChatResponse.
 
@@ -1291,6 +1318,7 @@ async def chat(
         fingerprint_summary=fingerprint_summary,
         user_role=user_role,
         user_jurisdiction_focus=user_jurisdiction_focus,
+        user_verbosity=user_verbosity,
     )
 
     # 5. Call Claude — fall back to OpenAI GPT-4o on Anthropic API failures.
@@ -1494,6 +1522,7 @@ async def chat_with_progress(
     fingerprint_summary: str | None = None,
     user_role: str | None = None,
     user_jurisdiction_focus: str | None = None,
+    user_verbosity: str | None = None,
 ) -> AsyncIterator[dict]:
     """Same RAG pipeline as chat() but yields lightweight progress events.
 
@@ -1557,6 +1586,7 @@ async def chat_with_progress(
         fingerprint_summary=fingerprint_summary,
         user_role=user_role,
         user_jurisdiction_focus=user_jurisdiction_focus,
+        user_verbosity=user_verbosity,
     )
 
     yield {"event": "status", "data": "Consulting compliance engine…"}

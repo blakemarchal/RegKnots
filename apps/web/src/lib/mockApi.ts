@@ -46,11 +46,16 @@ export async function sendMessageStream(
   onStatus: (message: string) => void,
   onDone: (data: ChatStreamDone) => void,
   onStarted?: (conversationId: string) => void,
+  // Sprint D6.34 — per-message verbosity override. Undefined = use the
+  // user's saved preference. "brief" / "standard" / "detailed" override
+  // for this turn only.
+  verbosity?: 'brief' | 'standard' | 'detailed',
 ): Promise<void> {
   const body = JSON.stringify({
     query,
     ...(conversationId ? { conversation_id: conversationId } : {}),
     ...(vesselId ? { vessel_id: vesselId } : {}),
+    ...(verbosity ? { verbosity } : {}),
   })
 
   const doFetch = (token: string | null): Promise<Response> =>

@@ -68,6 +68,11 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
   const [recoveryFailed, setRecoveryFailed] = useState(false)
   const recoveryAbortRef = useRef<AbortController | null>(null)
 
+  // Sprint D6.34 — per-message verbosity override. Reset to undefined
+  // after each successful send so the user has to opt in fresh each
+  // turn (avoids surprise "I forgot I left it on Brief").
+  const [verbosity, setVerbosity] = useState<'brief' | 'standard' | 'detailed' | undefined>(undefined)
+
   const router = useRouter()
   const { canInstall, install } = usePwa()
   const { vessels, activeVesselId, billing, setBilling } = useAuthStore()
@@ -339,6 +344,10 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
 
     try {
       const currentVesselId = useAuthStore.getState().activeVesselId
+      const turnVerbosity = verbosity  // capture before reset
+      // Sprint D6.34 — clear the chip immediately so the user sees it
+      // reset; if the request fails they can re-pick before retrying.
+      setVerbosity(undefined)
       await sendMessageStream(
         query,
         conversationId,
@@ -366,6 +375,7 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
           setConversationId(startedConvId)
           writePending(startedConvId, query)
         },
+        turnVerbosity,
       )
     } catch (err) {
       if (err instanceof Error && err.message.includes('402')) {
@@ -417,7 +427,7 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
       setProgressMsg(null)
       setLoading(false)
     }
-  }, [input, loading, conversationId, router, setBilling, writePending, clearPending, recoveryLoop])
+  }, [input, loading, conversationId, router, setBilling, writePending, clearPending, recoveryLoop, verbosity])
 
   function handlePrompt(text: string) {
     setInput(text)
@@ -719,6 +729,8 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
           onChange={setInput}
           onSend={handleSend}
           loading={loading || restoring}
+          verbosity={verbosity}
+          onVerbosityChange={setVerbosity}
         />
         {rateLimitMsg && (
           <p className="px-4 py-2 font-mono text-xs text-amber-400 bg-amber-950/30 border-t border-amber-800/20">

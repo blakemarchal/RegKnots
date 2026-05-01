@@ -58,10 +58,15 @@ VALID_JURISDICTION_FOCUS = {
     "international_mixed",
 }
 
+# Sprint D6.33 — verbosity tiers driving the response-style block in
+# the prompt. NULL or absent = "standard" (current behavior).
+VALID_VERBOSITY = {"brief", "standard", "detailed"}
+
 
 class PersonaRequest(BaseModel):
     persona: str | None = None
     jurisdiction_focus: str | None = None
+    verbosity_preference: str | None = None
 
 
 @router.get("/status", response_model=StatusResponse)
@@ -169,16 +174,30 @@ async def update_persona(
                 + ", ".join(sorted(VALID_JURISDICTION_FOCUS))
             ),
         )
+    if (
+        body.verbosity_preference is not None
+        and body.verbosity_preference not in VALID_VERBOSITY
+    ):
+        from fastapi import HTTPException, status as http_status
+        raise HTTPException(
+            status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                "verbosity_preference must be one of: "
+                + ", ".join(sorted(VALID_VERBOSITY))
+            ),
+        )
     # Use COALESCE so passing None on a field leaves it unchanged.
     await pool.execute(
         """
         UPDATE users
         SET persona = COALESCE($1, persona),
-            jurisdiction_focus = COALESCE($2, jurisdiction_focus)
-        WHERE id = $3
+            jurisdiction_focus = COALESCE($2, jurisdiction_focus),
+            verbosity_preference = COALESCE($3, verbosity_preference)
+        WHERE id = $4
         """,
         body.persona,
         body.jurisdiction_focus,
+        body.verbosity_preference,
         _uuid.UUID(user.user_id),
     )
     return {"ok": True}
@@ -192,10 +211,11 @@ async def get_persona(
     can pre-fill its edit form."""
     pool = await get_pool()
     row = await pool.fetchrow(
-        "SELECT persona, jurisdiction_focus FROM users WHERE id = $1",
+        "SELECT persona, jurisdiction_focus, verbosity_preference FROM users WHERE id = $1",
         _uuid.UUID(user.user_id),
     )
     return {
         "persona": row["persona"] if row else None,
         "jurisdiction_focus": row["jurisdiction_focus"] if row else None,
+        "verbosity_preference": row["verbosity_preference"] if row else None,
     }

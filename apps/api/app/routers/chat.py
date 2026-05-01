@@ -353,17 +353,26 @@ async def _run_chat_preflight(
     # Sprint D6.31 — explicit user persona + jurisdiction_focus, declared
     # in onboarding or account settings. Both nullable; the engine skips
     # the prompt line for any field that's None.
-    persona_row = await pool.fetchrow(
-        "SELECT persona, jurisdiction_focus FROM users WHERE id = $1",
+    # Sprint D6.33 — verbosity_preference fetched in same row.
+    profile_row = await pool.fetchrow(
+        "SELECT persona, jurisdiction_focus, verbosity_preference FROM users WHERE id = $1",
         uuid.UUID(current_user.user_id),
     )
-    user_persona = persona_row["persona"] if persona_row else None
-    user_jurisdiction_focus = persona_row["jurisdiction_focus"] if persona_row else None
+    user_persona = profile_row["persona"] if profile_row else None
+    user_jurisdiction_focus = profile_row["jurisdiction_focus"] if profile_row else None
+    # Per-message override (D6.34) trumps the persistent preference. Only
+    # apply the override if the body carries a known value; otherwise fall
+    # through to the user's saved default.
+    verbosity_override = getattr(body, "verbosity", None)
+    if verbosity_override in {"brief", "standard", "detailed"}:
+        user_verbosity = verbosity_override
+    else:
+        user_verbosity = profile_row["verbosity_preference"] if profile_row else None
 
     return (
         vessel_profile, conversation_id, history, is_new_conversation,
         credential_context, conversation_title, fingerprint,
-        user_persona, user_jurisdiction_focus,
+        user_persona, user_jurisdiction_focus, user_verbosity,
     )
 
 
@@ -487,7 +496,7 @@ async def chat_endpoint(
     (
         vessel_profile, conversation_id, history, is_new_conversation,
         credential_context, conversation_title, fingerprint,
-        user_persona, user_jurisdiction_focus,
+        user_persona, user_jurisdiction_focus, user_verbosity,
     ) = await _run_chat_preflight(body, current_user, pool)
 
     anthropic_client: AsyncAnthropic = request.app.state.anthropic
@@ -506,6 +515,7 @@ async def chat_endpoint(
         fingerprint_summary=fingerprint,
         user_role=user_persona,
         user_jurisdiction_focus=user_jurisdiction_focus,
+        user_verbosity=user_verbosity,
     )
 
     await _persist_chat_outcome(
@@ -548,7 +558,7 @@ async def chat_stream_endpoint(
     (
         vessel_profile, conversation_id, history, is_new_conversation,
         credential_context, conversation_title, fingerprint,
-        user_persona, user_jurisdiction_focus,
+        user_persona, user_jurisdiction_focus, user_verbosity,
     ) = await _run_chat_preflight(body, current_user, pool)
 
     anthropic_client: AsyncAnthropic = request.app.state.anthropic
@@ -581,6 +591,7 @@ async def chat_stream_endpoint(
                 fingerprint_summary=fingerprint,
                 user_role=user_persona,
                 user_jurisdiction_focus=user_jurisdiction_focus,
+                user_verbosity=user_verbosity,
             ):
                 event_type = event["event"]
                 payload = event["data"]
@@ -825,3 +836,9 @@ class ChatRequestBody(BaseModel):
     query: str
     conversation_id: uuid.UUID | None = None
     vessel_id: uuid.UUID | None = None
+    # Sprint D6.34 — per-message verbosity override. One of:
+    #   "brief"     — concise; lead citation + offer to expand
+    #   "standard"  — current behavior (no special instruction)
+    #   "detailed"  — sectioned, thorough, applicability tables
+    # Overrides users.verbosity_preference for this turn only.
+    verbosity: str | None = None

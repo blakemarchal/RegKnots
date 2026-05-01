@@ -55,8 +55,11 @@ function AccountContent() {
   // Sprint D6.31 — persona + jurisdiction_focus. Fetched lazily after
   // mount so existing users (NULL until they fill them) see the empty
   // state and can populate retroactively.
+  // Sprint D6.33 — verbosity_preference now lives in the same panel
+  // and persists with the same Save button.
   const [persona, setPersona] = useState<string>('')
   const [jurisdictionFocus, setJurisdictionFocus] = useState<string>('')
+  const [verbosityPreference, setVerbosityPreference] = useState<string>('')
   const [personaSaving, setPersonaSaving] = useState(false)
   const [personaMsg, setPersonaMsg] = useState<string | null>(null)
 
@@ -100,13 +103,16 @@ function AccountContent() {
       .then(setNotifPrefs)
       .catch(() => {})
       .finally(() => setNotifLoading(false))
-    // Sprint D6.31 — pre-fill persona + jurisdiction from server.
-    apiRequest<{ persona: string | null; jurisdiction_focus: string | null }>(
-      '/onboarding/persona',
-    )
+    // Sprint D6.31/D6.33 — pre-fill persona + jurisdiction + verbosity.
+    apiRequest<{
+      persona: string | null
+      jurisdiction_focus: string | null
+      verbosity_preference: string | null
+    }>('/onboarding/persona')
       .then((r) => {
         setPersona(r.persona ?? '')
         setJurisdictionFocus(r.jurisdiction_focus ?? '')
+        setVerbosityPreference(r.verbosity_preference ?? '')
       })
       .catch(() => {})
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
@@ -120,6 +126,7 @@ function AccountContent() {
         body: JSON.stringify({
           persona: persona || null,
           jurisdiction_focus: jurisdictionFocus || null,
+          verbosity_preference: verbosityPreference || null,
         }),
       })
       setPersonaMsg('Saved')
@@ -379,6 +386,26 @@ function AccountContent() {
                 <option value="mh" style={{ backgroundColor: '#111827', color: '#f0ece4' }}>Marshall Islands</option>
                 <option value="international_mixed" style={{ backgroundColor: '#111827', color: '#f0ece4' }}>International / mixed</option>
               </select>
+            </div>
+
+            {/* Sprint D6.33 — response style preference */}
+            <div className="flex flex-col gap-1">
+              <label className="font-mono text-xs text-[#6b7594]">Response style</label>
+              <select
+                value={verbosityPreference}
+                onChange={(e) => setVerbosityPreference(e.target.value)}
+                className="font-mono w-full border border-white/10 rounded-lg px-3 py-2 text-sm
+                  outline-none focus:border-[#2dd4bf] transition-colors"
+                style={{ backgroundColor: '#0d1225', color: '#f0ece4' }}
+              >
+                <option value="" style={{ backgroundColor: '#111827', color: '#f0ece4' }}>Standard (default)</option>
+                <option value="brief" style={{ backgroundColor: '#111827', color: '#f0ece4' }}>Brief &mdash; 2-3 paragraphs, lead citation</option>
+                <option value="standard" style={{ backgroundColor: '#111827', color: '#f0ece4' }}>Standard &mdash; current default</option>
+                <option value="detailed" style={{ backgroundColor: '#111827', color: '#f0ece4' }}>Detailed &mdash; sectioned, applicability tables</option>
+              </select>
+              <p className="font-mono text-[10px] text-[#6b7594] leading-relaxed mt-1">
+                You can also override per-message using the chips below the chat input.
+              </p>
             </div>
 
             <div className="flex items-center gap-3">

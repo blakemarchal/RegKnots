@@ -85,27 +85,72 @@ async def audit_log(
 
 # ── Stats ────────────────────────────────────────────────────────────────────────
 
+class TierBreakdown(BaseModel):
+    """Sprint D6.32 — paid-tier counts. Replaces the legacy single
+    `pro_subscribers` field which only counted the deprecated `pro` tier."""
+    mate: int
+    captain: int
+    pro_legacy: int  # Karynn + early users still on the deprecated tier
+
+
+class HedgeEvent(BaseModel):
+    """Sprint D6.32 — last-N hedges surfaced on the admin overview so
+    quality regressions are visible without drilling into the chats tab."""
+    created_at: str
+    user_email: str | None
+    query: str
+    hedge_phrase: str
+
+
 class AdminStats(BaseModel):
+    """Sprint D6.32 — restructured from the legacy 16-field flat shape into
+    four logical sections: headline KPIs, subscriptions, engagement, quality.
+
+    Breaking changes vs the prior shape (frontend updated in same sprint):
+    - `total_messages` / `messages_*` removed (they double-counted Q+A);
+      replaced by `questions_*` filtered to user-role messages.
+    - `pro_subscribers` removed (only counted legacy `pro` tier, missed
+      every Mate and Captain); replaced by `subs_active: TierBreakdown`.
+    - New: `bad_answer_rate_7d`, `hedge_rate_7d`, `retrieval_misses_7d`,
+      `recent_hedges`, `avg_questions_per_active_user_7d`.
+    - `active_users_24h` retained but no longer surfaced on the headline
+      row (kept for backwards-compat consumers).
+    """
+
+    # Row 1 — Headline KPIs
     total_users: int
-    active_users_24h: int
     active_users_7d: int
-    total_conversations: int
-    total_messages: int
-    messages_today: int
-    messages_7d: int
-    pro_subscribers: int
+    questions_7d: int
+    bad_answer_rate_7d: float  # 0.0–100.0
+
+    # Row 2 — Subscriptions (consolidated)
+    subs_active: TierBreakdown
+    subs_past_due: int
+    subs_paused: int
     trial_active: int
     trial_expired: int
-    message_limit_reached: int
-    total_chunks: int
-    chunks_by_source: dict[str, int]
-    citation_errors_7d: int
-    # Subscription breakdown
     subs_monthly: int
     subs_annual: int
-    subs_paused: int
-    # Sprint D6.10 — feeds the admin milestone-celebration trigger
-    paid_users_alltime: int
+    paid_users_alltime: int  # kept for D6.10 milestone-celebration trigger
+
+    # Row 3 — Engagement
+    questions_today: int
+    avg_questions_per_active_user_7d: float
+    total_conversations: int
+    conversations_today: int
+    conversations_7d: int
+    active_users_24h: int  # retained for backwards-compat consumers
+
+    # Row 4 — Quality
+    citation_errors_7d: int
+    retrieval_misses_7d: int
+    hedge_rate_7d: float  # 0.0–100.0
+    message_limit_reached: int
+    recent_hedges: list[HedgeEvent]
+
+    # Knowledge base
+    total_chunks: int
+    chunks_by_source: dict[str, int]
 
 
 @router.get("/role")
@@ -128,6 +173,20 @@ async def get_stats(
     _admin: Annotated[CurrentUser, Depends(require_admin)],
     exclude_internal: bool = Query(default=False),
 ) -> AdminStats:
+    """Sprint D6.32 — restructured admin overview.
+
+    Two structural fixes vs the prior implementation:
+    (1) Message counters now filter `m.role = 'user'` so the headline
+        reflects QUESTIONS asked, not exchanges. The legacy fields
+        double-counted because every Q+A pair was 2 rows.
+    (2) Paid-tier breakdown replaces the single `pro_subscribers` field,
+        which only counted the deprecated `pro` tier and was misleading
+        for current Mate/Captain pricing.
+
+    New top-line signals: bad_answer_rate (citation errors + retrieval
+    misses as % of answers), hedge_rate, avg questions per active user,
+    and a recent_hedges list for at-a-glance quality regressions.
+    """
     pool = await get_pool()
     # When filtering, exclude users where is_internal = TRUE OR is_admin = TRUE.
     # "exclude_internal" is a historical flag name; it also covers admins now
@@ -140,51 +199,93 @@ async def get_stats(
         if exclude_internal else ""
     )
     async with pool.acquire() as conn:
+        # ── Row 1 + 3 — Users + activity ─────────────────────────────
         total_users = await conn.fetchval(
             f"SELECT COUNT(*) FROM users u WHERE 1=1{uf}"
         )
-
         active_users_24h = await conn.fetchval(
             f"SELECT COUNT(DISTINCT c.user_id) FROM conversations c "
             f"JOIN messages m ON m.conversation_id = c.id "
             f"JOIN users u ON u.id = c.user_id "
-            f"WHERE m.created_at > NOW() - INTERVAL '24 hours'{uf}"
+            f"WHERE m.role = 'user' AND m.created_at > NOW() - INTERVAL '24 hours'{uf}"
         )
         active_users_7d = await conn.fetchval(
             f"SELECT COUNT(DISTINCT c.user_id) FROM conversations c "
             f"JOIN messages m ON m.conversation_id = c.id "
             f"JOIN users u ON u.id = c.user_id "
-            f"WHERE m.created_at > NOW() - INTERVAL '7 days'{uf}"
+            f"WHERE m.role = 'user' AND m.created_at > NOW() - INTERVAL '7 days'{uf}"
         )
 
+        # ── Conversations ────────────────────────────────────────────
         total_conversations = await conn.fetchval(
             f"SELECT COUNT(*) FROM conversations c JOIN users u ON u.id = c.user_id WHERE 1=1{uf}"
             if exclude_internal else "SELECT COUNT(*) FROM conversations"
         )
-        total_messages = await conn.fetchval(
-            f"SELECT COUNT(*) FROM messages m WHERE 1=1{muf}"
-            if exclude_internal else "SELECT COUNT(*) FROM messages"
+        conversations_today = await conn.fetchval(
+            f"SELECT COUNT(*) FROM conversations c JOIN users u ON u.id = c.user_id "
+            f"WHERE c.created_at >= DATE_TRUNC('day', NOW() AT TIME ZONE 'UTC'){uf}"
+            if exclude_internal else
+            "SELECT COUNT(*) FROM conversations WHERE created_at >= DATE_TRUNC('day', NOW() AT TIME ZONE 'UTC')"
+        )
+        conversations_7d = await conn.fetchval(
+            f"SELECT COUNT(*) FROM conversations c JOIN users u ON u.id = c.user_id "
+            f"WHERE c.created_at > NOW() - INTERVAL '7 days'{uf}"
+            if exclude_internal else
+            "SELECT COUNT(*) FROM conversations WHERE created_at > NOW() - INTERVAL '7 days'"
         )
 
-        messages_today = await conn.fetchval(
-            f"SELECT COUNT(*) FROM messages m WHERE m.created_at >= DATE_TRUNC('day', NOW() AT TIME ZONE 'UTC'){muf}"
+        # ── Questions (user-role messages only) — fixes the 2x bug ──
+        questions_today = await conn.fetchval(
+            f"SELECT COUNT(*) FROM messages m WHERE m.role = 'user' "
+            f"AND m.created_at >= DATE_TRUNC('day', NOW() AT TIME ZONE 'UTC'){muf}"
         )
-        messages_7d = await conn.fetchval(
-            f"SELECT COUNT(*) FROM messages m WHERE m.created_at > NOW() - INTERVAL '7 days'{muf}"
+        questions_7d = await conn.fetchval(
+            f"SELECT COUNT(*) FROM messages m WHERE m.role = 'user' "
+            f"AND m.created_at > NOW() - INTERVAL '7 days'{muf}"
+        )
+        # Answers count — denominator for bad_answer_rate. Same scope.
+        answers_7d = await conn.fetchval(
+            f"SELECT COUNT(*) FROM messages m WHERE m.role = 'assistant' "
+            f"AND m.created_at > NOW() - INTERVAL '7 days'{muf}"
         )
 
-        pro_subscribers = await conn.fetchval(
-            f"SELECT COUNT(*) FROM users u "
-            f"WHERE subscription_tier = 'pro' AND subscription_status = 'active'{uf}"
+        # ── Subscriptions — paid tier breakdown (replaces pro count) ─
+        # All counts here exclude admins entirely (subscription state
+        # of internal/admin accounts is meaningless for the dashboard).
+        subs_row = await conn.fetchrow(
+            f"""
+            SELECT
+              COUNT(*) FILTER (
+                WHERE subscription_tier = 'mate'
+                  AND subscription_status = 'active'
+              ) AS mate_active,
+              COUNT(*) FILTER (
+                WHERE subscription_tier = 'captain'
+                  AND subscription_status = 'active'
+              ) AS captain_active,
+              COUNT(*) FILTER (
+                WHERE subscription_tier = 'pro'
+                  AND subscription_status = 'active'
+              ) AS pro_legacy_active,
+              COUNT(*) FILTER (
+                WHERE subscription_tier IN ('mate', 'captain', 'pro')
+                  AND subscription_status = 'active'
+                  AND billing_interval = 'month'
+              ) AS subs_monthly,
+              COUNT(*) FILTER (
+                WHERE subscription_tier IN ('mate', 'captain', 'pro')
+                  AND subscription_status = 'active'
+                  AND billing_interval = 'year'
+              ) AS subs_annual,
+              COUNT(*) FILTER (WHERE subscription_status = 'past_due') AS past_due,
+              COUNT(*) FILTER (WHERE subscription_status = 'paused') AS paused
+            FROM users u
+            WHERE is_admin = false{uf}
+            """
         )
-        # Sprint D6.10 — milestone celebration counter. Inclusive of all
-        # paid tiers (mate, captain, legacy pro) and any subscription
-        # state short of fully wiped (active, past_due, paused). Frontend
-        # uses this against a localStorage'd "highest milestone seen" to
-        # decide whether to fire confetti on /admin load. The count can
-        # technically decrease (churn), but each admin device only fires
-        # each milestone once, so a temporary regression is harmless —
-        # the celebration just doesn't re-fire.
+
+        # Sprint D6.10 — milestone celebration. Kept inclusive of all
+        # paid tiers + any non-zero subscription state.
         paid_users_alltime = await conn.fetchval(
             f"SELECT COUNT(*) FROM users u "
             f"WHERE subscription_tier IN ('mate', 'captain', 'pro') "
@@ -203,13 +304,7 @@ async def get_stats(
             f"WHERE subscription_tier = 'free' AND message_count >= 50{uf}"
         )
 
-        total_chunks = await conn.fetchval("SELECT COUNT(*) FROM regulations")
-
-        chunk_rows = await conn.fetch(
-            "SELECT source, COUNT(*) AS cnt FROM regulations GROUP BY source ORDER BY source"
-        )
-        chunks_by_source = {r["source"]: r["cnt"] for r in chunk_rows}
-
+        # ── Quality signals ─────────────────────────────────────────
         citation_errors_7d = await conn.fetchval(
             "SELECT COUNT(*) FROM citation_errors ce "
             "JOIN conversations c ON c.id = ce.conversation_id "
@@ -218,45 +313,90 @@ async def get_stats(
             if exclude_internal else
             "SELECT COUNT(*) FROM citation_errors WHERE created_at > NOW() - INTERVAL '7 days'"
         )
-
-        sub_row = await conn.fetchrow(
-            f"""
-            SELECT
-              COUNT(*) FILTER (
-                WHERE subscription_tier = 'pro'
-                  AND subscription_status = 'active'
-                  AND billing_interval = 'month'
-              ) AS monthly,
-              COUNT(*) FILTER (
-                WHERE subscription_tier = 'pro'
-                  AND subscription_status = 'active'
-                  AND billing_interval = 'year'
-              ) AS annual,
-              COUNT(*) FILTER (WHERE subscription_status = 'paused') AS paused
-            FROM users u
-            WHERE is_admin = false{uf}
-            """
+        retrieval_misses_7d = await conn.fetchval(
+            "SELECT COUNT(*) FROM retrieval_misses rm "
+            "LEFT JOIN users u ON u.id = rm.user_id "
+            f"WHERE rm.created_at > NOW() - INTERVAL '7 days'{uf}"
+            if exclude_internal else
+            "SELECT COUNT(*) FROM retrieval_misses WHERE created_at > NOW() - INTERVAL '7 days'"
         )
 
+        recent_hedges_rows = await conn.fetch(
+            "SELECT rm.created_at, u.email AS user_email, rm.query, rm.hedge_phrase_matched "
+            "FROM retrieval_misses rm "
+            "LEFT JOIN users u ON u.id = rm.user_id "
+            f"WHERE rm.created_at > NOW() - INTERVAL '30 days'{uf} "
+            "ORDER BY rm.created_at DESC LIMIT 5"
+            if exclude_internal else
+            "SELECT rm.created_at, u.email AS user_email, rm.query, rm.hedge_phrase_matched "
+            "FROM retrieval_misses rm LEFT JOIN users u ON u.id = rm.user_id "
+            "ORDER BY rm.created_at DESC LIMIT 5"
+        )
+
+        # ── Knowledge base ───────────────────────────────────────────
+        total_chunks = await conn.fetchval("SELECT COUNT(*) FROM regulations")
+        chunk_rows = await conn.fetch(
+            "SELECT source, COUNT(*) AS cnt FROM regulations GROUP BY source ORDER BY source"
+        )
+        chunks_by_source = {r["source"]: r["cnt"] for r in chunk_rows}
+
+    # Derived metrics. Defensive division: empty corpus on day 0 = 0%.
+    answers_7d = answers_7d or 0
+    bad_answer_rate_7d = (
+        100.0 * (citation_errors_7d + retrieval_misses_7d) / answers_7d
+        if answers_7d > 0 else 0.0
+    )
+    hedge_rate_7d = (
+        100.0 * retrieval_misses_7d / answers_7d
+        if answers_7d > 0 else 0.0
+    )
+    avg_questions_per_active_user_7d = (
+        questions_7d / active_users_7d if active_users_7d > 0 else 0.0
+    )
+
     return AdminStats(
+        # Headline KPIs
         total_users=total_users,
-        active_users_24h=active_users_24h,
         active_users_7d=active_users_7d,
-        total_conversations=total_conversations,
-        total_messages=total_messages,
-        messages_today=messages_today,
-        messages_7d=messages_7d,
-        pro_subscribers=pro_subscribers,
-        trial_active=trial_active,
-        trial_expired=trial_expired,
-        message_limit_reached=message_limit_reached,
-        total_chunks=total_chunks,
-        chunks_by_source=chunks_by_source,
-        citation_errors_7d=citation_errors_7d,
-        subs_monthly=sub_row["monthly"] or 0,
-        subs_annual=sub_row["annual"] or 0,
-        subs_paused=sub_row["paused"] or 0,
+        questions_7d=questions_7d,
+        bad_answer_rate_7d=round(bad_answer_rate_7d, 1),
+        # Subscriptions
+        subs_active=TierBreakdown(
+            mate=subs_row["mate_active"] or 0,
+            captain=subs_row["captain_active"] or 0,
+            pro_legacy=subs_row["pro_legacy_active"] or 0,
+        ),
+        subs_past_due=subs_row["past_due"] or 0,
+        subs_paused=subs_row["paused"] or 0,
+        trial_active=trial_active or 0,
+        trial_expired=trial_expired or 0,
+        subs_monthly=subs_row["subs_monthly"] or 0,
+        subs_annual=subs_row["subs_annual"] or 0,
         paid_users_alltime=paid_users_alltime or 0,
+        # Engagement
+        questions_today=questions_today or 0,
+        avg_questions_per_active_user_7d=round(avg_questions_per_active_user_7d, 1),
+        total_conversations=total_conversations or 0,
+        conversations_today=conversations_today or 0,
+        conversations_7d=conversations_7d or 0,
+        active_users_24h=active_users_24h or 0,
+        # Quality
+        citation_errors_7d=citation_errors_7d or 0,
+        retrieval_misses_7d=retrieval_misses_7d or 0,
+        hedge_rate_7d=round(hedge_rate_7d, 1),
+        message_limit_reached=message_limit_reached or 0,
+        recent_hedges=[
+            HedgeEvent(
+                created_at=r["created_at"].isoformat(),
+                user_email=r["user_email"],
+                query=r["query"][:200],  # truncate long queries for the panel
+                hedge_phrase=r["hedge_phrase_matched"],
+            )
+            for r in recent_hedges_rows
+        ],
+        # Knowledge base
+        total_chunks=total_chunks or 0,
+        chunks_by_source=chunks_by_source,
     )
 
 
