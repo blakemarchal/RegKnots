@@ -30,13 +30,13 @@ Discovery flow:
 import json
 import logging
 import re
+import subprocess
 import time
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 
 import httpx
-import pdfplumber
 
 from ingest.models import Section
 
@@ -158,22 +158,30 @@ def get_source_date(raw_dir: Path) -> date:
 
 
 def _extract_pdf_text(pdf_path: Path) -> str:
-    page_texts: list[str] = []
-    with pdfplumber.open(pdf_path) as pdf:
-        for i, page in enumerate(pdf.pages):
-            t = page.extract_text() or ""
-            # Drop obvious page-number lines.
-            t = re.sub(r"(?m)^\s*\d{1,4}\s*$", "", t)
-            # Drop running headers / footers (codes.droit.org uses fixed
-            # marketing copy on every page — same string repeated lets us
-            # filter by anchored regex).
-            t = re.sub(
-                r"(?m)^.*?(codes\.droit\.org|p\.\s*\d+\s*/\s*\d+).*?$", "", t
-            )
-            t = re.sub(r"[ \t]+", " ", t)
-            t = re.sub(r"\n{3,}", "\n\n", t)
-            page_texts.append(t)
-    return "\n".join(page_texts)
+    """Extract text via Poppler's pdftotext — pdfplumber OOMs on the
+    37 MB consolidated PDF (the prod box has 3.8 GB RAM). pdftotext is
+    a streaming C tool that uses ~30 MB regardless of input size."""
+    cache = pdf_path.with_suffix(".txt")
+    if not cache.exists() or cache.stat().st_size < 1024 * 1024:
+        # -layout preserves the original column structure better than
+        # the default flowing mode — important for keeping article
+        # headers anchored to a single line.
+        subprocess.run(
+            ["pdftotext", "-layout", str(pdf_path), str(cache)],
+            check=True, capture_output=True, timeout=300,
+        )
+    text = cache.read_text(encoding="utf-8", errors="replace")
+
+    # Strip codes.droit.org's per-page marketing copy and page numbers.
+    text = re.sub(r"(?m)^\s*p\.\s*\d+\s*/?\s*\d*\s*$", "", text)
+    text = re.sub(
+        r"(?m)^.*?(codes\.droit\.org|Permet de voir|Permet de retrouver|"
+        r"Permet de lancer|Vous pouvez contribuer).*?$", "", text
+    )
+    text = re.sub(r"(?m)^\s*\d{1,4}\s*$", "", text)
+    text = re.sub(r"[ \t]+", " ", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text
 
 
 def _split_into_articles(text: str) -> list[ArticleMeta]:

@@ -46,7 +46,11 @@ _IMDG_DGL_ROW_RE = re.compile(r"^\s*(\d{4})\s{2,}(.+?)\s*$", re.MULTILINE)
 
 def chunk_section(section: Section) -> list[Chunk]:
     """Split a Section into ≤MAX_TOKENS chunks with OVERLAP_TOKENS overlap."""
-    text = section.full_text.strip()
+    # Strip NUL bytes — Postgres rejects them in TEXT/VARCHAR columns
+    # ("invalid byte sequence for encoding UTF8: 0x00"). PDF extractors
+    # occasionally emit them when a PDF has malformed content streams
+    # (seen on NMA Norwegian rundskriv PDFs in D6.46).
+    text = section.full_text.replace("\x00", "").strip()
     if not text:
         return []
 
