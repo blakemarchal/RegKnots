@@ -70,12 +70,18 @@ _APPBASE_INDEX = "iacs-search"
 _APPBASE_USER = "8050ba66c69d"
 _APPBASE_PASS = "31c2d972-6a49-4e3f-b2ce-6f2ed089cf32"
 
-# PRs live under /resolutions/<N>-<M>/<slug>/<slug> on iacs.org.uk.
-# Match path prefixes covering PR 1-10, 11-20, 21-30, 31-42 (current
-# active range — IACS may add/remove PRs over time).
+# PRs live under /resolutions/<N>-<M>/<slug>/<slug> on iacs.org.uk —
+# but so do Recommendations (Rec) and other resolution types under those
+# same numerical-bucket paths. We filter on the URL pattern as a coarse
+# sieve, then on post_title to keep only "PR <num>" entries (excluding
+# "Rec <num>", "UR-x", "UI <num>", etc.).
 _PR_PATH_REGEX = re.compile(
     r"^/resolutions/(\d+)-(\d+)/", re.IGNORECASE
 )
+# Match titles like "PR 1", "PR 1D", "PR 12 Rev3 CLN", "PR1A_PR1B_PR1C…".
+# Title must start with "PR" followed by a digit (with optional space).
+# Reject "PRC", "PRO", or other 3+ letter words starting with PR.
+_PR_TITLE_REGEX = re.compile(r"^PR\s*\d", re.IGNORECASE)
 
 # Match PDF URLs in Nuxt SSR state. The state is encoded JSON-in-JS so
 # slashes are escape-encoded as /. Regex copes with both encodings.
@@ -161,13 +167,16 @@ def _query_appbase(client: httpx.Client, console) -> list[dict]:
 
 
 def _filter_to_prs(hits: list[dict]) -> list[dict]:
-    """Keep only publications whose post_url matches /resolutions/<N>-<M>/.
-    That's the IACS taxonomy slot for Procedural Requirements."""
+    """Keep only publications that are actual Procedural Requirements.
+    Filter is two-stage: URL must match /resolutions/<N>-<M>/ AND title
+    must start with 'PR <digit>' (excluding Recs, URs, UIs, etc that
+    share the same URL-bucket scheme)."""
     out = []
     for h in hits:
         src = h.get("_source", {})
         url = src.get("post_url", "")
-        if _PR_PATH_REGEX.match(url):
+        title = (src.get("post_title", "") or "").strip()
+        if _PR_PATH_REGEX.match(url) and _PR_TITLE_REGEX.match(title):
             out.append(h)
     return out
 
