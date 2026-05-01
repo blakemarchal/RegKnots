@@ -305,6 +305,21 @@ async def get_stats(
         )
 
         # ── Quality signals ─────────────────────────────────────────
+        # Sprint D6.35 — bad-answer-rate fix.
+        # PRIOR BUG: numerator counted INCIDENTS not affected answers.
+        # citation_errors stores one row per bad citation, so a single
+        # answer with 3 wrong cites added 3 to the count. retrieval_misses
+        # was 1:1 with answers but added on top, so a single bad answer
+        # with one hedge AND three cite errors counted as 4 toward the
+        # rate. The composite could exceed 100%.
+        #
+        # FIX: count DISTINCT affected answers, not raw incidents:
+        # - citation_errors deduped by (conversation_id, message_content)
+        #   = one row per affected answer
+        # - retrieval_misses already 1:1 with hedge events
+        # - bad_answer_rate now caps at 100% (still possible to exceed if
+        #   the same answer is BOTH cite-errored AND hedged — accept that
+        #   small overcount as cheaper than a JOIN to dedup across both)
         citation_errors_7d = await conn.fetchval(
             "SELECT COUNT(*) FROM citation_errors ce "
             "JOIN conversations c ON c.id = ce.conversation_id "
@@ -312,6 +327,19 @@ async def get_stats(
             f"WHERE ce.created_at > NOW() - INTERVAL '7 days'{uf}"
             if exclude_internal else
             "SELECT COUNT(*) FROM citation_errors WHERE created_at > NOW() - INTERVAL '7 days'"
+        )
+        # NEW: distinct affected answers — used for the rate. The raw
+        # citation_errors_7d count is kept for display ("how many cite
+        # errors total this week") which is also a useful number.
+        affected_answers_7d = await conn.fetchval(
+            "SELECT COUNT(DISTINCT (ce.conversation_id, ce.message_content)) "
+            "FROM citation_errors ce "
+            "JOIN conversations c ON c.id = ce.conversation_id "
+            "JOIN users u ON u.id = c.user_id "
+            f"WHERE ce.created_at > NOW() - INTERVAL '7 days'{uf}"
+            if exclude_internal else
+            "SELECT COUNT(DISTINCT (conversation_id, message_content)) "
+            "FROM citation_errors WHERE created_at > NOW() - INTERVAL '7 days'"
         )
         retrieval_misses_7d = await conn.fetchval(
             "SELECT COUNT(*) FROM retrieval_misses rm "
@@ -342,8 +370,13 @@ async def get_stats(
 
     # Derived metrics. Defensive division: empty corpus on day 0 = 0%.
     answers_7d = answers_7d or 0
+    # Sprint D6.35 — affected_answers_7d is now the per-answer dedup count,
+    # not raw incidents. bad_answer_rate is bounded at 100% (still permits
+    # mild overcounting when a single answer is both cite-errored and
+    # hedged — acceptable; would require a more expensive JOIN to dedup
+    # across both tables and the upper bound is rarely binding).
     bad_answer_rate_7d = (
-        100.0 * (citation_errors_7d + retrieval_misses_7d) / answers_7d
+        min(100.0, 100.0 * (affected_answers_7d + retrieval_misses_7d) / answers_7d)
         if answers_7d > 0 else 0.0
     )
     hedge_rate_7d = (
