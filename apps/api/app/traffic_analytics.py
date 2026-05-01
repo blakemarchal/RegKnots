@@ -69,7 +69,14 @@ _cache_lock = asyncio.Lock()
 _BOT_UA_RE = re.compile(
     r"(?:bot|crawler|spider|monitor|sentry|uptime|googlebot|bingbot|"
     r"baiduspider|yandex|duckduckbot|preview|axios/|curl/|python-requests|"
-    r"wget/|httpx/|go-http-client|node-fetch|headlesschrome)",
+    r"wget/|httpx/|go-http-client|node-fetch|headlesschrome|"
+    # Pen-test and indiscriminate scanners we observe on the access logs
+    r"l9scan|leakix|nuclei|masscan|nmap|zgrab|sqlmap|"
+    # AI training / answer-engine crawlers
+    r"gptbot|chatgpt-user|claudebot|claude-web|anthropic-ai|"
+    r"perplexitybot|youbot|cohere-ai|cohereai|amazonbot|applebot|"
+    r"meta-externalagent|bytespider|ccbot|ahrefsbot|semrushbot|"
+    r"mj12bot|dotbot|petalbot|seznambot)",
     re.IGNORECASE,
 )
 
@@ -283,10 +290,32 @@ def _parse_logs_sync(
                 # Skip dimensions for bots — they'd swamp the human signal
                 continue
 
-            summary.human_requests += 1
-            by_day[day]["human"] += 1
-            if ip:
-                human_ips.add(ip)
+            # Pre-classify the request so the human_requests counter only
+            # includes meaningful traffic. Without this, the figure was
+            # dominated by a single open admin tab polling /api/admin/* on
+            # a 30s timer (~12 endpoints × 2 polls/min × 60min × 168hr =
+            # ~24K requests per dashboard tab per week) plus token-refresh
+            # and health-check chatter — none of which is "user activity"
+            # in the colloquial sense.
+            canonical_pre, _ = _normalize_path(uri)
+            is_self_polling = (
+                canonical_pre.startswith("/api/admin/")
+                or canonical_pre.startswith("/admin/")
+                or "/admin/" in canonical_pre
+                or canonical_pre == "/api/auth/refresh"
+                or canonical_pre == "/api/health"
+                or canonical_pre.startswith("/api/health/")
+                or _is_static(canonical_pre)
+            )
+            if is_self_polling:
+                # Still scan the rest of the loop for API rollups etc., but
+                # don't inflate the headline human_requests / by_day count.
+                pass
+            else:
+                summary.human_requests += 1
+                by_day[day]["human"] += 1
+                if ip:
+                    human_ips.add(ip)
 
             # Slow human requests worth surfacing (>2s, successful only —
             # 503/timeout already shows up in status distribution)
