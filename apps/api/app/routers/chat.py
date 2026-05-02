@@ -517,7 +517,7 @@ async def chat_endpoint(
         user_role=user_persona,
         user_jurisdiction_focus=user_jurisdiction_focus,
         user_verbosity=user_verbosity,
-        user_id=current_user.id,
+        user_id=uuid.UUID(current_user.user_id),
         web_fallback_enabled=settings.web_fallback_enabled,
         web_fallback_cosine_threshold=settings.web_fallback_cosine_threshold,
         web_fallback_daily_cap=settings.web_fallback_daily_cap,
@@ -559,6 +559,7 @@ async def chat_stream_endpoint(
     stays open until DB writes complete.
     """
     from rag.engine import chat_with_progress
+    from app.config import settings
 
     (
         vessel_profile, conversation_id, history, is_new_conversation,
@@ -597,6 +598,10 @@ async def chat_stream_endpoint(
                 user_role=user_persona,
                 user_jurisdiction_focus=user_jurisdiction_focus,
                 user_verbosity=user_verbosity,
+                user_id=user_uuid,
+                web_fallback_enabled=settings.web_fallback_enabled,
+                web_fallback_cosine_threshold=settings.web_fallback_cosine_threshold,
+                web_fallback_daily_cap=settings.web_fallback_daily_cap,
             ):
                 event_type = event["event"]
                 payload = event["data"]

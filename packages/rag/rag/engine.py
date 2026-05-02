@@ -1653,6 +1653,10 @@ async def chat_with_progress(
     user_role: str | None = None,
     user_jurisdiction_focus: str | None = None,
     user_verbosity: str | None = None,
+    user_id: UUID | None = None,
+    web_fallback_enabled: bool = True,
+    web_fallback_cosine_threshold: float = 0.7,
+    web_fallback_daily_cap: int = 10,
 ) -> AsyncIterator[dict]:
     """Same RAG pipeline as chat() but yields lightweight progress events.
 
@@ -1787,6 +1791,7 @@ async def chat_with_progress(
     # hook but this one was missing it prior to 2026-04-23 analysis.
     # Fire-and-forget: DB errors never fail the SSE stream.
     hedge_phrase = detect_hedge(cleaned_answer)
+    web_fallback_card = None
     if hedge_phrase is not None:
         try:
             await _log_retrieval_miss(
@@ -1809,25 +1814,63 @@ async def chat_with_progress(
                 str(exc)[:200],
             )
 
+        # Sprint D6.48 Phase 2 — fire web fallback for streaming users.
+        # This is the path real users hit through the chat UI. The
+        # non-streaming chat() function had this hook from D6.48 ship,
+        # but the streaming path was missed (caught by Blake's STRETCH
+        # DUCK 07 review 2026-05-02).
+        if web_fallback_enabled:
+            top_cosine = (
+                chunks[0].get("similarity", 0.0) if chunks else 0.0
+            )
+            yield {
+                "event": "status",
+                "data": "Searching authoritative sources…",
+            }
+            try:
+                web_fallback_card = await _try_web_fallback(
+                    query=query,
+                    conversation_id=conversation_id,
+                    user_id=user_id,
+                    pool=pool,
+                    anthropic_client=anthropic_client,
+                    top_cosine=top_cosine,
+                    cosine_threshold=web_fallback_cosine_threshold,
+                    daily_cap=web_fallback_daily_cap,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "web fallback failed (non-fatal): %s: %s",
+                    type(exc).__name__,
+                    str(exc)[:200],
+                )
+
     # Stage 6: Final event with the complete response
-    yield {
-        "event": "done",
-        "data": {
-            "answer": cleaned_answer,
-            "cited_regulations": [
-                {
-                    "source": c.source,
-                    "section_number": c.section_number,
-                    "section_title": c.section_title,
-                }
-                for c in verified_cited
-            ],
-            "conversation_id": str(conversation_id),
-            "model_used": model_used,
-            "input_tokens": input_tokens,
-            "output_tokens": output_tokens,
-            "unverified_citations": all_unverified,
-            "vessel_update": vessel_update,
-            "regenerated": regenerated,
-        },
+    done_payload = {
+        "answer": cleaned_answer,
+        "cited_regulations": [
+            {
+                "source": c.source,
+                "section_number": c.section_number,
+                "section_title": c.section_title,
+            }
+            for c in verified_cited
+        ],
+        "conversation_id": str(conversation_id),
+        "model_used": model_used,
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "unverified_citations": all_unverified,
+        "vessel_update": vessel_update,
+        "regenerated": regenerated,
     }
+    if web_fallback_card is not None:
+        done_payload["web_fallback"] = {
+            "fallback_id": web_fallback_card.fallback_id,
+            "source_url": web_fallback_card.source_url,
+            "source_domain": web_fallback_card.source_domain,
+            "quote": web_fallback_card.quote,
+            "summary": web_fallback_card.summary,
+            "confidence": web_fallback_card.confidence,
+        }
+    yield {"event": "done", "data": done_payload}
