@@ -27,6 +27,10 @@ export interface ChatStreamDone {
   input_tokens: number
   output_tokens: number
   vessel_update?: Record<string, unknown> | null
+  // Sprint D6.48 Phase 2 — populated only when the corpus genuinely
+  // missed AND web fallback found a verified verbatim quote on a
+  // trusted regulator domain.
+  web_fallback?: import('@/types/chat').WebFallbackCard | null
 }
 
 /**

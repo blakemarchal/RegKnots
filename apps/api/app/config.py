@@ -70,6 +70,20 @@ class Settings(BaseSettings):
     # returns an empty summary in that case instead of erroring.
     caddy_access_log_dir: str = Field(default="/var/log/caddy", validation_alias="CADDY_ACCESS_LOG_DIR")
 
+    # ── Crew tier (D6.49) ────────────────────────────────────────────────
+    # Master enable for the crew-tier feature. When false, the workspace
+    # endpoints + UI are hidden from non-internal users; the migration
+    # data model is harmless.
+    crew_tier_enabled: bool = Field(
+        default=False, validation_alias="CREW_TIER_ENABLED",
+    )
+    # Internal-only mode — when true (and crew_tier_enabled), only users
+    # with is_internal=true can create or join workspaces. Used during
+    # staged rollout for self-review before lifting to all users.
+    crew_tier_internal_only: bool = Field(
+        default=True, validation_alias="CREW_TIER_INTERNAL_ONLY",
+    )
+
     # ── Web search fallback (D6.48 Phase 2) ──────────────────────────────
     # Master kill switch — flip to false on prod to disable fallback firing
     # for all users instantly without redeploying.
