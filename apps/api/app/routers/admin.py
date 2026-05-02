@@ -150,6 +150,13 @@ class AdminStats(BaseModel):
     message_limit_reached: int
     recent_hedges: list[HedgeEvent]
 
+    # Row 4b — Web fallback (Sprint D6.48)
+    web_fallback_attempts_7d: int       # total fallback firings (production only)
+    web_fallback_surfaced_7d: int       # passed all 3 gates → user saw a card
+    web_fallback_surface_rate_7d: float # 0-100, surfaced / attempts
+    web_fallback_thumbs_up_7d: int      # user clicked helpful
+    web_fallback_thumbs_down_7d: int    # user clicked not_helpful
+
     # Knowledge base
     total_chunks: int
     chunks_by_source: dict[str, int]
@@ -351,6 +358,37 @@ async def get_stats(
             "SELECT COUNT(*) FROM retrieval_misses WHERE created_at > NOW() - INTERVAL '7 days'"
         )
 
+        # Sprint D6.48 Phase 2 — web fallback metrics. Calibration rows
+        # are excluded because those are admin replays, not real user
+        # activity. We surface attempt + surface counts so the operator
+        # can compare against retrieval_misses_7d to see how often the
+        # fallback rescues a corpus gap.
+        web_fb_attempts_7d = await conn.fetchval(
+            "SELECT COUNT(*) FROM web_fallback_responses "
+            "WHERE is_calibration = FALSE "
+            "AND created_at > NOW() - INTERVAL '7 days'"
+        ) or 0
+        web_fb_surfaced_7d = await conn.fetchval(
+            "SELECT COUNT(*) FROM web_fallback_responses "
+            "WHERE is_calibration = FALSE AND surfaced = TRUE "
+            "AND created_at > NOW() - INTERVAL '7 days'"
+        ) or 0
+        web_fb_thumbs_up_7d = await conn.fetchval(
+            "SELECT COUNT(*) FROM web_fallback_responses "
+            "WHERE is_calibration = FALSE AND user_feedback = 'helpful' "
+            "AND created_at > NOW() - INTERVAL '7 days'"
+        ) or 0
+        web_fb_thumbs_down_7d = await conn.fetchval(
+            "SELECT COUNT(*) FROM web_fallback_responses "
+            "WHERE is_calibration = FALSE "
+            "AND user_feedback IN ('not_helpful', 'inaccurate') "
+            "AND created_at > NOW() - INTERVAL '7 days'"
+        ) or 0
+        web_fb_surface_rate_7d = (
+            100.0 * web_fb_surfaced_7d / web_fb_attempts_7d
+            if web_fb_attempts_7d > 0 else 0.0
+        )
+
         recent_hedges_rows = await conn.fetch(
             "SELECT rm.created_at, u.email AS user_email, rm.query, rm.hedge_phrase_matched "
             "FROM retrieval_misses rm "
@@ -435,6 +473,12 @@ async def get_stats(
             )
             for r in recent_hedges_rows
         ],
+        # Web fallback (Sprint D6.48 Phase 2)
+        web_fallback_attempts_7d=web_fb_attempts_7d,
+        web_fallback_surfaced_7d=web_fb_surfaced_7d,
+        web_fallback_surface_rate_7d=round(web_fb_surface_rate_7d, 1),
+        web_fallback_thumbs_up_7d=web_fb_thumbs_up_7d,
+        web_fallback_thumbs_down_7d=web_fb_thumbs_down_7d,
         # Knowledge base
         total_chunks=total_chunks or 0,
         chunks_by_source=chunks_by_source,
