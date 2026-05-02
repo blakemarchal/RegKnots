@@ -143,7 +143,15 @@ def normalize_domain(host: str) -> str:
 
 
 def is_trusted_domain(url: str) -> bool:
-    """True if the URL's host is on the whitelist (exact or wildcard suffix)."""
+    """True if the URL's host is on the whitelist:
+      - exact match against EXACT_TRUSTED_DOMAINS, OR
+      - subdomain of any exact-trusted domain (e.g. wwwcdn.imo.org
+        is trusted because imo.org is), OR
+      - matches a wildcard suffix (.gov, .mil, .gov.uk, etc.).
+    Subdomain matching is safe because regulators own their subdomain
+    namespaces — there is no scenario where attacker-controlled
+    foo.imo.org exists without IMO's authorization.
+    """
     try:
         host = urlparse(url).netloc
     except Exception:
@@ -151,8 +159,16 @@ def is_trusted_domain(url: str) -> bool:
     if not host:
         return False
     h = normalize_domain(host)
+    # Strip port if present.
+    if ":" in h:
+        h = h.split(":", 1)[0]
     if h in EXACT_TRUSTED_DOMAINS:
         return True
+    # Subdomain of any exact-trusted org.
+    for trusted in EXACT_TRUSTED_DOMAINS:
+        if h.endswith("." + trusted):
+            return True
+    # Wildcard TLD suffixes.
     for suffix in WILDCARD_TRUSTED_SUFFIXES:
         if h.endswith(suffix):
             return True
