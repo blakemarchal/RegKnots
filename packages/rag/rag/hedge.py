@@ -121,6 +121,10 @@ HEDGE_PATTERNS: list[str] = [
     r"haven'?t\s+(?:been\s+)?retrieved",
     r"i\s+(?:could not|couldn'?t)\s+find",
     r"i\s+(?:cannot|can'?t)\s+find",
+    # "I don't have retrieved context containing X" — observed in
+    # no-vessel-context queries (Blake review #2, no-vessel branch).
+    r"don'?t have retrieved context",
+    r"do not have retrieved context",
     # "no specific information about <X>" / "no information about <X>"
     # — model admitting it has nothing on the topic.
     r"no\s+(?:specific\s+)?information\s+(?:about|on|regarding)",
