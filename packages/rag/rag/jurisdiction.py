@@ -252,6 +252,146 @@ _QUERY_JURISDICTION_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
         r"|\bIRI\s+(?:marine|notice)",
         re.IGNORECASE,
     )),
+    # Bahamas (Sprint D6.22 — bma_mn ingested but routing was missing)
+    ("bs", re.compile(
+        r"\bBahamas\b"
+        r"|\bBahamian[-\s]flag\b"
+        r"|\bBMA\s+(?:Marine\s+Notice|MN|circular)\b",
+        re.IGNORECASE,
+    )),
+    # France (Sprint D6.46 — fr_transport)
+    # Patterns must be specific enough not to match generic "freight" or
+    # ambiguous tokens. Anchored on the word "France"/"French" and on
+    # actual French regulatory citation forms.
+    ("fr", re.compile(
+        r"\bFrance\b"
+        r"|\bFrench[-\s]flag\b"
+        r"|\bFrench\s+(?:maritime|navigation|registry|register|"
+        r"vessel|ship|administration|regulation|law|rule|rules|"
+        r"requirement|requirements|code|article)\b"
+        r"|\bDAM\b"
+        r"|\bAffaires\s+Maritimes\b"
+        r"|\bCode\s+des\s+transports\b"
+        r"|\b(?:Article\s+)?(?:L|R|D)\s*5\d{3}-\d"  # Article L5111-1 etc.
+        r"|\bL[ée]gifrance\b"
+        r"|\bnavires?\s+fran[çc]ais\b"
+        r"|\bpavillon\s+fran[çc]ais\b",
+        re.IGNORECASE,
+    )),
+    # Germany (Sprint D6.47 — bg_verkehr)
+    ("de", re.compile(
+        r"\bGermany\b"
+        r"|\bGerman[-\s]flag\b"
+        r"|\bGerman\s+(?:maritime|navigation|registry|vessel|ship|"
+        r"administration|regulation|law|rule|rules|requirement|requirements)\b"
+        r"|\bBG\s+Verkehr\b"
+        r"|\bdeutsche-flagge\b"
+        r"|\bBSH\b"
+        r"|\bSeeArbG\b"
+        r"|\bSeearbeitsgesetz\b"
+        r"|\bSchSV\b"
+        r"|\bdeutsche[rs]?\s+(?:Schiff|Flagge|Schifffahrt)\b"
+        r"|\bRundschreiben\b",
+        re.IGNORECASE,
+    )),
+    # Spain (Sprint D6.47 — dgmm_es)
+    ("es", re.compile(
+        r"\bSpain\b"
+        r"|\bSpanish[-\s]flag\b"
+        r"|\bSpanish\s+(?:maritime|navigation|registry|vessel|ship|"
+        r"administration|regulation|law|rule|rules|requirement|"
+        r"requirements|merchant\s+marine)\b"
+        r"|\bDGMM\b"
+        r"|\bDirecci[óo]n\s+General\s+de\s+la\s+Marina\s+Mercante\b"
+        r"|\bMarina\s+Mercante\s+espa[ñn]ola\b"
+        r"|\bReal\s+Decreto\s+\d"
+        r"|\bRD\s+\d{1,4}/\d{4}\b"
+        r"|\bBOE-A-\d{4}\b"
+        r"|\bbuque\s+espa[ñn]ol\b"
+        r"|\bpabell[óo]n\s+espa[ñn]ol\b",
+        re.IGNORECASE,
+    )),
+    # Italy (Sprint D6.47 — it_capitaneria)
+    ("it", re.compile(
+        r"\bItaly\b"
+        r"|\bItalian[-\s]flag\b"
+        r"|\bItalian\s+(?:maritime|navigation|registry|vessel|ship|"
+        r"administration|regulation|law|rule|rules|requirement|"
+        r"requirements|coast\s+guard)\b"
+        r"|\bCapitanerie?\s+di\s+Porto\b"
+        r"|\bGuardia\s+Costiera\b"
+        r"|\bMinistero\s+(?:delle|dei)\s+(?:Infrastrutture|Trasporti)\b"
+        r"|\bMIT\s+(?:lavoro|decreto|circolare)\b"
+        r"|\bCircolare\s+(?:SG|Serie\s+Generale)\b"
+        r"|\bOrdinanza\s+\d+/\d{4}\b"
+        r"|\bnave\s+italiana\b"
+        r"|\bbandiera\s+italiana\b",
+        re.IGNORECASE,
+    )),
+    # Norway (Sprint D6.23 + D6.46 expansion — nma_rsv)
+    ("no", re.compile(
+        r"\bNorway\b"
+        r"|\bNorwegian[-\s]flag\b"
+        r"|\bNorwegian\s+(?:maritime|navigation|registry|vessel|ship|"
+        r"administration|regulation|law|rule|rules|requirement|requirements)\b"
+        r"|\bNMA\b"
+        r"|\bSj[øo]fartsdirektoratet\b"
+        r"|\b(?:NIS|NOR)[-\s](?:registry|register|ship)\b"
+        r"|\b(?:NMA|sdir\.no)\s+(?:circular|rundskriv)\b"
+        r"|\bRSR\s+\d|\bRSV\s+\d"
+        r"|\bnorske\s+skip\b",
+        re.IGNORECASE,
+    )),
+    # Greece (Sprint D6.47 — gr_ynanp scaffolded; ingest blocked by Akamai)
+    ("gr", re.compile(
+        r"\bGreece\b"
+        r"|\bGreek[-\s]flag\b"
+        r"|\bGreek\s+(?:maritime|navigation|registry|vessel|ship|"
+        r"administration|regulation|law|rule|rules|requirement|requirements)\b"
+        r"|\bHMSA\b"
+        r"|\bYNANP\b"
+        r"|\bHellenic\s+(?:Coast\s+Guard|Ministry\s+of\s+Maritime|Maritime)\b"
+        r"|\b(?:ΥΑ|ΠΔ|ΦΕΚ)\s+\d"   # Greek-script citation forms
+        r"|\b(?:YA|PD|FEK)\s+\d{1,5}/\d{4}\b"  # transliterated forms
+        r"|\bελληνικ[όά]\s+(?:πλοί|σκάφος)",
+        re.IGNORECASE,
+    )),
+    # Hong Kong (mardep_msin)
+    ("hk", re.compile(
+        r"\bHong\s+Kong\b"
+        r"|\bHK[-\s]flag(?:ged)?\b"
+        r"|\bMARDEP\b"
+        r"|\bHong\s+Kong\s+Marine\s+Department\b"
+        r"|\bMSIN\s+\d",
+        re.IGNORECASE,
+    )),
+    # Japan (no corpus yet — pattern future-proofs the routing)
+    ("jp", re.compile(
+        r"\bJapan\b"
+        r"|\bJapanese[-\s]flag\b"
+        r"|\bJapanese\s+(?:maritime|navigation|registry|vessel|ship)\b"
+        r"|\bClassNK\b"
+        r"|\bJG\s+(?:circular|notice)"
+        r"|\bMLIT\s+(?:Japan|circular)",
+        re.IGNORECASE,
+    )),
+    # Korea (no corpus yet)
+    ("kr", re.compile(
+        r"\bKorea\b"
+        r"|\bKorean[-\s]flag\b"
+        r"|\bKorean\s+(?:maritime|navigation|registry|vessel|ship)\b"
+        r"|\bKorean\s+Register\b"
+        r"|\bKR\s+(?:circular|notice|class)",
+        re.IGNORECASE,
+    )),
+    # China (no corpus yet)
+    ("cn", re.compile(
+        r"\bChinese[-\s]flag\b"
+        r"|\bChinese\s+(?:maritime|navigation|registry|vessel|ship)\b"
+        r"|\bCCS\s+(?:rules|circular|class)\b"
+        r"|\bChina\s+(?:Classification\s+Society|MSA|Maritime)\b",
+        re.IGNORECASE,
+    )),
 ]
 
 

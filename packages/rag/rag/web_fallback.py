@@ -102,6 +102,29 @@ EXACT_TRUSTED_DOMAINS: frozenset[str] = frozenset({
     "tc.canada.ca",
     "mca.gov.uk",
     "gov.uk",
+    # Sprint D6.48 — additions caught by calibration replay (legifrance
+    # was the dominant blocked-domain hit; the rest pre-empt the same
+    # mistake for other EU/Asian government domains).
+    "legifrance.gouv.fr",
+    "data.gouv.fr",
+    "service-public.fr",
+    "ecologie.gouv.fr",
+    "mer.gouv.fr",
+    "bund.de",
+    "bsh.de",
+    "bmdv.bund.de",
+    "overheid.nl",
+    "rijksoverheid.nl",
+    "ilent.nl",
+    "kustwacht.nl",
+    "regjeringen.no",
+    "kystverket.no",
+    "havarikom.no",
+    "mlit.go.jp",
+    "kaiho.mlit.go.jp",      # Japan Coast Guard
+    "mof.go.kr",
+    "mlit.go.kr",
+    "msa.gov.cn",            # China Maritime Safety Admin
     # International marine MOUs
     "tokyo-mou.org",
     "parismou.org",
@@ -131,6 +154,19 @@ WILDCARD_TRUSTED_SUFFIXES: tuple[str, ...] = (
     ".gob.es",
     ".gc.ca",
     ".canada.ca",
+    # Sprint D6.48 — additional government-domain conventions.
+    ".gouv.fr",       # France (legifrance.gouv.fr was the dominant
+                      # blocked-domain hit in calibration replay)
+    ".bund.de",       # German federal
+    ".overheid.nl",   # Dutch government
+    ".gov.gr",        # Greek government
+    ".gov.no",        # Norwegian (some agencies use this)
+    ".go.jp",         # Japan
+    ".go.kr",         # Korea
+    ".gov.cn",        # China
+    ".gov.in",        # India
+    ".gov.za",        # South Africa
+    ".gov.br",        # Brazil
 )
 
 
