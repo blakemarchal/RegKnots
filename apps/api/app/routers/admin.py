@@ -1,5 +1,6 @@
 """Admin dashboard endpoints — stats, user list, model usage, pilot reset, email testing, Sentry, export."""
 
+import asyncio
 import logging
 import uuid
 from datetime import datetime, timezone
@@ -7,7 +8,8 @@ from typing import Annotated, Any, Literal
 
 import asyncpg
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from anthropic import AsyncAnthropic
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
@@ -1016,6 +1018,217 @@ async def list_citation_errors(
             unverified_citation=r["unverified_citation"],
             model_used=r["model_used"],
             message_preview=r["message_preview"] or "",
+            created_at=r["created_at"].isoformat() if r["created_at"] else "",
+        )
+        for r in rows
+    ]
+
+
+# ── Web fallback calibration (D6.48 Phase 1) ──────────────────────────────────
+
+class WebFallbackReplayRow(BaseModel):
+    """One result of running the fallback stack against a historical hedge."""
+    id: str
+    query: str
+    web_query_used: str | None
+    confidence: int | None
+    source_url: str | None
+    source_domain: str | None
+    quote_text: str | None
+    quote_verified: bool
+    surfaced: bool
+    surface_blocked_reason: str | None
+    answer_text: str | None
+    top_urls: list[str]
+    latency_ms: int
+    created_at: str
+
+
+class WebFallbackReplayResult(BaseModel):
+    requested: int
+    attempted: int
+    surfaced: int
+    blocked_by_confidence: int
+    blocked_by_domain: int
+    blocked_by_quote: int
+    no_results_or_error: int
+    rows: list[WebFallbackReplayRow]
+
+
+@router.post("/web-fallback/replay", response_model=WebFallbackReplayResult)
+async def web_fallback_replay(
+    request: Request,
+    _admin: Annotated[CurrentUser, Depends(require_admin)],
+    n: int = Query(default=25, ge=1, le=100),
+    cosine_threshold: float = Query(default=0.5, ge=0.0, le=1.0),
+) -> WebFallbackReplayResult:
+    """Run the web-search fallback stack against the most recent N hedge
+    queries (from `retrieval_misses`) and persist every attempt to
+    `web_fallback_responses` with `is_calibration=true`.
+
+    No real user sees these results — this endpoint exists purely for
+    the calibration pass before the fallback is wired into the chat
+    pipeline. Use it to:
+      - Tune the trusted-domain whitelist (look at blocked_by_domain).
+      - Watch the verbatim-quote gate behavior.
+      - Sanity-check Anthropic web_search confidence calibration.
+
+    Run several times before launch; once production traffic accumulates
+    the same data will populate via real chat hits.
+    """
+    from rag.web_fallback import attempt_web_fallback
+
+    pool = await get_pool()
+    anthropic_client: AsyncAnthropic = request.app.state.anthropic
+
+    rows = await pool.fetch(
+        """
+        SELECT id, query, created_at
+        FROM retrieval_misses
+        WHERE created_at > NOW() - INTERVAL '30 days'
+        ORDER BY created_at DESC
+        LIMIT $1
+        """,
+        n,
+    )
+    if not rows:
+        return WebFallbackReplayResult(
+            requested=n, attempted=0, surfaced=0,
+            blocked_by_confidence=0, blocked_by_domain=0, blocked_by_quote=0,
+            no_results_or_error=0, rows=[],
+        )
+
+    # Run sequentially — Anthropic web_search is rate-limited and we don't
+    # want to thunder-herd. ~3-8s per call × N items.
+    persisted_rows: list[WebFallbackReplayRow] = []
+    surfaced = blocked_conf = blocked_dom = blocked_quote = noresult = 0
+
+    for row in rows:
+        query = row["query"]
+        try:
+            result = await attempt_web_fallback(
+                query=query,
+                anthropic_client=anthropic_client,
+            )
+        except Exception as exc:
+            logger.warning("Replay attempt failed for %r: %s", query[:80], exc)
+            continue
+
+        # Persist the attempt with is_calibration=true.
+        try:
+            inserted = await pool.fetchrow(
+                """
+                INSERT INTO web_fallback_responses
+                    (is_calibration, query, web_query_used,
+                     top_urls, confidence, source_url, source_domain,
+                     quote_text, quote_verified, surfaced,
+                     surface_blocked_reason, answer_text, latency_ms)
+                VALUES (TRUE, $1, $2, $3::text[], $4, $5, $6, $7, $8, $9,
+                        $10, $11, $12)
+                RETURNING id, created_at
+                """,
+                query,
+                result.web_query_used,
+                result.top_urls or [],
+                result.confidence,
+                result.source_url,
+                result.source_domain,
+                result.quote_text,
+                result.quote_verified,
+                result.surfaced,
+                result.surface_blocked_reason,
+                result.answer_text,
+                result.latency_ms,
+            )
+        except Exception as exc:
+            logger.warning("Replay persist failed: %s", exc)
+            continue
+
+        if result.surfaced:
+            surfaced += 1
+        elif result.surface_blocked_reason == "low_confidence":
+            blocked_conf += 1
+        elif result.surface_blocked_reason == "domain_blocked":
+            blocked_dom += 1
+        elif result.surface_blocked_reason == "quote_unverified":
+            blocked_quote += 1
+        else:
+            noresult += 1
+
+        persisted_rows.append(WebFallbackReplayRow(
+            id=str(inserted["id"]),
+            query=query,
+            web_query_used=result.web_query_used,
+            confidence=result.confidence,
+            source_url=result.source_url,
+            source_domain=result.source_domain,
+            quote_text=(result.quote_text[:300] if result.quote_text else None),
+            quote_verified=result.quote_verified,
+            surfaced=result.surfaced,
+            surface_blocked_reason=result.surface_blocked_reason,
+            answer_text=(result.answer_text[:500] if result.answer_text else None),
+            top_urls=result.top_urls,
+            latency_ms=result.latency_ms,
+            created_at=inserted["created_at"].isoformat(),
+        ))
+
+    return WebFallbackReplayResult(
+        requested=n,
+        attempted=len(persisted_rows),
+        surfaced=surfaced,
+        blocked_by_confidence=blocked_conf,
+        blocked_by_domain=blocked_dom,
+        blocked_by_quote=blocked_quote,
+        no_results_or_error=noresult,
+        rows=persisted_rows,
+    )
+
+
+@router.get("/web-fallback/recent", response_model=list[WebFallbackReplayRow])
+async def web_fallback_recent(
+    _admin: Annotated[CurrentUser, Depends(require_admin)],
+    limit: int = Query(default=50, ge=1, le=500),
+    only_surfaced: bool = Query(default=False),
+    only_calibration: bool = Query(default=False),
+) -> list[WebFallbackReplayRow]:
+    """Return recent web-fallback attempts for admin review."""
+    pool = await get_pool()
+    where_clauses = []
+    params: list = []
+    if only_surfaced:
+        where_clauses.append("surfaced = TRUE")
+    if only_calibration:
+        where_clauses.append("is_calibration = TRUE")
+    where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+    params.append(limit)
+    rows = await pool.fetch(
+        f"""
+        SELECT id, query, web_query_used, confidence, source_url,
+               source_domain, quote_text, quote_verified, surfaced,
+               surface_blocked_reason, answer_text, top_urls,
+               latency_ms, created_at
+        FROM web_fallback_responses
+        {where_sql}
+        ORDER BY created_at DESC
+        LIMIT ${len(params)}
+        """,
+        *params,
+    )
+    return [
+        WebFallbackReplayRow(
+            id=str(r["id"]),
+            query=r["query"],
+            web_query_used=r["web_query_used"],
+            confidence=r["confidence"],
+            source_url=r["source_url"],
+            source_domain=r["source_domain"],
+            quote_text=(r["quote_text"][:300] if r["quote_text"] else None),
+            quote_verified=r["quote_verified"] or False,
+            surfaced=r["surfaced"],
+            surface_blocked_reason=r["surface_blocked_reason"],
+            answer_text=(r["answer_text"][:500] if r["answer_text"] else None),
+            top_urls=list(r["top_urls"] or []),
+            latency_ms=r["latency_ms"] or 0,
             created_at=r["created_at"].isoformat() if r["created_at"] else "",
         )
         for r in rows
