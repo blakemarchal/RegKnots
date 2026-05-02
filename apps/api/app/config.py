@@ -91,10 +91,14 @@ class Settings(BaseSettings):
         default=True, validation_alias="WEB_FALLBACK_ENABLED",
     )
     # Cosine threshold below which we treat retrieval as a true corpus
-    # gap and consider firing fallback. 0.5 is the v1 default — tune up
-    # if fallback fires too often, down if it misses real gaps.
+    # gap and consider firing fallback. v1 was 0.5; audit (D6.48 Phase 2,
+    # 2026-05-02) showed real-world hedges fire with top-1 cosine in the
+    # 0.55-0.70 band ("nearby but not the answer"), making 0.5 a silent
+    # blocker. Bumped to 0.7 so the hedge classifier is the dominant
+    # signal and cosine only catches truly-confident corpus answers
+    # the model still hedged on (rare).
     web_fallback_cosine_threshold: float = Field(
-        default=0.5, validation_alias="WEB_FALLBACK_COSINE_THRESHOLD",
+        default=0.7, validation_alias="WEB_FALLBACK_COSINE_THRESHOLD",
     )
     # Per-user daily cap. Raises a soft block — user gets the original
     # hedge instead of a fallback after exceeding their daily quota.

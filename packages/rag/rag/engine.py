@@ -1469,7 +1469,20 @@ async def _try_web_fallback(
     from rag.models import WebFallbackCard
 
     # Gate 1: only fire when retrieval genuinely missed (true corpus gap).
+    # Persist a synthetic blocked-attempt row so the admin review tool
+    # can see WHY the fallback didn't fire (silent skip used to bury the
+    # signal). Sprint D6.48 Phase 2 audit fix.
     if top_cosine >= cosine_threshold:
+        try:
+            await pool.execute(
+                "INSERT INTO web_fallback_responses "
+                "  (is_calibration, user_id, chat_message_id, query, "
+                "   surfaced, surface_blocked_reason, latency_ms) "
+                "VALUES (FALSE, $1, $2, $3, FALSE, 'cosine_too_high', 0)",
+                user_id, conversation_id, query,
+            )
+        except Exception as exc:
+            logger.warning("cosine-block persist failed: %s", exc)
         return None
 
     # Gate 2: per-user daily cap (soft block — silently skip rather than
