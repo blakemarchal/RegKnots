@@ -364,9 +364,108 @@ export function ChatMessage({ message, onCitationTap }: Props) {
           </div>
         )}
 
+        {/* Sprint D6.48 Phase 2 — Web fallback yellow card. Visually
+            distinct from corpus answers above. Renders only when the
+            assistant hedged AND a verified verbatim quote was found
+            on a trusted regulator domain. */}
+        {message.web_fallback && (
+          <WebFallbackCardView card={message.web_fallback} />
+        )}
+
         {/* Action bar — copy plain-text version of the message */}
         <div className="mt-1 -ml-2.5 flex justify-start">
           <CopyMessageButton content={message.content} />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+
+// ── Web fallback yellow card ─────────────────────────────────────────────
+// Sprint D6.48 Phase 2. The card is intentionally visually distinct
+// from corpus citations: amber/yellow accent, "Web reference" header,
+// permanent disclaimer footer. We never blend this with the cited_
+// regulations chips above — they live in different lanes for a reason.
+
+function WebFallbackCardView({ card }: { card: import('@/types/chat').WebFallbackCard }) {
+  const [feedback, setFeedback] = useState<'helpful' | 'not_helpful' | null>(null)
+  const [submitting, setSubmitting] = useState(false)
+
+  async function submitFeedback(value: 'helpful' | 'not_helpful') {
+    if (submitting || feedback) return
+    setSubmitting(true)
+    try {
+      // Best-effort fire — errors don't surface to user.
+      await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL || ''}/web-fallback/${card.fallback_id}/feedback`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ feedback: value }),
+        }
+      )
+      setFeedback(value)
+    } catch {
+      // swallow
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <div className="mt-4 border-l-2 border-amber-400/70 bg-amber-400/5 rounded-r-md p-4">
+      <div className="flex items-center gap-2 mb-2">
+        <span className="text-xs font-mono uppercase tracking-wider text-amber-300/90">
+          Web reference
+        </span>
+        <span className="text-[10px] font-mono text-amber-200/50">
+          (not in RegKnots corpus)
+        </span>
+      </div>
+      <blockquote className="border-l-2 border-amber-400/40 pl-3 italic text-sm text-[#f0ece4]/85 mb-2">
+        &ldquo;{card.quote}&rdquo;
+      </blockquote>
+      {card.summary && (
+        <div className="text-sm text-[#f0ece4]/80 mb-2">{card.summary}</div>
+      )}
+      <div className="text-xs font-mono text-amber-200/60 mb-3 break-all">
+        Source:{' '}
+        <a
+          href={card.source_url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="underline hover:text-amber-200"
+        >
+          {card.source_domain}
+        </a>
+      </div>
+      <div className="flex items-center justify-between border-t border-amber-400/15 pt-2">
+        <div className="text-[11px] text-amber-200/50 italic">
+          Verify against the primary regulator before relying on this for compliance.
+        </div>
+        <div className="flex items-center gap-1.5 ml-2">
+          {feedback === null ? (
+            <>
+              <button
+                aria-label="Helpful"
+                onClick={() => submitFeedback('helpful')}
+                disabled={submitting}
+                className="px-1.5 py-0.5 text-xs hover:bg-amber-400/15 rounded transition-colors text-amber-200/70 disabled:opacity-40"
+              >👍</button>
+              <button
+                aria-label="Not helpful"
+                onClick={() => submitFeedback('not_helpful')}
+                disabled={submitting}
+                className="px-1.5 py-0.5 text-xs hover:bg-amber-400/15 rounded transition-colors text-amber-200/70 disabled:opacity-40"
+              >👎</button>
+            </>
+          ) : (
+            <span className="text-[10px] font-mono text-amber-200/60">
+              {feedback === 'helpful' ? 'thanks' : 'noted'}
+            </span>
+          )}
         </div>
       </div>
     </div>

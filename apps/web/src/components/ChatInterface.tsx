@@ -361,6 +361,7 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
             role: 'assistant',
             content: data.answer,
             citations: data.cited_regulations,
+            web_fallback: data.web_fallback ?? null,
           }
           setMessages(prev => [...prev, assistantMsg])
           // Generation succeeded — drop the pending marker.
@@ -457,6 +458,7 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
             role: 'assistant',
             content: data.answer,
             citations: data.cited_regulations,
+            web_fallback: data.web_fallback ?? null,
           }
           setMessages(prev => [...prev, assistantMsg])
           clearPending(data.conversation_id)
