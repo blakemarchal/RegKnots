@@ -169,6 +169,20 @@ function DetailContent() {
           }`}>
             {STATUS_LABEL[ws.status]}
           </span>
+          {/* D6.49 — open chat in this workspace context. Activates only
+              when explicitly clicked; personal chat (no ?workspace= URL
+              param) is always available at /. */}
+          {ws.status !== 'archived' && ws.status !== 'canceled' && (
+            <Link
+              href={`/?workspace=${ws.id}`}
+              className="ml-auto px-2.5 py-1 rounded-md bg-[#2dd4bf]/15 border border-[#2dd4bf]/30
+                         text-xs font-medium text-[#2dd4bf] hover:bg-[#2dd4bf]/25
+                         whitespace-nowrap transition-colors"
+              title="Opens chat in workspace context — chats are shared with members"
+            >
+              Open chat →
+            </Link>
+          )}
         </div>
         <div className="text-xs text-[#6b7594]">
           You are <span className="text-[#f0ece4]/80 font-mono">{ws.my_role.toUpperCase()}</span> ·

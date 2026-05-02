@@ -8,6 +8,7 @@ export async function sendMessage(
   query: string,
   conversationId: string | null,
   vesselId?: string | null,
+  workspaceId?: string | null,
 ): Promise<ApiResponse> {
   return apiRequest<ApiResponse>('/chat', {
     method: 'POST',
@@ -15,6 +16,7 @@ export async function sendMessage(
       query,
       ...(conversationId ? { conversation_id: conversationId } : {}),
       ...(vesselId ? { vessel_id: vesselId } : {}),
+      ...(workspaceId ? { workspace_id: workspaceId } : {}),
     }),
   })
 }
@@ -54,12 +56,18 @@ export async function sendMessageStream(
   // user's saved preference. "brief" / "standard" / "detailed" override
   // for this turn only.
   verbosity?: 'brief' | 'standard' | 'detailed',
+  // Sprint D6.49 — workspace context. Undefined/null = personal chat
+  // (legacy behavior). Set to a workspace UUID to bind this turn to
+  // that workspace. The user must already be a member; the API
+  // validates and 403s otherwise.
+  workspaceId?: string | null,
 ): Promise<void> {
   const body = JSON.stringify({
     query,
     ...(conversationId ? { conversation_id: conversationId } : {}),
     ...(vesselId ? { vessel_id: vesselId } : {}),
     ...(verbosity ? { verbosity } : {}),
+    ...(workspaceId ? { workspace_id: workspaceId } : {}),
   })
 
   const doFetch = (token: string | null): Promise<Response> =>

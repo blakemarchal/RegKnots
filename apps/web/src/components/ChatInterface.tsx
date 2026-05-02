@@ -104,6 +104,26 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
   const [vesselSheetOpen, setVesselSheetOpen] = useState(false)
   const searchParams = useSearchParams()
 
+  // Sprint D6.49 — workspace context. URL-based opt-in: when the page
+  // is loaded with ?workspace=<uuid>, all chats in this session bind to
+  // that workspace. Without the param, behavior is bit-identical to
+  // pre-D6.49 personal-tier chat. We capture the value once on mount;
+  // the workspace detail page passes the URL via Link / router.push.
+  const workspaceIdParam = searchParams.get('workspace')
+  const [activeWorkspaceId] = useState<string | null>(workspaceIdParam || null)
+  const [workspaceName, setWorkspaceName] = useState<string | null>(null)
+
+  // Resolve workspace name once for header display. Fire-and-forget;
+  // failure leaves workspaceName=null and shows just the UUID.
+  useEffect(() => {
+    if (!activeWorkspaceId) return
+    let cancelled = false
+    apiRequest<{ name: string }>(`/workspaces/${activeWorkspaceId}`)
+      .then((ws) => { if (!cancelled) setWorkspaceName(ws.name) })
+      .catch(() => { if (!cancelled) setWorkspaceName(null) })
+    return () => { cancelled = true }
+  }, [activeWorkspaceId])
+
   function openVesselSheet() {
     setMenuOpen(false)
     // Brief delay so hamburger closes before sheet opens — avoids z-index conflict
@@ -377,6 +397,7 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
           writePending(startedConvId, query)
         },
         turnVerbosity,
+        activeWorkspaceId,
       )
     } catch (err) {
       if (err instanceof Error && err.message.includes('402')) {
@@ -472,6 +493,8 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
           setConversationId(startedConvId)
           writePending(startedConvId, text)
         },
+        undefined,
+        activeWorkspaceId,
       )
         .catch(() => {
           if (resolvedConvId) {
@@ -655,6 +678,30 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
           </div>
         ) : (
           <>
+            {/* Sprint D6.49 — workspace context banner. Renders ONLY when
+                ?workspace=<id> URL param activated this session.
+                Personal-tier users (no URL param) never see this. */}
+            {activeWorkspaceId && (
+              <div className="flex-shrink-0 bg-[#2dd4bf]/8 border-b border-[#2dd4bf]/25 px-4 py-2 flex items-center justify-between gap-3">
+                <div className="text-xs font-mono text-[#2dd4bf]/80 truncate">
+                  <span className="uppercase tracking-wider mr-1.5">Workspace:</span>
+                  <span className="text-[#f0ece4]">
+                    {workspaceName ?? 'Loading…'}
+                  </span>
+                  <span className="ml-2 text-[#6b7594]">
+                    Chats are shared with all workspace members.
+                  </span>
+                </div>
+                <a
+                  href="/"
+                  className="text-xs font-mono text-[#2dd4bf]/80 hover:text-[#2dd4bf]
+                             underline whitespace-nowrap"
+                >
+                  Switch to personal →
+                </a>
+              </div>
+            )}
+
             {/* Coming Up widget — full version on fresh chat, compact pill
                 on active chats (so power users with one mega-thread still
                 see DAU signals). Dismissible per session in either mode. */}
