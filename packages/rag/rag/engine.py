@@ -31,6 +31,7 @@ from rag.context import build_context
 from rag.fallback import FALLBACK_MODEL_ID, fallback_chat
 from rag.followup import compose_followup_query, detect_followup
 from rag.hedge import detect_hedge
+from rag.query_distill import LENGTH_THRESHOLD_CHARS
 from rag.models import ChatMessage, ChatResponse, CitedRegulation
 from rag.prompts import NAVIGATION_AID_REMINDER, SYSTEM_PROMPT
 from rag.retriever import retrieve
@@ -1301,6 +1302,31 @@ async def chat(
             "Followup detected (pattern=%r); routing to %s with combined retrieval query",
             followup_match, REGENERATION_MODEL,
         )
+    elif (
+        len(conversation_history) == 0
+        and len(query) > LENGTH_THRESHOLD_CHARS
+    ):
+        # Sprint D6.51 — verbose first-turn query distillation. Pre-
+        # rewrite the query to its core regulatory question before
+        # embedding, so retrieval can find the rule the user is
+        # actually asking about. The original query still goes to the
+        # generation prompt — only the embedding-input is distilled.
+        # See packages/rag/rag/query_distill.py.
+        from rag.query_distill import distill_query
+        distilled = await distill_query(
+            query=query,
+            anthropic_client=anthropic_client,
+            pool=pool,
+            user_id=user_id,
+            conversation_id=conversation_id,
+        )
+        if distilled:
+            retrieval_query = distilled
+            logger.info(
+                "Distilled verbose first-turn query "
+                "(orig=%dch, distilled=%dch): %r",
+                len(query), len(distilled), distilled[:100],
+            )
 
     # 2. Retrieve
     chunks = await retrieve(
@@ -1685,6 +1711,30 @@ async def chat_with_progress(
             "Followup detected (pattern=%r); routing to %s with combined retrieval query",
             followup_match, REGENERATION_MODEL,
         )
+    elif (
+        len(conversation_history) == 0
+        and len(query) > LENGTH_THRESHOLD_CHARS
+    ):
+        # Sprint D6.51 — verbose first-turn query distillation. See
+        # query_distill.py for rationale. Streaming users get a status
+        # event so the brief Haiku call is visible during the retrieval
+        # pause.
+        yield {"event": "status", "data": "Refining your question…"}
+        from rag.query_distill import distill_query
+        distilled = await distill_query(
+            query=query,
+            anthropic_client=anthropic_client,
+            pool=pool,
+            user_id=user_id,
+            conversation_id=conversation_id,
+        )
+        if distilled:
+            retrieval_query = distilled
+            logger.info(
+                "Distilled verbose first-turn query "
+                "(orig=%dch, distilled=%dch): %r",
+                len(query), len(distilled), distilled[:100],
+            )
 
     # Stage 2: Retrieve
     source_labels = _describe_sources(query)
