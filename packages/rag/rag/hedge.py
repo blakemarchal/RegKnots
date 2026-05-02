@@ -79,6 +79,36 @@ HEDGE_PATTERNS: list[str] = [
 
     # "regulation context I have" / "retrieved context for this query"
     r"(?:regulation|retrieved|verified) context (?:I have|for this|returned)",
+
+    # Sprint D6.48 Phase 2 audit — patterns observed in production hedges
+    # that the original set didn't catch. Found by Blake's STRETCH DUCK 07
+    # manning query review.
+    r"can'?t fully answer",
+    r"could not fully answer",
+    r"unable to fully answer",
+    # "weren't surfaced in this query's context" — the model has admitted
+    # the verified context is missing the controlling regulation.
+    r"weren'?t surfaced",
+    r"wasn'?t surfaced",
+    r"didn'?t surface",
+    # "won't cite from memory" / "I won't guess" — explicit refusal to
+    # answer beyond the corpus, which is a hedge by definition.
+    r"won'?t (?:cite|guess|speculate)\s+(?:them )?(?:from memory|without)",
+    r"i won'?t cite\s+(?:them|those|specific)",
+    # "from the verified context provided" — phrase used to bracket the
+    # honesty preface ("I can't fully answer X from the verified context
+    # provided"). Catches the prefix path.
+    r"from\s+the\s+verified\s+context\s+provided",
+    # "almost certainly does not apply" / "doesn't directly apply" —
+    # model is rejecting a retrieved chunk as off-topic, which means it
+    # had nothing on-topic. Strong hedge signal.
+    r"almost certainly (?:does not|doesn'?t|don'?t) apply",
+    r"not directly applicable",
+    # "doesn't map cleanly to" / "doesn't map to" — model rejecting the
+    # retrieved set as the wrong scope.
+    r"don'?t (?:contain|include) a\s+\w+\s+rule",
+    r"doesn'?t map (?:cleanly )?to",
+    r"don'?t map (?:cleanly )?to",
 ]
 
 _HEDGE_RE = re.compile("|".join(HEDGE_PATTERNS), re.IGNORECASE)
