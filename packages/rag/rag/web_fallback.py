@@ -34,7 +34,6 @@ from typing import Optional
 from urllib.parse import urlparse
 
 import httpx
-import pdfplumber
 
 logger = logging.getLogger(__name__)
 
@@ -240,14 +239,43 @@ async def fetch_source_text(url: str, client: httpx.AsyncClient) -> str:
     ctype = (resp.headers.get("Content-Type") or "").lower()
     if "pdf" in ctype or resp.content[:4] == b"%PDF":
         # PDF: extract via pdfplumber to a single concatenated string.
+        # Lazy import — pdfplumber isn't on the API container's dep list,
+        # but it IS available on the ingest container; if a user-facing
+        # invocation hits a PDF source on a host without pdfplumber, we
+        # fall through to writing the bytes to a temp file and shelling
+        # out to Poppler's pdftotext (which is installed system-wide).
         try:
             from io import BytesIO
-            page_texts: list[str] = []
-            with pdfplumber.open(BytesIO(resp.content)) as pdf:
-                for page in pdf.pages:
-                    t = page.extract_text() or ""
-                    page_texts.append(t)
-            return "\n".join(page_texts)
+            try:
+                import pdfplumber  # type: ignore
+            except ImportError:
+                pdfplumber = None
+            if pdfplumber is not None:
+                page_texts: list[str] = []
+                with pdfplumber.open(BytesIO(resp.content)) as pdf:
+                    for page in pdf.pages:
+                        t = page.extract_text() or ""
+                        page_texts.append(t)
+                return "\n".join(page_texts)
+            else:
+                import subprocess, tempfile
+                with tempfile.NamedTemporaryFile(
+                    suffix=".pdf", delete=False
+                ) as fh:
+                    fh.write(resp.content)
+                    pdf_path = fh.name
+                try:
+                    out = subprocess.run(
+                        ["pdftotext", "-layout", pdf_path, "-"],
+                        capture_output=True, timeout=30, check=True,
+                    )
+                    return out.stdout.decode("utf-8", errors="replace")
+                finally:
+                    import os as _os
+                    try:
+                        _os.unlink(pdf_path)
+                    except OSError:
+                        pass
         except Exception as exc:
             logger.info("PDF extract failed %s: %s", url, exc)
             return ""
