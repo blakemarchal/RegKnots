@@ -187,7 +187,17 @@ function HistoryContent() {
   useEffect(() => {
     let cancelled = false
 
-    apiRequest<ConversationSummary[]>('/conversations')
+    // Sprint D6.49 — workspace context. URL-based opt-in: when the
+    // history page is opened with ?workspace=<uuid>, list workspace
+    // conversations. Without the param, list personal conversations
+    // (legacy behavior, identical for non-workspace users).
+    const params = new URLSearchParams(window.location.search)
+    const wsId = params.get('workspace')
+    const url = wsId
+      ? `/conversations?workspace_id=${encodeURIComponent(wsId)}`
+      : '/conversations'
+
+    apiRequest<ConversationSummary[]>(url)
       .then(data => {
         if (cancelled) return
         setConversations(data)
@@ -239,7 +249,14 @@ function HistoryContent() {
 
   function openConversation(id: string) {
     signalNavigation()
-    router.push(`/?conversation_id=${id}`)
+    // Preserve workspace context if currently viewing workspace history,
+    // so the chat opens in the right context (Sprint D6.49).
+    const params = new URLSearchParams(window.location.search)
+    const wsId = params.get('workspace')
+    const target = wsId
+      ? `/?conversation_id=${id}&workspace=${wsId}`
+      : `/?conversation_id=${id}`
+    router.push(target)
   }
 
   async function exportConversation(id: string, title: string) {
@@ -307,9 +324,34 @@ function HistoryContent() {
   // Unique vessel names from conversations (not just user's vessels)
   const allVesselNames = [...new Set(conversations.filter(c => c.vessel_name).map(c => c.vessel_name!))]
 
+  // Sprint D6.49 — workspace context banner. Renders ONLY when the
+  // history page was opened with ?workspace=<id>; personal-tier users
+  // (no URL param) never see this.
+  const wsParam = typeof window !== 'undefined'
+    ? new URLSearchParams(window.location.search).get('workspace')
+    : null
+
   return (
     <div className="flex flex-col h-dvh bg-[#0a0e1a]">
       <AppHeader title="Chat History" />
+
+      {/* Workspace context banner — workspace mode only */}
+      {wsParam && (
+        <div className="flex-shrink-0 bg-[#2dd4bf]/8 border-b border-[#2dd4bf]/25 px-4 py-2 flex items-center justify-between gap-3">
+          <div className="text-xs font-mono text-[#2dd4bf]/80 truncate">
+            <span className="uppercase tracking-wider mr-1.5">Workspace history</span>
+            <span className="text-[#6b7594]">
+              · Showing chats shared with all workspace members
+            </span>
+          </div>
+          <a
+            href="/history"
+            className="text-xs font-mono text-[#2dd4bf]/80 hover:text-[#2dd4bf] underline whitespace-nowrap"
+          >
+            Personal history →
+          </a>
+        </div>
+      )}
 
       {/* Content */}
       <main className="chat-thread flex-1 overflow-y-auto">

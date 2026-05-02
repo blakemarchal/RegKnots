@@ -68,8 +68,23 @@ class WorkspaceDTO(BaseModel):
     card_pending_started_at: str | None = None
 
 
+class HandoffNoteDTO(BaseModel):
+    """Rolling free-form note left by the outgoing watch for the
+    incoming watch. One per workspace; in-place edits only (no history).
+    """
+    content: str | None
+    updated_at: str | None
+    updated_by_email: str | None
+    updated_by_name: str | None
+
+
 class WorkspaceDetailDTO(WorkspaceDTO):
     members: list[WorkspaceMemberDTO]
+    handoff_note: HandoffNoteDTO
+
+
+class HandoffNoteUpdate(BaseModel):
+    content: str = Field(max_length=8000)
 
 
 class CreateWorkspaceBody(BaseModel):
@@ -268,9 +283,14 @@ async def get_workspace(
         pool, workspace_id, user_uuid, ("owner", "admin", "member"),
     )
     ws = await pool.fetchrow(
-        "SELECT id, name, owner_user_id, status, seat_cap, created_at, "
-        "       card_pending_started_at "
-        "FROM workspaces WHERE id = $1",
+        "SELECT w.id, w.name, w.owner_user_id, w.status, w.seat_cap, w.created_at, "
+        "       w.card_pending_started_at, "
+        "       w.handoff_note, w.handoff_note_updated_at, "
+        "       u.email AS handoff_editor_email, "
+        "       u.full_name AS handoff_editor_name "
+        "FROM workspaces w "
+        "LEFT JOIN users u ON u.id = w.handoff_note_updated_by_user_id "
+        "WHERE w.id = $1",
         workspace_id,
     )
     if ws is None:
@@ -313,6 +333,70 @@ async def get_workspace(
             )
             for m in members
         ],
+        handoff_note=HandoffNoteDTO(
+            content=ws["handoff_note"],
+            updated_at=(ws["handoff_note_updated_at"].isoformat()
+                        if ws["handoff_note_updated_at"] else None),
+            updated_by_email=ws["handoff_editor_email"],
+            updated_by_name=ws["handoff_editor_name"],
+        ),
+    )
+
+
+# ── Handoff note ────────────────────────────────────────────────────────────
+
+
+@router.put("/{workspace_id}/handoff-note", response_model=HandoffNoteDTO)
+async def update_handoff_note(
+    workspace_id: UUID,
+    body: HandoffNoteUpdate,
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    pool: Annotated[asyncpg.Pool, Depends(get_pool)],
+) -> HandoffNoteDTO:
+    """Update the workspace's rolling handoff note. Any member can write
+    to it (rotation reality: the watch leaving the vessel might be Mate
+    or Engineer, not Captain). Last-editor + timestamp tracked so the
+    incoming watch knows who wrote what and when.
+
+    Read-only when the workspace is in card_pending / archived /
+    canceled state."""
+    _ensure_feature_enabled()
+    user_uuid = UUID(current_user.user_id)
+    await _require_workspace_role(
+        pool, workspace_id, user_uuid, ("owner", "admin", "member"),
+    )
+
+    ws_status = await pool.fetchval(
+        "SELECT status FROM workspaces WHERE id = $1", workspace_id,
+    )
+    if ws_status in ("card_pending", "archived", "canceled"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                f"Workspace is read-only (status: {ws_status}). "
+                "Note edits are paused."
+            ),
+        )
+
+    updated = await pool.fetchrow(
+        "UPDATE workspaces SET "
+        "  handoff_note = $1, "
+        "  handoff_note_updated_at = NOW(), "
+        "  handoff_note_updated_by_user_id = $2, "
+        "  updated_at = NOW() "
+        "WHERE id = $3 "
+        "RETURNING handoff_note, handoff_note_updated_at",
+        body.content, user_uuid, workspace_id,
+    )
+    editor = await pool.fetchrow(
+        "SELECT email, full_name FROM users WHERE id = $1", user_uuid,
+    )
+    return HandoffNoteDTO(
+        content=updated["handoff_note"],
+        updated_at=updated["handoff_note_updated_at"].isoformat()
+                   if updated["handoff_note_updated_at"] else None,
+        updated_by_email=editor["email"] if editor else None,
+        updated_by_name=editor["full_name"] if editor else None,
     )
 
 

@@ -18,6 +18,13 @@ interface Member {
   invited_by: string | null
 }
 
+interface HandoffNote {
+  content: string | null
+  updated_at: string | null
+  updated_by_email: string | null
+  updated_by_name: string | null
+}
+
 interface WorkspaceDetail {
   id: string
   name: string
@@ -29,6 +36,7 @@ interface WorkspaceDetail {
   created_at: string
   card_pending_started_at: string | null
   members: Member[]
+  handoff_note: HandoffNote
 }
 
 const STATUS_LABEL: Record<WorkspaceDetail['status'], string> = {
@@ -169,19 +177,30 @@ function DetailContent() {
           }`}>
             {STATUS_LABEL[ws.status]}
           </span>
-          {/* D6.49 — open chat in this workspace context. Activates only
-              when explicitly clicked; personal chat (no ?workspace= URL
-              param) is always available at /. */}
+          {/* D6.49 — open chat / view history in this workspace context.
+              Activates only when explicitly clicked; personal chat (no
+              ?workspace= URL param) is always available at /. */}
           {ws.status !== 'archived' && ws.status !== 'canceled' && (
-            <Link
-              href={`/?workspace=${ws.id}`}
-              className="ml-auto px-2.5 py-1 rounded-md bg-[#2dd4bf]/15 border border-[#2dd4bf]/30
-                         text-xs font-medium text-[#2dd4bf] hover:bg-[#2dd4bf]/25
-                         whitespace-nowrap transition-colors"
-              title="Opens chat in workspace context — chats are shared with members"
-            >
-              Open chat →
-            </Link>
+            <div className="ml-auto flex items-center gap-2">
+              <Link
+                href={`/history?workspace=${ws.id}`}
+                className="px-2.5 py-1 rounded-md border border-white/10
+                           text-xs font-medium text-[#f0ece4]/80 hover:bg-white/5
+                           whitespace-nowrap transition-colors"
+                title="View shared chat history with workspace members"
+              >
+                History
+              </Link>
+              <Link
+                href={`/?workspace=${ws.id}`}
+                className="px-2.5 py-1 rounded-md bg-[#2dd4bf]/15 border border-[#2dd4bf]/30
+                           text-xs font-medium text-[#2dd4bf] hover:bg-[#2dd4bf]/25
+                           whitespace-nowrap transition-colors"
+                title="Opens chat in workspace context — chats are shared with members"
+              >
+                Open chat →
+              </Link>
+            </div>
           )}
         </div>
         <div className="text-xs text-[#6b7594]">
@@ -215,6 +234,11 @@ function DetailContent() {
           )}
         </div>
       )}
+
+      <HandoffNoteSection
+        workspace={ws}
+        onSaved={() => void load()}
+      />
 
       <section className="mb-8">
         <div className="flex items-center justify-between mb-3">
@@ -517,5 +541,149 @@ function TransferModal({
         </form>
       </div>
     </div>
+  )
+}
+
+
+// ── Handoff note section ───────────────────────────────────────────────────
+// The rotation killer feature: free-form note any member can edit, with
+// last-editor + timestamp tracking. Outgoing watch leaves notes for
+// incoming watch — vessel status, recent PSC findings, equipment quirks,
+// near-miss observations, anything the next watch needs to know.
+
+function HandoffNoteSection({
+  workspace, onSaved,
+}: {
+  workspace: WorkspaceDetail
+  onSaved: () => void
+}) {
+  const note = workspace.handoff_note
+  const isReadOnly =
+    workspace.status === 'card_pending'
+    || workspace.status === 'archived'
+    || workspace.status === 'canceled'
+
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(note.content ?? '')
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  function startEditing() {
+    setDraft(note.content ?? '')
+    setEditing(true)
+    setError(null)
+  }
+
+  async function save() {
+    if (submitting) return
+    setSubmitting(true)
+    setError(null)
+    try {
+      await apiRequest(
+        `/workspaces/${workspace.id}/handoff-note`,
+        { method: 'PUT', body: JSON.stringify({ content: draft }) },
+      )
+      setEditing(false)
+      onSaved()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to save note.')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  function cancel() {
+    setDraft(note.content ?? '')
+    setEditing(false)
+    setError(null)
+  }
+
+  const updatedLabel = note.updated_at
+    ? `${note.updated_by_name ?? note.updated_by_email ?? 'someone'} · ${new Date(note.updated_at).toLocaleString()}`
+    : null
+
+  return (
+    <section className="mb-8 rounded-lg border border-white/8 bg-[#0a0e1a]/60 p-4">
+      <div className="flex items-center justify-between mb-2">
+        <h2 className="text-sm font-mono uppercase tracking-wider text-[#6b7594]">
+          Handoff note
+        </h2>
+        {!editing && !isReadOnly && (
+          <button
+            onClick={startEditing}
+            className="text-xs font-mono text-[#2dd4bf]/80 hover:text-[#2dd4bf] transition-colors"
+          >
+            {note.content ? 'Edit' : '+ Write a note'}
+          </button>
+        )}
+      </div>
+
+      {!editing && !note.content && (
+        <p className="text-xs text-[#6b7594] italic">
+          Leave a note for the next watch — vessel status, PSC findings,
+          equipment quirks, anything the incoming captain or engineer
+          should know. Any member can write or edit.
+        </p>
+      )}
+
+      {!editing && note.content && (
+        <>
+          <div className="text-sm text-[#f0ece4]/90 whitespace-pre-wrap leading-relaxed">
+            {note.content}
+          </div>
+          {updatedLabel && (
+            <div className="mt-3 text-[10px] font-mono text-[#6b7594] uppercase tracking-wider">
+              Last update: {updatedLabel}
+            </div>
+          )}
+        </>
+      )}
+
+      {editing && (
+        <>
+          <textarea
+            autoFocus
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            placeholder="e.g. PSC at Houston Apr 28 flagged emergency lighting in engine room. Replaced fixtures, awaiting class confirmation. Next port Norfolk May 15."
+            maxLength={8000}
+            rows={6}
+            className="w-full px-3 py-2 rounded-md bg-[#111827] border border-white/10
+                       text-sm text-[#f0ece4] focus:outline-none focus:border-[#2dd4bf]/50
+                       resize-y leading-relaxed"
+          />
+          <div className="mt-2 flex items-center justify-between">
+            <div className="text-[10px] font-mono text-[#6b7594]">
+              {draft.length} / 8000 characters
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={cancel}
+                disabled={submitting}
+                className="px-3 py-1.5 text-sm text-[#6b7594] hover:text-[#f0ece4] transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={save}
+                disabled={submitting}
+                className="px-3 py-1.5 rounded-md bg-[#2dd4bf]/15 border border-[#2dd4bf]/30
+                           text-sm font-medium text-[#2dd4bf] hover:bg-[#2dd4bf]/25
+                           disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                {submitting ? 'Saving…' : 'Save'}
+              </button>
+            </div>
+          </div>
+          {error && <div className="mt-2 text-xs text-red-400">{error}</div>}
+        </>
+      )}
+
+      {isReadOnly && note.content && (
+        <div className="mt-3 text-[10px] font-mono text-amber-300/70 uppercase tracking-wider">
+          Read-only — workspace is in {workspace.status.replace('_', ' ')} state
+        </div>
+      )}
+    </section>
   )
 }
