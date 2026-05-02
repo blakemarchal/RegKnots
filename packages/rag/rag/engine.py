@@ -1262,6 +1262,10 @@ async def chat(
     user_role: str | None = None,
     user_jurisdiction_focus: str | None = None,
     user_verbosity: str | None = None,
+    user_id: UUID | None = None,
+    web_fallback_enabled: bool = True,
+    web_fallback_cosine_threshold: float = 0.5,
+    web_fallback_daily_cap: int = 10,
 ) -> ChatResponse:
     """Run the full RAG pipeline and return a ChatResponse.
 
@@ -1385,6 +1389,7 @@ async def chat(
     # to `retrieval_misses` for offline analysis. Fire-and-forget — DB
     # errors never fail the chat response.
     hedge_phrase = detect_hedge(cleaned_answer)
+    web_fallback_card = None
     if hedge_phrase is not None:
         try:
             await _log_retrieval_miss(
@@ -1407,6 +1412,31 @@ async def chat(
                 str(exc)[:200],
             )
 
+        # Sprint D6.48 Phase 2 — when the corpus genuinely missed AND
+        # the kill switch is on AND the user has cap remaining, try a
+        # web search fallback against the trusted-domain whitelist.
+        if web_fallback_enabled:
+            top_cosine = (
+                chunks[0].get("similarity", 0.0) if chunks else 0.0
+            )
+            try:
+                web_fallback_card = await _try_web_fallback(
+                    query=query,
+                    conversation_id=conversation_id,
+                    user_id=user_id,
+                    pool=pool,
+                    anthropic_client=anthropic_client,
+                    top_cosine=top_cosine,
+                    cosine_threshold=web_fallback_cosine_threshold,
+                    daily_cap=web_fallback_daily_cap,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "web fallback failed (non-fatal): %s: %s",
+                    type(exc).__name__,
+                    str(exc)[:200],
+                )
+
     return ChatResponse(
         answer=cleaned_answer,
         conversation_id=conversation_id,
@@ -1417,6 +1447,93 @@ async def chat(
         unverified_citations=all_unverified,
         vessel_update=vessel_update,
         regenerated=regenerated,
+        web_fallback=web_fallback_card,
+    )
+
+
+async def _try_web_fallback(
+    *,
+    query: str,
+    conversation_id: UUID,
+    user_id: UUID | None,
+    pool: asyncpg.Pool,
+    anthropic_client: AsyncAnthropic,
+    top_cosine: float,
+    cosine_threshold: float,
+    daily_cap: int,
+) -> "WebFallbackCard | None":
+    """Run one fallback attempt for a hedged answer. Returns a populated
+    card iff all gates pass. Persists every attempt to
+    web_fallback_responses regardless of outcome. Sprint D6.48 Phase 2."""
+    from rag.web_fallback import attempt_web_fallback
+    from rag.models import WebFallbackCard
+
+    # Gate 1: only fire when retrieval genuinely missed (true corpus gap).
+    if top_cosine >= cosine_threshold:
+        return None
+
+    # Gate 2: per-user daily cap (soft block — silently skip rather than
+    # error). Only count surfaced fallbacks toward the cap so users who
+    # ask many corpus-gap questions in a row don't get capped on
+    # blocked-but-attempted ones.
+    if user_id is not None and daily_cap > 0:
+        try:
+            count_today = await pool.fetchval(
+                "SELECT COUNT(*) FROM web_fallback_responses "
+                "WHERE user_id = $1 AND surfaced = TRUE "
+                "AND is_calibration = FALSE "
+                "AND created_at > NOW() - INTERVAL '24 hours'",
+                user_id,
+            )
+            if (count_today or 0) >= daily_cap:
+                logger.info(
+                    "web_fallback daily cap reached for user %s "
+                    "(%d/%d)", user_id, count_today, daily_cap,
+                )
+                return None
+        except Exception as exc:
+            logger.warning("web_fallback cap check failed: %s", exc)
+
+    result = await attempt_web_fallback(
+        query=query, anthropic_client=anthropic_client,
+    )
+
+    # Persist (fire-and-forget — DB errors don't suppress the card if
+    # we managed to assemble one).
+    fallback_id: str | None = None
+    try:
+        row = await pool.fetchrow(
+            "INSERT INTO web_fallback_responses "
+            "  (is_calibration, user_id, chat_message_id, query, "
+            "   web_query_used, top_urls, confidence, source_url, "
+            "   source_domain, quote_text, quote_verified, surfaced, "
+            "   surface_blocked_reason, answer_text, latency_ms) "
+            "VALUES (FALSE, $1, $2, $3, $4, $5::text[], $6, $7, $8, $9, "
+            "        $10, $11, $12, $13, $14) "
+            "RETURNING id",
+            user_id, conversation_id, query, result.web_query_used,
+            result.top_urls or [], result.confidence,
+            result.source_url, result.source_domain, result.quote_text,
+            result.quote_verified, result.surfaced,
+            result.surface_blocked_reason, result.answer_text,
+            result.latency_ms,
+        )
+        if row is not None:
+            fallback_id = str(row["id"])
+    except Exception as exc:
+        logger.warning("web_fallback persist failed (non-fatal): %s", exc)
+
+    if not result.surfaced:
+        return None
+
+    # All gates passed — assemble the yellow-card payload for the UI.
+    return WebFallbackCard(
+        fallback_id=fallback_id or "",
+        source_url=result.source_url or "",
+        source_domain=result.source_domain or "",
+        quote=result.quote_text or "",
+        summary=result.answer_text or "",
+        confidence=result.confidence or 0,
     )
 
 

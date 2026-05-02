@@ -492,6 +492,7 @@ async def chat_endpoint(
 ):
     from rag.engine import chat
     from rag.models import ChatResponse
+    from app.config import settings
 
     (
         vessel_profile, conversation_id, history, is_new_conversation,
@@ -516,6 +517,10 @@ async def chat_endpoint(
         user_role=user_persona,
         user_jurisdiction_focus=user_jurisdiction_focus,
         user_verbosity=user_verbosity,
+        user_id=current_user.id,
+        web_fallback_enabled=settings.web_fallback_enabled,
+        web_fallback_cosine_threshold=settings.web_fallback_cosine_threshold,
+        web_fallback_daily_cap=settings.web_fallback_daily_cap,
     )
 
     await _persist_chat_outcome(

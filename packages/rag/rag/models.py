@@ -27,6 +27,17 @@ class ChatRequest(BaseModel):
     vessel_id: UUID | None = None
 
 
+class WebFallbackCard(BaseModel):
+    """Yellow-card payload returned alongside a hedge when a web search
+    fallback succeeded. Sprint D6.48 Phase 2."""
+    fallback_id: str        # web_fallback_responses.id, used for thumbs feedback
+    source_url: str
+    source_domain: str
+    quote: str              # verbatim, verified to exist in source
+    summary: str            # Claude's plain-English explanation
+    confidence: int         # 1-5, gated to >= 4 before surfacing
+
+
 class ChatResponse(BaseModel):
     answer: str
     conversation_id: UUID
@@ -37,3 +48,7 @@ class ChatResponse(BaseModel):
     unverified_citations: list[str] = []
     vessel_update: dict | None = None
     regenerated: bool = False
+    # Sprint D6.48 Phase 2 — populated only when retrieval missed AND
+    # the hedge classifier matched AND web fallback found a verified
+    # quote on a trusted domain. Frontend renders as a yellow card.
+    web_fallback: WebFallbackCard | None = None

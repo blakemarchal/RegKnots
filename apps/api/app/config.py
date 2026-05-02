@@ -70,6 +70,24 @@ class Settings(BaseSettings):
     # returns an empty summary in that case instead of erroring.
     caddy_access_log_dir: str = Field(default="/var/log/caddy", validation_alias="CADDY_ACCESS_LOG_DIR")
 
+    # ── Web search fallback (D6.48 Phase 2) ──────────────────────────────
+    # Master kill switch — flip to false on prod to disable fallback firing
+    # for all users instantly without redeploying.
+    web_fallback_enabled: bool = Field(
+        default=True, validation_alias="WEB_FALLBACK_ENABLED",
+    )
+    # Cosine threshold below which we treat retrieval as a true corpus
+    # gap and consider firing fallback. 0.5 is the v1 default — tune up
+    # if fallback fires too often, down if it misses real gaps.
+    web_fallback_cosine_threshold: float = Field(
+        default=0.5, validation_alias="WEB_FALLBACK_COSINE_THRESHOLD",
+    )
+    # Per-user daily cap. Raises a soft block — user gets the original
+    # hedge instead of a fallback after exceeding their daily quota.
+    web_fallback_daily_cap: int = Field(
+        default=10, validation_alias="WEB_FALLBACK_DAILY_CAP",
+    )
+
     # Monitoring
     sentry_dsn: str = Field(default="", validation_alias="SENTRY_DSN")
     sentry_auth_token: str = Field(default="", validation_alias="SENTRY_AUTH_TOKEN")
