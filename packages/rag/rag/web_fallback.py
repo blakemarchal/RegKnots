@@ -259,6 +259,84 @@ def normalize_text(s: str) -> str:
     return s.strip().lower()
 
 
+_ECFR_URL_RE = re.compile(
+    r"/current/title-(?P<title>\d+)"
+    r"(?:/chapter-[^/]+)?"
+    r"(?:/subchapter-[^/]+)?"
+    r"(?:/part-(?P<part>\d+(?:\.\d+)?))?"
+    r"(?:/subpart-(?P<subpart>[^/]+))?"
+    r"(?:/section-(?P<section>[^/]+))?",
+    re.IGNORECASE,
+)
+
+
+async def _fetch_ecfr_via_api(url: str, client: httpx.AsyncClient) -> str:
+    """Rewrite an /current/title-N/.../section-X.Y URL to the eCFR
+    versioner API form which returns full regulation XML. Strip XML
+    tags and return plaintext.
+
+    Falls back to "" if the URL doesn't parse — caller will retry the
+    standard fetcher."""
+    m = _ECFR_URL_RE.search(url)
+    if not m:
+        return ""
+    title = m.group("title")
+    part = m.group("part")
+    subpart = m.group("subpart")
+    if not title:
+        return ""
+
+    # eCFR snapshots have a ~3-4 day publishing lag — "today" 404s on
+    # the API. Try a descending fallback list of dates until one works.
+    from datetime import date as _date, timedelta
+    today = _date.today()
+    candidate_dates = [
+        today - timedelta(days=d)
+        for d in (0, 1, 3, 7, 14, 30, 60, 120)
+    ]
+    # Also append the last few year-starts so very-old probes still
+    # work in case the API tightens further.
+    candidate_dates.append(_date(today.year, 1, 1))
+
+    # Most-specific filter we can pass: part > whole-title.
+    # (Subpart filter is rejected by the API — only part and section
+    # are supported as query-string filters.)
+    params = {}
+    if part:
+        params["part"] = part
+
+    last_error = None
+    for d in candidate_dates:
+        api_url = (
+            f"https://www.ecfr.gov/api/versioner/v1/full/"
+            f"{d.isoformat()}/title-{title}.xml"
+        )
+        try:
+            resp = await client.get(api_url, headers=_FETCH_HEADERS,
+                                    params=params, timeout=_FETCH_TIMEOUT_S)
+            if resp.status_code == 404:
+                continue
+            resp.raise_for_status()
+        except Exception as exc:
+            last_error = exc
+            continue
+        if len(resp.content) >= 200:
+            break
+    else:
+        if last_error:
+            logger.info("eCFR API fetch failed (all dates): %s", last_error)
+        return ""
+    # The XML uses similar tag structure to HTML — strip tags, decode
+    # numeric entities, normalize whitespace via the same path as HTML.
+    body = resp.text
+    body = re.sub(r"&#xA0;", " ", body)
+    body = re.sub(r"&#x([0-9A-Fa-f]+);",
+                  lambda mo: chr(int(mo.group(1), 16)), body)
+    body = re.sub(r"&#(\d+);",
+                  lambda mo: chr(int(mo.group(1))), body)
+    return _strip_html(body)
+
+
 def _strip_html(html: str) -> str:
     s = _HTML_TAG_RE.sub(" ", html)
     s = _HTML_ENTITY_NBSP.sub(" ", s)
@@ -275,6 +353,16 @@ async def fetch_source_text(url: str, client: httpx.AsyncClient) -> str:
     PDF responses based on Content-Type. Returns "" if the source is
     unreachable or oversized. Never raises — failure → empty string,
     which means quote verification fails closed."""
+    # Special-case: eCFR HTML pages are a JS-rendered SPA shell and a
+    # plain GET returns only ~3KB of skeleton (Sprint D6.48 audit). Use
+    # eCFR's public versioner API to fetch the actual regulation XML
+    # for the relevant part, then strip tags.
+    if "ecfr.gov/current/" in url:
+        api_text = await _fetch_ecfr_via_api(url, client)
+        if api_text:
+            return api_text
+        # Fall through to standard fetch if API rewrite failed.
+
     try:
         resp = await client.get(url, headers=_FETCH_HEADERS,
                                 timeout=_FETCH_TIMEOUT_S,
