@@ -142,7 +142,7 @@ const CORPUS: CorpusSource[] = [
   },
   {
     short: 'MPA SG',
-    full: 'Maritime and Port Authority of Singapore — Shipping Circulars and Port Marine Circulars',
+    full: 'Maritime and Port Authority of Singapore — Shipping Circulars, Port Marine Circulars, Port Marine Notices',
     category: 'flag_state',
     flagCC: 'sg',
     url: 'https://www.mpa.gov.sg/',
@@ -181,6 +181,34 @@ const CORPUS: CorpusSource[] = [
     category: 'flag_state',
     flagCC: 'bs',
     url: 'https://www.bahamasmaritime.com/',
+  },
+  {
+    short: 'France',
+    full: 'France — Code des transports, Cinquième Partie (Maritime). Articles L5*/R5*/D5* covering ship identification, registration, liability, autonomous vessels, seafarer rights, port operations, and maritime enforcement (French-language source).',
+    category: 'flag_state',
+    flagCC: 'fr',
+    url: 'https://www.legifrance.gouv.fr/codes/texte_lc/LEGITEXT000023086525',
+  },
+  {
+    short: 'BG Verkehr',
+    full: 'Germany — BG Verkehr Dienststelle Schifffahrt: ISM Rundschreiben, SOLAS interpretations, MLC implementation, STCW, SchSV, Ballast Water (German-language source).',
+    category: 'flag_state',
+    flagCC: 'de',
+    url: 'https://www.deutsche-flagge.de/',
+  },
+  {
+    short: 'DGMM',
+    full: 'Spain — Dirección General de la Marina Mercante: Reales Decretos, Instrucciones de Servicio, BOE consolidations covering inspection/certification, manning, training, vessel registration (Spanish-language source).',
+    category: 'flag_state',
+    flagCC: 'es',
+    url: 'https://www.transportes.gob.es/marina-mercante',
+  },
+  {
+    short: 'Capitanerie / MIT',
+    full: 'Italy — Guardia Costiera (Capitanerie di Porto) Circolari Serie Generale + sample ordinanze, plus Ministero MIT lavoro-marittimo decreti and STCW transposition (Italian-language source).',
+    category: 'flag_state',
+    flagCC: 'it',
+    url: 'https://www.guardiacostiera.gov.it/',
   },
 
   // ── U.S. federal (statute, regulation, USCG guidance) ────────────────
