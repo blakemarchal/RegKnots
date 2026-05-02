@@ -1279,6 +1279,136 @@ async def web_fallback_recent(
     ]
 
 
+# ── Phase 2 review tool (D6.48) ───────────────────────────────────────────────
+# A single endpoint that joins the three tables an operator wants to scan
+# while reviewing fallback behavior — recent assistant messages, the
+# retrieval_misses log, and web_fallback_responses outcomes — so the
+# admin doesn't have to flip between three tabs to assess "did the
+# fallback fire correctly on this query?"
+
+class ReviewRow(BaseModel):
+    timestamp: str
+    user_email: str | None
+    query: str
+    answer_preview: str
+    hedged: bool
+    hedge_phrase: str | None
+    fallback_attempted: bool
+    fallback_surfaced: bool
+    fallback_blocked_reason: str | None
+    fallback_source_domain: str | None
+    fallback_confidence: int | None
+    fallback_quote_preview: str | None
+    fallback_thumbs: str | None     # 'helpful' | 'not_helpful' | 'inaccurate' | null
+    citations_count: int
+
+
+@router.get("/phase2-review", response_model=list[ReviewRow])
+async def phase2_review(
+    _admin: Annotated[CurrentUser, Depends(require_admin)],
+    hours: int = Query(default=24, ge=1, le=720),
+    only_hedged: bool = Query(default=False),
+    only_fallback: bool = Query(default=False),
+    user_email: str | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+) -> list[ReviewRow]:
+    """One-shot timeline of recent assistant messages with hedge +
+    fallback overlay. Designed for "let me eyeball Phase 2 behavior in
+    the last day" without joining three tables by hand.
+
+    Filters:
+      hours          — lookback window (default 24h, max 30 days)
+      only_hedged    — only return turns where the answer hedged
+      only_fallback  — only return turns where fallback was attempted
+      user_email     — filter to a specific user (e.g. for self-review)
+      limit          — page size
+
+    Each row joins:
+      messages (assistant content + timestamp)
+      retrieval_misses (hedge phrase that triggered the miss log)
+      web_fallback_responses (whether fallback fired, what it returned,
+                              why it was blocked, what feedback the user
+                              left)
+    """
+    pool = await get_pool()
+    where = ["m.role = 'assistant'",
+             f"m.created_at > NOW() - INTERVAL '{int(hours)} hours'"]
+    params: list = []
+    if user_email:
+        params.append(user_email)
+        where.append(f"u.email = ${len(params)}")
+    if only_hedged:
+        where.append("rm.id IS NOT NULL")
+    if only_fallback:
+        where.append("wfr.id IS NOT NULL")
+    where_sql = " AND ".join(where)
+    params.append(limit)
+    rows = await pool.fetch(
+        f"""
+        SELECT
+          m.created_at         AS ts,
+          m.content            AS answer,
+          u.email              AS user_email,
+          q.content            AS query,
+          rm.hedge_phrase_matched AS hedge_phrase,
+          wfr.id IS NOT NULL   AS fb_attempted,
+          wfr.surfaced         AS fb_surfaced,
+          wfr.surface_blocked_reason AS fb_blocked,
+          wfr.source_domain    AS fb_domain,
+          wfr.confidence       AS fb_conf,
+          wfr.quote_text       AS fb_quote,
+          wfr.user_feedback    AS fb_thumbs,
+          COALESCE(array_length(m.cited_regulation_ids, 1), 0) AS citations_count
+        FROM messages m
+        JOIN conversations c ON c.id = m.conversation_id
+        JOIN users u ON u.id = c.user_id
+        LEFT JOIN LATERAL (
+          SELECT content FROM messages
+          WHERE conversation_id = m.conversation_id
+            AND role = 'user'
+            AND created_at <= m.created_at
+          ORDER BY created_at DESC LIMIT 1
+        ) q ON TRUE
+        LEFT JOIN retrieval_misses rm
+          ON rm.conversation_id = m.conversation_id
+          AND rm.created_at BETWEEN m.created_at - INTERVAL '5 seconds'
+                                AND m.created_at + INTERVAL '5 seconds'
+        LEFT JOIN web_fallback_responses wfr
+          ON wfr.chat_message_id = m.conversation_id
+          AND wfr.is_calibration = FALSE
+          AND wfr.created_at BETWEEN m.created_at - INTERVAL '60 seconds'
+                                 AND m.created_at + INTERVAL '60 seconds'
+        WHERE {where_sql}
+        ORDER BY m.created_at DESC
+        LIMIT ${len(params)}
+        """,
+        *params,
+    )
+
+    out: list[ReviewRow] = []
+    for r in rows:
+        ans = r["answer"] or ""
+        out.append(ReviewRow(
+            timestamp=r["ts"].isoformat() if r["ts"] else "",
+            user_email=r["user_email"],
+            query=(r["query"] or "")[:240],
+            answer_preview=ans[:400],
+            hedged=r["hedge_phrase"] is not None,
+            hedge_phrase=r["hedge_phrase"],
+            fallback_attempted=bool(r["fb_attempted"]),
+            fallback_surfaced=bool(r["fb_surfaced"]),
+            fallback_blocked_reason=r["fb_blocked"],
+            fallback_source_domain=r["fb_domain"],
+            fallback_confidence=r["fb_conf"],
+            fallback_quote_preview=(
+                r["fb_quote"][:200] if r["fb_quote"] else None
+            ),
+            fallback_thumbs=r["fb_thumbs"],
+            citations_count=int(r["citations_count"] or 0),
+        ))
+    return out
+
+
 # ── Email testing ─────────────────────────────────────────────────────────────
 
 EmailType = Literal[
