@@ -299,15 +299,83 @@ async def _run_chat_preflight(
     is_new_conversation = conversation_id is None
     history: list[ChatMessage] = []
 
+    # Sprint D6.49 — workspace-scoped chat. If body.workspace_id is set,
+    # the user MUST already be a member of that workspace. Validate up
+    # front; on success, conversations created in this turn carry the
+    # workspace_id for shared visibility. If body.workspace_id is None
+    # (default for all users without an active workspace context), the
+    # conversation behaves as personal-tier chat — no workspace columns
+    # touched, no behavioral change vs. pre-D6.49.
+    workspace_id = body.workspace_id
+    if workspace_id is not None:
+        member_role = await pool.fetchval(
+            "SELECT role FROM workspace_members "
+            "WHERE workspace_id = $1 AND user_id = $2",
+            workspace_id, uuid.UUID(current_user.user_id),
+        )
+        if member_role is None:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You are not a member of that workspace.",
+            )
+        # Block writes during card_pending grace state.
+        ws_status = await pool.fetchval(
+            "SELECT status FROM workspaces WHERE id = $1", workspace_id,
+        )
+        if ws_status in ("card_pending", "archived", "canceled"):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=(
+                    "This workspace is read-only "
+                    f"(status: {ws_status}). New chats are paused until "
+                    "the Owner adds a payment card."
+                ),
+            )
+
     conversation_title: str | None = None  # Sprint D6.29 — soft jurisdictional anchor
     if conversation_id is not None:
+        # Conversation lookup: load by id, then check the caller has
+        # permission. Personal conversations require user_id match.
+        # Workspace conversations require the caller to be a workspace
+        # member (regardless of who originally created the chat).
         conv_row = await pool.fetchrow(
-            "SELECT id, vessel_id, title FROM conversations WHERE id = $1 AND user_id = $2",
+            "SELECT id, vessel_id, title, user_id, workspace_id "
+            "FROM conversations WHERE id = $1",
             conversation_id,
-            uuid.UUID(current_user.user_id),
         )
         if not conv_row:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
+
+        owner_user_id = conv_row["user_id"]
+        conv_workspace_id = conv_row["workspace_id"]
+        is_personal = conv_workspace_id is None
+
+        if is_personal:
+            # Personal conversation — only the owner can resume it.
+            if str(owner_user_id) != current_user.user_id:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Conversation not found",
+                )
+        else:
+            # Workspace conversation — any member of the workspace can
+            # resume it. (Validated above when workspace_id present in
+            # body, but we re-check here for cases where the client
+            # supplied conversation_id without workspace_id.)
+            member_role = await pool.fetchval(
+                "SELECT role FROM workspace_members "
+                "WHERE workspace_id = $1 AND user_id = $2",
+                conv_workspace_id, uuid.UUID(current_user.user_id),
+            )
+            if member_role is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Conversation not found",
+                )
+            # Pin workspace_id from the loaded conv so downstream
+            # logic uses the correct value even if the client omitted it.
+            workspace_id = conv_workspace_id
+
         conversation_title = conv_row.get("title")
 
         # Update conversation if vessel changed mid-conversation
@@ -334,14 +402,18 @@ async def _run_chat_preflight(
         )
         history = [ChatMessage(role=r["role"], content=r["content"]) for r in reversed(rows)]
     else:
+        # New conversation. workspace_id is NULL when the client didn't
+        # opt into a workspace context — preserves legacy behavior bit-
+        # identical for personal-tier users.
         conversation_id = await pool.fetchval(
             """
-            INSERT INTO conversations (user_id, vessel_id)
-            VALUES ($1, $2)
+            INSERT INTO conversations (user_id, vessel_id, workspace_id)
+            VALUES ($1, $2, $3)
             RETURNING id
             """,
             uuid.UUID(current_user.user_id),
             body.vessel_id,
+            workspace_id,
         )
 
     # Sprint D6.30 — soft jurisdictional fingerprint from prior queries.
@@ -852,3 +924,9 @@ class ChatRequestBody(BaseModel):
     #   "detailed"  — sectioned, thorough, applicability tables
     # Overrides users.verbosity_preference for this turn only.
     verbosity: str | None = None
+    # Sprint D6.49 — workspace-scoped chat. NULL/absent = personal chat
+    # (legacy behavior, untouched). When set, the conversation is
+    # bound to the workspace and visible to all workspace members. The
+    # user must already be a member of the workspace; the preflight
+    # validates this and raises 403 if not.
+    workspace_id: uuid.UUID | None = None

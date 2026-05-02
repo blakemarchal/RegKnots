@@ -59,31 +59,85 @@ class ConversationMessage(BaseModel):
 async def list_conversations(
     user: Annotated[CurrentUser, Depends(get_current_user)],
     pool=Depends(get_pool),
+    workspace_id: Annotated[uuid.UUID | None, Query(description="Filter to a workspace context. Omit for personal chat.")] = None,
 ) -> list[ConversationSummary]:
-    async with pool.acquire() as conn:
-        rows = await conn.fetch(
-            """
-            SELECT
-                c.id,
-                COALESCE(
-                    c.title,
-                    LEFT(
-                        (SELECT content FROM messages m
-                         WHERE m.conversation_id = c.id AND m.role = 'user'
-                         ORDER BY m.created_at ASC LIMIT 1),
-                        60
-                    )
-                ) AS title,
-                c.updated_at,
-                v.name AS vessel_name
-            FROM conversations c
-            LEFT JOIN vessels v ON v.id = c.vessel_id
-            WHERE c.user_id = $1
-            ORDER BY c.updated_at DESC
-            LIMIT 50
-            """,
-            uuid.UUID(user.user_id),
-        )
+    """List conversations for the current user.
+
+    Default (no workspace_id query param): returns the user's PERSONAL
+    conversations only. Behavior identical to pre-D6.49.
+
+    With ?workspace_id=<id>: returns conversations bound to that
+    workspace. Caller must be a member of the workspace, else 403.
+    All workspace members see all of the workspace's conversations.
+    """
+    user_uuid = uuid.UUID(user.user_id)
+
+    if workspace_id is None:
+        # PERSONAL CONTEXT — bit-identical to pre-D6.49 query path.
+        # Includes only conversations where workspace_id IS NULL so a
+        # workspace member's workspace conversations don't bleed into
+        # their personal list.
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT
+                    c.id,
+                    COALESCE(
+                        c.title,
+                        LEFT(
+                            (SELECT content FROM messages m
+                             WHERE m.conversation_id = c.id AND m.role = 'user'
+                             ORDER BY m.created_at ASC LIMIT 1),
+                            60
+                        )
+                    ) AS title,
+                    c.updated_at,
+                    v.name AS vessel_name
+                FROM conversations c
+                LEFT JOIN vessels v ON v.id = c.vessel_id
+                WHERE c.user_id = $1 AND c.workspace_id IS NULL
+                ORDER BY c.updated_at DESC
+                LIMIT 50
+                """,
+                user_uuid,
+            )
+    else:
+        # WORKSPACE CONTEXT — caller must be a member.
+        async with pool.acquire() as conn:
+            role = await conn.fetchval(
+                "SELECT role FROM workspace_members "
+                "WHERE workspace_id = $1 AND user_id = $2",
+                workspace_id, user_uuid,
+            )
+            if role is None:
+                from fastapi import HTTPException, status as _st
+                raise HTTPException(
+                    status_code=_st.HTTP_403_FORBIDDEN,
+                    detail="You are not a member of that workspace.",
+                )
+            rows = await conn.fetch(
+                """
+                SELECT
+                    c.id,
+                    COALESCE(
+                        c.title,
+                        LEFT(
+                            (SELECT content FROM messages m
+                             WHERE m.conversation_id = c.id AND m.role = 'user'
+                             ORDER BY m.created_at ASC LIMIT 1),
+                            60
+                        )
+                    ) AS title,
+                    c.updated_at,
+                    v.name AS vessel_name
+                FROM conversations c
+                LEFT JOIN vessels v ON v.id = c.vessel_id
+                WHERE c.workspace_id = $1
+                ORDER BY c.updated_at DESC
+                LIMIT 50
+                """,
+                workspace_id,
+            )
 
     return [
         ConversationSummary(
@@ -184,14 +238,30 @@ async def get_conversation_messages(
     pool=Depends(get_pool),
 ) -> list[ConversationMessage]:
     async with pool.acquire() as conn:
-        # Verify ownership
-        owner = await conn.fetchval(
-            "SELECT id FROM conversations WHERE id = $1 AND user_id = $2",
+        # Verify access: personal conversation requires owner match;
+        # workspace conversation requires workspace membership.
+        # Sprint D6.49.
+        conv = await conn.fetchrow(
+            "SELECT user_id, workspace_id FROM conversations WHERE id = $1",
             conversation_id,
-            uuid.UUID(user.user_id),
         )
-        if not owner:
+        if not conv:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
+
+        user_uuid = uuid.UUID(user.user_id)
+        if conv["workspace_id"] is None:
+            # Personal — only the owner can read.
+            if conv["user_id"] != user_uuid:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
+        else:
+            # Workspace — any member can read.
+            role = await conn.fetchval(
+                "SELECT role FROM workspace_members "
+                "WHERE workspace_id = $1 AND user_id = $2",
+                conv["workspace_id"], user_uuid,
+            )
+            if role is None:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
 
         rows = await conn.fetch(
             """
