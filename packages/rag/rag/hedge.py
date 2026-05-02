@@ -109,6 +109,25 @@ HEDGE_PATTERNS: list[str] = [
     r"don'?t (?:contain|include) a\s+\w+\s+rule",
     r"doesn'?t map (?:cleanly )?to",
     r"don'?t map (?:cleanly )?to",
+
+    # Sprint D6.48 Phase 2 audit (Blake review #2, 2026-05-02 14:25) —
+    # streaming-path queries that hedged with "did not retrieve…":
+    #   "I did not retrieve specific information about Paris MOU's 2025…"
+    #   "I did not retrieve information about the most recent IMO MEPC…"
+    # The pattern is "<negation> retrieve" + "information" or "specific"
+    # within a short window. Strong corpus-gap admission either way.
+    r"(?:did not|didn'?t|do not|don'?t)\s+retrieve",
+    r"(?:was|were|isn'?t|aren'?t)\s+not\s+retrieved",
+    r"haven'?t\s+(?:been\s+)?retrieved",
+    r"i\s+(?:could not|couldn'?t)\s+find",
+    r"i\s+(?:cannot|can'?t)\s+find",
+    # "no specific information about <X>" / "no information about <X>"
+    # — model admitting it has nothing on the topic.
+    r"no\s+(?:specific\s+)?information\s+(?:about|on|regarding)",
+    # "limited to <older year>" / "as of <date>, my context only covers"
+    # — model dating the corpus and admitting newer content is missing.
+    r"(?:my|the)\s+(?:retrieved|verified|knowledge)[^.]{0,40}(?:is\s+limited|only\s+covers|extends only)",
+    r"limited to\s+(?:the\s+)?\d{4}",
 ]
 
 _HEDGE_RE = re.compile("|".join(HEDGE_PATTERNS), re.IGNORECASE)
