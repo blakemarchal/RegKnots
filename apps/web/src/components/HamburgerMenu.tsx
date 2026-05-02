@@ -45,6 +45,10 @@ const MENU_SECTIONS: MenuSection[] = [
     items: [
       { icon: '\u2693', label: 'My Vessels', action: 'vessels' },
       { icon: '\u24D8', label: 'Vessel Dossier', action: 'vessel-dossier', path: '/vessel-dossier' },
+      // D6.49 \u2014 Wheelhouse / crew tier. Visible to all users; the
+      // /workspaces page itself shows a friendly "not yet available"
+      // message to non-internal accounts during the staged rollout.
+      { icon: '\u2693', label: 'Wheelhouse (Beta)', action: 'wheelhouse', path: '/workspaces' },
     ],
   },
   {
