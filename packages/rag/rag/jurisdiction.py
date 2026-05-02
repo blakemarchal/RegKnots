@@ -73,6 +73,8 @@ SOURCE_TO_JURISDICTIONS: dict[str, list[str]] = {
     "dgmm_es":          ["es"],
     "it_capitaneria":   ["it"],
     "gr_ynanp":         ["gr"],
+    # Sprint D6.50 — OCIMF (international industry guidance).
+    "ocimf":            ["intl"],
     # Norway (Sprint D6.23) — first non-English flag (but content is in English)
     "nma_rsv":          ["no"],
     # Sprint D6.23 — Tier D international references. All tagged 'intl'

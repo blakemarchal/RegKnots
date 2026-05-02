@@ -74,6 +74,13 @@ _PDF_SOURCE_CONFIG: dict[str, dict] = {
         "raw_dir": _DATA_RAW / "gr_ynanp",
         "adapter": "ingest.sources.gr_ynanp",
     },
+    "ocimf": {
+        # Sprint D6.50 — OCIMF public layer (SIRE 2.0 + Information Papers).
+        # Member-only content (full Q library, ISGOTT 6th, MEG-4, etc.)
+        # is intentionally excluded; needs OCIMF membership for ingest.
+        "raw_dir": _DATA_RAW / "ocimf",
+        "adapter": "ingest.sources.ocimf",
+    },
     "imdg": {
         # Sprint D6.12 — IMDG Code 2024 Edition (Vol 1 + Vol 2, Amend 42-24).
         # Two-stage source: scripts/ocr_imdg_screenshots.py +

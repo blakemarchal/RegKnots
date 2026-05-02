@@ -187,6 +187,8 @@ _SOURCE_TO_JURISDICTIONS: dict[str, list[str]] = {
     "dgmm_es":          ["es"],
     "it_capitaneria":   ["it"],
     "gr_ynanp":         ["gr"],
+    # Sprint D6.50 — OCIMF (industry, treated as international tier-4).
+    "ocimf":            ["intl"],
     # Norway (Sprint D6.23)
     "nma_rsv":          ["no"],
     # Tier D international references (Sprint D6.23)

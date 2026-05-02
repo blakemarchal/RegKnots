@@ -236,6 +236,86 @@ _IT_CAPITANERIA_DOCS: list[CuratedDoc] = [
                "https://lavoromarittimo.mit.gov.it/wp-content/uploads/2023/07/DM-22-NOVEMBRE-2016.pdf"),
 ]
 
+_OCIMF_DOCS: list[CuratedDoc] = [
+    # ── SIRE 2.0 program docs ───────────────────────────────────────────────
+    CuratedDoc("OCIMF SIRE 2.0 Programme Intro",
+               "SIRE 2.0 Programme Introduction and Guidance v1.0 (Jan 2022)",
+               "https://www.ocimf.org/document-libary/628-sire-2-0-programme-introduction-and-guidance-version-1-0-january-2022/file"),
+    CuratedDoc("OCIMF SIRE 2.0 User Guide",
+               "Programme User Guide to SIRE 2.0 Documents (Aug 2024)",
+               "https://www.ocimf.org/document-libary/841-programme-user-guide-to-sire-2-0-documents/file"),
+    CuratedDoc("OCIMF SIRE 2.0 Conditions",
+               "SIRE 2.0 Conditions of Participation, Policies and Procedures",
+               "https://www.ocimf.org/document-libary/833-sire-2-0-conditions-of-participation-policies-and-procedures/file"),
+    CuratedDoc("OCIMF SIRE 2.0 Q Library Pt1",
+               "SIRE 2.0 Question Library Part 1 — Chapters 1 to 7 v1.0 (Jan 2022)",
+               "https://www.ocimf.org/document-libary/630-sire-2-0-question-library-part-1-chapters-1-to-7-version-1-0-january-2022/file"),
+    CuratedDoc("OCIMF SIRE 2.0 Pre-Inspection Q",
+               "SIRE 2.0 Instructions for Completing the Pre-Inspection Questionnaire v1.0",
+               "https://www.ocimf.org/document-libary/664-sire-2-0-instructions-for-completing-the-pre-inspection-questionnaire-version-1-0/file"),
+    CuratedDoc("OCIMF SIRE 2.0 Report Format",
+               "SIRE 2.0 Inspection Report Format and Transition Report Anonymisation Process v1.0",
+               "https://www.ocimf.org/document-libary/796-sire-2-0-inspection-report-format-and-transition-report-anonymisation-process-version-1-0/file"),
+    CuratedDoc("OCIMF SIRE 2.0 Universal Interpretations",
+               "SIRE 2.0 Universal Interpretations v1.0 (Jan 2023)",
+               "https://www.ocimf.org/document-libary/737-sire-2-0-universal-interpretations-version-1-0/file"),
+    CuratedDoc("OCIMF SIRE 2.0 Closing Checklist",
+               "SIRE 2.0 Inspection Closing Meeting Checklist v1.0 (Apr 2022)",
+               "https://www.ocimf.org/document-libary/667-sire-2-0-inspection-closing-meeting-checklist-version-1-0/file"),
+    CuratedDoc("OCIMF SIRE 2.0 Opening Checklist",
+               "SIRE 2.0 Inspection Opening Meeting Checklist v1.0 (Apr 2022)",
+               "https://www.ocimf.org/document-libary/668-sire-2-0-inspection-opening-meeting-checklist-version-1-0/file"),
+    CuratedDoc("OCIMF SIRE 2.0 Negative Observation",
+               "SIRE 2.0 Negative Observation Module Explanation v1.0 (Apr 2022)",
+               "https://www.ocimf.org/document-libary/666-sire-2-0-negative-observation-module-explanation-version-1-0/file"),
+    CuratedDoc("OCIMF SIRE 2.0 Certificate Repository",
+               "SIRE 2.0 Instructions for Uploading Certificates to the Certificate Repository v1.0",
+               "https://www.ocimf.org/document-libary/663-sire-2-0-instructions-for-uploading-certificates-to-the-certificate-repository-version-1-0/file"),
+    CuratedDoc("OCIMF SIRE 2.0 Draft Validation",
+               "SIRE 2.0 Draft Inspection Report Validation Best Practice v1.0",
+               "https://www.ocimf.org/document-libary/814-sire-2-0-draft-inspection-report-validation-best-practice-version-1-0/file"),
+    CuratedDoc("OCIMF SIRE Operator Quick Start",
+               "SIRE Operator Access Quick Start Guide v3.26 (Jun 2022)",
+               "https://www.ocimf.org/document-libary/806-sire-operator-access-quick-start-guide/file"),
+    # ── Legacy SIRE / VIQ ───────────────────────────────────────────────────
+    CuratedDoc("OCIMF SIRE VIQ7",
+               "SIRE Vessel Inspection Questionnaire (VIQ) v7007",
+               "https://www.ocimf.org/document-libary/287-sire-vessel-inspection-questionnaire-viq-ver-7007-questionnaire/file"),
+    # ── Offshore + barge ────────────────────────────────────────────────────
+    CuratedDoc("OCIMF OVIQ4 7300",
+               "Offshore Vessel Inspection Questionnaire OVIQ4 v7300",
+               "https://www.ocimf.org/document-libary/1008-oviq4-7300-questionnaire/file"),
+    CuratedDoc("OCIMF OVIQ4 Small Craft 7301",
+               "OVIQ4 Small Craft v7301 Questionnaire",
+               "https://www.ocimf.org/document-libary/1009-oviq4-small-craft-7301-questionnaire/file"),
+    CuratedDoc("OCIMF BIQ5 US v5301",
+               "Barge Inspection Questionnaire BIQ5 US v5301",
+               "https://www.ocimf.org/document-libary/545-biq5-us-v5301/file"),
+    # ── Information papers + operational guidance ──────────────────────────
+    CuratedDoc("OCIMF Marine Terminal Info Booklet",
+               "Marine Terminal Information Booklet: Guidelines and Recommendations",
+               "https://www.ocimf.org/document-libary/89-marine-terminal-information-booklet-guidelines-and-recommendations/file"),
+    CuratedDoc("OCIMF Marine Breakaway Couplings",
+               "Marine Breakaway Couplings — Information Paper",
+               "https://www.ocimf.org/document-libary/133-marine-breakaway-couplings-information-paper/file"),
+    CuratedDoc("OCIMF Inert Gas Systems",
+               "Inert Gas Systems — Use of Inert Gas for Carriage of Flammable Oil Cargoes",
+               "https://www.ocimf.org/document-libary/96-inert-gas-systems-the-use-of-inert-gas-for-the-carriage-of-flammable-oil-cargoes/file"),
+    CuratedDoc("OCIMF Safety Critical Equipment",
+               "Safety Critical Equipment and Spare Parts Guidance",
+               "https://www.ocimf.org/document-libary/93-safety-critical-equipment-and-spare-parts-guidance/file"),
+    CuratedDoc("OCIMF Human Factors Approach",
+               "Human Factors Approach — A Framework to Materially Reduce Marine Risk",
+               "https://www.ocimf.org/document-libary/62-human-factors-approach/file"),
+    CuratedDoc("OCIMF Survival Craft Offshore",
+               "Management of Survival Craft on Fixed/Floating Offshore Installations",
+               "https://www.ocimf.org/document-libary/878-management-of-survival-craft-on-fixed-floating-offshore-installations/file"),
+    CuratedDoc("OCIMF Danish Straits 2026",
+               "Guidelines for Large Ships Transiting the Danish Straits through the Great Belt (1st ed. 2026)",
+               "https://www.ocimf.org/document-libary/1067-danish-straits-guidelines/file"),
+]
+
+
 _GR_YNANP_DOCS: list[CuratedDoc] = [
     CuratedDoc("HMSA YA STCW Tankers", "Υπουργική Απόφαση — STCW V/1-1, V/1-2 Tankers",
                "https://www.ynanp.gr/media/documents/document_vuk6BHq.pdf"),
@@ -296,6 +376,19 @@ _CONFIGS: dict[str, SourceConfig] = {
         language="el",
         source_date=date(2026, 5, 1),
         docs=_GR_YNANP_DOCS,
+    ),
+    # Sprint D6.50 — OCIMF public layer. Tier-4 industry guidance (not a
+    # flag-state) but uses the same curated-list adapter shape. Limited
+    # to free, publicly-downloadable PDFs from ocimf.org. The full SIRE
+    # 2.0 question library beyond Part 1 + ISGOTT 6th + MEG-4 + similar
+    # member-only publications are NOT ingested — those need OCIMF
+    # membership and are flagged in the user-facing UI as paywalled.
+    "ocimf": SourceConfig(
+        code="ocimf",
+        parent_section_number="OCIMF Public Layer",
+        language="en",
+        source_date=date(2026, 5, 2),
+        docs=_OCIMF_DOCS,
     ),
 }
 
