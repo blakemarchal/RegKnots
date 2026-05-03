@@ -294,22 +294,31 @@ async def send_trial_expiring_email(to_email: str, full_name: str, messages_used
     raw_first = full_name.split()[0] if full_name.strip() else "Mariner"
     first_name = _html_lib.escape(raw_first)
     html = _html(f"""
-      <h1>Your trial ends in 3 days</h1>
+      <h1>Your RegKnot trial ends in 3 days</h1>
       <p>
-        Hey {first_name} — just a heads up that your RegKnot trial expires in 3 days.
-        You've sent <strong style="color:#f0ece4;">{messages_used}</strong> messages so far.
+        Hey {first_name} — quick heads up that your trial expires in 3 days.
+        You've asked <strong style="color:#f0ece4;">{messages_used}</strong> regulation
+        questions so far.
       </p>
       <p>
-        To keep your access to unlimited compliance questions, vessel-specific answers, and every
-        regulation source, subscribe to RegKnot Pro for <strong style="color:#f0ece4;">$39/month</strong>
-        (or save 26% with the annual plan at <strong style="color:#f0ece4;">$29/month</strong>).
+        Before you decide whether to continue, I'd genuinely like your honest read
+        on RegKnot — what's worked, what hasn't, what's missing for your day-to-day
+        work. Just hit reply to this email; I read every response personally.
       </p>
-      <a href="{APP_URL}/pricing" class="cta">Subscribe Now</a>
+      <p>
+        If you've found it useful and want to keep going, our paid plans cover unlimited
+        compliance questions, vessel-specific answers, and every regulation source we've
+        ingested.
+      </p>
+      <a href="{APP_URL}/pricing" class="cta">See plans</a>
+      <p style="font-size:12px; color:rgba(107,117,148,0.7); margin-top:14px;">
+        Either way, thanks for trying RegKnot. Your feedback shapes what we build next.
+      </p>
     """)
     resend.Emails.send({
         "from": CAPTAIN_EMAIL,
         "to": [to_email],
-        "subject": "Your RegKnot trial ends in 3 days",
+        "subject": "Your RegKnot trial ends in 3 days — quick favor first",
         "html": html,
     })
 

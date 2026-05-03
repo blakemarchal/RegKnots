@@ -68,10 +68,38 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
   const [recoveryFailed, setRecoveryFailed] = useState(false)
   const recoveryAbortRef = useRef<AbortController | null>(null)
 
-  // Sprint D6.34 — per-message verbosity override. Reset to undefined
-  // after each successful send so the user has to opt in fresh each
-  // turn (avoids surprise "I forgot I left it on Brief").
-  const [verbosity, setVerbosity] = useState<'brief' | 'standard' | 'detailed' | undefined>(undefined)
+  // Sprint D6.34 / D6.52 — verbosity chip state.
+  //
+  // savedVerbosity = user's account-settings preference (the "default
+  // I want to live in"). Fetched on mount from /onboarding/persona;
+  // falls back to 'standard' if the user never set a preference.
+  //
+  // verbosity = the currently-highlighted chip. Init = savedVerbosity
+  // so the chip ALWAYS has one selected (UX bug fix — previously no
+  // chip was highlighted on a fresh load, which looked broken).
+  //
+  // Per-message override: click a different chip → that chip is
+  // highlighted for the next turn. After successful send, snap back
+  // to savedVerbosity so the next blank turn doesn't accidentally
+  // inherit the override. Tightly coupled to account settings: the
+  // chip never silently mutates the saved preference.
+  const [savedVerbosity, setSavedVerbosity] = useState<'brief' | 'standard' | 'detailed'>('standard')
+  const [verbosity, setVerbosity] = useState<'brief' | 'standard' | 'detailed'>('standard')
+
+  useEffect(() => {
+    let cancelled = false
+    apiRequest<{ verbosity_preference: string | null }>('/onboarding/persona')
+      .then((r) => {
+        if (cancelled) return
+        const pref = r.verbosity_preference
+        if (pref === 'brief' || pref === 'standard' || pref === 'detailed') {
+          setSavedVerbosity(pref)
+          setVerbosity(pref)
+        }
+      })
+      .catch(() => { /* keep 'standard' fallback */ })
+    return () => { cancelled = true }
+  }, [])
 
   const router = useRouter()
   const { canInstall, install } = usePwa()
@@ -365,9 +393,10 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
     try {
       const currentVesselId = useAuthStore.getState().activeVesselId
       const turnVerbosity = verbosity  // capture before reset
-      // Sprint D6.34 — clear the chip immediately so the user sees it
-      // reset; if the request fails they can re-pick before retrying.
-      setVerbosity(undefined)
+      // D6.52 — snap back to the user's saved account preference so
+      // the next blank turn picks up their default. Override is only
+      // ever per-turn; tightly coupled to account settings.
+      setVerbosity(savedVerbosity)
       await sendMessageStream(
         query,
         conversationId,
@@ -449,7 +478,7 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
       setProgressMsg(null)
       setLoading(false)
     }
-  }, [input, loading, conversationId, router, setBilling, writePending, clearPending, recoveryLoop, verbosity])
+  }, [input, loading, conversationId, router, setBilling, writePending, clearPending, recoveryLoop, verbosity, savedVerbosity])
 
   function handlePrompt(text: string) {
     setInput(text)

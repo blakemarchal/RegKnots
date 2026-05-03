@@ -381,3 +381,25 @@ body {
     margin: 15mm 20mm;
   }
 }
+
+/* ── Chat content — long-string overflow guard (D6.52) ────────────────────────
+   Long URLs, file paths, or dangerous-goods identifier strings (e.g.
+   pmlength="UN-2734-AMINOPROPYLDIETHANOLAMINE_TECHNICAL_GRADE") would
+   otherwise force horizontal scroll on mobile when pasted into a chat
+   message. overflow-wrap:anywhere lets the browser break inside long
+   tokens at any character; word-break:break-word is the legacy fallback
+   for older WebKit. Scoped to chat content so we don't accidentally
+   break tabular layouts. */
+.chat-thread,
+.chat-thread .prose,
+.chat-thread .prose * {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+/* Code spans and pre blocks should still allow horizontal scroll within
+   their own box (preserves the "look at long code" affordance) but the
+   surrounding paragraph stays wrapped. */
+.chat-thread pre,
+.chat-thread code {
+  overflow-x: auto;
+}

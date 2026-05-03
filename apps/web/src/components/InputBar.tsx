@@ -3,9 +3,13 @@
 import { useRef, useEffect, type KeyboardEvent, type ChangeEvent } from 'react'
 import { useVoiceInput } from '@/lib/useVoiceInput'
 
-// Sprint D6.34 — per-message verbosity override.
-// undefined = use the user's saved default (users.verbosity_preference).
-// "brief" / "standard" / "detailed" override for THIS turn only.
+// Sprint D6.34 / D6.52 — verbosity chip selection.
+// Always one of the three concrete values. ChatInterface initializes
+// from the user's account preference and snaps back to it after each
+// successful send. The legacy `undefined` state was dropped (no
+// chip highlighted = poor UX); type kept as a union for callers that
+// want to express "not yet loaded" but the chip ALWAYS renders one
+// selected when handed a defined value.
 export type VerbosityOverride = 'brief' | 'standard' | 'detailed' | undefined
 
 interface Props {
@@ -49,11 +53,14 @@ export function InputBar({
 
   const canSend = !loading && value.trim().length > 0
 
-  // Sprint D6.34 — chip toggle. Clicking the active chip clears it
-  // (back to user default); clicking another chip switches the override.
+  // Sprint D6.34 / D6.52 — chip click. There is always one chip
+  // highlighted (initialized from the user's saved account preference).
+  // Clicking the same chip is a no-op; clicking another chip switches
+  // the active chip for THIS turn only — ChatInterface snaps it back
+  // to the saved preference after the message sends.
   function pickChip(next: VerbosityOverride) {
-    if (!onVerbosityChange) return
-    onVerbosityChange(verbosity === next ? undefined : next)
+    if (!onVerbosityChange || verbosity === next) return
+    onVerbosityChange(next)
   }
 
   return (
@@ -75,15 +82,9 @@ export function InputBar({
             active={verbosity === 'detailed'}
             onClick={() => pickChip('detailed')}
           />
-          {verbosity && (
-            <button
-              onClick={() => onVerbosityChange(undefined)}
-              className="font-mono text-[10px] text-[#6b7594] hover:text-[#f0ece4] ml-1 transition-colors"
-              aria-label="Clear verbosity override"
-            >
-              clear
-            </button>
-          )}
+          {/* D6.52 — "clear" button removed. There's always one chip
+              active (the saved preference). To revert a per-turn
+              override, click the saved-preference chip directly. */}
         </div>
       )}
       <div className="flex items-end gap-2 px-3 py-2 rounded-2xl
