@@ -7,19 +7,17 @@ import { useVoiceInput } from '@/lib/useVoiceInput'
 // Always one of the three concrete values. ChatInterface initializes
 // from the user's account preference and snaps back to it after each
 // successful send. The legacy `undefined` state was dropped (no
-// chip highlighted = poor UX); type kept as a union for callers that
-// want to express "not yet loaded" but the chip ALWAYS renders one
-// selected when handed a defined value.
-export type VerbosityOverride = 'brief' | 'standard' | 'detailed' | undefined
+// chip highlighted = poor UX).
+export type VerbosityOverride = 'brief' | 'standard' | 'detailed'
 
 interface Props {
   value: string
   onChange: (v: string) => void
   onSend: () => void
   loading: boolean
-  /** Optional verbosity override surfaced as 3 chips above the textarea.
-   *  When undefined, no chip is selected and the user's saved preference
-   *  governs. Selecting a chip applies for the next message only. */
+  /** Verbosity setting surfaced as 3 chips above the textarea. Always
+   *  has one chip active; per-turn override snaps back to saved
+   *  preference after send (handled by parent ChatInterface). */
   verbosity?: VerbosityOverride
   onVerbosityChange?: (v: VerbosityOverride) => void
 }
