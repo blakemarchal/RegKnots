@@ -137,3 +137,137 @@ def is_synonym(term: str) -> bool:
             if syn.lower() == term_lower:
                 return True
     return False
+
+
+# ── Sprint D6.56 — intent expansion ───────────────────────────────────────
+#
+# Term-level synonyms (above) handle the case where the user uses one
+# noun and the corpus uses another ("lifejacket" → "lifesaving
+# appliance"). They DON'T handle the case where the user's question
+# implies a different SECTION than what the literal terms point to.
+#
+# Brandon's 2026-05-04 query motivated this:
+#
+#   Q: "How often does a rescue boat need to be launched cfr"
+#
+# Embedding pulled "rescue boat launched" hard and landed on
+# §§108.570 / 133.160 / 199.160 — the LAUNCHING-ARRANGEMENT sections.
+# But the answer to "how often" lives in §§199.180 / 109.213 /
+# 122.520 / 185.520 / 35.10-1 — the TRAINING-AND-DRILLS sections,
+# which are titled with vocabulary the user never used ("training",
+# "drills", "musters").
+#
+# Intent expansion fires when the query carries:
+#   1. A FREQUENCY MARKER ("how often", "interval", "schedule",
+#      "weekly", "monthly", etc.)
+# AND
+#   2. An EMERGENCY-EQUIPMENT TERM (lifeboat, rescue boat, fire alarm,
+#      lifejacket, immersion suit, etc.)
+#
+# When both fire, we append the corpus's canonical drill / training
+# vocabulary as additional trigram-search terms. Vector embedding is
+# unchanged; the new terms just give trigram a chance to surface the
+# right sections, which the reranker then promotes.
+#
+# Same conservative principle as SYNONYM_DICT: only patterns we have
+# direct evidence for. Add more as new misses surface.
+
+
+_FREQUENCY_TOKENS: frozenset[str] = frozenset({
+    # Token-level frequency words after stopword removal
+    "frequency", "interval", "intervals", "schedule",
+    "weekly", "biweekly", "fortnightly",
+    "monthly", "annually", "yearly", "quarterly",
+    "rotation", "periodic", "periodically",
+})
+
+_FREQUENCY_PHRASES: tuple[str, ...] = (
+    # Phrase-level markers checked against the raw query (lowercase).
+    # Stopword-aware extraction would drop "how" + "often"; we look at
+    # the raw text for these.
+    "how often", "how frequently", "how regularly",
+    "how many times", "how much time between",
+    "every how",
+)
+
+_EMERGENCY_EQUIPMENT: frozenset[str] = frozenset({
+    # Tokens (post-stopword extraction) that signal emergency-context
+    # equipment whose corpus answer lives in a drill/training section
+    # rather than the equipment-capability section.
+    "lifeboat", "lifeboats",
+    "rescue",            # paired with "boat" via _EMERGENCY_PHRASES
+    "liferaft", "raft", "rafts",
+    "immersion", "suit",
+    "lifejacket", "pfd",
+    "abandon",           # paired with "ship" via _EMERGENCY_PHRASES
+    "alarm", "alarms",
+    "muster", "musters",
+    "emergency",
+    "fire",
+    "drill", "drills",   # already corpus vocab; harmless to keep
+})
+
+_EMERGENCY_PHRASES: tuple[str, ...] = (
+    # When these multi-word phrases appear, count as emergency context
+    # even if the individual tokens are too generic (e.g. "fire").
+    "rescue boat", "abandon ship", "fire alarm", "fire pump",
+    "fire detection", "fire drill", "abandon-ship drill",
+    "emergency generator", "emergency lighting",
+)
+
+# Canonical CFR / SOLAS vocabulary appended when intent fires.
+# Multi-word phrases pass through verbatim — trigram treats them as
+# ILIKE substrings, matching exact phrases in section text/titles.
+_DRILL_INTENT_VOCAB: tuple[str, ...] = (
+    "drill",
+    "training",
+    "musters",
+    "operational readiness",
+    "inspection",
+)
+
+
+def expand_intent(
+    query: str, keywords: list[str],
+) -> tuple[list[str], list[str]]:
+    """Detect intent patterns and append canonical vocab to keywords.
+
+    Returns:
+        (expanded_keywords, intent_added) where
+          - expanded_keywords: original list plus any appended canonical
+            vocab. Original order preserved; appended terms come last.
+          - intent_added: just the appended terms, for the caller to
+            pass to _broad_keyword_search as synonym_keywords (so the
+            relaxed freq cap applies — these terms are by design
+            broader than user vocab, like real synonyms).
+    """
+    if not keywords:
+        return list(keywords), []
+
+    query_lower = query.lower()
+    keyword_set = {k.lower() for k in keywords}
+
+    # Frequency signal: token-level OR phrase-level
+    has_freq_token = any(k in _FREQUENCY_TOKENS for k in keyword_set)
+    has_freq_phrase = any(p in query_lower for p in _FREQUENCY_PHRASES)
+    if not (has_freq_token or has_freq_phrase):
+        return list(keywords), []
+
+    # Emergency-context signal: token-level OR phrase-level
+    has_eq_token = any(k in _EMERGENCY_EQUIPMENT for k in keyword_set)
+    has_eq_phrase = any(p in query_lower for p in _EMERGENCY_PHRASES)
+    if not (has_eq_token or has_eq_phrase):
+        return list(keywords), []
+
+    # Both fired — append the canonical drill/training vocabulary.
+    out = list(keywords)
+    seen = set(keyword_set)
+    added: list[str] = []
+    for v in _DRILL_INTENT_VOCAB:
+        v_lower = v.lower()
+        if v_lower in seen:
+            continue
+        seen.add(v_lower)
+        out.append(v)
+        added.append(v)
+    return out, added

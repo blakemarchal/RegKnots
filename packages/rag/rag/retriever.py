@@ -1293,6 +1293,23 @@ async def retrieve(
             synonym_added = {s for syns in synonym_map.values() for s in syns}
             logger.info("Synonym expansion: %s", synonym_map)
 
+    # Sprint D6.56 — intent expansion. Catches the
+    # "how often + emergency equipment" failure mode where embedding
+    # lands on equipment-capability sections but the answer lives in
+    # drill/training sections (e.g. Brandon's "How often does a rescue
+    # boat need to be launched cfr" → 199.160 vs the right 199.180).
+    # Appended terms flow into synonym_added so they share the relaxed
+    # freq cap (drill/training are broader than user vocab by design).
+    if keywords:
+        from .synonyms import expand_intent
+        keywords, intent_added = expand_intent(query, keywords)
+        if intent_added:
+            synonym_added.update(intent_added)
+            logger.info(
+                "Intent expansion fired (frequency+emergency) — appended %s",
+                intent_added,
+            )
+
     id_results: list[dict] = []
     kw_results: list[dict] = []
     specific_keywords: list[str] = []
