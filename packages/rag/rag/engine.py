@@ -1463,6 +1463,29 @@ async def chat(
                     str(exc)[:200],
                 )
 
+        # Sprint D6.58 Slice 2 — fire the hedge classifier on every
+        # hedge. Fire-and-forget; never block the response. Result
+        # lands in hedge_audits for admin review. We classify even
+        # when web fallback succeeded — the corpus still missed, and
+        # Karynn might want to ingest the source the fallback found.
+        try:
+            await _classify_and_persist_hedge(
+                pool=pool,
+                conversation_id=conversation_id,
+                user_id=user_id,
+                query=query,
+                vessel_profile=vessel_profile,
+                retrieved=chunks,
+                hedge_text=cleaned_answer,
+                anthropic_client=anthropic_client,
+                web_fallback_card=web_fallback_card,
+            )
+        except Exception as exc:
+            logger.warning(
+                "hedge audit failed (non-fatal): %s: %s",
+                type(exc).__name__, str(exc)[:200],
+            )
+
     return ChatResponse(
         answer=cleaned_answer,
         conversation_id=conversation_id,
@@ -1576,6 +1599,56 @@ async def _try_web_fallback(
         summary=result.answer_text or "",
         confidence=result.confidence or 0,
         surface_tier=result.surface_tier,
+    )
+
+
+async def _classify_and_persist_hedge(
+    *,
+    pool,
+    conversation_id,
+    user_id,
+    query: str,
+    vessel_profile,
+    retrieved: list,
+    hedge_text: str,
+    anthropic_client,
+    web_fallback_card,
+) -> None:
+    """Run the Haiku hedge classifier and persist to hedge_audits.
+
+    Fire-and-forget — caller swallows all exceptions. The classifier
+    is single-shot, ~$0.001 per call, ~1s latency. We always run it
+    after the user has already received their response, so this never
+    affects perceived latency. Sprint D6.58 Slice 2.
+    """
+    from rag.hedge_audit import classify_hedge, persist_hedge_audit
+
+    outcome = await classify_hedge(
+        query=query,
+        retrieved=retrieved or [],
+        hedge_text=hedge_text,
+        vessel_profile=vessel_profile,
+        anthropic_client=anthropic_client,
+    )
+    if outcome is None:
+        return
+
+    web_fallback_id = (
+        web_fallback_card.fallback_id if web_fallback_card else None
+    )
+    web_surface_tier = (
+        web_fallback_card.surface_tier if web_fallback_card else None
+    )
+
+    await persist_hedge_audit(
+        pool=pool,
+        conversation_id=conversation_id,
+        user_id=user_id,
+        query=query,
+        retrieved=retrieved or [],
+        web_fallback_id=web_fallback_id,
+        web_surface_tier=web_surface_tier,
+        outcome=outcome,
     )
 
 
@@ -1897,6 +1970,27 @@ async def chat_with_progress(
                     type(exc).__name__,
                     str(exc)[:200],
                 )
+
+        # Sprint D6.58 Slice 2 — hedge classifier (streaming path).
+        # Fire-and-forget; Haiku call adds <1s latency on the
+        # already-completed response.
+        try:
+            await _classify_and_persist_hedge(
+                pool=pool,
+                conversation_id=conversation_id,
+                user_id=user_id,
+                query=query,
+                vessel_profile=vessel_profile,
+                retrieved=chunks,
+                hedge_text=cleaned_answer,
+                anthropic_client=anthropic_client,
+                web_fallback_card=web_fallback_card,
+            )
+        except Exception as exc:
+            logger.warning(
+                "hedge audit failed (non-fatal): %s: %s",
+                type(exc).__name__, str(exc)[:200],
+            )
 
     # Stage 6: Final event with the complete response
     done_payload = {

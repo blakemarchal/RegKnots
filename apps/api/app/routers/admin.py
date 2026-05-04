@@ -4129,3 +4129,190 @@ async def get_chat(
         vessel=vessel,
         messages=messages,
     )
+
+
+# ── Hedge audits (Sprint D6.58 Slice 2) ───────────────────────────────────
+
+
+class HedgeAuditDTO(BaseModel):
+    id: str
+    created_at: str
+    classification: Literal[
+        "VOCAB", "INTENT", "RANKING", "COSINE",
+        "CORPUS_GAP", "JURISDICTION", "OTHER",
+    ]
+    status: Literal["open", "fixed", "wontfix", "duplicate"]
+    query: str
+    classifier_reasoning: str | None
+    recommendation: str | None
+    classifier_model: str | None
+    web_surface_tier: str | None
+    user_email: str | None
+    user_full_name: str | None
+    conversation_id: str | None
+    top_retrieved_sections: list[dict[str, Any]]
+    admin_notes: str | None
+    fixed_at: str | None
+    fixed_by_email: str | None
+
+
+class HedgeAuditUpdate(BaseModel):
+    status: Literal["open", "fixed", "wontfix", "duplicate"]
+    admin_notes: str | None = None
+    fix_commit_sha: str | None = None
+
+
+class HedgeAuditStats(BaseModel):
+    open_count: int
+    fixed_last_7d: int
+    by_classification: dict[str, int]
+
+
+@router.get("/hedge-audits/stats", response_model=HedgeAuditStats)
+async def hedge_audit_stats(
+    _admin: Annotated[CurrentUser, Depends(require_admin)],
+    pool: Annotated[asyncpg.Pool, Depends(get_pool)],
+) -> HedgeAuditStats:
+    """Aggregate counters for the admin dashboard."""
+    open_count = await pool.fetchval(
+        "SELECT COUNT(*) FROM hedge_audits WHERE status = 'open'"
+    ) or 0
+    fixed_last_7d = await pool.fetchval(
+        "SELECT COUNT(*) FROM hedge_audits "
+        "WHERE status = 'fixed' AND fixed_at > NOW() - INTERVAL '7 days'"
+    ) or 0
+    rows = await pool.fetch(
+        "SELECT classification, COUNT(*) AS n FROM hedge_audits "
+        "WHERE status = 'open' GROUP BY classification"
+    )
+    by_class = {r["classification"]: int(r["n"]) for r in rows}
+    return HedgeAuditStats(
+        open_count=int(open_count),
+        fixed_last_7d=int(fixed_last_7d),
+        by_classification=by_class,
+    )
+
+
+@router.get("/hedge-audits", response_model=list[HedgeAuditDTO])
+async def list_hedge_audits(
+    _admin: Annotated[CurrentUser, Depends(require_admin)],
+    pool: Annotated[asyncpg.Pool, Depends(get_pool)],
+    status: Annotated[
+        Literal["open", "fixed", "wontfix", "duplicate", "all"], Query()
+    ] = "open",
+    classification: Annotated[str | None, Query()] = None,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+) -> list[HedgeAuditDTO]:
+    """List hedge audits, newest first. Default filter: status=open.
+
+    Workflow: admin opens dashboard → sees open audits sorted newest →
+    clicks one → reviews retrieval + reasoning → marks fixed/wontfix.
+    """
+    where = []
+    params: list[object] = []
+    idx = 1
+    if status != "all":
+        where.append(f"ha.status = ${idx}")
+        params.append(status)
+        idx += 1
+    if classification:
+        where.append(f"ha.classification = ${idx}")
+        params.append(classification)
+        idx += 1
+    where_sql = ("WHERE " + " AND ".join(where)) if where else ""
+    params.append(limit)
+
+    rows = await pool.fetch(
+        f"""
+        SELECT ha.id, ha.created_at, ha.classification, ha.status,
+               ha.query, ha.classifier_reasoning, ha.recommendation,
+               ha.classifier_model, ha.web_surface_tier,
+               ha.conversation_id, ha.top_retrieved_sections,
+               ha.admin_notes, ha.fixed_at,
+               u.email AS user_email, u.full_name AS user_full_name,
+               fb.email AS fixed_by_email
+        FROM hedge_audits ha
+        LEFT JOIN users u ON u.id = ha.user_id
+        LEFT JOIN users fb ON fb.id = ha.fixed_by_user_id
+        {where_sql}
+        ORDER BY ha.created_at DESC
+        LIMIT ${idx}
+        """,
+        *params,
+    )
+    import json as _json
+    return [
+        HedgeAuditDTO(
+            id=str(r["id"]),
+            created_at=r["created_at"].isoformat(),
+            classification=r["classification"],
+            status=r["status"],
+            query=r["query"],
+            classifier_reasoning=r["classifier_reasoning"],
+            recommendation=r["recommendation"],
+            classifier_model=r["classifier_model"],
+            web_surface_tier=r["web_surface_tier"],
+            user_email=r["user_email"],
+            user_full_name=r["user_full_name"],
+            conversation_id=str(r["conversation_id"]) if r["conversation_id"] else None,
+            top_retrieved_sections=(
+                _json.loads(r["top_retrieved_sections"])
+                if isinstance(r["top_retrieved_sections"], str)
+                else (r["top_retrieved_sections"] or [])
+            ),
+            admin_notes=r["admin_notes"],
+            fixed_at=r["fixed_at"].isoformat() if r["fixed_at"] else None,
+            fixed_by_email=r["fixed_by_email"],
+        )
+        for r in rows
+    ]
+
+
+@router.patch("/hedge-audits/{audit_id}", response_model=HedgeAuditDTO)
+async def update_hedge_audit(
+    audit_id: uuid.UUID,
+    body: HedgeAuditUpdate,
+    admin: Annotated[CurrentUser, Depends(require_admin)],
+    pool: Annotated[asyncpg.Pool, Depends(get_pool)],
+) -> HedgeAuditDTO:
+    """Mark an audit fixed/wontfix/duplicate, with optional notes.
+
+    `fixed_at` and `fixed_by_user_id` get auto-populated when status
+    transitions to 'fixed'. Re-opening (status='open') clears them.
+    """
+    set_fixed = body.status == "fixed"
+    set_open = body.status == "open"
+
+    fixed_at_sql = "fixed_at = NOW()" if set_fixed else ("fixed_at = NULL" if set_open else "fixed_at = fixed_at")
+    fixed_by_sql = "fixed_by_user_id = $4" if set_fixed else (
+        "fixed_by_user_id = NULL" if set_open else "fixed_by_user_id = fixed_by_user_id"
+    )
+
+    params: list[object] = [body.status, body.admin_notes, body.fix_commit_sha]
+    if set_fixed:
+        params.append(uuid.UUID(admin.user_id))
+    params.append(audit_id)
+
+    sql = f"""
+        UPDATE hedge_audits SET
+          status = $1,
+          admin_notes = COALESCE($2, admin_notes),
+          fix_commit_sha = COALESCE($3, fix_commit_sha),
+          {fixed_at_sql},
+          {fixed_by_sql},
+          updated_at = NOW()
+        WHERE id = ${len(params)}
+        RETURNING id
+    """
+    res = await pool.fetchrow(sql, *params)
+    if res is None:
+        raise HTTPException(404, "Hedge audit not found")
+
+    # Return the updated row through list_hedge_audits' shape for UI consistency
+    rows = await list_hedge_audits(
+        _admin=admin, pool=pool, status="all", classification=None, limit=200,
+    )
+    for r in rows:
+        if r.id == str(audit_id):
+            return r
+    raise HTTPException(404, "Hedge audit not found after update")

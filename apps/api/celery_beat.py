@@ -58,4 +58,11 @@ celery.conf.beat_schedule = {
         # day-25 reminders for both. Sprint D6.54.
         "schedule": crontab(hour=16, minute=0),
     },
+    "hedge-audit-weekly-digest": {
+        "task": "app.tasks.hedge_audit_weekly_digest",
+        # Mondays at 13:30 UTC (early morning U.S.). Karynn gets a
+        # focused queue of open audits to plan her week's fixes.
+        # Sprint D6.58 Slice 2.
+        "schedule": crontab(hour=13, minute=30, day_of_week="monday"),
+    },
 }

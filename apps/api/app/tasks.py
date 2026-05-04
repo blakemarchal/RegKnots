@@ -541,6 +541,121 @@ def _send_amendment_alert(findings: list[dict]):
 # ── Workspace (Wheelhouse) state-machine crons (Sprint D6.54) ────────────
 
 
+@celery.task(name="app.tasks.hedge_audit_weekly_digest")
+def hedge_audit_weekly_digest():
+    """Email the Owner a weekly summary of open hedge audits.
+
+    Sprint D6.58 Slice 2. Aggregates the top open audits since the
+    last digest, grouped by classification, with the model's
+    recommendations inline so Karynn can scan and prioritize without
+    opening the admin UI.
+
+    Recipient: blakemarchal@gmail.com per project standing rule
+    (admin digests go to the Owner; Karynn gets context separately).
+    """
+    _run_async(_hedge_audit_weekly_digest_async())
+
+
+async def _hedge_audit_weekly_digest_async():
+    import asyncpg
+    import resend
+    from app.config import settings
+
+    resend.api_key = settings.resend_api_key
+    dsn = settings.database_url.replace("postgresql+asyncpg://", "postgresql://")
+    conn = await asyncpg.connect(dsn)
+    try:
+        # Aggregate counters
+        open_count = await conn.fetchval(
+            "SELECT COUNT(*) FROM hedge_audits WHERE status = 'open'"
+        ) or 0
+        fixed_last_7d = await conn.fetchval(
+            "SELECT COUNT(*) FROM hedge_audits "
+            "WHERE status = 'fixed' AND fixed_at > NOW() - INTERVAL '7 days'"
+        ) or 0
+        new_open_last_7d = await conn.fetchval(
+            "SELECT COUNT(*) FROM hedge_audits "
+            "WHERE status = 'open' AND created_at > NOW() - INTERVAL '7 days'"
+        ) or 0
+
+        # Top 12 open audits, newest first
+        rows = await conn.fetch(
+            """
+            SELECT id, classification, query, recommendation,
+                   created_at, classifier_reasoning
+            FROM hedge_audits
+            WHERE status = 'open'
+            ORDER BY created_at DESC
+            LIMIT 12
+            """
+        )
+
+        if not rows and fixed_last_7d == 0:
+            logger.info("hedge audit digest: nothing to report — skipping email")
+            return
+
+        items_html = ""
+        for r in rows:
+            items_html += (
+                f"<li style='margin-bottom:14px;'>"
+                f"<strong style='color:#2dd4bf;'>[{r['classification']}]</strong> "
+                f"<em style='color:#f0ece4;'>{_escape(r['query'])[:160]}</em><br>"
+                f"<span style='color:#6b7594; font-size:13px;'>"
+                f"→ {_escape(r['recommendation'] or 'No recommendation provided.')[:300]}"
+                f"</span>"
+                f"</li>"
+            )
+
+        from app.email import APP_URL
+        admin_url = f"{APP_URL}/admin/hedge-audit"
+        html = (
+            f"<h2 style='color:#f0ece4;'>RegKnots — Weekly hedge audit</h2>"
+            f"<p style='color:#6b7594;'>"
+            f"<strong style='color:#f0ece4;'>{open_count}</strong> open audits "
+            f"(<strong>{new_open_last_7d}</strong> new this week, "
+            f"<strong>{fixed_last_7d}</strong> fixed)"
+            f"</p>"
+            f"<p style='color:#6b7594;'>Top open items, newest first:</p>"
+            f"<ol style='color:#f0ece4; line-height:1.4;'>{items_html}</ol>"
+            f"<p style='margin-top:20px;'>"
+            f"<a href='{admin_url}' "
+            f"style='background:#2dd4bf; color:#0a0e1a; padding:10px 20px; "
+            f"border-radius:8px; text-decoration:none; font-weight:bold; "
+            f"font-family:monospace;'>"
+            f"Open admin queue</a></p>"
+            f"<p style='color:#6b7594; font-size:12px; margin-top:24px;'>"
+            f"Sprint D6.58 Slice 2 — mariner-in-the-loop feedback. "
+            f"Each audit is auto-classified by Haiku and recommends a "
+            f"specific next step (synonyms.py edit, ingest, retrieval tweak)."
+            f"</p>"
+        )
+
+        resend.Emails.send({
+            "from": "RegKnot <hello@mail.regknots.com>",
+            "to": ["blakemarchal@gmail.com"],
+            "subject": (
+                f"RegKnot weekly hedge audit — {open_count} open "
+                f"({new_open_last_7d} new, {fixed_last_7d} fixed)"
+            ),
+            "html": html,
+        })
+        logger.info(
+            "Sent hedge audit digest: open=%d new=%d fixed=%d",
+            open_count, new_open_last_7d, fixed_last_7d,
+        )
+    finally:
+        await conn.close()
+
+
+def _escape(s: str) -> str:
+    """Minimal HTML escape for digest body."""
+    if not s:
+        return ""
+    return (
+        s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    )
+
+
 @celery.task(name="app.tasks.workspace_state_transitions")
 def workspace_state_transitions():
     """Daily cron: drive the workspace billing state machine forward.
