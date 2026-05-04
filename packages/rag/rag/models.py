@@ -29,13 +29,28 @@ class ChatRequest(BaseModel):
 
 class WebFallbackCard(BaseModel):
     """Yellow-card payload returned alongside a hedge when a web search
-    fallback succeeded. Sprint D6.48 Phase 2."""
+    fallback succeeded.
+
+    Sprint D6.58 (Slice 1) — `surface_tier` distinguishes two
+    presentations:
+
+      'verified' — confidence 4-5 + quote verified in source. UI shows
+                   "Verified web result" badge; the answer is presented
+                   as a RegKnots-authored statement anchored on the
+                   verbatim quote.
+      'reference' — confidence 2-3 OR quote unverifiable. UI shows
+                    "External reference — please verify" badge; the
+                    surface is a link-with-context, NOT a RegKnots
+                    statement of fact. The user is invited to click
+                    through and check the source themselves.
+    """
     fallback_id: str        # web_fallback_responses.id, used for thumbs feedback
     source_url: str
     source_domain: str
-    quote: str              # verbatim, verified to exist in source
+    quote: str              # verbatim if surface_tier='verified'; may be empty for 'reference'
     summary: str            # Claude's plain-English explanation
-    confidence: int         # 1-5, gated to >= 4 before surfacing
+    confidence: int         # 1-5
+    surface_tier: str = "verified"  # 'verified' | 'reference'
 
 
 class ChatResponse(BaseModel):

@@ -22,6 +22,10 @@ class Settings(BaseSettings):
     # AI API keys — no REGKNOTS_ prefix in .env
     openai_api_key: str = Field(default="", validation_alias="OPENAI_API_KEY")
     anthropic_api_key: str = Field(default="", validation_alias="ANTHROPIC_API_KEY")
+    # Sprint D6.58 (Slice 3) — xAI / Grok API key for the Big-3 ensemble
+    # web fallback. Empty in dev; the ensemble path falls back to
+    # Anthropic+OpenAI only when this is unset (graceful degrade).
+    xai_api_key: str = Field(default="", validation_alias="XAI_API_KEY")
 
     # Email — no REGKNOTS_ prefix in .env
     resend_api_key: str = Field(default="", validation_alias="RESEND_API_KEY")

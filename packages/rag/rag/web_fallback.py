@@ -450,7 +450,27 @@ async def verify_quote_in_source(
 @dataclass
 class FallbackResult:
     """Outcome of a single fallback attempt — surfaced or not, plus all
-    the metadata we want to log to web_fallback_responses."""
+    the metadata we want to log to web_fallback_responses.
+
+    Sprint D6.58 (Slice 1) — `surface_tier` replaces the binary
+    `surfaced` flag with three states:
+
+      'verified'   — confidence 4-5, quote verified verbatim against the
+                     source, source domain on whitelist. Surfaced as a
+                     RegKnots-authored answer with a "Verified web
+                     result" badge.
+      'reference'  — confidence 2-3 OR quote unverifiable, but source is
+                     a maritime-relevant URL. Surfaced as a "look here
+                     to verify" link with an "External reference —
+                     please verify" badge. The user gets actionable
+                     direction without RegKnot endorsing the content.
+      'blocked'    — confidence ≤ 1, no source URL, or domain explicitly
+                     blocked. Stay hedged; show nothing.
+
+    `surfaced` is kept as a derived boolean (True when tier is
+    verified or reference) for backward compatibility with downstream
+    code that just wants "did we put anything in front of the user."
+    """
     query:                  str
     web_query_used:         Optional[str] = None
     top_urls:               list[str] = field(default_factory=list)
@@ -461,6 +481,7 @@ class FallbackResult:
     quote_verified:         bool = False
     answer_text:            Optional[str] = None
     surfaced:               bool = False
+    surface_tier:           str = "blocked"  # 'verified' | 'reference' | 'blocked'
     surface_blocked_reason: Optional[str] = None
     latency_ms:             int = 0
 
@@ -495,10 +516,20 @@ async def attempt_web_fallback(
     query: str,
     anthropic_client,
     model: str = "claude-sonnet-4-6",
-    min_confidence: int = 4,
+    min_confidence_verified: int = 4,
+    min_confidence_reference: int = 2,
 ) -> FallbackResult:
     """Run one fallback attempt for a user query. Returns a FallbackResult
-    with `surfaced=True` only if all gates pass.
+    whose `surface_tier` indicates the surface treatment.
+
+    Two-tier model (D6.58):
+      - confidence >= min_confidence_verified AND quote verified AND
+        domain trusted → surface_tier='verified' (RegKnot-authored
+        answer with verified-web badge)
+      - confidence >= min_confidence_reference AND domain trusted (quote
+        verification optional) → surface_tier='reference' (link-only
+        with verify-yourself badge)
+      - otherwise → surface_tier='blocked' (stay hedged)
 
     This function does NOT mutate any database; the caller is responsible
     for logging the result to web_fallback_responses.
@@ -545,34 +576,57 @@ async def attempt_web_fallback(
             urlparse(result.source_url).netloc
         )
 
-    # Gate 1: confidence floor
-    if result.confidence is None or result.confidence < min_confidence:
+    # ── Gate ladder (D6.58 two-tier surface model) ─────────────────────
+    #
+    # We evaluate three independent gates (confidence, domain, quote)
+    # and combine them into one of three tiers. Order is:
+    #   1. Reject if confidence too low (< reference floor) OR no URL
+    #      OR domain not trusted → blocked
+    #   2. Verify the quote against the source page
+    #   3. If confidence high AND quote verified → verified tier
+    #      Else → reference tier (link surfaced, but with caveat)
+
+    confidence_below_floor = (
+        result.confidence is None
+        or result.confidence < min_confidence_reference
+    )
+    if confidence_below_floor:
         result.surface_blocked_reason = "low_confidence"
+        result.surface_tier = "blocked"
         result.latency_ms = int((time.monotonic() - started) * 1000)
         return result
 
-    # Gate 2: domain on whitelist
     if not result.source_url or not is_trusted_domain(result.source_url):
         result.surface_blocked_reason = "domain_blocked"
+        result.surface_tier = "blocked"
         result.latency_ms = int((time.monotonic() - started) * 1000)
         return result
 
-    # Gate 3: verbatim quote present in source
-    if not result.quote_text:
-        result.surface_blocked_reason = "quote_unverified"
-        result.latency_ms = int((time.monotonic() - started) * 1000)
-        return result
+    # Quote verification — best-effort. We surface either way; the
+    # outcome only affects which tier the result lands in.
+    if result.quote_text:
+        async with httpx.AsyncClient() as client:
+            result.quote_verified = await verify_quote_in_source(
+                result.quote_text, result.source_url, client,
+            )
 
-    async with httpx.AsyncClient() as client:
-        result.quote_verified = await verify_quote_in_source(
-            result.quote_text, result.source_url, client,
-        )
-    if not result.quote_verified:
-        result.surface_blocked_reason = "quote_unverified"
-        result.latency_ms = int((time.monotonic() - started) * 1000)
-        return result
+    high_confidence = (
+        result.confidence is not None
+        and result.confidence >= min_confidence_verified
+    )
 
-    # All gates passed.
+    if high_confidence and result.quote_verified:
+        result.surface_tier = "verified"
+        result.surface_blocked_reason = None
+    else:
+        result.surface_tier = "reference"
+        # Reason captures WHY we couldn't go to verified, useful for
+        # admin auditing — but doesn't block surfacing.
+        if not high_confidence:
+            result.surface_blocked_reason = "low_confidence_for_verified"
+        elif not result.quote_verified:
+            result.surface_blocked_reason = "quote_unverified"
+
     result.surfaced = True
     result.latency_ms = int((time.monotonic() - started) * 1000)
     return result

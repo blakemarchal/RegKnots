@@ -1565,7 +1565,9 @@ async def _try_web_fallback(
     if not result.surfaced:
         return None
 
-    # All gates passed — assemble the yellow-card payload for the UI.
+    # All gates passed (verified or reference tier) — assemble the
+    # yellow-card payload for the UI. Tier propagates so the renderer
+    # picks the right badge + language.
     return WebFallbackCard(
         fallback_id=fallback_id or "",
         source_url=result.source_url or "",
@@ -1573,6 +1575,7 @@ async def _try_web_fallback(
         quote=result.quote_text or "",
         summary=result.answer_text or "",
         confidence=result.confidence or 0,
+        surface_tier=result.surface_tier,
     )
 
 
@@ -1922,5 +1925,8 @@ async def chat_with_progress(
             "quote": web_fallback_card.quote,
             "summary": web_fallback_card.summary,
             "confidence": web_fallback_card.confidence,
+            # D6.58 Slice 1 — propagate surface tier so the frontend
+            # renders the right badge (verified vs reference).
+            "surface_tier": web_fallback_card.surface_tier,
         }
     yield {"event": "done", "data": done_payload}

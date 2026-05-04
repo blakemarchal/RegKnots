@@ -414,19 +414,31 @@ function WebFallbackCardView({ card }: { card: import('@/types/chat').WebFallbac
     }
   }
 
+  // D6.58 Slice 1 — two-tier rendering. The renderer picks badge
+  // text + tone from `surface_tier`. Default to 'verified' for
+  // back-compat with old payloads that don't carry the field.
+  const tier = card.surface_tier ?? 'verified'
+  const isReference = tier === 'reference'
+  const badgeText = isReference ? 'External reference' : 'Web reference'
+  const badgeSubtext = isReference
+    ? '(found via web — please verify)'
+    : '(not in RegKnots corpus)'
+
   return (
     <div className="mt-4 border-l-2 border-amber-400/70 bg-amber-400/5 rounded-r-md p-4">
       <div className="flex items-center gap-2 mb-2">
         <span className="text-xs font-mono uppercase tracking-wider text-amber-300/90">
-          Web reference
+          {badgeText}
         </span>
         <span className="text-[10px] font-mono text-amber-200/50">
-          (not in RegKnots corpus)
+          {badgeSubtext}
         </span>
       </div>
-      <blockquote className="border-l-2 border-amber-400/40 pl-3 italic text-sm text-[#f0ece4]/85 mb-2">
-        &ldquo;{card.quote}&rdquo;
-      </blockquote>
+      {card.quote && (
+        <blockquote className="border-l-2 border-amber-400/40 pl-3 italic text-sm text-[#f0ece4]/85 mb-2">
+          &ldquo;{card.quote}&rdquo;
+        </blockquote>
+      )}
       {card.summary && (
         <div className="text-sm text-[#f0ece4]/80 mb-2">{card.summary}</div>
       )}
@@ -443,7 +455,9 @@ function WebFallbackCardView({ card }: { card: import('@/types/chat').WebFallbac
       </div>
       <div className="flex items-center justify-between border-t border-amber-400/15 pt-2">
         <div className="text-[11px] text-amber-200/50 italic">
-          Verify against the primary regulator before relying on this for compliance.
+          {isReference
+            ? "We didn't fully verify this — open the source and confirm before acting on it."
+            : 'Verify against the primary regulator before relying on this for compliance.'}
         </div>
         <div className="flex items-center gap-1.5 ml-2">
           {feedback === null ? (
