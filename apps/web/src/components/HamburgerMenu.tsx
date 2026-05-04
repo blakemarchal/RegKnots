@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, useTransition } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import { useAuthStore } from '@/lib/auth'
+import { useViewMode } from '@/lib/useViewMode'
 import { signalNavigation } from './NavigationProgress'
 
 interface Props {
@@ -79,12 +80,43 @@ const MENU_SECTIONS: MenuSection[] = [
 
 const ADMIN_ITEM: MenuItem = { icon: '\u2318', label: 'Admin', action: 'admin', path: '/admin' }
 
+// D6.53 \u2014 actions hidden from wheelhouse_only users.
+//
+// These are personal-context tools (your vessels, your credentials,
+// your sea service letter, your compliance log) that don't apply
+// when your only access to RegKnot is via a captain's workspace seat.
+// Hiding them keeps the hamburger relevant to the surface they're
+// actually using and prevents confusion about "where is MY data?"
+// (Answer: there is none \u2014 the workspace owns the data.)
+//
+// Wheelhouse, Chat, Help & Account all stay visible.
+const WHEELHOUSE_ONLY_HIDDEN_ACTIONS = new Set<string>([
+  'vessels',
+  'vessel-dossier',
+  'credentials',
+  'sea-service-letter',
+  'log',
+  'psc-checklist',
+  // Reference is global maritime info, but for the wheelhouse-only
+  // view it adds noise \u2014 captain's tool, not crew's tool. Hide.
+  'reference',
+  // "Giving Back" is the charity tier surface \u2014 only relevant if
+  // the user is paying us directly, which a wheelhouse-only user
+  // is not.
+  'giving',
+])
+
 export function HamburgerMenu({ open, onClose, onNewChat, onOpenVessels, onOpenSurvey }: Props) {
   const router = useRouter()
   const pathname = usePathname()
   const logout = useAuthStore((s) => s.logout)
   const isAdmin = useAuthStore((s) => s.user?.is_admin ?? false)
-
+  // D6.53 — wheelhouse_only users see a filtered menu (no personal-
+  // context tools) and have New Chat / Chat History rerouted into
+  // the workspace context.
+  const { viewMode } = useViewMode()
+  const isWheelhouseOnly = viewMode?.mode === 'wheelhouse_only'
+  const primaryWorkspaceId = viewMode?.primary_workspace_id ?? null
 
   const [pendingAction, setPendingAction] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
@@ -100,9 +132,12 @@ export function HamburgerMenu({ open, onClose, onNewChat, onOpenVessels, onOpenS
   }, [open])
 
   // Flatten the grouped sections into a single list of items for prefetch
-  // and admin appending. Memoized so we don't rebuild on every render.
+  // and admin appending. Filters out wheelhouse_only-hidden items so we
+  // don't waste prefetch on routes we won't show.
   const allItems = (() => {
-    const flat = MENU_SECTIONS.flatMap((s) => s.items)
+    const flat = MENU_SECTIONS.flatMap((s) => s.items).filter(
+      (it) => !isWheelhouseOnly || !WHEELHOUSE_ONLY_HIDDEN_ACTIONS.has(it.action),
+    )
     return isAdmin ? [...flat, ADMIN_ITEM] : flat
   })()
 
@@ -145,6 +180,24 @@ export function HamburgerMenu({ open, onClose, onNewChat, onOpenVessels, onOpenS
   function handleItem(item: MenuItem) {
     const action = item.action
 
+    // D6.53 — wheelhouse_only override: New Chat and Chat History
+    // route to workspace-scoped surfaces, not the personal versions.
+    // The personal `/` chat surface is hidden by WheelhouseRedirect
+    // for these users; landing them on `/?workspace=<id>` (chat) and
+    // `/history?workspace=<id>` (workspace conversations) is what
+    // they expect.
+    if (isWheelhouseOnly && primaryWorkspaceId) {
+      if (action === 'new') {
+        onClose()
+        navigateTo('new', `/?workspace=${primaryWorkspaceId}`)
+        return
+      }
+      if (action === 'history') {
+        navigateTo('history', `/history?workspace=${primaryWorkspaceId}`)
+        return
+      }
+    }
+
     // Non-nav actions close immediately.
     if (action === 'new') { onNewChat(); onClose(); return }
     if (action === 'vessels') { onOpenVessels(); return } // onOpenVessels handles its own close
@@ -160,11 +213,25 @@ export function HamburgerMenu({ open, onClose, onNewChat, onOpenVessels, onOpenS
     }
   }
 
+  // Filter out items hidden for wheelhouse_only users, and drop any
+  // section that ends up empty so we don't render dangling section
+  // headers.
+  const filteredSections: MenuSection[] = MENU_SECTIONS
+    .map((s) => ({
+      ...s,
+      items: isWheelhouseOnly
+        ? s.items.filter(
+            (it) => !WHEELHOUSE_ONLY_HIDDEN_ACTIONS.has(it.action),
+          )
+        : s.items,
+    }))
+    .filter((s) => s.items.length > 0)
+
   // Append the admin item as its own section so it gets the same visual
   // treatment as the rest of the menu when present.
   const sections: MenuSection[] = isAdmin
-    ? [...MENU_SECTIONS, { label: 'Admin', items: [ADMIN_ITEM] }]
-    : MENU_SECTIONS
+    ? [...filteredSections, { label: 'Admin', items: [ADMIN_ITEM] }]
+    : filteredSections
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
