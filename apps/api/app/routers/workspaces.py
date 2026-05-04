@@ -44,6 +44,20 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/workspaces", tags=["workspaces"])
 
 
+# Sprint D6.49 — temporary test whitelist. While crew_tier_internal_only
+# is True, only users with is_internal=true can create or join
+# workspaces. This whitelist provides an additional override path so
+# Blake can spin up his other personal accounts (proton, live) and
+# his wife's account for testing without flipping is_internal on every
+# new email. Remove this list once we open the crew tier publicly.
+_CREW_TEST_WHITELIST: frozenset[str] = frozenset({
+    "blakemarchal@gmail.com",
+    "blakemarchal@proton.me",
+    "bmarchal@live.com",
+    "hillbryanna11@gmail.com",
+})
+
+
 # ── Pydantic models ─────────────────────────────────────────────────────────
 
 
@@ -122,6 +136,10 @@ async def _ensure_internal_or_open(
     user: CurrentUser, pool: asyncpg.Pool,
 ) -> None:
     if not settings.crew_tier_internal_only:
+        return
+    # D6.49 — bypass for the explicit test whitelist (Blake's personal
+    # accounts + wife). Cheap email check before hitting the DB.
+    if user.email.lower() in _CREW_TEST_WHITELIST:
         return
     is_internal = await pool.fetchval(
         "SELECT is_internal FROM users WHERE id = $1",
@@ -445,9 +463,11 @@ async def invite_member(
             detail="No RegKnots account exists for that email. The user "
                    "must sign up first.",
         )
+    invitee_email = (invitee["email"] or "").lower()
     if (
         settings.crew_tier_internal_only
         and not invitee["is_internal"]
+        and invitee_email not in _CREW_TEST_WHITELIST
     ):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
