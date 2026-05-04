@@ -40,6 +40,10 @@ from app.auth.schemas import CurrentUser
 from app.config import settings
 from app.db import get_pool
 from app.email import send_workspace_invite_email
+from app.stripe_service import (
+    create_workspace_billing_portal_session,
+    create_workspace_checkout_session,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -160,6 +164,18 @@ class ChangeRoleBody(BaseModel):
 
 class TransferOwnershipBody(BaseModel):
     new_owner_user_id: str
+
+
+class CheckoutBody(BaseModel):
+    plan: Literal["monthly", "annual"]
+
+
+class CheckoutResponse(BaseModel):
+    checkout_url: str
+
+
+class PortalResponse(BaseModel):
+    portal_url: str
 
 
 # ── Internal helpers ────────────────────────────────────────────────────────
@@ -502,18 +518,8 @@ async def update_handoff_note(
     await _require_workspace_role(
         pool, workspace_id, user_uuid, ("owner", "admin", "member"),
     )
-
-    ws_status = await pool.fetchval(
-        "SELECT status FROM workspaces WHERE id = $1", workspace_id,
-    )
-    if ws_status in ("card_pending", "archived", "canceled"):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=(
-                f"Workspace is read-only (status: {ws_status}). "
-                "Note edits are paused."
-            ),
-        )
+    # D6.54 — read-only enforcement consolidated to one helper.
+    await ensure_workspace_writable(pool, workspace_id)
 
     updated = await pool.fetchrow(
         "UPDATE workspaces SET "
@@ -563,6 +569,9 @@ async def invite_member(
     await _require_workspace_role(
         pool, workspace_id, user_uuid, ("owner", "admin"),
     )
+    # D6.54 — no inviting into a read-only workspace; the invitee
+    # would land into a portal where they can't actually do anything.
+    await ensure_workspace_writable(pool, workspace_id)
 
     ws = await pool.fetchrow(
         "SELECT name, seat_cap FROM workspaces WHERE id = $1", workspace_id,
@@ -881,6 +890,109 @@ async def transfer_ownership(
             if updated["card_pending_started_at"] else None
         ),
     )
+
+
+# ── Wheelhouse billing (Sprint D6.54) ──────────────────────────────────────
+
+
+@router.post("/{workspace_id}/checkout", response_model=CheckoutResponse)
+async def create_workspace_checkout(
+    workspace_id: UUID,
+    body: CheckoutBody,
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    pool: Annotated[asyncpg.Pool, Depends(get_pool)],
+) -> CheckoutResponse:
+    """Create a Stripe Checkout Session for this workspace.
+
+    Owner-only. Used to:
+      - Add a payment method during the 30-day trial (status='trialing')
+      - Rescue a workspace from card_pending grace
+    Cannot be used to switch plans on an active subscription — use the
+    billing portal for that. The portal handles subscription updates,
+    cancellation, and card replacement; checkout is for the FIRST card
+    only.
+    """
+    _ensure_feature_enabled()
+    user_uuid = UUID(current_user.user_id)
+    await _require_workspace_role(pool, workspace_id, user_uuid, ("owner",))
+
+    try:
+        url = await create_workspace_checkout_session(
+            workspace_id=workspace_id,
+            owner_user_id=current_user.user_id,
+            plan=body.plan,
+            pool=pool,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        )
+    return CheckoutResponse(checkout_url=url)
+
+
+@router.post(
+    "/{workspace_id}/billing-portal", response_model=PortalResponse,
+)
+async def open_workspace_billing_portal(
+    workspace_id: UUID,
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    pool: Annotated[asyncpg.Pool, Depends(get_pool)],
+) -> PortalResponse:
+    """Stripe Billing Portal session URL for this workspace.
+
+    Owner-only. The portal handles cancel, update card, and (if
+    enabled in Stripe Dashboard) switch monthly ↔ annual.
+    """
+    _ensure_feature_enabled()
+    user_uuid = UUID(current_user.user_id)
+    await _require_workspace_role(pool, workspace_id, user_uuid, ("owner",))
+
+    try:
+        url = await create_workspace_billing_portal_session(
+            workspace_id=workspace_id, pool=pool,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        )
+    return PortalResponse(portal_url=url)
+
+
+# ── Workspace state-machine helper exported for chat/dossier writes ────────
+
+
+async def ensure_workspace_writable(
+    pool: asyncpg.Pool, workspace_id: UUID,
+) -> None:
+    """Raise 403 if the workspace status is read-only.
+
+    Sprint D6.54 — read-only enforcement for `card_pending`,
+    `archived`, and `canceled` states. Imported by chat.py,
+    conversations.py, and any other write path that operates inside
+    workspace context.
+
+    `active` and `trialing` allow writes. `past_due` also allows
+    writes — it's a transient dunning state, Stripe will retry the
+    card; locking out members during dunning would be customer-hostile.
+    """
+    ws_status = await pool.fetchval(
+        "SELECT status FROM workspaces WHERE id = $1", workspace_id,
+    )
+    if ws_status is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Workspace not found",
+        )
+    if ws_status in ("card_pending", "archived", "canceled"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                f"Workspace is read-only (status: {ws_status}). "
+                "The Owner needs to add a payment method to resume."
+            ),
+        )
 
 
 # ── /me/* — caller-scoped invite + view-mode endpoints ─────────────────────

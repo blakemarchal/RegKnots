@@ -59,6 +59,16 @@ class Settings(BaseSettings):
     stripe_price_captain_promo: str = Field(
         default="", validation_alias="STRIPE_PRICE_CAPTAIN_PROMO"
     )
+    # Sprint D6.54 — Wheelhouse (crew tier) pricing. One product, two
+    # billing intervals. No promo variants by design — margin risk on
+    # multi-seat tier is too high to discount. See plans_workspace.py
+    # for the price_id → workspace mapping logic.
+    stripe_price_wheelhouse_monthly: str = Field(
+        default="", validation_alias="STRIPE_PRICE_WHEELHOUSE_MONTHLY"
+    )
+    stripe_price_wheelhouse_annual: str = Field(
+        default="", validation_alias="STRIPE_PRICE_WHEELHOUSE_ANNUAL"
+    )
     app_url: str = "https://regknots.com"
 
     # File uploads

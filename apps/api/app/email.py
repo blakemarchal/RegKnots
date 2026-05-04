@@ -675,6 +675,175 @@ async def send_subscription_resumed_email(to_email: str, full_name: str) -> None
     })
 
 
+# ── Workspace lifecycle (Sprint D6.54) ──────────────────────────────────
+
+
+async def send_workspace_trial_ending_email(
+    to_email: str, workspace_name: str,
+) -> None:
+    """Day 25 of trial — 5 days left, add a card."""
+    safe_name = _html_lib.escape(workspace_name)
+    workspaces_url = f"{APP_URL}/workspaces"
+    html = _html(f"""
+      <h1>5 days left in your Wheelhouse trial</h1>
+      <p>
+        Your <strong style="color:#2dd4bf;">{safe_name}</strong> Wheelhouse
+        trial ends in 5 days. To keep your crew's chat history, dossier,
+        and handoff notes flowing, add a payment method before the trial
+        ends.
+      </p>
+      <p>
+        After the trial, the workspace enters a 30-day read-only window
+        where you can still view everything but can't add new entries.
+        After that, it's archived (90-day recovery before purge).
+      </p>
+      <a href="{workspaces_url}" class="cta">Add Payment Method</a>
+    """)
+    resend.Emails.send({
+        "from": FROM_EMAIL,
+        "to": [to_email],
+        "subject": f"5 days left — add a card to keep {workspace_name}",
+        "html": html,
+    })
+
+
+async def send_workspace_trial_ended_email(
+    to_email: str, workspace_name: str,
+) -> None:
+    """Day 30 — trial ended, workspace is now read-only for 30 days."""
+    safe_name = _html_lib.escape(workspace_name)
+    workspaces_url = f"{APP_URL}/workspaces"
+    html = _html(f"""
+      <h1>Wheelhouse trial ended</h1>
+      <p>
+        The 30-day trial for <strong style="color:#2dd4bf;">{safe_name}</strong>
+        has ended. The workspace is now <strong>read-only</strong> &mdash;
+        your crew can still view existing chats, dossier entries, and
+        handoff notes, but no new entries until you add a payment method.
+      </p>
+      <p>
+        You have <strong>30 days</strong> to add a card. After that, the
+        workspace is archived with a 90-day recovery window.
+      </p>
+      <a href="{workspaces_url}" class="cta">Add Payment Method</a>
+    """)
+    resend.Emails.send({
+        "from": FROM_EMAIL,
+        "to": [to_email],
+        "subject": f"Trial ended — {workspace_name} is read-only",
+        "html": html,
+    })
+
+
+async def send_workspace_card_pending_reminder_email(
+    to_email: str, workspace_name: str,
+) -> None:
+    """Day 25 of card_pending — 5 days left to rescue."""
+    safe_name = _html_lib.escape(workspace_name)
+    workspaces_url = f"{APP_URL}/workspaces"
+    html = _html(f"""
+      <h1>5 days left to save {safe_name}</h1>
+      <p>
+        Your <strong style="color:#2dd4bf;">{safe_name}</strong> Wheelhouse
+        will be archived in 5 days unless you add a payment method.
+      </p>
+      <p>
+        Once archived, the workspace becomes inaccessible to your crew.
+        You'll have a 90-day recovery window before everything is
+        permanently deleted. Add a card now to keep things running.
+      </p>
+      <a href="{workspaces_url}" class="cta">Add Payment Method</a>
+    """)
+    resend.Emails.send({
+        "from": FROM_EMAIL,
+        "to": [to_email],
+        "subject": f"5 days left — {workspace_name} will be archived",
+        "html": html,
+    })
+
+
+async def send_workspace_archived_email(
+    to_email: str, workspace_name: str,
+) -> None:
+    """Card-pending grace expired — workspace archived, 90-day retention."""
+    safe_name = _html_lib.escape(workspace_name)
+    workspaces_url = f"{APP_URL}/workspaces"
+    html = _html(f"""
+      <h1>Wheelhouse archived</h1>
+      <p>
+        <strong style="color:#2dd4bf;">{safe_name}</strong> has been
+        archived. Your crew can no longer access it.
+      </p>
+      <p>
+        You have <strong>90 days</strong> to restore the workspace by
+        adding a payment method. After that, all data (chat history,
+        dossier, handoff notes) will be permanently deleted.
+      </p>
+      <a href="{workspaces_url}" class="cta">Restore Workspace</a>
+    """)
+    resend.Emails.send({
+        "from": FROM_EMAIL,
+        "to": [to_email],
+        "subject": f"{workspace_name} archived — 90 days to restore",
+        "html": html,
+    })
+
+
+async def send_workspace_subscription_confirmed_email(
+    to_email: str, workspace_name: str,
+) -> None:
+    """First successful payment — welcome to paid Wheelhouse."""
+    safe_name = _html_lib.escape(workspace_name)
+    workspace_url = f"{APP_URL}/workspaces"
+    html = _html(f"""
+      <h1>You're in &mdash; {safe_name} is active</h1>
+      <p>
+        Payment received. Your <strong style="color:#2dd4bf;">{safe_name}</strong>
+        Wheelhouse is now an active subscription. Your crew has
+        uninterrupted access to shared chat, dossier, and handoff notes.
+      </p>
+      <p>
+        You can manage billing, switch monthly &harr; annual, or update
+        your payment method anytime from the workspace page.
+      </p>
+      <a href="{workspace_url}" class="cta">Open Workspace</a>
+    """)
+    resend.Emails.send({
+        "from": FROM_EMAIL,
+        "to": [to_email],
+        "subject": f"{workspace_name} Wheelhouse activated",
+        "html": html,
+    })
+
+
+async def send_workspace_payment_failed_email(
+    to_email: str, workspace_name: str,
+) -> None:
+    """invoice.payment_failed — card was declined."""
+    safe_name = _html_lib.escape(workspace_name)
+    workspaces_url = f"{APP_URL}/workspaces"
+    html = _html(f"""
+      <h1>Card declined for {safe_name}</h1>
+      <p>
+        We couldn't charge the card on file for your
+        <strong style="color:#2dd4bf;">{safe_name}</strong> Wheelhouse.
+        Stripe will retry the payment over the next two weeks.
+      </p>
+      <p>
+        If the card has expired or changed, please update it now to avoid
+        losing access. Your crew still has full access during this
+        retry window.
+      </p>
+      <a href="{workspaces_url}" class="cta">Update Payment Method</a>
+    """)
+    resend.Emails.send({
+        "from": FROM_EMAIL,
+        "to": [to_email],
+        "subject": f"Card declined for {workspace_name}",
+        "html": html,
+    })
+
+
 async def send_workspace_invite_email(
     to_email: str,
     inviter_name: str,

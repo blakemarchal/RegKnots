@@ -51,4 +51,11 @@ celery.conf.beat_schedule = {
         # memos, and credentialing guidance PDFs.
         "schedule": crontab(hour=12, minute=0, day_of_week="wednesday"),
     },
+    "workspace-state-transitions-daily": {
+        "task": "app.tasks.workspace_state_transitions",
+        # Daily at 16:00 UTC (mid-morning U.S.) — drives the workspace
+        # billing state machine: trial → card_pending → archived, plus
+        # day-25 reminders for both. Sprint D6.54.
+        "schedule": crontab(hour=16, minute=0),
+    },
 }

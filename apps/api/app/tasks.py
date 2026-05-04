@@ -538,6 +538,207 @@ def _send_amendment_alert(findings: list[dict]):
         logger.error("Failed to send IMO amendment alert email: %s", exc)
 
 
+# ── Workspace (Wheelhouse) state-machine crons (Sprint D6.54) ────────────
+
+
+@celery.task(name="app.tasks.workspace_state_transitions")
+def workspace_state_transitions():
+    """Daily cron: drive the workspace billing state machine forward.
+
+    Two transitions:
+      1. trialing → card_pending  (after 30 days from creation, no
+         Stripe subscription)
+      2. card_pending → archived  (after 30 days from card_pending_started_at)
+
+    Idempotent — safe to run multiple times per day; the WHERE
+    conditions filter out already-transitioned rows.
+
+    Sends one reminder email per transition. Emails are best-effort;
+    a failure doesn't block the state change.
+    """
+    _run_async(_workspace_state_transitions_async())
+
+
+async def _workspace_state_transitions_async():
+    import asyncpg
+    from app.config import settings
+    from app.email import (
+        RESEND_THROTTLE_SECONDS,
+        send_with_throttle,
+        send_workspace_archived_email,
+        send_workspace_card_pending_reminder_email,
+        send_workspace_trial_ended_email,
+        send_workspace_trial_ending_email,
+    )
+
+    dsn = settings.database_url.replace("postgresql+asyncpg://", "postgresql://")
+    conn = await asyncpg.connect(dsn)
+    try:
+        # Sub-task 1: trial day-25 reminder ("5 days left, add a card")
+        # Fires once per workspace, tracked by trial_reminder_sent_at flag.
+        # We don't add a column for this — instead use the
+        # workspace_billing_events ledger to dedup. This keeps the
+        # workspaces table lean.
+        trial_reminder_rows = await conn.fetch(
+            """
+            SELECT w.id, w.name, u.email AS owner_email
+            FROM workspaces w
+            JOIN users u ON u.id = w.owner_user_id
+            WHERE w.status = 'trialing'
+              AND w.created_at < now() - INTERVAL '25 days'
+              AND w.created_at > now() - INTERVAL '30 days'
+              AND NOT EXISTS (
+                SELECT 1 FROM workspace_billing_events
+                WHERE workspace_id = w.id
+                  AND event_type = 'trial_25d_reminder_sent'
+              )
+            """
+        )
+        for idx, row in enumerate(trial_reminder_rows):
+            try:
+                await send_with_throttle(
+                    lambda email=row["owner_email"], name=row["name"]:
+                        send_workspace_trial_ending_email(email, name),
+                    label=f"trial-25d:{row['id']}",
+                )
+                await conn.execute(
+                    "INSERT INTO workspace_billing_events "
+                    "(workspace_id, event_type, actor_user_id, details) "
+                    "VALUES ($1, 'trial_25d_reminder_sent', NULL, '{}'::jsonb)",
+                    row["id"],
+                )
+            except Exception as exc:
+                logger.error(
+                    "Workspace trial 25d reminder failed for %s: %s",
+                    row["id"], exc,
+                )
+            if idx < len(trial_reminder_rows) - 1:
+                await asyncio.sleep(RESEND_THROTTLE_SECONDS)
+
+        # Sub-task 2: trialing → card_pending after 30 days
+        expiring_trials = await conn.fetch(
+            """
+            UPDATE workspaces SET
+              status = 'card_pending',
+              card_pending_started_at = now(),
+              updated_at = now()
+            WHERE status = 'trialing'
+              AND created_at < now() - INTERVAL '30 days'
+              AND stripe_subscription_id IS NULL
+            RETURNING id, name, owner_user_id
+            """
+        )
+        for idx, row in enumerate(expiring_trials):
+            owner_email = await conn.fetchval(
+                "SELECT email FROM users WHERE id = $1", row["owner_user_id"],
+            )
+            try:
+                if owner_email:
+                    await send_with_throttle(
+                        lambda email=owner_email, name=row["name"]:
+                            send_workspace_trial_ended_email(email, name),
+                        label=f"trial-ended:{row['id']}",
+                    )
+                await conn.execute(
+                    "INSERT INTO workspace_billing_events "
+                    "(workspace_id, event_type, actor_user_id, details) "
+                    "VALUES ($1, 'trial_expired_to_card_pending', NULL, "
+                    "'{}'::jsonb)",
+                    row["id"],
+                )
+            except Exception as exc:
+                logger.error(
+                    "Trial-ended email failed for workspace %s: %s",
+                    row["id"], exc,
+                )
+            if idx < len(expiring_trials) - 1:
+                await asyncio.sleep(RESEND_THROTTLE_SECONDS)
+
+        # Sub-task 3: card_pending day-25 reminder
+        card_pending_reminder_rows = await conn.fetch(
+            """
+            SELECT w.id, w.name, u.email AS owner_email,
+                   w.card_pending_started_at
+            FROM workspaces w
+            JOIN users u ON u.id = w.owner_user_id
+            WHERE w.status = 'card_pending'
+              AND w.card_pending_started_at < now() - INTERVAL '25 days'
+              AND w.card_pending_started_at > now() - INTERVAL '30 days'
+              AND NOT EXISTS (
+                SELECT 1 FROM workspace_billing_events
+                WHERE workspace_id = w.id
+                  AND event_type = 'card_pending_25d_reminder_sent'
+              )
+            """
+        )
+        for idx, row in enumerate(card_pending_reminder_rows):
+            try:
+                await send_with_throttle(
+                    lambda email=row["owner_email"], name=row["name"]:
+                        send_workspace_card_pending_reminder_email(email, name),
+                    label=f"card-pending-25d:{row['id']}",
+                )
+                await conn.execute(
+                    "INSERT INTO workspace_billing_events "
+                    "(workspace_id, event_type, actor_user_id, details) "
+                    "VALUES ($1, 'card_pending_25d_reminder_sent', NULL, "
+                    "'{}'::jsonb)",
+                    row["id"],
+                )
+            except Exception as exc:
+                logger.error(
+                    "Card-pending 25d reminder failed for %s: %s",
+                    row["id"], exc,
+                )
+            if idx < len(card_pending_reminder_rows) - 1:
+                await asyncio.sleep(RESEND_THROTTLE_SECONDS)
+
+        # Sub-task 4: card_pending → archived after another 30 days
+        archived_rows = await conn.fetch(
+            """
+            UPDATE workspaces SET
+              status = 'archived',
+              updated_at = now()
+            WHERE status = 'card_pending'
+              AND card_pending_started_at < now() - INTERVAL '30 days'
+            RETURNING id, name, owner_user_id
+            """
+        )
+        for idx, row in enumerate(archived_rows):
+            owner_email = await conn.fetchval(
+                "SELECT email FROM users WHERE id = $1", row["owner_user_id"],
+            )
+            try:
+                if owner_email:
+                    await send_with_throttle(
+                        lambda email=owner_email, name=row["name"]:
+                            send_workspace_archived_email(email, name),
+                        label=f"archived:{row['id']}",
+                    )
+                await conn.execute(
+                    "INSERT INTO workspace_billing_events "
+                    "(workspace_id, event_type, actor_user_id, details) "
+                    "VALUES ($1, 'archived', NULL, '{}'::jsonb)",
+                    row["id"],
+                )
+            except Exception as exc:
+                logger.error(
+                    "Archived email failed for workspace %s: %s",
+                    row["id"], exc,
+                )
+            if idx < len(archived_rows) - 1:
+                await asyncio.sleep(RESEND_THROTTLE_SECONDS)
+
+        logger.info(
+            "Workspace state transitions: trial-25d=%d, trial→pending=%d, "
+            "card-25d=%d, pending→archived=%d",
+            len(trial_reminder_rows), len(expiring_trials),
+            len(card_pending_reminder_rows), len(archived_rows),
+        )
+    finally:
+        await conn.close()
+
+
 # ── ERG release monitor ────────────────────────────────────────────────────
 #
 # The Emergency Response Guidebook is republished every ~4 years by US DOT

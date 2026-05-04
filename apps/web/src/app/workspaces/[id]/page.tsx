@@ -89,6 +89,9 @@ function DetailContent() {
   const [error, setError] = useState<string | null>(null)
   const [showInvite, setShowInvite] = useState(false)
   const [showTransfer, setShowTransfer] = useState(false)
+  // D6.54 — Wheelhouse billing modals.
+  const [showCheckout, setShowCheckout] = useState(false)
+  const [openingPortal, setOpeningPortal] = useState(false)
 
   useEffect(() => {
     if (workspaceId) void load()
@@ -170,11 +173,31 @@ function DetailContent() {
   const canManageRoles = ws.my_role === 'owner'
   const canTransfer = ws.my_role === 'owner'
   const adminCount = ws.members.filter(m => m.role === 'admin').length
+  // D6.54 — trial-end countdown for the banner. Workspaces are created
+  // in `trialing` status; trial is 30 days from created_at.
+  const trialDaysLeft = ws.status === 'trialing'
+    ? Math.max(0, 30 - daysSince(ws.created_at))
+    : null
   // D6.53 — pending invites count against seat_cap on the server, so
   // mirror that here when deciding whether to show the Invite button.
   const pendingInvites = ws.pending_invites ?? []
   const seatsUsed = ws.member_count + pendingInvites.length
   const seatsLeft = Math.max(0, ws.seat_cap - seatsUsed)
+
+  async function openManageBilling() {
+    if (!ws || openingPortal) return
+    setOpeningPortal(true)
+    try {
+      const res = await apiRequest<{ portal_url: string }>(
+        `/workspaces/${ws.id}/billing-portal`,
+        { method: 'POST' },
+      )
+      window.location.href = res.portal_url
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Failed to open billing portal.')
+      setOpeningPortal(false)
+    }
+  }
 
   async function rescindInvite(inv: PendingInvite) {
     if (!ws) return
@@ -246,6 +269,31 @@ function DetailContent() {
         </div>
       </header>
 
+      {/* D6.54 — Trialing banner. Counts down to trial expiry. */}
+      {ws.status === 'trialing' && trialDaysLeft !== null && (
+        <div className="mb-6 rounded-md border border-[#2dd4bf]/30 bg-[#2dd4bf]/5 p-4">
+          <div className="flex items-center gap-2 mb-1 text-sm font-semibold text-[#2dd4bf]">
+            <span>Free trial — {trialDaysLeft} day{trialDaysLeft === 1 ? '' : 's'} left</span>
+          </div>
+          <p className="text-xs text-[#6b7594]">
+            Your Wheelhouse trial runs for 30 days, no card required. Add
+            a payment method anytime to lock in your subscription before
+            the trial ends. After the trial, the workspace becomes
+            read-only for 30 days while you decide.
+          </p>
+          {ws.my_role === 'owner' && (
+            <button
+              onClick={() => setShowCheckout(true)}
+              className="mt-3 px-3 py-1.5 rounded-md bg-[#2dd4bf]/15 border border-[#2dd4bf]/30
+                         text-xs font-medium text-[#2dd4bf] hover:bg-[#2dd4bf]/25
+                         transition-colors"
+            >
+              Add payment method
+            </button>
+          )}
+        </div>
+      )}
+
       {ws.status === 'card_pending' && cardPendingDays !== null && (
         <div className="mb-6 rounded-md border border-amber-400/40 bg-amber-400/8 p-4">
           <div className="flex items-center gap-2 mb-1 text-sm font-semibold text-amber-300">
@@ -260,14 +308,29 @@ function DetailContent() {
           </p>
           {ws.my_role === 'owner' && (
             <button
-              disabled
-              title="Stripe billing wires up next sprint"
-              className="mt-3 px-3 py-1.5 rounded-md bg-amber-400/15 border border-amber-400/30
-                         text-xs font-medium text-amber-200 disabled:opacity-50 cursor-not-allowed"
+              onClick={() => setShowCheckout(true)}
+              className="mt-3 px-3 py-1.5 rounded-md bg-amber-400/20 border border-amber-400/40
+                         text-xs font-medium text-amber-100 hover:bg-amber-400/30
+                         transition-colors"
             >
-              Add payment card (coming soon)
+              Add payment method
             </button>
           )}
+        </div>
+      )}
+
+      {/* D6.54 — Manage Billing for active subscriptions (Owner only). */}
+      {ws.status === 'active' && ws.my_role === 'owner' && (
+        <div className="mb-6 flex items-center justify-end">
+          <button
+            onClick={openManageBilling}
+            disabled={openingPortal}
+            className="px-3 py-1.5 rounded-md border border-white/10
+                       text-xs font-medium text-[#f0ece4]/80 hover:bg-white/5
+                       disabled:opacity-50 disabled:cursor-wait transition-colors"
+          >
+            {openingPortal ? 'Opening Stripe…' : 'Manage billing'}
+          </button>
         </div>
       )}
 
@@ -423,6 +486,12 @@ function DetailContent() {
           admins={ws.members.filter(m => m.role === 'admin')}
           onCancel={() => setShowTransfer(false)}
           onSuccess={() => { setShowTransfer(false); void load() }}
+        />
+      )}
+      {showCheckout && (
+        <CheckoutModal
+          workspaceId={ws.id}
+          onCancel={() => setShowCheckout(false)}
         />
       )}
     </>
@@ -661,6 +730,128 @@ function TransferModal({
                          disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
             >
               {submitting ? 'Transferring…' : 'Transfer ownership'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
+
+
+// ── Checkout modal (D6.54) ─────────────────────────────────────────────────
+//
+// Plan selector — monthly vs annual — that posts to the workspace
+// checkout endpoint and redirects to Stripe Checkout. Owner-only
+// (caller already gates this).
+
+function CheckoutModal({
+  workspaceId, onCancel,
+}: {
+  workspaceId: string
+  onCancel: () => void
+}) {
+  const [plan, setPlan] = useState<'monthly' | 'annual'>('annual')
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault()
+    if (submitting) return
+    setSubmitting(true)
+    setError(null)
+    try {
+      const res = await apiRequest<{ checkout_url: string }>(
+        `/workspaces/${workspaceId}/checkout`,
+        {
+          method: 'POST',
+          body: JSON.stringify({ plan }),
+        },
+      )
+      window.location.href = res.checkout_url
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to start checkout.')
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center px-4">
+      <div className="w-full max-w-md rounded-lg border border-white/10 bg-[#0a0e1a] p-5 shadow-xl">
+        <h2 className="text-lg font-semibold mb-1">Add payment method</h2>
+        <p className="text-xs text-[#6b7594] mb-4">
+          Choose a billing interval. You can switch from the Stripe
+          billing portal anytime after.
+        </p>
+        <form onSubmit={submit} className="space-y-3">
+          <label
+            className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
+              plan === 'annual'
+                ? 'border-[#2dd4bf]/60 bg-[#2dd4bf]/10'
+                : 'border-white/10 hover:border-white/25'
+            }`}
+          >
+            <input
+              type="radio"
+              name="plan"
+              value="annual"
+              checked={plan === 'annual'}
+              onChange={() => setPlan('annual')}
+              className="mt-1"
+            />
+            <div className="flex-1">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-semibold text-[#f0ece4]">Annual</span>
+                <span className="text-sm font-mono text-[#2dd4bf]">$1,079.88/yr</span>
+              </div>
+              <p className="text-[11px] text-[#6b7594] mt-0.5">
+                Equivalent to $89.99/month. Save $120 vs. monthly.
+              </p>
+            </div>
+          </label>
+
+          <label
+            className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
+              plan === 'monthly'
+                ? 'border-[#2dd4bf]/60 bg-[#2dd4bf]/10'
+                : 'border-white/10 hover:border-white/25'
+            }`}
+          >
+            <input
+              type="radio"
+              name="plan"
+              value="monthly"
+              checked={plan === 'monthly'}
+              onChange={() => setPlan('monthly')}
+              className="mt-1"
+            />
+            <div className="flex-1">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-semibold text-[#f0ece4]">Monthly</span>
+                <span className="text-sm font-mono text-[#f0ece4]/80">$99.99/mo</span>
+              </div>
+              <p className="text-[11px] text-[#6b7594] mt-0.5">
+                Pay month-to-month. Cancel anytime from the billing portal.
+              </p>
+            </div>
+          </label>
+
+          {error && <div className="text-xs text-red-400">{error}</div>}
+
+          <div className="flex justify-end gap-2 pt-2">
+            <button
+              type="button" onClick={onCancel} disabled={submitting}
+              className="px-3 py-1.5 text-sm text-[#6b7594] hover:text-[#f0ece4] transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit" disabled={submitting}
+              className="px-3 py-1.5 rounded-md bg-[#2dd4bf]/15 border border-[#2dd4bf]/30
+                         text-sm font-medium text-[#2dd4bf] hover:bg-[#2dd4bf]/25
+                         disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              {submitting ? 'Opening Stripe…' : 'Continue to Stripe'}
             </button>
           </div>
         </form>

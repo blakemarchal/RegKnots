@@ -2,6 +2,7 @@
 
 import logging
 from datetime import datetime, timezone
+from uuid import UUID
 
 import stripe
 
@@ -11,6 +12,11 @@ from app.plans import (
     is_paid_tier,
     plan_info_from_price_id,
     resolve_price_for_plan,
+)
+from app.plans_workspace import (
+    is_wheelhouse_price_id,
+    resolve_wheelhouse_price_id,
+    wheelhouse_interval_from_price_id,
 )
 
 logger = logging.getLogger(__name__)
@@ -157,6 +163,198 @@ async def create_billing_portal_session(user_id: str, pool) -> str:
     return session.url
 
 
+# ── Workspace (Wheelhouse) checkout + portal ────────────────────────────────
+#
+# Sprint D6.54 — Wheelhouse billing.
+#
+# Each workspace gets its OWN Stripe customer (separate from the owner's
+# personal customer). This keeps workspace billing tidy and makes
+# ownership transfers a Stripe-side operation: the new owner takes
+# control of an existing customer rather than a subscription migrating
+# between customers. The owner's email is the customer email; metadata
+# tracks which workspace + which user owns it.
+#
+# Workspace state machine:
+#
+#   trialing      → newly created; 30-day free trial; no Stripe
+#                   relationship yet
+#   active        → has paid subscription; checkout completed
+#   past_due      → invoice failed; access remains for grace, Stripe
+#                   handles dunning emails
+#   card_pending  → trial expired without card OR owner removed card;
+#                   30-day read-only grace
+#   archived      → grace expired; 90-day retention before purge
+#   canceled      → owner explicitly canceled; 90-day retention
+
+
+async def create_workspace_checkout_session(
+    workspace_id: UUID,
+    owner_user_id: str,
+    plan: str,  # 'monthly' | 'annual'
+    pool,
+) -> str:
+    """Create a Stripe Checkout Session for a workspace and return the URL.
+
+    First call creates the Stripe customer and stores it on the
+    workspace row. Subsequent calls reuse it — idempotent in the sense
+    that one workspace = one customer, even if the owner restarts the
+    flow multiple times.
+    """
+    _configure()
+
+    price_id = resolve_wheelhouse_price_id(plan)
+    if not price_id:
+        raise ValueError(
+            f"No Stripe price configured for Wheelhouse plan {plan!r}. "
+            "Verify STRIPE_PRICE_WHEELHOUSE_* env vars are set."
+        )
+
+    ws = await pool.fetchrow(
+        "SELECT name, stripe_customer_id, stripe_subscription_id, status "
+        "FROM workspaces WHERE id = $1",
+        workspace_id,
+    )
+    if ws is None:
+        raise ValueError("Workspace not found")
+    if ws["status"] in ("archived", "canceled"):
+        # Allow status='card_pending' through — that's the WHOLE point
+        # of this flow; user is rescuing a workspace that hit the grace
+        # period. Block only the truly-dead states.
+        raise ValueError(
+            f"Workspace is {ws['status']}; can't take new payment. "
+            "Restore via support if recovery is intended."
+        )
+    if ws["stripe_subscription_id"]:
+        raise ValueError(
+            "Workspace already has an active subscription. Use the "
+            "billing portal to manage it instead."
+        )
+
+    customer_id = ws["stripe_customer_id"]
+    if not customer_id:
+        # Look up owner email/name for the customer record so Stripe
+        # receipts go to the right person.
+        owner = await pool.fetchrow(
+            "SELECT email, full_name FROM users WHERE id = $1",
+            UUID(owner_user_id),
+        )
+        if owner is None:
+            raise ValueError("Owner user not found")
+        customer = stripe.Customer.create(
+            email=owner["email"],
+            name=owner["full_name"] or owner["email"],
+            metadata={
+                "workspace_id": str(workspace_id),
+                "owner_user_id": owner_user_id,
+                "kind": "wheelhouse",
+            },
+        )
+        customer_id = customer.id
+        await pool.execute(
+            "UPDATE workspaces SET stripe_customer_id = $1 WHERE id = $2",
+            customer_id, workspace_id,
+        )
+
+    session = stripe.checkout.Session.create(
+        customer=customer_id,
+        mode="subscription",
+        line_items=[{"price": price_id, "quantity": 1}],
+        success_url=(
+            f"{settings.app_url}/workspaces/{workspace_id}"
+            f"?checkout=success&session_id={{CHECKOUT_SESSION_ID}}"
+        ),
+        cancel_url=f"{settings.app_url}/workspaces/{workspace_id}",
+        metadata={
+            "workspace_id": str(workspace_id),
+            "owner_user_id": owner_user_id,
+            "plan": plan,
+            "kind": "wheelhouse",
+        },
+        # Pass workspace_id through to the subscription itself so the
+        # webhook handler can route subscription events to the right
+        # workspace even on later updates (cancel, plan change).
+        subscription_data={
+            "metadata": {
+                "workspace_id": str(workspace_id),
+                "kind": "wheelhouse",
+            },
+        },
+    )
+    return session.url
+
+
+async def create_workspace_billing_portal_session(
+    workspace_id: UUID, pool,
+) -> str:
+    """Stripe Billing Portal URL for the workspace's customer.
+
+    Owner-only (caller enforces). The portal handles cancel, update
+    card, and switch monthly ↔ annual based on what's configured in
+    Stripe Dashboard → Settings → Billing → Customer portal.
+    """
+    _configure()
+    customer_id = await pool.fetchval(
+        "SELECT stripe_customer_id FROM workspaces WHERE id = $1",
+        workspace_id,
+    )
+    if not customer_id:
+        raise ValueError(
+            "Workspace has no Stripe customer yet. Add a payment method "
+            "first."
+        )
+
+    session = stripe.billing_portal.Session.create(
+        customer=customer_id,
+        return_url=f"{settings.app_url}/workspaces/{workspace_id}",
+    )
+    return session.url
+
+
+# ── Webhook event router ───────────────────────────────────────────────────
+
+
+def _is_wheelhouse_event(obj) -> bool:
+    """Decide whether a Stripe object (subscription / invoice / session)
+    relates to a Wheelhouse subscription.
+
+    Two signals, in priority order:
+      1. metadata.kind == 'wheelhouse' (set on subscription + checkout
+         metadata at creation time) — most reliable, survives plan
+         changes.
+      2. The first line item's price_id matches a known Wheelhouse
+         price — fallback if metadata wasn't propagated.
+
+    Returns False on objects that have neither signal — those are
+    user-tier subscriptions and route to the existing flow.
+    """
+    metadata = getattr(obj, "metadata", None) or {}
+    if hasattr(metadata, "get"):
+        if metadata.get("kind") == "wheelhouse":
+            return True
+
+    # Subscription or invoice → look at items[0].price.id
+    try:
+        items = getattr(obj, "items", None)
+        if items and getattr(items, "data", None):
+            price = getattr(items.data[0], "price", None)
+            if price and is_wheelhouse_price_id(getattr(price, "id", None)):
+                return True
+    except Exception:
+        pass
+
+    # Invoice line items live under .lines.data, not .items.data
+    try:
+        lines = getattr(obj, "lines", None)
+        if lines and getattr(lines, "data", None):
+            price = getattr(lines.data[0], "price", None)
+            if price and is_wheelhouse_price_id(getattr(price, "id", None)):
+                return True
+    except Exception:
+        pass
+
+    return False
+
+
 async def handle_webhook_event(payload: bytes, sig_header: str, pool) -> None:
     """Process a Stripe webhook event."""
     _configure()
@@ -171,8 +369,33 @@ async def handle_webhook_event(payload: bytes, sig_header: str, pool) -> None:
     data = event.data.object
     logger.info("Stripe webhook received: type=%s", etype)
 
+    # D6.54 — for subscription events we need the FULL subscription
+    # object (with line items + price IDs) to route to the right
+    # handler. The event payload usually has it; but for robustness
+    # we re-retrieve when the routing signal is missing.
+    is_wheelhouse = False
+    try:
+        is_wheelhouse = _is_wheelhouse_event(data)
+        # Subscription objects in events sometimes lack .items expansion;
+        # fetch fresh if we can't decide and we have an id.
+        if not is_wheelhouse and getattr(data, "object", None) == "subscription":
+            sub_id = getattr(data, "id", None)
+            if sub_id:
+                full = stripe.Subscription.retrieve(sub_id)
+                if _is_wheelhouse_event(full):
+                    is_wheelhouse = True
+                    data = full
+    except Exception as exc:
+        logger.warning("Wheelhouse routing check failed for %s: %s", etype, exc)
+
     if etype == "checkout.session.completed":
-        await _on_checkout_completed(data, pool)
+        # Checkout sessions carry our workspace_id metadata (set when we
+        # created the session), so `_is_wheelhouse_event` reliably
+        # identifies them via the `kind=wheelhouse` marker.
+        if is_wheelhouse:
+            await _on_workspace_checkout_completed(data, pool)
+        else:
+            await _on_checkout_completed(data, pool)
     elif etype in (
         "customer.subscription.created",
         "customer.subscription.updated",
@@ -180,11 +403,20 @@ async def handle_webhook_event(payload: bytes, sig_header: str, pool) -> None:
         "customer.subscription.paused",
         "customer.subscription.resumed",
     ):
-        await _on_subscription_change(data, pool)
+        if is_wheelhouse:
+            await _on_workspace_subscription_change(data, pool)
+        else:
+            await _on_subscription_change(data, pool)
     elif etype == "invoice.paid":
-        await _on_invoice_paid(data, pool)
+        if is_wheelhouse:
+            await _on_workspace_invoice_paid(data, pool)
+        else:
+            await _on_invoice_paid(data, pool)
     elif etype == "invoice.payment_failed":
-        await _on_invoice_payment_failed(data, pool)
+        if is_wheelhouse:
+            await _on_workspace_invoice_payment_failed(data, pool)
+        else:
+            await _on_invoice_payment_failed(data, pool)
     else:
         logger.info("Ignoring Stripe event: %s", etype)
 
@@ -662,3 +894,295 @@ async def _on_invoice_payment_failed(invoice, pool) -> None:
             await send_payment_failed_email(user_row["email"], user_row["full_name"] or "")
     except Exception as exc:
         logger.error("Failed to send payment failed email: %s", exc)
+
+
+# ── Workspace (Wheelhouse) webhook handlers ────────────────────────────────
+
+
+async def _resolve_workspace_id_for_event(obj, pool) -> UUID | None:
+    """Find the workspace_id for a Stripe event object.
+
+    Tries, in order:
+      1. metadata.workspace_id (set by us at checkout creation)
+      2. Lookup by stripe_subscription_id
+      3. Lookup by stripe_customer_id
+
+    Returns None if no match — handler should log and bail rather than
+    raise so we always return 200 to Stripe (avoid retry storms).
+    """
+    metadata = getattr(obj, "metadata", None) or {}
+    if hasattr(metadata, "get"):
+        ws_id = metadata.get("workspace_id")
+        if ws_id:
+            try:
+                return UUID(ws_id)
+            except (ValueError, TypeError):
+                pass
+
+    sub_id = getattr(obj, "subscription", None) or getattr(obj, "id", None)
+    if sub_id and isinstance(sub_id, str) and sub_id.startswith("sub_"):
+        ws_id = await pool.fetchval(
+            "SELECT id FROM workspaces WHERE stripe_subscription_id = $1",
+            sub_id,
+        )
+        if ws_id:
+            return ws_id
+
+    customer_id = getattr(obj, "customer", None)
+    if customer_id and isinstance(customer_id, str):
+        ws_id = await pool.fetchval(
+            "SELECT id FROM workspaces WHERE stripe_customer_id = $1",
+            customer_id,
+        )
+        if ws_id:
+            return ws_id
+
+    return None
+
+
+async def _on_workspace_checkout_completed(session, pool) -> None:
+    """checkout.session.completed → activate the workspace.
+
+    Stores stripe_subscription_id on the workspace row and flips
+    status to 'active'. Idempotent — second delivery for the same
+    subscription is a no-op.
+    """
+    customer_id = getattr(session, "customer", None)
+    subscription_id = getattr(session, "subscription", None)
+    logger.info(
+        "Workspace checkout completed: customer=%s subscription=%s",
+        customer_id, subscription_id,
+    )
+    if not customer_id or not subscription_id:
+        logger.warning(
+            "Workspace checkout missing customer/subscription — skipping",
+        )
+        return
+
+    workspace_id = await _resolve_workspace_id_for_event(session, pool)
+    if workspace_id is None:
+        logger.warning(
+            "Workspace checkout could not resolve workspace_id "
+            "(customer=%s subscription=%s) — skipping",
+            customer_id, subscription_id,
+        )
+        return
+
+    # Idempotency: if this subscription is already on the workspace,
+    # skip. (Stripe replays webhooks for ~3 days on success-200 fails.)
+    prev_sub = await pool.fetchval(
+        "SELECT stripe_subscription_id FROM workspaces WHERE id = $1",
+        workspace_id,
+    )
+    if prev_sub == subscription_id:
+        logger.info(
+            "Duplicate checkout.session.completed for workspace %s — skipping",
+            workspace_id,
+        )
+        return
+
+    await pool.execute(
+        """
+        UPDATE workspaces SET
+          status = 'active',
+          stripe_subscription_id = $1,
+          card_pending_started_at = NULL,
+          updated_at = now()
+        WHERE id = $2
+        """,
+        subscription_id, workspace_id,
+    )
+
+    # Audit log
+    try:
+        import json
+        await pool.execute(
+            "INSERT INTO workspace_billing_events "
+            "(workspace_id, event_type, actor_user_id, details) "
+            "VALUES ($1, 'subscription_started', NULL, $2::jsonb)",
+            workspace_id,
+            json.dumps({
+                "stripe_subscription_id": subscription_id,
+                "stripe_customer_id": customer_id,
+            }),
+        )
+    except Exception as exc:
+        logger.warning("workspace_billing_events insert failed: %s", exc)
+
+    # Owner email — first activation only.
+    try:
+        owner_email = await pool.fetchval(
+            "SELECT u.email FROM workspaces w "
+            "JOIN users u ON u.id = w.owner_user_id "
+            "WHERE w.id = $1",
+            workspace_id,
+        )
+        ws_name = await pool.fetchval(
+            "SELECT name FROM workspaces WHERE id = $1", workspace_id,
+        )
+        if owner_email and ws_name:
+            from app.email import send_workspace_subscription_confirmed_email
+            await send_workspace_subscription_confirmed_email(
+                owner_email, ws_name,
+            )
+    except Exception as exc:
+        logger.error("workspace subscription confirmed email failed: %s", exc)
+
+
+async def _on_workspace_subscription_change(subscription, pool) -> None:
+    """customer.subscription.* → sync workspace status.
+
+    Status mapping (Stripe → workspaces.status):
+      active                → active
+      trialing              → active (Stripe-managed trial; we don't use it
+                              today but mapping is forward-compatible)
+      past_due              → active (read-only enforcement is by `status`;
+                              Stripe handles dunning emails)
+      canceled              → canceled (90-day retention before purge)
+      unpaid / incomplete   → card_pending (give the owner a grace window)
+      paused / incomplete_expired → archived
+    """
+    sub_id = getattr(subscription, "id", None)
+    customer_id = getattr(subscription, "customer", None)
+    stripe_status = getattr(subscription, "status", None)
+    cancel_at_period_end = getattr(subscription, "cancel_at_period_end", False)
+
+    workspace_id = await _resolve_workspace_id_for_event(subscription, pool)
+    if workspace_id is None:
+        logger.warning(
+            "Workspace subscription.%s could not resolve workspace "
+            "(sub=%s customer=%s)",
+            stripe_status, sub_id, customer_id,
+        )
+        return
+
+    # Map Stripe status → workspaces.status. Note we deliberately keep
+    # past_due as "active" so members aren't locked out mid-month for a
+    # transient card decline. Stripe's dunning will resolve it or escalate
+    # to canceled, which we DO act on.
+    status_map = {
+        "active": "active",
+        "trialing": "active",
+        "past_due": "active",
+        "canceled": "canceled",
+        "unpaid": "card_pending",
+        "incomplete": "card_pending",
+        "paused": "archived",
+        "incomplete_expired": "archived",
+    }
+    new_status = status_map.get(stripe_status, "active")
+
+    # Special case: cancel-at-period-end is just a flag — keep status
+    # active until Stripe actually fires customer.subscription.deleted.
+    # No DB change needed for that signal alone.
+
+    set_card_pending_started = ""
+    if new_status == "card_pending":
+        set_card_pending_started = (
+            ", card_pending_started_at = COALESCE(card_pending_started_at, now())"
+        )
+
+    await pool.execute(
+        f"UPDATE workspaces SET "
+        f"  status = $1, "
+        f"  stripe_subscription_id = COALESCE(stripe_subscription_id, $2)"
+        f"  {set_card_pending_started}, "
+        f"  updated_at = now() "
+        f"WHERE id = $3",
+        new_status, sub_id, workspace_id,
+    )
+    logger.info(
+        "Workspace %s: stripe_status=%s → status=%s",
+        workspace_id, stripe_status, new_status,
+    )
+
+    try:
+        import json
+        await pool.execute(
+            "INSERT INTO workspace_billing_events "
+            "(workspace_id, event_type, actor_user_id, details) "
+            "VALUES ($1, $2, NULL, $3::jsonb)",
+            workspace_id,
+            f"sub_{stripe_status or 'unknown'}",
+            json.dumps({
+                "stripe_subscription_id": sub_id,
+                "cancel_at_period_end": cancel_at_period_end,
+                "new_status": new_status,
+            }),
+        )
+    except Exception as exc:
+        logger.warning("workspace_billing_events insert failed: %s", exc)
+
+
+async def _on_workspace_invoice_paid(invoice, pool) -> None:
+    """invoice.paid → confirm active status, log."""
+    workspace_id = await _resolve_workspace_id_for_event(invoice, pool)
+    if workspace_id is None:
+        logger.warning(
+            "Workspace invoice.paid could not resolve workspace (id=%s)",
+            getattr(invoice, "id", None),
+        )
+        return
+
+    # Recovery from past_due is handled by sub.updated; here we just
+    # confirm + log for ledger.
+    await pool.execute(
+        "UPDATE workspaces SET status = 'active', updated_at = now() "
+        "WHERE id = $1 AND status IN ('active', 'past_due', 'card_pending')",
+        workspace_id,
+    )
+    try:
+        import json
+        await pool.execute(
+            "INSERT INTO workspace_billing_events "
+            "(workspace_id, event_type, actor_user_id, details) "
+            "VALUES ($1, 'invoice_paid', NULL, $2::jsonb)",
+            workspace_id,
+            json.dumps({
+                "stripe_invoice_id": getattr(invoice, "id", None),
+                "amount_paid_cents": getattr(invoice, "amount_paid", None),
+            }),
+        )
+    except Exception as exc:
+        logger.warning("workspace_billing_events log failed: %s", exc)
+
+
+async def _on_workspace_invoice_payment_failed(invoice, pool) -> None:
+    """invoice.payment_failed → log + email owner.
+
+    We don't immediately flip status here — Stripe's dunning will
+    retry the payment over ~2 weeks. If it ultimately fails, we'll
+    receive customer.subscription.deleted and handle status='canceled'
+    there. Status stays 'active' during dunning so members aren't
+    locked out for a transient decline (matches user-tier behavior).
+    """
+    workspace_id = await _resolve_workspace_id_for_event(invoice, pool)
+    if workspace_id is None:
+        return
+
+    try:
+        owner_email = await pool.fetchval(
+            "SELECT u.email FROM workspaces w "
+            "JOIN users u ON u.id = w.owner_user_id WHERE w.id = $1",
+            workspace_id,
+        )
+        ws_name = await pool.fetchval(
+            "SELECT name FROM workspaces WHERE id = $1", workspace_id,
+        )
+        if owner_email and ws_name:
+            from app.email import send_workspace_payment_failed_email
+            await send_workspace_payment_failed_email(owner_email, ws_name)
+    except Exception as exc:
+        logger.error("workspace payment_failed email send failed: %s", exc)
+
+    try:
+        import json
+        await pool.execute(
+            "INSERT INTO workspace_billing_events "
+            "(workspace_id, event_type, actor_user_id, details) "
+            "VALUES ($1, 'invoice_payment_failed', NULL, $2::jsonb)",
+            workspace_id,
+            json.dumps({"stripe_invoice_id": getattr(invoice, "id", None)}),
+        )
+    except Exception as exc:
+        logger.warning("workspace_billing_events log failed: %s", exc)
