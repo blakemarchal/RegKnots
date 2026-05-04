@@ -465,8 +465,9 @@ function InviteModal({
         },
       )
       setSuccess({ kind: res.kind, email: trimmed })
-      // Auto-close after a beat so the user reads the confirmation.
-      setTimeout(onSuccess, 1500)
+      // No auto-close — the invite-kind copy explains a 14-day window
+      // that takes a moment to read; Owners reported the prior 1.5s
+      // pop was not long enough. User dismisses with the Done button.
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to invite.')
     } finally {
@@ -482,7 +483,7 @@ function InviteModal({
           <h2 className="text-lg font-semibold mb-1 text-[#2dd4bf]">
             {success.kind === 'member' ? 'Added to workspace' : 'Invite sent'}
           </h2>
-          <p className="text-xs text-[#6b7594]">
+          <p className="text-xs text-[#6b7594] mb-4">
             {success.kind === 'member' ? (
               <><code>{success.email}</code> already has a RegKnot account
               and was added directly.</>
@@ -492,6 +493,17 @@ function InviteModal({
               join automatically when they sign up.</>
             )}
           </p>
+          <div className="flex justify-end">
+            <button
+              onClick={onSuccess}
+              autoFocus
+              className="px-4 py-1.5 rounded-md bg-[#2dd4bf]/15 border border-[#2dd4bf]/30
+                         text-sm font-medium text-[#2dd4bf] hover:bg-[#2dd4bf]/25
+                         transition-colors"
+            >
+              Done
+            </button>
+          </div>
         </div>
       </div>
     )

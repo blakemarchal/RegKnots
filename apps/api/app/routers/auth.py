@@ -89,10 +89,17 @@ async def register(data: RegisterRequest, response: Response) -> TokenResponse:
     )
 
     if has_pending_invite:
+        # Set trial_ends_at = NOW() (already-expired) rather than NULL.
+        # The users.trial_ends_at column is NOT NULL by historical
+        # schema, and we don't want to migrate that constraint just
+        # for this slice. Already-expired works identically for the
+        # view-mode trial_active check (`trial_ends_at > now()` is
+        # false by the time anyone reads), and reads as "no active
+        # trial" everywhere else in the codebase.
         user = await pool.fetchrow(
             """
             INSERT INTO users (email, hashed_password, full_name, role, trial_ends_at)
-            VALUES ($1, $2, $3, $4, NULL)
+            VALUES ($1, $2, $3, $4, NOW())
             RETURNING id, email, full_name, role, subscription_tier, is_admin, email_verified
             """,
             data.email, hashed_pw, data.full_name, data.role,
