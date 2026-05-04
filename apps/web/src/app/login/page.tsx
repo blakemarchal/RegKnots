@@ -20,6 +20,10 @@ function LoginForm() {
   const [loading, setLoading] = useState(false)
 
   const resetSuccess = searchParams.get('reset') === '1'
+  // D6.53 — invite redirect. /invite/<token> sends users here with
+  // ?invite=<token>. After successful login we forward back so the
+  // landing page can show the Accept button with the user signed in.
+  const inviteToken = searchParams.get('invite')
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -28,6 +32,10 @@ function LoginForm() {
     setLoading(true)
     try {
       await login(email, password)
+      if (inviteToken) {
+        router.replace(`/invite/${inviteToken}`)
+        return
+      }
       router.replace('/')
     } catch (err) {
       // TypeError means a network-level failure (DNS, firewall, offline, etc.)

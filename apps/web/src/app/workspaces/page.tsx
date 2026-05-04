@@ -2,9 +2,11 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import AuthGuard from '@/components/AuthGuard'
 import { AppHeader } from '@/components/AppHeader'
 import { apiRequest, ApiError } from '@/lib/api'
+import { useViewMode } from '@/lib/useViewMode'
 
 // ── Types (mirror packages/rag/rag/models.py and routers/workspaces.py) ────
 
@@ -18,6 +20,16 @@ interface Workspace {
   my_role: 'owner' | 'admin' | 'member'
   created_at: string
   card_pending_started_at: string | null
+}
+
+// D6.53 — pending invite addressed to the current user's email.
+interface MyInvite {
+  id: string
+  workspace_id: string
+  workspace_name: string | null
+  role: 'admin' | 'member'
+  invited_by_name: string | null
+  expires_at: string
 }
 
 const STATUS_LABEL: Record<Workspace['status'], string> = {
@@ -56,20 +68,30 @@ export default function WorkspacesPage() {
 }
 
 function WorkspacesContent() {
+  const router = useRouter()
+  const { refresh: refreshViewMode } = useViewMode()
   const [workspaces, setWorkspaces] = useState<Workspace[] | null>(null)
+  const [invites, setInvites] = useState<MyInvite[]>([])
   const [error, setError] = useState<string | null>(null)
   const [showCreate, setShowCreate] = useState(false)
   const [creating, setCreating] = useState(false)
   const [newName, setNewName] = useState('')
   const [createError, setCreateError] = useState<string | null>(null)
+  const [acting, setActing] = useState<string | null>(null)
 
   useEffect(() => { void load() }, [])
 
   async function load() {
     setError(null)
     try {
-      const data = await apiRequest<Workspace[]>('/workspaces')
+      const [data, myInvites] = await Promise.all([
+        apiRequest<Workspace[]>('/workspaces'),
+        // /me/invites is best-effort; if it fails (e.g. crew tier off
+        // or user has no invites), we still want the workspace list.
+        apiRequest<MyInvite[]>('/me/invites').catch(() => [] as MyInvite[]),
+      ])
       setWorkspaces(data)
+      setInvites(myInvites)
     } catch (e) {
       if (e instanceof ApiError && e.status === 404) {
         // CREW_TIER_ENABLED=false → endpoint returns 404
@@ -86,6 +108,41 @@ function WorkspacesContent() {
         setError(e instanceof Error ? e.message : 'Failed to load workspaces.')
         setWorkspaces([])
       }
+    }
+  }
+
+  async function acceptInvite(inv: MyInvite) {
+    if (acting) return
+    setActing(inv.id)
+    try {
+      const res = await apiRequest<{ workspace_id: string }>(
+        `/me/invites/${inv.id}/accept`,
+        { method: 'POST' },
+      )
+      // Bust the view-mode cache — joining a workspace can flip a
+      // free user from `individual` to `wheelhouse_only`.
+      await refreshViewMode()
+      router.push(`/workspaces/${res.workspace_id}`)
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Failed to accept invite.')
+    } finally {
+      setActing(null)
+    }
+  }
+
+  async function declineInvite(inv: MyInvite) {
+    if (acting) return
+    if (!confirm(`Decline the invite to ${inv.workspace_name ?? 'this workspace'}?`)) {
+      return
+    }
+    setActing(inv.id)
+    try {
+      await apiRequest(`/me/invites/${inv.id}/decline`, { method: 'POST' })
+      await load()
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Failed to decline invite.')
+    } finally {
+      setActing(null)
     }
   }
 
@@ -124,6 +181,55 @@ function WorkspacesContent() {
                         px-4 py-3 text-sm text-amber-200/90">
           {error}
         </div>
+      )}
+
+      {invites.length > 0 && (
+        <section className="mb-6">
+          <h2 className="text-xs font-mono uppercase tracking-wider text-[#6b7594] mb-2">
+            Pending invites ({invites.length})
+          </h2>
+          <ul className="space-y-2">
+            {invites.map((inv) => (
+              <li
+                key={inv.id}
+                className="rounded-lg border border-[#2dd4bf]/30 bg-[#2dd4bf]/5 p-4"
+              >
+                <div className="flex items-start justify-between gap-3 flex-wrap">
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm font-semibold text-[#f0ece4]">
+                      {inv.workspace_name ?? 'A workspace'}
+                    </div>
+                    <div className="text-xs text-[#6b7594] mt-0.5">
+                      {inv.invited_by_name && <>Invited by {inv.invited_by_name} · </>}
+                      Join as <span className="text-[#f0ece4]/80">{inv.role}</span>
+                      {' '}· expires {new Date(inv.expires_at).toLocaleDateString()}
+                    </div>
+                  </div>
+                  <div className="flex gap-2 flex-shrink-0">
+                    <button
+                      onClick={() => acceptInvite(inv)}
+                      disabled={acting === inv.id}
+                      className="px-3 py-1.5 rounded-md bg-[#2dd4bf]/15 border border-[#2dd4bf]/30
+                                 text-xs font-medium text-[#2dd4bf] hover:bg-[#2dd4bf]/25
+                                 disabled:opacity-50 disabled:cursor-not-allowed
+                                 transition-colors"
+                    >
+                      {acting === inv.id ? 'Joining…' : 'Accept'}
+                    </button>
+                    <button
+                      onClick={() => declineInvite(inv)}
+                      disabled={acting === inv.id}
+                      className="px-3 py-1.5 text-xs text-[#6b7594] hover:text-[#f0ece4]
+                                 transition-colors disabled:opacity-50"
+                    >
+                      Decline
+                    </button>
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
       )}
 
       <div className="mb-4 flex items-center justify-between">

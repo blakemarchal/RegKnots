@@ -25,6 +25,7 @@ from app.email import (
     send_verification_email,
     send_welcome_email,
 )
+from app.routers.workspaces import auto_claim_invites_for_user
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -107,6 +108,14 @@ async def register(data: RegisterRequest, response: Response) -> TokenResponse:
     )
 
     _set_refresh_cookie(response, raw_refresh)
+
+    # D6.53 — auto-claim any pending workspace invites for this email
+    # so users who came in via an invite link land directly in their
+    # crew workspace. Best-effort; failures don't affect registration.
+    try:
+        await auto_claim_invites_for_user(pool, user["id"], user["email"])
+    except Exception:
+        pass
 
     # Fire welcome email — non-blocking, failures don't affect registration
     try:

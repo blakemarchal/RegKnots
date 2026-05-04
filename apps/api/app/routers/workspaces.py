@@ -26,18 +26,20 @@ Feature flag:
 """
 
 import logging
+import secrets
 from datetime import datetime, timezone
 from typing import Annotated, Literal
 from uuid import UUID
 
 import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, EmailStr, Field
 
 from app.auth.deps import get_current_user
 from app.auth.schemas import CurrentUser
 from app.config import settings
 from app.db import get_pool
+from app.email import send_workspace_invite_email
 
 logger = logging.getLogger(__name__)
 
@@ -92,8 +94,33 @@ class HandoffNoteDTO(BaseModel):
     updated_by_name: str | None
 
 
+class WorkspaceInviteDTO(BaseModel):
+    """A pending or historical invite to join a workspace.
+
+    Surfaced in two places:
+      - GET /workspaces/{id}/invites — Owner/Admin list of pending
+        invites for one workspace (so they see whom they've invited
+        and can rescind).
+      - GET /me/invites — caller's own pending invites across all
+        workspaces (so signed-in users can accept/decline).
+    """
+    id: str
+    workspace_id: str
+    workspace_name: str | None = None  # Populated on /me/invites
+    email: str
+    role: Literal["admin", "member"]
+    status: Literal[
+        "pending", "accepted", "declined", "rescinded", "expired"
+    ]
+    invited_by_email: str | None = None
+    invited_by_name: str | None = None
+    created_at: str
+    expires_at: str
+
+
 class WorkspaceDetailDTO(WorkspaceDTO):
     members: list[WorkspaceMemberDTO]
+    pending_invites: list[WorkspaceInviteDTO]
     handoff_note: HandoffNoteDTO
 
 
@@ -106,8 +133,25 @@ class CreateWorkspaceBody(BaseModel):
 
 
 class InviteMemberBody(BaseModel):
-    email: str = Field(min_length=3, max_length=254)
+    # Pydantic's EmailStr enforces the basic shape so we don't have to
+    # re-validate downstream. Lowercased before insertion.
+    email: EmailStr
     role: Literal["admin", "member"] = "member"
+
+
+class InviteMemberResponse(BaseModel):
+    """The /workspaces/{id}/members POST endpoint can return one of two
+    things now (sprint D6.53):
+      - kind='member' — invitee already had a RegKnots account; we
+        added them straight to workspace_members.
+      - kind='invite' — invitee did not exist yet; we created a pending
+        invite and emailed them a tokenized signup link.
+
+    Frontend dispatches on `kind` for the success toast.
+    """
+    kind: Literal["member", "invite"]
+    member: WorkspaceMemberDTO | None = None
+    invite: WorkspaceInviteDTO | None = None
 
 
 class ChangeRoleBody(BaseModel):
@@ -178,6 +222,64 @@ async def _require_workspace_role(
             detail=f"Requires one of: {', '.join(required)}",
         )
     return role
+
+
+async def _seats_used(
+    pool: asyncpg.Pool, workspace_id: UUID,
+) -> int:
+    """Members + still-pending invites. Pending invites count against
+    seat_cap so an admin who fires off 8 invites can't have the 9th
+    accept silently fail (D6.53). Expired/rescinded/accepted invites
+    don't count — only currently-outstanding ones."""
+    members = await pool.fetchval(
+        "SELECT COUNT(*) FROM workspace_members WHERE workspace_id = $1",
+        workspace_id,
+    )
+    pending = await pool.fetchval(
+        "SELECT COUNT(*) FROM workspace_invites "
+        "WHERE workspace_id = $1 AND status = 'pending' "
+        "  AND expires_at > now()",
+        workspace_id,
+    )
+    return int(members or 0) + int(pending or 0)
+
+
+async def _expire_stale_invites(
+    pool: asyncpg.Pool, workspace_id: UUID | None = None,
+) -> None:
+    """Lazy state transition: pending invites past their expires_at
+    become status='expired'. Called from any endpoint that reads
+    invites so users don't see stale "pending" rows. Cheap UPDATE; no
+    cron needed for this slice."""
+    if workspace_id is not None:
+        await pool.execute(
+            "UPDATE workspace_invites SET status = 'expired' "
+            "WHERE workspace_id = $1 AND status = 'pending' "
+            "  AND expires_at < now()",
+            workspace_id,
+        )
+    else:
+        await pool.execute(
+            "UPDATE workspace_invites SET status = 'expired' "
+            "WHERE status = 'pending' AND expires_at < now()"
+        )
+
+
+def _invite_row_to_dto(
+    row: asyncpg.Record, workspace_name: str | None = None,
+) -> WorkspaceInviteDTO:
+    return WorkspaceInviteDTO(
+        id=str(row["id"]),
+        workspace_id=str(row["workspace_id"]),
+        workspace_name=workspace_name,
+        email=row["email"],
+        role=row["role"],
+        status=row["status"],
+        invited_by_email=row.get("inviter_email"),
+        invited_by_name=row.get("inviter_name"),
+        created_at=row["created_at"].isoformat(),
+        expires_at=row["expires_at"].isoformat(),
+    )
 
 
 async def _log_billing_event(
@@ -330,6 +432,22 @@ async def get_workspace(
         """,
         workspace_id,
     )
+    # D6.53 — pending invites (with stale-pending sweep). Surfacing them
+    # in the member list keeps Owner/Admin honest about real headcount;
+    # frontend renders them with a "Pending" pill below the members.
+    await _expire_stale_invites(pool, workspace_id)
+    invites = await pool.fetch(
+        """
+        SELECT wi.id, wi.workspace_id, wi.email, wi.role, wi.status,
+               wi.created_at, wi.expires_at,
+               u.email AS inviter_email, u.full_name AS inviter_name
+        FROM workspace_invites wi
+        LEFT JOIN users u ON u.id = wi.invited_by_user_id
+        WHERE wi.workspace_id = $1 AND wi.status = 'pending'
+        ORDER BY wi.created_at DESC
+        """,
+        workspace_id,
+    )
     return WorkspaceDetailDTO(
         id=str(ws["id"]), name=ws["name"],
         owner_user_id=str(ws["owner_user_id"]),
@@ -351,6 +469,7 @@ async def get_workspace(
             )
             for m in members
         ],
+        pending_invites=[_invite_row_to_dto(inv) for inv in invites],
         handoff_note=HandoffNoteDTO(
             content=ws["handoff_note"],
             updated_at=(ws["handoff_note_updated_at"].isoformat()
@@ -419,83 +538,175 @@ async def update_handoff_note(
 
 
 @router.post("/{workspace_id}/members",
-             response_model=WorkspaceMemberDTO, status_code=201)
+             response_model=InviteMemberResponse, status_code=201)
 async def invite_member(
     workspace_id: UUID,
     body: InviteMemberBody,
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
     pool: Annotated[asyncpg.Pool, Depends(get_pool)],
-) -> WorkspaceMemberDTO:
-    """Invite an existing RegKnots user to the workspace by email.
-    Owner or Admin only. The invited user must already have a RegKnots
-    account — we do NOT auto-create accounts (per privacy rule against
-    creating accounts on behalf of users)."""
+) -> InviteMemberResponse:
+    """Invite a user to the workspace by email. Owner or Admin only.
+
+    Two paths (D6.53):
+      - Invitee already has a RegKnots account → add directly to
+        workspace_members and return kind='member'.
+      - Invitee has no account → create a row in workspace_invites,
+        email a tokenized link, return kind='invite'. Their first
+        action (signup-via-link OR direct signup with the same email)
+        will auto-claim the invite.
+
+    Pending invites count against seat_cap so an admin who fires off
+    8 invites can't have the 9th accept silently fail.
+    """
     _ensure_feature_enabled()
     user_uuid = UUID(current_user.user_id)
     await _require_workspace_role(
         pool, workspace_id, user_uuid, ("owner", "admin"),
     )
 
-    # Seat cap check.
     ws = await pool.fetchrow(
-        "SELECT seat_cap FROM workspaces WHERE id = $1", workspace_id,
+        "SELECT name, seat_cap FROM workspaces WHERE id = $1", workspace_id,
     )
     if ws is None:
         raise HTTPException(404, "Workspace not found")
-    current_count = await pool.fetchval(
-        "SELECT COUNT(*) FROM workspace_members WHERE workspace_id = $1",
-        workspace_id,
-    )
-    if current_count >= ws["seat_cap"]:
+
+    # Sweep stale invites BEFORE counting seats so freshly-expired rows
+    # don't block a legitimate invite.
+    await _expire_stale_invites(pool, workspace_id)
+
+    seats_used = await _seats_used(pool, workspace_id)
+    if seats_used >= ws["seat_cap"]:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Seat cap reached ({ws['seat_cap']}). Remove an inactive "
-                   "member first or contact support to upgrade.",
+            detail=f"Seat cap reached ({ws['seat_cap']} — including pending "
+                   "invites). Remove an inactive member or rescind a pending "
+                   "invite first, or contact support to upgrade.",
         )
 
+    email_norm = body.email.strip().lower()
     invitee = await pool.fetchrow(
         "SELECT id, email, full_name, is_internal FROM users WHERE email = $1",
-        body.email.strip().lower(),
+        email_norm,
     )
-    if invitee is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="No RegKnots account exists for that email. The user "
-                   "must sign up first.",
-        )
-    invitee_email = (invitee["email"] or "").lower()
-    if (
-        settings.crew_tier_internal_only
-        and not invitee["is_internal"]
-        and invitee_email not in _CREW_TEST_WHITELIST
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Cannot invite non-internal users while crew tier is "
-                   "in internal review.",
+
+    # ── Path A: existing user → straight to workspace_members ───────────
+    if invitee is not None:
+        invitee_email = (invitee["email"] or "").lower()
+        if (
+            settings.crew_tier_internal_only
+            and not invitee["is_internal"]
+            and invitee_email not in _CREW_TEST_WHITELIST
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Cannot invite non-internal users while crew tier is "
+                       "in internal review.",
+            )
+
+        try:
+            new_member = await pool.fetchrow(
+                "INSERT INTO workspace_members "
+                "(workspace_id, user_id, role, invited_by_user_id) "
+                "VALUES ($1, $2, $3, $4) "
+                "RETURNING joined_at",
+                workspace_id, invitee["id"], body.role, user_uuid,
+            )
+        except asyncpg.UniqueViolationError:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="User is already a member of this workspace.",
+            )
+
+        return InviteMemberResponse(
+            kind="member",
+            member=WorkspaceMemberDTO(
+                user_id=str(invitee["id"]),
+                email=invitee["email"], full_name=invitee["full_name"],
+                role=body.role,
+                joined_at=new_member["joined_at"].isoformat(),
+                invited_by=str(user_uuid),
+            ),
         )
 
-    try:
-        new_member = await pool.fetchrow(
-            "INSERT INTO workspace_members "
-            "(workspace_id, user_id, role, invited_by_user_id) "
-            "VALUES ($1, $2, $3, $4) "
-            "RETURNING joined_at",
-            workspace_id, invitee["id"], body.role, user_uuid,
-        )
-    except asyncpg.UniqueViolationError:
+    # ── Path B: no account → create pending invite + email ──────────────
+    # Internal-only gate doesn't apply here — the invitee is brand new
+    # and lands in our system via an explicit invite link, which is
+    # itself the gating mechanism. The check on the existing-user path
+    # above prevents accidental adds of unrelated existing users.
+
+    # Reject duplicate pending invite for same (workspace, email).
+    existing_pending = await pool.fetchval(
+        "SELECT id FROM workspace_invites "
+        "WHERE workspace_id = $1 AND lower(email) = $2 AND status = 'pending'",
+        workspace_id, email_norm,
+    )
+    if existing_pending:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="User is already a member of this workspace.",
+            detail="An invite for that email is already pending. Rescind it "
+                   "first if you need to change the role.",
         )
 
-    return WorkspaceMemberDTO(
-        user_id=str(invitee["id"]),
-        email=invitee["email"], full_name=invitee["full_name"],
-        role=body.role,
-        joined_at=new_member["joined_at"].isoformat(),
-        invited_by=str(user_uuid),
+    token = secrets.token_urlsafe(32)
+    invite_row = await pool.fetchrow(
+        """
+        INSERT INTO workspace_invites
+          (workspace_id, email, role, token, invited_by_user_id)
+        VALUES ($1, $2, $3, $4, $5)
+        RETURNING id, workspace_id, email, role, token, status,
+                  created_at, expires_at
+        """,
+        workspace_id, email_norm, body.role, token, user_uuid,
     )
+
+    # Best-effort send. If email fails the invite still exists; admin
+    # can resend or rescind from the UI. We log but don't raise.
+    inviter_name = (current_user.full_name or current_user.email).strip()
+    try:
+        await send_workspace_invite_email(
+            to_email=email_norm,
+            inviter_name=inviter_name,
+            workspace_name=ws["name"],
+            token=token,
+            role=body.role,
+        )
+    except Exception as exc:
+        logger.warning("workspace invite email failed (%s): %s", email_norm, exc)
+
+    return InviteMemberResponse(
+        kind="invite",
+        invite=_invite_row_to_dto(invite_row, workspace_name=ws["name"]),
+    )
+
+
+@router.delete(
+    "/{workspace_id}/invites/{invite_id}", status_code=204,
+)
+async def rescind_invite(
+    workspace_id: UUID,
+    invite_id: UUID,
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    pool: Annotated[asyncpg.Pool, Depends(get_pool)],
+) -> None:
+    """Rescind a pending invite. Owner or Admin only. Frees the seat
+    immediately (D6.53)."""
+    _ensure_feature_enabled()
+    user_uuid = UUID(current_user.user_id)
+    await _require_workspace_role(
+        pool, workspace_id, user_uuid, ("owner", "admin"),
+    )
+    res = await pool.execute(
+        "UPDATE workspace_invites SET "
+        "  status = 'rescinded', rescinded_at = now() "
+        "WHERE id = $1 AND workspace_id = $2 AND status = 'pending'",
+        invite_id, workspace_id,
+    )
+    # asyncpg's execute() returns "UPDATE n" — cheap parse to detect 0.
+    if res.endswith(" 0"):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Invite not found, already accepted, or already rescinded.",
+        )
 
 
 @router.delete("/{workspace_id}/members/{member_user_id}", status_code=204)
@@ -670,3 +881,396 @@ async def transfer_ownership(
             if updated["card_pending_started_at"] else None
         ),
     )
+
+
+# ── /me/* — caller-scoped invite + view-mode endpoints ─────────────────────
+#
+# Mounted under a separate router prefix so the path reads naturally:
+#   GET    /me/invites           list my pending invites
+#   POST   /me/invites/{id}/accept
+#   POST   /me/invites/{id}/decline
+#   GET    /me/view-mode         which UX shell to render
+#
+# Both me_router and the workspaces router are registered in main.py.
+# These endpoints do NOT require a specific workspace role — they're
+# scoped to the caller's identity (email + workspace memberships).
+me_router = APIRouter(prefix="/me", tags=["me"])
+
+
+class ViewModeDTO(BaseModel):
+    """The UX shell the frontend should render. Derived state — never
+    stored on the user row.
+
+      individual              — no workspaces, regular RegKnots view
+      individual_with_workspaces — has workspaces AND a personal sub
+                                   (or trial); shows Wheelhouse switcher
+      wheelhouse_only         — has workspaces but no personal sub;
+                                lands directly in workspace portal,
+                                no personal chat surface
+    """
+    mode: Literal[
+        "individual", "individual_with_workspaces", "wheelhouse_only",
+    ]
+    workspace_count: int
+    has_personal_access: bool
+    primary_workspace_id: str | None = None
+    pending_invite_count: int = 0
+
+
+@me_router.get("/view-mode", response_model=ViewModeDTO)
+async def get_view_mode(
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    pool: Annotated[asyncpg.Pool, Depends(get_pool)],
+) -> ViewModeDTO:
+    """Return which UX shell the frontend should render for this user.
+
+    `has_personal_access` is true when the user has any path to using
+    RegKnots independently of a Wheelhouse — paid sub, active trial,
+    admin, or internal flag. The wheelhouse_only mode applies only to
+    users whose ONLY access is via a workspace seat.
+    """
+    _ensure_feature_enabled()
+    user_uuid = UUID(current_user.user_id)
+
+    row = await pool.fetchrow(
+        """
+        SELECT
+          subscription_tier,
+          subscription_status,
+          trial_ends_at,
+          is_admin,
+          is_internal
+        FROM users
+        WHERE id = $1
+        """,
+        user_uuid,
+    )
+
+    # Trial active → personal access until the trial ends.
+    trial_active = (
+        row and row["trial_ends_at"]
+        and row["trial_ends_at"] > datetime.now(timezone.utc)
+    )
+    paid_active = (
+        row and row["subscription_status"] in ("active", "trialing", "past_due")
+        and row["subscription_tier"] not in (None, "free")
+    )
+    has_personal_access = bool(
+        paid_active or trial_active
+        or (row and (row["is_admin"] or row["is_internal"]))
+    )
+
+    workspaces = await pool.fetch(
+        "SELECT workspace_id FROM workspace_members WHERE user_id = $1 "
+        "ORDER BY joined_at",
+        user_uuid,
+    )
+    workspace_count = len(workspaces)
+
+    pending_invite_count = await pool.fetchval(
+        "SELECT COUNT(*) FROM workspace_invites "
+        "WHERE lower(email) = lower($1) "
+        "  AND status = 'pending' AND expires_at > now()",
+        current_user.email,
+    ) or 0
+
+    if workspace_count == 0:
+        mode = "individual"
+    elif has_personal_access:
+        mode = "individual_with_workspaces"
+    else:
+        mode = "wheelhouse_only"
+
+    return ViewModeDTO(
+        mode=mode,
+        workspace_count=workspace_count,
+        has_personal_access=has_personal_access,
+        primary_workspace_id=(
+            str(workspaces[0]["workspace_id"]) if workspaces else None
+        ),
+        pending_invite_count=int(pending_invite_count),
+    )
+
+
+@me_router.get("/invites", response_model=list[WorkspaceInviteDTO])
+async def list_my_invites(
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    pool: Annotated[asyncpg.Pool, Depends(get_pool)],
+) -> list[WorkspaceInviteDTO]:
+    """Pending invites addressed to the caller's email, across all
+    workspaces. Used for the post-login banner / invite-claim UX
+    (D6.53)."""
+    _ensure_feature_enabled()
+    await _expire_stale_invites(pool)
+    rows = await pool.fetch(
+        """
+        SELECT wi.id, wi.workspace_id, wi.email, wi.role, wi.status,
+               wi.created_at, wi.expires_at,
+               w.name AS workspace_name,
+               u.email AS inviter_email, u.full_name AS inviter_name
+        FROM workspace_invites wi
+        JOIN workspaces w ON w.id = wi.workspace_id
+        LEFT JOIN users u ON u.id = wi.invited_by_user_id
+        WHERE lower(wi.email) = lower($1)
+          AND wi.status = 'pending'
+          AND wi.expires_at > now()
+        ORDER BY wi.created_at DESC
+        """,
+        current_user.email,
+    )
+    return [
+        _invite_row_to_dto(r, workspace_name=r["workspace_name"])
+        for r in rows
+    ]
+
+
+class InviteLookupResponse(BaseModel):
+    """Public, unauthenticated lookup so the /invite/<token> landing
+    page can show "You've been invited to *F/V Northern Edge*" before
+    the user signs in or registers."""
+    workspace_name: str
+    inviter_name: str | None
+    role: Literal["admin", "member"]
+    email: str
+    expires_at: str
+    requires_signup: bool  # True if no RegKnots account exists for `email`
+
+
+@me_router.get("/invites/lookup/{token}", response_model=InviteLookupResponse)
+async def lookup_invite(
+    token: str,
+    pool: Annotated[asyncpg.Pool, Depends(get_pool)],
+) -> InviteLookupResponse:
+    """Unauthenticated. The /invite/<token> landing page calls this so
+    it can render workspace name + role before sending the user
+    through register or login. Token is a 32-byte URL-safe random
+    string and not feasibly guessable."""
+    _ensure_feature_enabled()
+    row = await pool.fetchrow(
+        """
+        SELECT wi.email, wi.role, wi.status, wi.expires_at,
+               w.name AS workspace_name,
+               u.full_name AS inviter_name
+        FROM workspace_invites wi
+        JOIN workspaces w ON w.id = wi.workspace_id
+        LEFT JOIN users u ON u.id = wi.invited_by_user_id
+        WHERE wi.token = $1
+        """,
+        token,
+    )
+    if row is None:
+        raise HTTPException(404, "Invite not found")
+    if row["status"] != "pending":
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail=f"Invite is no longer valid (status: {row['status']}).",
+        )
+    if row["expires_at"] < datetime.now(timezone.utc):
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail="Invite has expired.",
+        )
+
+    has_account = await pool.fetchval(
+        "SELECT 1 FROM users WHERE lower(email) = lower($1)", row["email"],
+    )
+    return InviteLookupResponse(
+        workspace_name=row["workspace_name"],
+        inviter_name=row["inviter_name"],
+        role=row["role"],
+        email=row["email"],
+        expires_at=row["expires_at"].isoformat(),
+        requires_signup=not bool(has_account),
+    )
+
+
+class AcceptInviteResponse(BaseModel):
+    workspace_id: str
+    role: Literal["admin", "member"]
+
+
+@me_router.post(
+    "/invites/{invite_id}/accept", response_model=AcceptInviteResponse,
+)
+async def accept_invite(
+    invite_id: UUID,
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    pool: Annotated[asyncpg.Pool, Depends(get_pool)],
+) -> AcceptInviteResponse:
+    """Accept a pending invite addressed to the signed-in user's email.
+
+    The invite is keyed by id (frontend gets it from /me/invites or
+    /me/invites/lookup/{token}). We re-verify the email matches so a
+    user can't accept someone else's invite even if they somehow get
+    the id.
+    """
+    _ensure_feature_enabled()
+    user_uuid = UUID(current_user.user_id)
+
+    invite = await pool.fetchrow(
+        "SELECT workspace_id, email, role, status, expires_at "
+        "FROM workspace_invites WHERE id = $1",
+        invite_id,
+    )
+    if invite is None:
+        raise HTTPException(404, "Invite not found")
+    if invite["email"].lower() != current_user.email.lower():
+        # Surface as 404 to avoid leaking the existence of an invite
+        # for a different email.
+        raise HTTPException(404, "Invite not found")
+    if invite["status"] != "pending":
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail=f"Invite is no longer valid (status: {invite['status']}).",
+        )
+    if invite["expires_at"] < datetime.now(timezone.utc):
+        await pool.execute(
+            "UPDATE workspace_invites SET status = 'expired' WHERE id = $1",
+            invite_id,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail="Invite has expired.",
+        )
+
+    # Re-check seat cap at accept time (someone else may have filled
+    # the slot if seats were tight and this invite was pre-issued).
+    ws = await pool.fetchrow(
+        "SELECT seat_cap FROM workspaces WHERE id = $1", invite["workspace_id"],
+    )
+    if ws is None:
+        raise HTTPException(404, "Workspace no longer exists")
+    member_count = await pool.fetchval(
+        "SELECT COUNT(*) FROM workspace_members WHERE workspace_id = $1",
+        invite["workspace_id"],
+    )
+    # We DON'T include other pending invites here — accepting THIS
+    # invite consumes its reservation, and we want to allow the accept
+    # even if the workspace has other pending invites that would push
+    # past cap on their own future accepts. (Each accept is checked
+    # individually.)
+    if member_count >= ws["seat_cap"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Workspace is full. Ask the Owner to remove a member or "
+                   "upgrade the plan.",
+        )
+
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            try:
+                await conn.execute(
+                    "INSERT INTO workspace_members "
+                    "(workspace_id, user_id, role, invited_by_user_id) "
+                    "VALUES ($1, $2, $3, NULL)",
+                    invite["workspace_id"], user_uuid, invite["role"],
+                )
+            except asyncpg.UniqueViolationError:
+                # Already a member somehow — still mark the invite
+                # accepted so the row doesn't haunt the UI.
+                pass
+            await conn.execute(
+                "UPDATE workspace_invites SET "
+                "  status = 'accepted', "
+                "  accepted_at = now(), "
+                "  accepted_by_user_id = $1 "
+                "WHERE id = $2",
+                user_uuid, invite_id,
+            )
+
+    return AcceptInviteResponse(
+        workspace_id=str(invite["workspace_id"]),
+        role=invite["role"],
+    )
+
+
+@me_router.post("/invites/{invite_id}/decline", status_code=204)
+async def decline_invite(
+    invite_id: UUID,
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    pool: Annotated[asyncpg.Pool, Depends(get_pool)],
+) -> None:
+    """Politely decline. Frees the seat. Same email-match check as
+    accept to prevent declining someone else's invite."""
+    _ensure_feature_enabled()
+    invite = await pool.fetchrow(
+        "SELECT email, status FROM workspace_invites WHERE id = $1", invite_id,
+    )
+    if invite is None or invite["email"].lower() != current_user.email.lower():
+        raise HTTPException(404, "Invite not found")
+    if invite["status"] != "pending":
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail=f"Invite is no longer valid (status: {invite['status']}).",
+        )
+    await pool.execute(
+        "UPDATE workspace_invites SET "
+        "  status = 'declined', declined_at = now() "
+        "WHERE id = $1",
+        invite_id,
+    )
+
+
+# ── Auto-claim helper (called from auth.py on register) ───────────────────
+
+
+async def auto_claim_invites_for_user(
+    pool: asyncpg.Pool, user_id: UUID, email: str,
+) -> list[UUID]:
+    """On registration, automatically accept any still-pending invites
+    addressed to the new user's email. Returns the list of workspace_ids
+    they were added to, so the caller can surface them in the welcome
+    flow.
+
+    This runs in best-effort mode — failures are logged, not raised,
+    so a workspace_invites issue can't block account creation."""
+    workspace_ids: list[UUID] = []
+    try:
+        invites = await pool.fetch(
+            "SELECT id, workspace_id, role FROM workspace_invites "
+            "WHERE lower(email) = lower($1) "
+            "  AND status = 'pending' AND expires_at > now()",
+            email,
+        )
+        for inv in invites:
+            ws = await pool.fetchrow(
+                "SELECT seat_cap FROM workspaces WHERE id = $1",
+                inv["workspace_id"],
+            )
+            if ws is None:
+                continue
+            members = await pool.fetchval(
+                "SELECT COUNT(*) FROM workspace_members "
+                "WHERE workspace_id = $1",
+                inv["workspace_id"],
+            )
+            if members >= ws["seat_cap"]:
+                # Skip this one but don't kill the loop — other invites
+                # may still fit.
+                continue
+            try:
+                async with pool.acquire() as conn:
+                    async with conn.transaction():
+                        await conn.execute(
+                            "INSERT INTO workspace_members "
+                            "(workspace_id, user_id, role, invited_by_user_id) "
+                            "VALUES ($1, $2, $3, NULL) "
+                            "ON CONFLICT DO NOTHING",
+                            inv["workspace_id"], user_id, inv["role"],
+                        )
+                        await conn.execute(
+                            "UPDATE workspace_invites SET "
+                            "  status = 'accepted', "
+                            "  accepted_at = now(), "
+                            "  accepted_by_user_id = $1 "
+                            "WHERE id = $2",
+                            user_id, inv["id"],
+                        )
+                workspace_ids.append(inv["workspace_id"])
+            except Exception as exc:
+                logger.warning(
+                    "auto_claim invite %s failed: %s", inv["id"], exc,
+                )
+    except Exception as exc:
+        logger.warning("auto_claim_invites_for_user failed: %s", exc)
+    return workspace_ids

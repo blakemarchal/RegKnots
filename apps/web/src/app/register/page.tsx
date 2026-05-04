@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, FormEvent } from 'react'
-import { useRouter } from 'next/navigation'
+import { useState, useEffect, FormEvent, Suspense } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { useAuthStore } from '@/lib/auth'
 import { CompassRose } from '@/components/CompassRose'
@@ -17,16 +17,41 @@ const ROLES = [
 ]
 
 export default function RegisterPage() {
+  // Wrap in Suspense so useSearchParams() doesn't fail during static
+  // prerender. Same pattern the login page uses.
+  return (
+    <Suspense fallback={null}>
+      <RegisterForm />
+    </Suspense>
+  )
+}
+
+function RegisterForm() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const register = useAuthStore((s) => s.register)
 
+  // D6.53 — Wheelhouse invite. /invite/<token> sends users here with
+  // ?invite=<token>&email=<addr>. We prefill the email and remember
+  // the invite so the post-register redirect can land them in the
+  // right workspace. The email is locked when an invite token is
+  // present — changing it would break the auto-claim match.
+  const inviteToken = searchParams.get('invite')
+  const inviteEmail = searchParams.get('email')
+
   const [fullName, setFullName] = useState('')
-  const [email, setEmail] = useState('')
+  const [email, setEmail] = useState(inviteEmail ?? '')
   const [password, setPassword] = useState('')
   const [role, setRole] = useState('other')
   const [error, setError] = useState('')
   const [networkDiag, setNetworkDiag] = useState<NetworkDiagnosis | null>(null)
   const [loading, setLoading] = useState(false)
+
+  // If the invite param shows up after first render (rare race with
+  // searchParams hydration), keep the email field in sync.
+  useEffect(() => {
+    if (inviteEmail && !email) setEmail(inviteEmail)
+  }, [inviteEmail, email])
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -70,6 +95,16 @@ export default function RegisterPage() {
           // leaving the user on a broken state.
         }
       }
+      // D6.53 — invite-flow short-circuit. If they came in via
+      // /invite/<token>, the auth/register handler already auto-
+      // claimed any pending invites for this email, so we skip the
+      // pricing nag and land them on /workspaces directly. Their
+      // wheelhouse_only or individual_with_workspaces shell will be
+      // resolved by /me/view-mode on next page load.
+      if (inviteToken) {
+        router.replace('/workspaces')
+        return
+      }
       // Vessel onboarding is optional — shore-side users can skip it and
       // add a vessel later from the vessel sheet. Go straight to chat.
       router.replace('/')
@@ -101,6 +136,15 @@ export default function RegisterPage() {
           </div>
         </div>
 
+        {inviteToken && (
+          <div className="mb-4 rounded-lg border border-[--color-teal]/30
+                          bg-[--color-teal]/5 px-4 py-3 text-xs text-[--color-teal]
+                          font-mono">
+            You&apos;re joining a Wheelhouse. Create your account with the
+            invited email and you&apos;ll be added automatically.
+          </div>
+        )}
+
         <form
           onSubmit={handleSubmit}
           className="bg-[--color-surface-mid] border border-white/8 rounded-xl p-6 flex flex-col gap-4"
@@ -131,8 +175,14 @@ export default function RegisterPage() {
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="font-mono bg-[--color-surface-dim] border border-white/10 rounded-lg px-3 py-2 text-sm text-[--color-off-white] outline-none focus:border-[--color-teal] transition-colors"
+              readOnly={!!inviteToken}
+              className={`font-mono bg-[--color-surface-dim] border border-white/10 rounded-lg px-3 py-2 text-sm text-[--color-off-white] outline-none focus:border-[--color-teal] transition-colors ${inviteToken ? 'opacity-70 cursor-not-allowed' : ''}`}
             />
+            {inviteToken && (
+              <p className="text-[10px] text-[--color-muted] font-mono mt-1">
+                Locked &mdash; matches the invite address.
+              </p>
+            )}
           </div>
 
           <div className="flex flex-col gap-1">

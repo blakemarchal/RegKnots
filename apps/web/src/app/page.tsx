@@ -1,6 +1,7 @@
 import { ChatInterface } from '@/components/ChatInterface'
 import AuthGuard from '@/components/AuthGuard'
 import { OnboardingGate } from '@/components/OnboardingGate'
+import { WheelhouseRedirect } from '@/components/WheelhouseRedirect'
 
 // Sprint D6.23g — force-dynamic on root.
 // Without this, Next.js prerenders `/` with `Cache-Control: s-maxage=31536000`.
@@ -20,12 +21,14 @@ export default async function Home({
   const { conversation_id, q } = await searchParams
   return (
     <AuthGuard>
-      <OnboardingGate>
-        <ChatInterface
-          initialConversationId={conversation_id ?? null}
-          initialQuery={q ?? null}
-        />
-      </OnboardingGate>
+      <WheelhouseRedirect>
+        <OnboardingGate>
+          <ChatInterface
+            initialConversationId={conversation_id ?? null}
+            initialQuery={q ?? null}
+          />
+        </OnboardingGate>
+      </WheelhouseRedirect>
     </AuthGuard>
   )
 }

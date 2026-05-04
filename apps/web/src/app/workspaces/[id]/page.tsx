@@ -25,6 +25,19 @@ interface HandoffNote {
   updated_by_name: string | null
 }
 
+// D6.53 — pending workspace invites for users not yet members.
+interface PendingInvite {
+  id: string
+  workspace_id: string
+  email: string
+  role: 'admin' | 'member'
+  status: 'pending'
+  invited_by_email: string | null
+  invited_by_name: string | null
+  created_at: string
+  expires_at: string
+}
+
 interface WorkspaceDetail {
   id: string
   name: string
@@ -36,6 +49,7 @@ interface WorkspaceDetail {
   created_at: string
   card_pending_started_at: string | null
   members: Member[]
+  pending_invites: PendingInvite[]
   handoff_note: HandoffNote
 }
 
@@ -156,6 +170,25 @@ function DetailContent() {
   const canManageRoles = ws.my_role === 'owner'
   const canTransfer = ws.my_role === 'owner'
   const adminCount = ws.members.filter(m => m.role === 'admin').length
+  // D6.53 — pending invites count against seat_cap on the server, so
+  // mirror that here when deciding whether to show the Invite button.
+  const pendingInvites = ws.pending_invites ?? []
+  const seatsUsed = ws.member_count + pendingInvites.length
+  const seatsLeft = Math.max(0, ws.seat_cap - seatsUsed)
+
+  async function rescindInvite(inv: PendingInvite) {
+    if (!ws) return
+    if (!confirm(`Rescind the invite to ${inv.email}?`)) return
+    try {
+      await apiRequest(
+        `/workspaces/${ws.id}/invites/${inv.id}`,
+        { method: 'DELETE' },
+      )
+      await load()
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Failed to rescind invite.')
+    }
+  }
 
   return (
     <>
@@ -205,8 +238,11 @@ function DetailContent() {
         </div>
         <div className="text-xs text-[#6b7594]">
           You are <span className="text-[#f0ece4]/80 font-mono">{ws.my_role.toUpperCase()}</span> ·
-          {ws.member_count}/{ws.seat_cap} seats used ·
-          created {new Date(ws.created_at).toLocaleDateString()}
+          {seatsUsed}/{ws.seat_cap} seats used
+          {pendingInvites.length > 0 && (
+            <span> ({pendingInvites.length} pending)</span>
+          )}
+          {' '}· created {new Date(ws.created_at).toLocaleDateString()}
         </div>
       </header>
 
@@ -245,7 +281,7 @@ function DetailContent() {
           <h2 className="text-sm font-mono uppercase tracking-wider text-[#6b7594]">
             Members ({ws.member_count})
           </h2>
-          {canManageMembers && ws.member_count < ws.seat_cap && (
+          {canManageMembers && seatsLeft > 0 && (
             <button
               onClick={() => setShowInvite(true)}
               className="px-2.5 py-1 rounded-md bg-[#2dd4bf]/15 border border-[#2dd4bf]/30
@@ -300,6 +336,48 @@ function DetailContent() {
             </li>
           ))}
         </ul>
+
+        {/* D6.53 — pending invites count against seat_cap. Show under the
+            member list with a "Pending" pill so Owners/Admins can rescind
+            invites that were sent in error or to wrong address. */}
+        {pendingInvites.length > 0 && (
+          <ul className="mt-3 space-y-2">
+            {pendingInvites.map(inv => (
+              <li
+                key={inv.id}
+                className="rounded-lg border border-dashed border-white/10
+                           bg-[#0a0e1a]/40 p-3 flex items-center justify-between gap-3"
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm text-[#f0ece4]/80 truncate">
+                    {inv.email}
+                  </div>
+                  <div className="text-[11px] text-[#6b7594]">
+                    Invited as {inv.role} ·
+                    {' '}expires {new Date(inv.expires_at).toLocaleDateString()}
+                    {inv.invited_by_name && (
+                      <> · by {inv.invited_by_name}</>
+                    )}
+                  </div>
+                </div>
+                <span className="px-1.5 py-0.5 rounded text-[10px] font-mono uppercase
+                                 tracking-wider border bg-amber-400/10 text-amber-300
+                                 border-amber-400/30">
+                  Pending
+                </span>
+                {canManageMembers && (
+                  <button
+                    onClick={() => rescindInvite(inv)}
+                    title="Rescind invite (frees the seat)"
+                    className="text-xs text-red-400/70 hover:text-red-400 transition-colors px-1"
+                  >
+                    ✕
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
       </section>
 
       {canTransfer && adminCount > 0 && (
@@ -334,7 +412,7 @@ function DetailContent() {
       {showInvite && (
         <InviteModal
           workspaceId={ws.id}
-          seatsLeft={ws.seat_cap - ws.member_count}
+          seatsLeft={seatsLeft}
           onCancel={() => setShowInvite(false)}
           onSuccess={() => { setShowInvite(false); void load() }}
         />
@@ -365,6 +443,12 @@ function InviteModal({
   const [role, setRole] = useState<'admin' | 'member'>('member')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // D6.53 — split toast for the two outcomes (joined directly vs.
+  // pending-invite emailed). When non-null, we replace the form with
+  // a success card briefly so the user sees what happened.
+  const [success, setSuccess] = useState<{
+    kind: 'member' | 'invite'; email: string;
+  } | null>(null)
 
   async function submit(e: React.FormEvent) {
     e.preventDefault()
@@ -372,14 +456,17 @@ function InviteModal({
     setSubmitting(true)
     setError(null)
     try {
-      await apiRequest(
+      const trimmed = email.trim().toLowerCase()
+      const res = await apiRequest<{ kind: 'member' | 'invite' }>(
         `/workspaces/${workspaceId}/members`,
         {
           method: 'POST',
-          body: JSON.stringify({ email: email.trim().toLowerCase(), role }),
+          body: JSON.stringify({ email: trimmed, role }),
         },
       )
-      onSuccess()
+      setSuccess({ kind: res.kind, email: trimmed })
+      // Auto-close after a beat so the user reads the confirmation.
+      setTimeout(onSuccess, 1500)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to invite.')
     } finally {
@@ -387,12 +474,38 @@ function InviteModal({
     }
   }
 
+  if (success) {
+    return (
+      <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center px-4">
+        <div className="w-full max-w-md rounded-lg border border-[#2dd4bf]/40
+                        bg-[#0a0e1a] p-5 shadow-xl">
+          <h2 className="text-lg font-semibold mb-1 text-[#2dd4bf]">
+            {success.kind === 'member' ? 'Added to workspace' : 'Invite sent'}
+          </h2>
+          <p className="text-xs text-[#6b7594]">
+            {success.kind === 'member' ? (
+              <><code>{success.email}</code> already has a RegKnot account
+              and was added directly.</>
+            ) : (
+              <><code>{success.email}</code> doesn&apos;t have a RegKnot
+              account yet — we emailed them a 14-day invite link. They&apos;ll
+              join automatically when they sign up.</>
+            )}
+          </p>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center px-4">
       <div className="w-full max-w-md rounded-lg border border-white/10 bg-[#0a0e1a] p-5 shadow-xl">
         <h2 className="text-lg font-semibold mb-1">Invite member</h2>
         <p className="text-xs text-[#6b7594] mb-4">
-          The user must already have a RegKnots account. {seatsLeft} seat{seatsLeft === 1 ? '' : 's'} remaining.
+          If they have a RegKnot account, we&apos;ll add them directly.
+          Otherwise we&apos;ll email a 14-day invite link.
+          {' '}{seatsLeft} seat{seatsLeft === 1 ? '' : 's'} remaining (pending
+          invites count).
         </p>
         <form onSubmit={submit} className="space-y-3">
           <div>

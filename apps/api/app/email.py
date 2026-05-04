@@ -675,6 +675,59 @@ async def send_subscription_resumed_email(to_email: str, full_name: str) -> None
     })
 
 
+async def send_workspace_invite_email(
+    to_email: str,
+    inviter_name: str,
+    workspace_name: str,
+    token: str,
+    role: str,
+) -> None:
+    """Email a user an invite link to join a Wheelhouse workspace.
+
+    The link lands on /invite/<token> in the web app, which handles
+    both the "no account yet" (signup → auto-claim) and the "already
+    have an account" (login → accept) paths. Sprint D6.53.
+
+    The email is intentionally light — the invite landing page does
+    the heavy lifting of explaining the workspace, the inviter, and
+    what role they'll have. We don't want to repeat that copy in the
+    email body.
+    """
+    invite_url = f"{APP_URL}/invite/{token}"
+    safe_workspace = _html_lib.escape(workspace_name)
+    safe_inviter = _html_lib.escape(inviter_name)
+    role_label = "Admin" if role == "admin" else "Member"
+    html = _html(f"""
+      <h1>You've been invited to a Wheelhouse</h1>
+      <p>
+        <strong style="color:#f0ece4;">{safe_inviter}</strong> invited you to
+        join <strong style="color:#2dd4bf;">{safe_workspace}</strong> on
+        RegKnot &mdash; the maritime compliance co-pilot used by their crew.
+      </p>
+      <p>
+        You'll join as a <strong style="color:#f0ece4;">{role_label}</strong>.
+        Inside the workspace you'll have access to the vessel dossier,
+        shared chat history, and crew-rotation handoff notes.
+      </p>
+      <a href="{invite_url}" class="cta">Accept Invite</a>
+      <p style="font-size:12px; color:rgba(107,117,148,0.7); margin-top:4px;">
+        Or copy this link into your browser:
+      </p>
+      <div class="token-box">{invite_url}</div>
+      <p style="font-size:12px; color:rgba(107,117,148,0.6);">
+        This invite expires in 14 days. If you weren't expecting it,
+        you can safely ignore this email &mdash; nothing happens until
+        you click the link.
+      </p>
+    """)
+    resend.Emails.send({
+        "from": FROM_EMAIL,
+        "to": [to_email],
+        "subject": f"You're invited to {workspace_name} on RegKnot",
+        "html": html,
+    })
+
+
 async def send_custom_email(to_email: str, subject: str, body_text: str) -> None:
     """Send an admin-composed custom email to a user.
 
