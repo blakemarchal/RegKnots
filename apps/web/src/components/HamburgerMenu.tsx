@@ -80,29 +80,32 @@ const MENU_SECTIONS: MenuSection[] = [
 
 const ADMIN_ITEM: MenuItem = { icon: '\u2318', label: 'Admin', action: 'admin', path: '/admin' }
 
-// D6.53 \u2014 actions hidden from wheelhouse_only users.
+// D6.55 \u2014 actions hidden from wheelhouse_only users.
 //
-// These are personal-context tools (your vessels, your credentials,
-// your sea service letter, your compliance log) that don't apply
-// when your only access to RegKnot is via a captain's workspace seat.
-// Hiding them keeps the hamburger relevant to the surface they're
-// actually using and prevents confusion about "where is MY data?"
-// (Answer: there is none \u2014 the workspace owns the data.)
+// Boundary: workspace owns vessel-context tools (vessel particulars,
+// dossier, compliance log, PSC checklist); USER owns career-context
+// tools (credentials, sea service letter). Wheelhouse-only users
+// are guests on a captain's workspace, but their MMC, STCW, and time
+// at sea are theirs personally \u2014 they retain access to those.
 //
-// Wheelhouse, Chat, Help & Account all stay visible.
+// Hide:
+//   vessels, vessel-dossier   (workspace owns the boat)
+//   log, psc-checklist        (boat-side compliance, not personal)
+//   reference, giving         (UI noise for invited-only users)
+// Keep:
+//   credentials               (their MMC etc.)
+//   sea-service-letter        (their career history)
+//   account, help, feedback, signout
+//   wheelhouse                (the workspace itself)
+//
+// Earlier slice (D6.53) over-aggressively hid credentials + sea
+// service. Restored here.
 const WHEELHOUSE_ONLY_HIDDEN_ACTIONS = new Set<string>([
   'vessels',
   'vessel-dossier',
-  'credentials',
-  'sea-service-letter',
   'log',
   'psc-checklist',
-  // Reference is global maritime info, but for the wheelhouse-only
-  // view it adds noise \u2014 captain's tool, not crew's tool. Hide.
   'reference',
-  // "Giving Back" is the charity tier surface \u2014 only relevant if
-  // the user is paying us directly, which a wheelhouse-only user
-  // is not.
   'giving',
 ])
 

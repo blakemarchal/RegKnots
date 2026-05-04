@@ -21,6 +21,7 @@ import { NotificationBanner } from './NotificationBanner'
 import { VerificationBanner } from './VerificationBanner'
 import { ComingUpWidget } from './ComingUpWidget'
 import type { VesselProfileForPrompts } from '@/lib/vesselPrompts'
+import { useViewMode } from '@/lib/useViewMode'
 
 interface ConversationMessage {
   role: string
@@ -103,7 +104,20 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
 
   const router = useRouter()
   const { canInstall, install } = usePwa()
-  const { vessels, activeVesselId, billing, setBilling } = useAuthStore()
+  const { vessels, activeVesselId, billing, setBilling, setActiveVessel } = useAuthStore()
+  // D6.55 — view mode gates UI surfaces that don't apply to invite-only
+  // wheelhouse_only members (e.g. the personal pilot survey, the
+  // "Switch to personal →" link).
+  const { viewMode } = useViewMode()
+  const isWheelhouseOnly = viewMode?.mode === 'wheelhouse_only'
+
+  // D6.55 — workspace vessels (separate from auth-store personal vessels).
+  // Loaded when ?workspace=<id> active. Drives the VesselPill display
+  // and the activeVesselProfile lookup so workspace chat shows the
+  // boat's name and uses the boat's profile for empty-chat prompts.
+  const [workspaceVessels, setWorkspaceVessels] = useState<
+    { id: string; name: string }[]
+  >([])
 
   // Fetch billing status on mount
   useEffect(() => {
@@ -111,23 +125,17 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
       .then(setBilling)
       .catch(() => {})
   }, [setBilling])
-  const activeVessel = vessels.find(v => v.id === activeVesselId) ?? null
+  // D6.55 — when in workspace context, the active vessel comes from
+  // the workspace's vessel list, not the user's personal vessels.
+  const activeVessel = (
+    workspaceVessels.find(v => v.id === activeVesselId)
+    ?? vessels.find(v => v.id === activeVesselId)
+    ?? null
+  )
 
   // Fetch the active vessel's full profile for tailored empty-chat prompts.
   // Re-runs when the user switches vessels. Only fetches when there's an id to match.
   const [activeVesselProfile, setActiveVesselProfile] = useState<VesselProfileForPrompts | null>(null)
-  useEffect(() => {
-    if (!activeVesselId) { setActiveVesselProfile(null); return }
-    let cancelled = false
-    apiRequest<VesselProfileForPrompts[]>('/vessels')
-      .then((list) => {
-        if (cancelled) return
-        const v = list.find((x) => x.id === activeVesselId)
-        setActiveVesselProfile(v ?? null)
-      })
-      .catch(() => { if (!cancelled) setActiveVesselProfile(null) })
-    return () => { cancelled = true }
-  }, [activeVesselId])
 
   const [vesselSheetOpen, setVesselSheetOpen] = useState(false)
   const searchParams = useSearchParams()
@@ -140,17 +148,80 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
   const workspaceIdParam = searchParams.get('workspace')
   const [activeWorkspaceId] = useState<string | null>(workspaceIdParam || null)
   const [workspaceName, setWorkspaceName] = useState<string | null>(null)
+  // D6.55 — caller's role in the workspace, used to gate the Add Vessel
+  // button in the VesselSheet (Owner/Admin only).
+  const [workspaceRole, setWorkspaceRole] = useState<
+    'owner' | 'admin' | 'member' | null
+  >(null)
 
-  // Resolve workspace name once for header display. Fire-and-forget;
-  // failure leaves workspaceName=null and shows just the UUID.
+  // Resolve workspace name + caller's role once for header display +
+  // VesselSheet gating. Fire-and-forget; failure leaves both null.
   useEffect(() => {
     if (!activeWorkspaceId) return
     let cancelled = false
-    apiRequest<{ name: string }>(`/workspaces/${activeWorkspaceId}`)
-      .then((ws) => { if (!cancelled) setWorkspaceName(ws.name) })
-      .catch(() => { if (!cancelled) setWorkspaceName(null) })
+    apiRequest<{ name: string; my_role: 'owner' | 'admin' | 'member' }>(
+      `/workspaces/${activeWorkspaceId}`,
+    )
+      .then((ws) => {
+        if (cancelled) return
+        setWorkspaceName(ws.name)
+        setWorkspaceRole(ws.my_role)
+      })
+      .catch(() => {
+        if (cancelled) return
+        setWorkspaceName(null)
+        setWorkspaceRole(null)
+      })
     return () => { cancelled = true }
   }, [activeWorkspaceId])
+
+  // D6.55 — workspace vessel auto-load + auto-select. When a workspace
+  // is active, fetch its vessel(s) and pin activeVesselId to the first
+  // one so the VesselPill, prompt prefill, and chat send all line up
+  // with the boat the user is actually chatting about. Replaces the
+  // legacy "members have no vessel, can't start a chat" failure mode.
+  useEffect(() => {
+    if (!activeWorkspaceId) {
+      setWorkspaceVessels([])
+      return
+    }
+    let cancelled = false
+    apiRequest<{ id: string; name: string }[]>(
+      `/vessels?workspace_id=${activeWorkspaceId}`,
+    )
+      .then((list) => {
+        if (cancelled) return
+        setWorkspaceVessels(list.map((v) => ({ id: v.id, name: v.name })))
+        if (list.length > 0) {
+          // Pin the workspace vessel as the active one. Don't override if
+          // the user already has the right one selected (avoids a needless
+          // store write that would re-render).
+          if (!list.some((v) => v.id === activeVesselId)) {
+            setActiveVessel(list[0].id)
+          }
+        }
+      })
+      .catch(() => { if (!cancelled) setWorkspaceVessels([]) })
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeWorkspaceId])
+
+  // Profile load — fetches from the right scope (workspace vs personal).
+  useEffect(() => {
+    if (!activeVesselId) { setActiveVesselProfile(null); return }
+    let cancelled = false
+    const url = activeWorkspaceId
+      ? `/vessels?workspace_id=${activeWorkspaceId}`
+      : '/vessels'
+    apiRequest<VesselProfileForPrompts[]>(url)
+      .then((list) => {
+        if (cancelled) return
+        const v = list.find((x) => x.id === activeVesselId)
+        setActiveVesselProfile(v ?? null)
+      })
+      .catch(() => { if (!cancelled) setActiveVesselProfile(null) })
+    return () => { cancelled = true }
+  }, [activeVesselId, activeWorkspaceId])
 
   function openVesselSheet() {
     setMenuOpen(false)
@@ -721,13 +792,19 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
                     Chats are shared with all workspace members.
                   </span>
                 </div>
-                <a
-                  href="/"
-                  className="text-xs font-mono text-[#2dd4bf]/80 hover:text-[#2dd4bf]
-                             underline whitespace-nowrap"
-                >
-                  Switch to personal →
-                </a>
+                {/* D6.55 — only show "Switch to personal" for users with
+                    a personal surface to switch to. Wheelhouse-only
+                    members have no personal account and the link would
+                    just bounce them back via WheelhouseRedirect. */}
+                {!isWheelhouseOnly && (
+                  <a
+                    href="/"
+                    className="text-xs font-mono text-[#2dd4bf]/80 hover:text-[#2dd4bf]
+                               underline whitespace-nowrap"
+                  >
+                    Switch to personal →
+                  </a>
+                )}
               </div>
             )}
 
@@ -887,7 +964,11 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
 
       {/* ── Vessel selector sheet ────────────────────────────────── */}
       {vesselSheetOpen && (
-        <VesselSheet onClose={() => setVesselSheetOpen(false)} />
+        <VesselSheet
+          onClose={() => setVesselSheetOpen(false)}
+          workspaceId={activeWorkspaceId}
+          workspaceRole={workspaceRole}
+        />
       )}
 
       {/* ── Citation bottom sheet ─────────────────────────────────── */}
@@ -909,7 +990,11 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
       )}
 
       {/* ── Pilot survey modal (auto-triggered by billing or menu) ── */}
-      <PilotSurveyModal billing={billing} />
+      {/* D6.55 — pilot survey targets users we onboarded into the
+          regknots pilot program. Wheelhouse-only members were brought
+          in by their captain, never opted into the pilot, and shouldn't
+          be prompted for product feedback they didn't sign up for. */}
+      {!isWheelhouseOnly && <PilotSurveyModal billing={billing} />}
       {surveyOpen && (
         <PilotSurveyModal forceOpen onClose={() => setSurveyOpen(false)} />
       )}

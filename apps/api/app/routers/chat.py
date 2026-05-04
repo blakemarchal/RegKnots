@@ -332,6 +332,59 @@ async def _run_chat_preflight(
                 ),
             )
 
+        # D6.55 — vessel scope must match workspace scope. If a vessel is
+        # specified, it must belong to THIS workspace. Personal vessels
+        # cannot be used in workspace chat — they belong to a different
+        # boat context. If no vessel is specified, auto-select the
+        # workspace's first vessel (auto-created at workspace setup).
+        if body.vessel_id is not None:
+            v_workspace = await pool.fetchval(
+                "SELECT workspace_id FROM vessels WHERE id = $1",
+                body.vessel_id,
+            )
+            if v_workspace != workspace_id:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=(
+                        "That vessel does not belong to this workspace. "
+                        "Workspace chats can only use the workspace's "
+                        "vessel."
+                    ),
+                )
+        else:
+            # Auto-select workspace's primary vessel.
+            ws_vessel_id = await pool.fetchval(
+                "SELECT id FROM vessels WHERE workspace_id = $1 "
+                "ORDER BY created_at ASC LIMIT 1",
+                workspace_id,
+            )
+            if ws_vessel_id is not None:
+                # Mutate the body's vessel_id; downstream uses body.vessel_id
+                # for the conversation INSERT and for ChatMessage history.
+                body.vessel_id = ws_vessel_id
+
+    elif body.vessel_id is not None:
+        # D6.55 — personal chat with a vessel: it must be the caller's
+        # personal vessel (workspace_id IS NULL, user_id = caller).
+        # Workspace vessels can only be used inside their workspace.
+        v_row = await pool.fetchrow(
+            "SELECT user_id, workspace_id FROM vessels WHERE id = $1",
+            body.vessel_id,
+        )
+        if (
+            v_row is None
+            or v_row["workspace_id"] is not None
+            or v_row["user_id"] != uuid.UUID(current_user.user_id)
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=(
+                    "That vessel is not available for personal chat. "
+                    "Workspace vessels can only be used inside their "
+                    "workspace."
+                ),
+            )
+
     conversation_title: str | None = None  # Sprint D6.29 — soft jurisdictional anchor
     if conversation_id is not None:
         # Conversation lookup: load by id, then check the caller has

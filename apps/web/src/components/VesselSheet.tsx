@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { apiRequest } from '@/lib/api'
 import { useAuthStore } from '@/lib/auth'
+import { useViewMode } from '@/lib/useViewMode'
 
 interface VesselDetail {
   id: string
@@ -24,11 +25,29 @@ function routeSummary(routes: string[]) {
 
 interface Props {
   onClose: () => void
+  /** D6.55 — when set, the sheet shows the WORKSPACE's vessels and
+   *  hides "Add vessel" for non-Owner/Admin members. Without it the
+   *  sheet behaves as before (personal-tier vessels). */
+  workspaceId?: string | null
+  /** Caller's role in the workspace, used to gate the Add Vessel button.
+   *  Owner/Admin can add a workspace vessel; members can't. */
+  workspaceRole?: 'owner' | 'admin' | 'member' | null
 }
 
-export function VesselSheet({ onClose }: Props) {
+export function VesselSheet({ onClose, workspaceId, workspaceRole }: Props) {
   const router = useRouter()
   const { vessels, activeVesselId, setActiveVessel, setVessels, removeVessel } = useAuthStore()
+  const { viewMode } = useViewMode()
+  const isWheelhouseOnly = viewMode?.mode === 'wheelhouse_only'
+
+  // D6.55 — Add Vessel button visibility:
+  //   - Personal context (no workspaceId): show, unless wheelhouse_only
+  //     (those users have no personal-tier surface and shouldn't be
+  //     told to add a personal vessel)
+  //   - Workspace context: only show for Owner/Admin
+  const canAddVessel = workspaceId
+    ? workspaceRole === 'owner' || workspaceRole === 'admin'
+    : !isWheelhouseOnly
 
   const [detail, setDetail] = useState<VesselDetail[]>([])
   const [loading, setLoading] = useState(true)
@@ -44,17 +63,25 @@ export function VesselSheet({ onClose }: Props) {
   const dragCurrentY = useRef(0)
   const [dragOffset, setDragOffset] = useState(0)
 
-  // Fetch fresh vessel list on open
+  // D6.55 — fetch from the right scope. Workspace context → workspace
+  // vessels; personal → user's personal vessels (legacy behavior).
   useEffect(() => {
-    apiRequest<VesselDetail[]>('/vessels')
+    const url = workspaceId
+      ? `/vessels?workspace_id=${workspaceId}`
+      : '/vessels'
+    apiRequest<VesselDetail[]>(url)
       .then(rows => {
         setDetail(rows)
-        // Sync summary list into store (catches vessels added via onboarding)
-        setVessels(rows.map(v => ({ id: v.id, name: v.name })))
+        // Only sync the auth-store summary list when in personal scope —
+        // workspace vessels aren't personal-tier and shouldn't show up
+        // in the user's personal vessel store.
+        if (!workspaceId) {
+          setVessels(rows.map(v => ({ id: v.id, name: v.name })))
+        }
         setLoading(false)
       })
       .catch(() => setLoading(false))
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [workspaceId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Lock body scroll
   useEffect(() => {
@@ -196,28 +223,35 @@ export function VesselSheet({ onClose }: Props) {
               </div>
               <div className="flex flex-col gap-1.5">
                 <p className="font-display text-lg font-bold text-[#f0ece4] tracking-wide">
-                  No vessels yet
+                  {workspaceId ? 'No vessel yet' : 'No vessels yet'}
                 </p>
                 <p className="font-mono text-xs text-[#6b7594] leading-relaxed max-w-[260px]">
-                  Add a vessel to get compliance answers tailored to your specific ship.
+                  {workspaceId && !canAddVessel
+                    ? 'Ask your captain to set up the workspace vessel.'
+                    : 'Add a vessel to get compliance answers tailored to your specific ship.'}
                 </p>
               </div>
               <div className="flex flex-col gap-2 w-full max-w-xs mt-1">
-                <button
-                  onClick={goToOnboardingAdd}
-                  className="w-full bg-[#2dd4bf] hover:brightness-110 text-[#0a0e1a]
-                    font-mono font-bold text-sm uppercase tracking-wider
-                    rounded-lg py-2.5 transition-[filter] duration-150"
-                >
-                  Add a vessel
-                </button>
+                {/* D6.55 — Add Vessel only shown when allowed by scope/role.
+                    Wheelhouse-only members and non-owner/admin workspace
+                    members both fall through to "Close" only. */}
+                {canAddVessel && (
+                  <button
+                    onClick={goToOnboardingAdd}
+                    className="w-full bg-[#2dd4bf] hover:brightness-110 text-[#0a0e1a]
+                      font-mono font-bold text-sm uppercase tracking-wider
+                      rounded-lg py-2.5 transition-[filter] duration-150"
+                  >
+                    Add a vessel
+                  </button>
+                )}
                 <button
                   onClick={dismiss}
                   className="w-full border border-white/10 hover:bg-white/5
                     text-[#f0ece4]/80 font-mono text-sm rounded-lg py-2.5
                     transition-colors duration-150"
                 >
-                  Continue without a vessel
+                  {canAddVessel ? 'Continue without a vessel' : 'Close'}
                 </button>
               </div>
             </div>
@@ -316,8 +350,8 @@ export function VesselSheet({ onClose }: Props) {
             </button>
           )}
 
-          {/* Add another vessel */}
-          {!loading && detail.length > 0 && (
+          {/* Add another vessel — only when allowed (D6.55) */}
+          {!loading && detail.length > 0 && canAddVessel && (
             <button
               onClick={goToOnboarding}
               className="w-full flex items-center gap-2 px-5 py-3.5 text-left

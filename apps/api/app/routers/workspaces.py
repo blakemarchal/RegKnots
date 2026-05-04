@@ -345,6 +345,23 @@ async def create_workspace(
                 "(workspace_id, user_id, role) VALUES ($1, $2, 'owner')",
                 row["id"], user_uuid,
             )
+            # D6.55 — auto-create a workspace vessel named after the
+            # workspace so members have something to chat against
+            # immediately. Owner/Admin can edit it later via the standard
+            # vessel editor; the placeholder values are deliberately
+            # generic ('unknown' type, 'coastal' route) to avoid biasing
+            # ingestion logic before the real vessel data is filled in.
+            await conn.execute(
+                """
+                INSERT INTO vessels (
+                    user_id, workspace_id, name, vessel_type,
+                    flag_state, route_types, cargo_types
+                )
+                VALUES ($1, $2, $3, 'unknown', 'Unknown',
+                        ARRAY['coastal']::TEXT[], ARRAY[]::TEXT[])
+                """,
+                user_uuid, row["id"], body.name.strip(),
+            )
     await _log_billing_event(
         pool, row["id"], "created", user_uuid,
         {"name": body.name},
