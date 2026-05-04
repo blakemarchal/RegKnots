@@ -42,10 +42,18 @@ function RegisterForm() {
   const [fullName, setFullName] = useState('')
   const [email, setEmail] = useState(inviteEmail ?? '')
   const [password, setPassword] = useState('')
+  // D6.53 — confirm-password field. Validated client-side only; the
+  // API contract is unchanged (still takes a single `password`). We
+  // enforce min length via the input's minLength attr on both fields
+  // so a stray short value can't sneak through one of them.
+  const [passwordConfirm, setPasswordConfirm] = useState('')
   const [role, setRole] = useState('other')
   const [error, setError] = useState('')
   const [networkDiag, setNetworkDiag] = useState<NetworkDiagnosis | null>(null)
   const [loading, setLoading] = useState(false)
+
+  const passwordMismatch =
+    passwordConfirm.length > 0 && password !== passwordConfirm
 
   // If the invite param shows up after first render (rare race with
   // searchParams hydration), keep the email field in sync.
@@ -57,6 +65,10 @@ function RegisterForm() {
     e.preventDefault()
     setError('')
     setNetworkDiag(null)
+    if (password !== passwordConfirm) {
+      setError("Passwords don't match.")
+      return
+    }
     setLoading(true)
     try {
       await register(email, password, fullName, role)
@@ -202,6 +214,31 @@ function RegisterForm() {
           </div>
 
           <div className="flex flex-col gap-1">
+            <label htmlFor="password_confirm" className="text-xs text-[--color-muted] uppercase tracking-wider font-mono">
+              Confirm Password
+            </label>
+            <input
+              id="password_confirm"
+              type="password"
+              autoComplete="new-password"
+              required
+              minLength={8}
+              value={passwordConfirm}
+              onChange={(e) => setPasswordConfirm(e.target.value)}
+              className={`font-mono bg-[--color-surface-dim] border rounded-lg px-3 py-2 text-sm text-[--color-off-white] outline-none transition-colors ${
+                passwordMismatch
+                  ? 'border-red-400/60 focus:border-red-400'
+                  : 'border-white/10 focus:border-[--color-teal]'
+              }`}
+            />
+            {passwordMismatch && (
+              <p className="text-[10px] text-red-400 font-mono mt-1">
+                Passwords don&apos;t match.
+              </p>
+            )}
+          </div>
+
+          <div className="flex flex-col gap-1">
             <label htmlFor="role" className="text-xs text-[--color-muted] uppercase tracking-wider font-mono">
               Role
             </label>
@@ -235,7 +272,7 @@ function RegisterForm() {
 
           <button
             type="submit"
-            disabled={loading}
+            disabled={loading || passwordMismatch}
             className="mt-1 bg-[--color-teal] hover:bg-[--color-teal-dark] disabled:opacity-50 disabled:cursor-not-allowed text-[--color-navy] font-bold text-sm uppercase tracking-wider rounded-lg py-2.5 transition-colors font-mono"
           >
             {loading ? 'Creating account…' : 'Create Account'}

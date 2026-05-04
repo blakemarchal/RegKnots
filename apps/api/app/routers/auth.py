@@ -62,19 +62,52 @@ async def register(data: RegisterRequest, response: Response) -> TokenResponse:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid role")
 
     hashed_pw = hash_password(data.password)
-    trial_days = 14 if settings.pilot_mode else 7
-    user = await pool.fetchrow(
-        """
-        INSERT INTO users (email, hashed_password, full_name, role, trial_ends_at)
-        VALUES ($1, $2, $3, $4, NOW() + ($5 || ' days')::INTERVAL)
-        RETURNING id, email, full_name, role, subscription_tier, is_admin, email_verified
-        """,
+
+    # D6.53 — Wheelhouse-only signup detection.
+    #
+    # If this email has a still-pending workspace invite, the user is
+    # registering to claim that invite (either via /invite/<token> or
+    # by direct signup with a matching email). Their workspace seat IS
+    # their trial — we deliberately don't issue a personal trial on
+    # top, because:
+    #   1. The view-mode logic uses trial_ends_at to decide between
+    #      `wheelhouse_only` and `individual_with_workspaces`. Issuing
+    #      a trial would flip them to the latter and force them through
+    #      the OnboardingGate (vessel prompt) for a personal context
+    #      they didn't sign up for.
+    #   2. The captain who invited them is paying the per-seat cost.
+    #      Stacking a free personal trial on top double-dips on the
+    #      free-evaluation budget.
+    # If they later want personal access they can register fresh after
+    # leaving the workspace, or pay outright — by design.
+    has_pending_invite = await pool.fetchval(
+        "SELECT 1 FROM workspace_invites "
+        "WHERE lower(email) = lower($1) "
+        "  AND status = 'pending' AND expires_at > now() "
+        "LIMIT 1",
         data.email,
-        hashed_pw,
-        data.full_name,
-        data.role,
-        str(trial_days),
     )
+
+    if has_pending_invite:
+        user = await pool.fetchrow(
+            """
+            INSERT INTO users (email, hashed_password, full_name, role, trial_ends_at)
+            VALUES ($1, $2, $3, $4, NULL)
+            RETURNING id, email, full_name, role, subscription_tier, is_admin, email_verified
+            """,
+            data.email, hashed_pw, data.full_name, data.role,
+        )
+    else:
+        trial_days = 14 if settings.pilot_mode else 7
+        user = await pool.fetchrow(
+            """
+            INSERT INTO users (email, hashed_password, full_name, role, trial_ends_at)
+            VALUES ($1, $2, $3, $4, NOW() + ($5 || ' days')::INTERVAL)
+            RETURNING id, email, full_name, role, subscription_tier, is_admin, email_verified
+            """,
+            data.email, hashed_pw, data.full_name, data.role,
+            str(trial_days),
+        )
 
     # Auto-mark internal accounts
     base_email = data.email.split('+')[0] + '@' + data.email.split('@')[1] if '+' in data.email else data.email
@@ -112,6 +145,15 @@ async def register(data: RegisterRequest, response: Response) -> TokenResponse:
     # D6.53 — auto-claim any pending workspace invites for this email
     # so users who came in via an invite link land directly in their
     # crew workspace. Best-effort; failures don't affect registration.
+    #
+    # ORDERING INVARIANT: this MUST run BEFORE we return the access
+    # token. The view-mode logic depends on workspace_members rows
+    # being visible by the time the JWT is consumed. If the access
+    # token is returned with auto_claim still pending, the frontend
+    # will briefly see `mode=individual` + `trial_active=false` (since
+    # invite-claim users have trial_ends_at=NULL — see above), which
+    # paints a "subscribe to continue" surface for ~1s before the
+    # workspace appears. Don't reorder this above the response build.
     try:
         await auto_claim_invites_for_user(pool, user["id"], user["email"])
     except Exception:
