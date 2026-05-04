@@ -7,6 +7,7 @@ import { AppHeader } from '@/components/AppHeader'
 import { useAuthStore } from '@/lib/auth'
 import type { BillingStatus } from '@/lib/auth'
 import { apiRequest } from '@/lib/api'
+import { useViewMode } from '@/lib/useViewMode'
 import {
   formatExportAsText,
   triggerDownload,
@@ -45,6 +46,13 @@ function AccountContent() {
   // Sprint D6.5 — vessel list/edit/delete moved to the My Vessels sheet
   // (single source of truth). Account page no longer touches vessels.
   const { user, logout, updateUserFromToken, billing, setBilling } = useAuthStore()
+  // D6.55 — view mode shapes the upgrade messaging. Wheelhouse-only
+  // members already have access via their captain's workspace; the
+  // upgrade pitch should acknowledge that rather than implying they
+  // have no access at all.
+  const { viewMode } = useViewMode()
+  const isWheelhouseOnly = viewMode?.mode === 'wheelhouse_only'
+  const hasWorkspaces = (viewMode?.workspace_count ?? 0) > 0
 
   // ── Profile editing ────────────────────────────────────────────
   const [fullName, setFullName] = useState(user?.full_name ?? '')
@@ -579,19 +587,56 @@ function AccountContent() {
           {!billingLoading && !billingError && billing && billing.tier === 'free' && !billing.unlimited && (
             <section className="bg-[#111827] border border-white/8 rounded-xl p-5 flex flex-col gap-3">
               <p className="font-mono text-xs text-[#6b7594] uppercase tracking-wider">Subscription</p>
-              <p className="font-mono text-sm text-[#f0ece4]/80">
-                {billing.trial_active
-                  ? `Free trial — ${billing.messages_remaining ?? 0} messages remaining`
-                  : 'No active subscription'}
-              </p>
-              <a
-                href="/pricing"
-                className="w-full text-center font-mono text-sm font-bold text-[#0a0e1a]
-                  bg-[#2dd4bf] hover:brightness-110 rounded-lg py-2.5
-                  transition-[filter] duration-150 block"
-              >
-                Upgrade to Pro
-              </a>
+              {/* D6.55 — three messaging tracks based on view mode:
+                   1. Wheelhouse-only member: acknowledge their workspace
+                      seat; soft-pitch a personal account if they want one.
+                   2. Free with active trial: show trial countdown.
+                   3. Free with no trial: nudge to a paid plan.
+                  CTA wording switched off legacy "Pro" since the live
+                  tiers are Mate (limited) and Captain (unlimited). */}
+              {isWheelhouseOnly ? (
+                <>
+                  <p className="font-mono text-sm text-[#f0ece4]/80">
+                    You&apos;re using RegKnot through a Wheelhouse seat.
+                    Your access is covered by the workspace owner.
+                  </p>
+                  <p className="font-mono text-xs text-[#6b7594] leading-relaxed">
+                    If you want your own personal RegKnot account
+                    (independent of any workspace), pick a plan below.
+                  </p>
+                  <a
+                    href="/pricing"
+                    className="w-full text-center font-mono text-sm font-bold text-[#f0ece4]
+                      border border-white/10 hover:bg-white/5 rounded-lg py-2.5
+                      transition-colors duration-150 block"
+                  >
+                    Get a personal account
+                  </a>
+                </>
+              ) : (
+                <>
+                  <p className="font-mono text-sm text-[#f0ece4]/80">
+                    {billing.trial_active
+                      ? `Free trial — ${billing.messages_remaining ?? 0} messages remaining`
+                      : 'No active subscription'}
+                  </p>
+                  {hasWorkspaces && (
+                    <p className="font-mono text-xs text-[#6b7594] leading-relaxed">
+                      Note: your workspace seat covers your workspace
+                      chat. A personal plan unlocks personal-tier
+                      features (your own vessels, dossier, history).
+                    </p>
+                  )}
+                  <a
+                    href="/pricing"
+                    className="w-full text-center font-mono text-sm font-bold text-[#0a0e1a]
+                      bg-[#2dd4bf] hover:brightness-110 rounded-lg py-2.5
+                      transition-[filter] duration-150 block"
+                  >
+                    Pick a plan &mdash; Mate or Captain
+                  </a>
+                </>
+              )}
             </section>
           )}
 
