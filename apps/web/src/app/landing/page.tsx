@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { CompassRose } from '@/components/CompassRose'
 import { ContactModal } from '@/components/ContactModal'
 import { CorpusBadges } from '@/components/CorpusBadges'
+import { HallucinationCarousel } from '@/components/HallucinationCarousel'
 
 // ── Static citation chip (non-interactive, landing page only) ─────────────────
 function StaticChip({ label }: { label: string }) {
@@ -548,6 +549,47 @@ export default function LandingPage() {
       </section>
 
       {/* ══════════════════════════════════════════════════════════════════════
+          SECTION 2.75 — HALLUCINATION SHOWCASE (Sprint D6.57)
+
+          Direct proof of the citation-discipline + licensed-content
+          claims in the "Why not just use ChatGPT?" cards above.
+          Three side-by-side examples sourced from a real grading
+          session against ChatGPT (with web browsing enabled) on
+          2026-05-04. Every example verifies in <60 seconds against
+          eCFR / IMDG / NMC. Auto-rotates every 12s; pauses on hover.
+      ══════════════════════════════════════════════════════════════════════ */}
+      <section id="hallucination-proof" className="bg-[#0a0e1a] px-5 md:px-10 py-20 md:py-28
+                                                  border-t border-white/5">
+        <div className="max-w-5xl mx-auto">
+          <div className="text-center mb-12 md:mb-14">
+            <p className="font-mono text-xs text-[#2dd4bf] uppercase tracking-[0.25em] mb-3">
+              We tested it
+            </p>
+            <h2 className="font-display font-black text-[#f0ece4] leading-tight tracking-tight
+                           text-[clamp(28px,5vw,44px)] mb-4">
+              ChatGPT looks confident. <br className="hidden sm:block" />
+              That&apos;s the problem.
+            </h2>
+            <p className="font-mono text-[#6b7594] leading-relaxed text-sm md:text-base
+                          max-w-2xl mx-auto">
+              We asked ChatGPT specific maritime questions. Every answer came back
+              polished and authoritative. Some of them are wrong. The hard part
+              isn&apos;t spotting hallucinations &mdash; it&apos;s noticing them
+              before the inspector does.
+            </p>
+          </div>
+
+          <HallucinationCarousel />
+
+          <p className="font-mono text-[10px] text-[#6b7594] text-center mt-10
+                        max-w-xl mx-auto leading-relaxed">
+            Examples captured 2026-05-04 from ChatGPT with web browsing enabled.
+            Verifiable against eCFR, the IMDG Code, and USCG NVIC archive.
+          </p>
+        </div>
+      </section>
+
+      {/* ══════════════════════════════════════════════════════════════════════
           SECTION 3 — SAMPLE ANSWER
       ══════════════════════════════════════════════════════════════════════ */}
       <section id="in-action" className="px-5 md:px-10 py-20 md:py-28">
@@ -704,6 +746,35 @@ export default function LandingPage() {
               cta="Subscribe to Captain"
               featured
             />
+          </div>
+
+          {/* D6.57 — Wheelhouse callout. Conceptually different (per-vessel,
+              multi-seat, 30-day no-card trial) so it lives below the personal
+              tiers as a "for crews" upsell rather than crammed into the
+              same row. Links to /pricing for the detailed Wheelhouse cards. */}
+          <div className="mt-8 rounded-2xl border border-[#2dd4bf]/30 bg-[#0d1225] p-6 md:p-7">
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-5">
+              <div className="flex-1">
+                <p className="font-mono text-[10px] text-[#2dd4bf] uppercase tracking-[0.25em] mb-2">
+                  For crews — Wheelhouse
+                </p>
+                <p className="font-display text-xl md:text-2xl font-bold text-[#f0ece4] mb-2 leading-tight">
+                  One vessel. Up to 10 crew. Shared chat, dossier, and rotation handoff.
+                </p>
+                <p className="font-mono text-xs md:text-sm text-[#6b7594] leading-relaxed">
+                  $99.99/month or $89.99/month billed annually ($1,079.88/yr).
+                  30-day free trial — no card required.
+                </p>
+              </div>
+              <Link
+                href="/pricing"
+                className="font-mono font-bold text-sm uppercase tracking-wider whitespace-nowrap
+                           bg-[#2dd4bf] text-[#0a0e1a] hover:brightness-110
+                           rounded-lg py-2.5 px-5 transition-[filter] duration-150"
+              >
+                See Wheelhouse →
+              </Link>
+            </div>
           </div>
 
           <p className="font-mono text-xs text-[#6b7594] text-center mt-6">

@@ -437,6 +437,43 @@ export default function WomenOffshorePage() {
         </div>
       </section>
 
+      {/* ── Wheelhouse callout (Sprint D6.57) ──────────────────────────────
+          Mentor-captains in the Women Offshore network often pay for crew
+          access on their boats — a Wheelhouse covers that case directly.
+          One subscription per vessel, up to 10 seats, 30-day free trial. */}
+      <section className="px-5 pb-20">
+        <div className="max-w-4xl mx-auto">
+          <div className="rounded-2xl border border-[#2dd4bf]/30 bg-[#0d1225] p-6 md:p-8">
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-5">
+              <div className="flex-1">
+                <p className="font-mono text-[10px] text-[#2dd4bf] uppercase tracking-[0.25em] mb-2">
+                  For mentor captains — Wheelhouse
+                </p>
+                <p className="font-display text-xl md:text-2xl font-bold text-[#f0ece4] mb-2 leading-tight">
+                  Cover your whole crew on one subscription.
+                </p>
+                <p className="font-mono text-xs md:text-sm text-[#6b7594] leading-relaxed">
+                  If you&apos;re a mentor captain bringing women officers up
+                  through the ranks, Wheelhouse gives your whole rotation
+                  shared access — chat history, vessel dossier, and rotation
+                  handoff notes that survive when the watch changes.
+                  $99.99/month or $89.99/month annually. 30-day free trial,
+                  no card required.
+                </p>
+              </div>
+              <Link
+                href="/pricing"
+                className="font-mono font-bold text-sm uppercase tracking-wider whitespace-nowrap
+                           bg-[#2dd4bf] text-[#0a0e1a] hover:brightness-110
+                           rounded-lg py-2.5 px-5 transition-[filter] duration-150"
+              >
+                See Wheelhouse →
+              </Link>
+            </div>
+          </div>
+        </div>
+      </section>
+
       {/* ── Sample answers carousel (Sprint D6.3c) ───────────────────── */}
       <SampleAnswerCarousel />
 

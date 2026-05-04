@@ -347,6 +347,126 @@ export default function PricingPage() {
           <Link href="/giving" className="text-[#2dd4bf] hover:underline">our giving page</Link>.
         </p>
 
+        {/* ════════════════════════════════════════════════════════════════════
+            Wheelhouse (Sprint D6.57) — separate visual block. Conceptually
+            different product (per-vessel, multi-seat) so it lives below the
+            individual tiers rather than crammed into the same row.
+        ════════════════════════════════════════════════════════════════════ */}
+        <div className="w-full max-w-5xl mt-20 md:mt-24">
+          <div className="text-center mb-10">
+            <p className="font-mono text-xs text-[#2dd4bf] uppercase tracking-[0.25em] mb-3">
+              For crews
+            </p>
+            <h2 className="font-display font-black text-[#f0ece4] leading-tight tracking-tight
+                           text-[clamp(28px,5vw,40px)] mb-3">
+              Wheelhouse
+            </h2>
+            <p className="font-mono text-[#6b7594] text-sm md:text-base max-w-2xl mx-auto leading-relaxed">
+              Vessel-anchored workspaces for rotation crews. One subscription per vessel.
+              Shared chat, shared dossier, shared rotation handoff notes. Up to 10 seats.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5 max-w-3xl mx-auto">
+            {/* Monthly */}
+            <div className="flex flex-col rounded-2xl p-6 border border-white/10 bg-[#0d1225]">
+              <div className="mb-4">
+                <p className="font-display text-2xl font-bold text-[#f0ece4] tracking-wide">
+                  Monthly
+                </p>
+                <p className="font-mono text-3xl font-bold text-[#f0ece4] mt-1">
+                  $99.99
+                </p>
+                <p className="font-mono text-xs text-[#6b7594]">per month, per vessel</p>
+              </div>
+              <p className="font-mono text-xs text-[#6b7594] mb-4 leading-relaxed">
+                Pay month-to-month. 30-day free trial, no card required.
+              </p>
+              <ul className="flex flex-col gap-2 mb-6 flex-1">
+                {[
+                  '10 crew seats',
+                  'Shared chat history & vessel dossier',
+                  'Rotation handoff notes',
+                  'Captain stays Owner; can transfer',
+                ].map((perk) => (
+                  <li key={perk} className="flex items-start gap-2">
+                    <svg className="w-3.5 h-3.5 text-[#2dd4bf] mt-0.5 flex-shrink-0" viewBox="0 0 16 16" fill="currentColor">
+                      <path d="M13.854 3.646a.5.5 0 0 1 0 .708l-7 7a.5.5 0 0 1-.708 0l-3.5-3.5a.5.5 0 1 1 .708-.708L6.5 10.293l6.646-6.647a.5.5 0 0 1 .708 0z"/>
+                    </svg>
+                    <span className="font-mono text-sm text-[#f0ece4]/80">{perk}</span>
+                  </li>
+                ))}
+              </ul>
+              <a
+                href="/workspaces"
+                className="w-full text-center font-mono font-bold text-sm uppercase tracking-wider
+                           bg-[#1a2238] text-[#f0ece4] hover:bg-[#232d47]
+                           border border-white/10 rounded-lg py-3 transition-colors duration-150"
+              >
+                Start Free Trial
+              </a>
+            </div>
+
+            {/* Annual */}
+            <div className="flex flex-col rounded-2xl p-6 border bg-[#111827]
+                            border-[#2dd4bf]/50 shadow-[0_0_40px_rgba(45,212,191,0.08)]">
+              <div className="flex items-start justify-between gap-3 mb-4">
+                <div>
+                  <p className="font-display text-2xl font-bold text-[#f0ece4] tracking-wide">
+                    Annual
+                  </p>
+                  <p className="font-mono text-3xl font-bold text-[#f0ece4] mt-1">
+                    $89.99
+                  </p>
+                  <p className="font-mono text-xs text-[#6b7594]">
+                    per month, billed $1,079.88/yr
+                  </p>
+                  <p className="font-mono text-xs text-[#2dd4bf]/80 mt-1">
+                    Save $120 vs monthly
+                  </p>
+                </div>
+                <span className="font-mono text-[10px] font-bold text-[#2dd4bf] bg-[#2dd4bf]/10
+                                 border border-[#2dd4bf]/30 rounded px-2 py-1
+                                 uppercase tracking-wider whitespace-nowrap">
+                  Best value
+                </span>
+              </div>
+              <p className="font-mono text-xs text-[#6b7594] mb-4 leading-relaxed">
+                Best for vessels operating year-round. 30-day free trial, no card required.
+              </p>
+              <ul className="flex flex-col gap-2 mb-6 flex-1">
+                {[
+                  '10 crew seats',
+                  'Shared chat history & vessel dossier',
+                  'Rotation handoff notes',
+                  'Captain stays Owner; can transfer',
+                ].map((perk) => (
+                  <li key={perk} className="flex items-start gap-2">
+                    <svg className="w-3.5 h-3.5 text-[#2dd4bf] mt-0.5 flex-shrink-0" viewBox="0 0 16 16" fill="currentColor">
+                      <path d="M13.854 3.646a.5.5 0 0 1 0 .708l-7 7a.5.5 0 0 1-.708 0l-3.5-3.5a.5.5 0 1 1 .708-.708L6.5 10.293l6.646-6.647a.5.5 0 0 1 .708 0z"/>
+                    </svg>
+                    <span className="font-mono text-sm text-[#f0ece4]/80">{perk}</span>
+                  </li>
+                ))}
+              </ul>
+              <a
+                href="/workspaces"
+                className="w-full text-center font-mono font-bold text-sm uppercase tracking-wider
+                           bg-[#2dd4bf] text-[#0a0e1a] hover:brightness-110
+                           rounded-lg py-3 transition-[filter] duration-150"
+              >
+                Start Free Trial
+              </a>
+            </div>
+          </div>
+
+          <p className="font-mono text-xs text-[#6b7594] text-center mt-6 max-w-xl mx-auto leading-relaxed">
+            Trial gives your crew full access for 30 days. Add a payment method
+            anytime; otherwise the workspace becomes read-only on day 31 (90-day
+            recovery window before archival).
+          </p>
+        </div>
+
         <div className="mt-16 mb-8">
           <CorpusBadges
             heading="What we know"
