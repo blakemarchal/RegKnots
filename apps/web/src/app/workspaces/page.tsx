@@ -69,7 +69,13 @@ export default function WorkspacesPage() {
 
 function WorkspacesContent() {
   const router = useRouter()
-  const { refresh: refreshViewMode } = useViewMode()
+  const { viewMode, refresh: refreshViewMode } = useViewMode()
+  // D6.55 — wheelhouse_only users came in via invite, not as customers,
+  // and shouldn't be encouraged to create their own workspace from
+  // inside someone else's. Hide the "+ New workspace" CTA for them.
+  // (The whitelist still allows the API call for testing, but the UI
+  // shouldn't surface the button.)
+  const isWheelhouseOnly = viewMode?.mode === 'wheelhouse_only'
   const [workspaces, setWorkspaces] = useState<Workspace[] | null>(null)
   const [invites, setInvites] = useState<MyInvite[]>([])
   const [error, setError] = useState<string | null>(null)
@@ -236,14 +242,16 @@ function WorkspacesContent() {
         <div className="text-xs font-mono uppercase tracking-wider text-[#6b7594]">
           {workspaces ? `${workspaces.length} workspace${workspaces.length === 1 ? '' : 's'}` : 'Loading…'}
         </div>
-        <button
-          onClick={() => setShowCreate(true)}
-          className="px-3 py-1.5 rounded-md bg-[#2dd4bf]/15 border border-[#2dd4bf]/30
-                     text-sm font-medium text-[#2dd4bf] hover:bg-[#2dd4bf]/25
-                     transition-colors"
-        >
-          + New workspace
-        </button>
+        {!isWheelhouseOnly && (
+          <button
+            onClick={() => setShowCreate(true)}
+            className="px-3 py-1.5 rounded-md bg-[#2dd4bf]/15 border border-[#2dd4bf]/30
+                       text-sm font-medium text-[#2dd4bf] hover:bg-[#2dd4bf]/25
+                       transition-colors"
+          >
+            + New workspace
+          </button>
+        )}
       </div>
 
       {workspaces !== null && workspaces.length === 0 && !error && (

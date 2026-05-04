@@ -183,16 +183,23 @@ export function HamburgerMenu({ open, onClose, onNewChat, onOpenVessels, onOpenS
   function handleItem(item: MenuItem) {
     const action = item.action
 
-    // D6.53 — wheelhouse_only override: New Chat and Chat History
-    // route to workspace-scoped surfaces, not the personal versions.
-    // The personal `/` chat surface is hidden by WheelhouseRedirect
-    // for these users; landing them on `/?workspace=<id>` (chat) and
-    // `/history?workspace=<id>` (workspace conversations) is what
-    // they expect.
+    // D6.53/D6.55 — wheelhouse_only override: New Chat and Chat History
+    // route to workspace-scoped surfaces.
+    //
+    // CRITICAL: New Chat must use a HARD navigation (window.location.href)
+    // not Next.js soft routing. Two reasons:
+    //   1. If we're already at `/?workspace=<id>` (e.g. resumed a chat
+    //      from history), navigateTo's same-pathname check short-circuits
+    //      and nothing happens.
+    //   2. ChatInterface initializes its conversation_id state from the
+    //      URL's `?conversation_id=` ONCE on mount; soft routing won't
+    //      reset that state. Hard nav fully reloads.
+    // The non-wheelhouse path uses window.location.href = '/' for the
+    // same reason — we're matching that pattern.
     if (isWheelhouseOnly && primaryWorkspaceId) {
       if (action === 'new') {
         onClose()
-        navigateTo('new', `/?workspace=${primaryWorkspaceId}`)
+        window.location.href = `/?workspace=${primaryWorkspaceId}`
         return
       }
       if (action === 'history') {

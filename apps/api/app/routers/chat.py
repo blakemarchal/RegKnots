@@ -136,7 +136,21 @@ async def _run_chat_preflight(
     # ── Subscription gate ────────────────────────────────────────────────────
     # Admins and internal users always get unlimited access.
     _is_privileged = current_user.is_admin or getattr(current_user, "is_internal", False)
-    if sub_row and sub_row["subscription_tier"] == "free" and not _is_privileged:
+
+    # D6.55 — Workspace chats are billed at the WORKSPACE level (the
+    # owner's card, the workspace's status). Personal trial/cap gates
+    # don't apply when the user is chatting inside a workspace they
+    # belong to. The workspace membership + status check further down
+    # (line ~310) will 403 invalid workspace_ids before any RAG runs,
+    # so we can safely skip the personal gates here based on the body
+    # signal alone.
+    is_workspace_chat = body.workspace_id is not None
+
+    if (
+        not is_workspace_chat
+        and sub_row and sub_row["subscription_tier"] == "free"
+        and not _is_privileged
+    ):
         trial_expired = sub_row["trial_ends_at"] < datetime.now(timezone.utc)
         over_limit = sub_row["message_count"] >= 50
         if trial_expired or over_limit:
@@ -151,7 +165,12 @@ async def _run_chat_preflight(
     # the user is already capped. Race with concurrent requests is bounded
     # to at most one extra message past the cap (the atomic increment step
     # gates subsequent calls).
-    if sub_row and sub_row["subscription_tier"] == "mate" and not _is_privileged:
+    # D6.55 — same workspace bypass applies; workspace bills the owner.
+    if (
+        not is_workspace_chat
+        and sub_row and sub_row["subscription_tier"] == "mate"
+        and not _is_privileged
+    ):
         from app.plans import MATE_MESSAGE_CAP as _MATE_CAP
         cycle_start = sub_row["message_cycle_started_at"]
         cycle_age = datetime.now(timezone.utc) - cycle_start if cycle_start else None
