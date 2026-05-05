@@ -1525,28 +1525,26 @@ async def _try_web_fallback(
 ) -> "WebFallbackCard | None":
     """Run one fallback attempt for a hedged answer. Returns a populated
     card iff all gates pass. Persists every attempt to
-    web_fallback_responses regardless of outcome. Sprint D6.48 Phase 2."""
+    web_fallback_responses regardless of outcome.
+
+    D6.58 force-fire-on-hedge revision:
+      The caller only invokes this function when the model already
+      hedged (engine.py: `if hedge_phrase is not None`). The hedge IS
+      the authoritative signal that retrieval missed — the model has
+      seen the chunks and decided they don't answer. Cosine is a
+      noisy proxy for that decision (high cosine on adjacent topics
+      is a common failure mode — Brandon's rescue-boat-drill query,
+      Karynn's engine-room-signal-column query both had top_cosine
+      ≥ 0.6 on irrelevant chunks).
+      So we no longer pre-gate on cosine. We always TRY a fallback
+      when the model hedged. top_cosine is still recorded on the
+      attempt row for analysis. Cost is bounded by per-user daily
+      cap below + per-tier monthly caps (Slice 3).
+    """
     from rag.web_fallback import attempt_web_fallback
     from rag.models import WebFallbackCard
 
-    # Gate 1: only fire when retrieval genuinely missed (true corpus gap).
-    # Persist a synthetic blocked-attempt row so the admin review tool
-    # can see WHY the fallback didn't fire (silent skip used to bury the
-    # signal). Sprint D6.48 Phase 2 audit fix.
-    if top_cosine >= cosine_threshold:
-        try:
-            await pool.execute(
-                "INSERT INTO web_fallback_responses "
-                "  (is_calibration, user_id, chat_message_id, query, "
-                "   surfaced, surface_blocked_reason, latency_ms) "
-                "VALUES (FALSE, $1, $2, $3, FALSE, 'cosine_too_high', 0)",
-                user_id, conversation_id, query,
-            )
-        except Exception as exc:
-            logger.warning("cosine-block persist failed: %s", exc)
-        return None
-
-    # Gate 2: per-user daily cap (soft block — silently skip rather than
+    # Gate: per-user daily cap (soft block — silently skip rather than
     # error). Only count surfaced fallbacks toward the cap so users who
     # ask many corpus-gap questions in a row don't get capped on
     # blocked-but-attempted ones.
@@ -1573,7 +1571,9 @@ async def _try_web_fallback(
     )
 
     # Persist (fire-and-forget — DB errors don't suppress the card if
-    # we managed to assemble one).
+    # we managed to assemble one). top_cosine recorded on the attempt
+    # row so we can still see the retrieval signal at fire time even
+    # though we no longer gate on it.
     fallback_id: str | None = None
     try:
         row = await pool.fetchrow(
@@ -1581,9 +1581,10 @@ async def _try_web_fallback(
             "  (is_calibration, user_id, chat_message_id, query, "
             "   web_query_used, top_urls, confidence, source_url, "
             "   source_domain, quote_text, quote_verified, surfaced, "
-            "   surface_blocked_reason, answer_text, latency_ms) "
+            "   surface_blocked_reason, answer_text, latency_ms, "
+            "   retrieval_top1_cosine) "
             "VALUES (FALSE, $1, $2, $3, $4, $5::text[], $6, $7, $8, $9, "
-            "        $10, $11, $12, $13, $14) "
+            "        $10, $11, $12, $13, $14, $15) "
             "RETURNING id",
             user_id, conversation_id, query, result.web_query_used,
             result.top_urls or [], result.confidence,
@@ -1591,6 +1592,7 @@ async def _try_web_fallback(
             result.quote_verified, result.surfaced,
             result.surface_blocked_reason, result.answer_text,
             result.latency_ms,
+            top_cosine,
         )
         if row is not None:
             fallback_id = str(row["id"])
