@@ -521,15 +521,42 @@ async def attempt_ensemble_fallback(
     started = time.monotonic()
     result = EnsembleResult()
 
-    # Fire all three in parallel. asyncio.gather is preferred over
-    # as_completed because we want to combine all three regardless
-    # of order; latency = max of three, not sum.
-    raw_results = await asyncio.gather(
+    # Fire all three in parallel. asyncio.gather with
+    # return_exceptions=True defends against the case where one
+    # provider's task raises an exception that bypasses the
+    # function-internal try/except (CancelledError, network reset
+    # on httpx init, etc.). Without this, a single rogue raise
+    # cancels the entire ensemble silently — that's the class of
+    # bug behind the 2026-05-05 17:39 / 20:04 missing-fallback rows.
+    # Latency = max of three, not sum.
+    raw = await asyncio.gather(
         query_claude_web(query, anthropic_client),
         query_gpt_web(query, openai_api_key),
         query_grok_web(query, xai_api_key),
-        return_exceptions=False,  # the per-provider funcs already swallow
+        return_exceptions=True,
     )
+    raw_results: list[ProviderResult] = []
+    for i, item in enumerate(raw):
+        provider = ("claude", "gpt", "grok")[i]
+        if isinstance(item, ProviderResult):
+            raw_results.append(item)
+        elif isinstance(item, BaseException):
+            # Provider raised a non-handled exception. Synthesize a
+            # ProviderResult that records the failure so it shows up
+            # in provider_errors and doesn't break synthesis.
+            err = f"{type(item).__name__}: {str(item)[:200]}"
+            logger.warning(
+                "ensemble: %s task raised unexpectedly: %s", provider, err,
+            )
+            raw_results.append(ProviderResult(
+                provider=provider,
+                error=f"task_raised:{err}",
+            ))
+        else:
+            # Defensive: unknown gather result type
+            raw_results.append(ProviderResult(
+                provider=provider, error="unknown_gather_result",
+            ))
 
     succeeded = [r for r in raw_results if r.succeeded]
     result.providers_succeeded = [r.provider for r in succeeded]

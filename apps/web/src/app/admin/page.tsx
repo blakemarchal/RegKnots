@@ -847,12 +847,28 @@ function AdminContent() {
                 </span>
               )}
             </div>
-            <a
-              href="/admin/traffic"
-              className="font-mono text-xs text-[#2dd4bf] hover:underline"
-            >
-              Traffic →
-            </a>
+            <div className="flex items-center gap-4">
+              <a
+                href="/admin/hedge-audit"
+                className="font-mono text-xs text-[#2dd4bf] hover:underline"
+                title="Hedge classifier queue — see why corpus answers hedged and tag the cause"
+              >
+                Hedge Audit →
+              </a>
+              <a
+                href="/admin/web-fallback"
+                className="font-mono text-xs text-[#2dd4bf] hover:underline"
+                title="Web fallback events — single-LLM + Big-3 ensemble surfaces"
+              >
+                Web Fallback →
+              </a>
+              <a
+                href="/admin/traffic"
+                className="font-mono text-xs text-[#2dd4bf] hover:underline"
+              >
+                Traffic →
+              </a>
+            </div>
           </div>
 
           {/* ── Tab bar ──────────────────────────────────────────────── */}
