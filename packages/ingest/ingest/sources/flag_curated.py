@@ -501,16 +501,59 @@ def _parse_source(cfg: SourceConfig, raw_dir: Path) -> list[Section]:
     return sections
 
 
+_LARGE_PDF_BYTES = 3 * 1024 * 1024  # 3 MB
+
+
 def _extract_pdf_text(pdf_path: Path) -> str:
-    page_texts: list[str] = []
-    with pdfplumber.open(pdf_path) as pdf:
-        for page in pdf.pages:
-            t = page.extract_text() or ""
-            t = re.sub(r"(?m)^\s*\d{1,4}\s*$", "", t)
-            t = re.sub(r"[ \t]+", " ", t)
-            t = re.sub(r"\n{3,}", "\n\n", t)
-            page_texts.append(t.strip())
-    return "\n\n".join(p for p in page_texts if p)
+    """Extract text from a PDF.
+
+    Uses pdfplumber for small files (good table handling, layout-aware)
+    and shells out to Poppler's pdftotext for files larger than 3 MB
+    or when pdfplumber fails — pdftotext is a streaming C extractor
+    that uses ~30 MB regardless of input size, while pdfplumber's
+    memory footprint scales with content density and OOM-kills the
+    prod worker on image-heavy PDFs (Sprint D6.50 OCIMF SIRE Operator
+    Quick Start incident).
+    """
+    file_size = pdf_path.stat().st_size
+    if file_size > _LARGE_PDF_BYTES:
+        return _extract_via_pdftotext(pdf_path)
+
+    try:
+        page_texts: list[str] = []
+        with pdfplumber.open(pdf_path) as pdf:
+            for page in pdf.pages:
+                t = page.extract_text() or ""
+                t = re.sub(r"(?m)^\s*\d{1,4}\s*$", "", t)
+                t = re.sub(r"[ \t]+", " ", t)
+                t = re.sub(r"\n{3,}", "\n\n", t)
+                page_texts.append(t.strip())
+        return "\n\n".join(p for p in page_texts if p)
+    except Exception as exc:
+        logger.warning(
+            "pdfplumber failed on %s (%s); falling back to pdftotext",
+            pdf_path.name, exc,
+        )
+        return _extract_via_pdftotext(pdf_path)
+
+
+def _extract_via_pdftotext(pdf_path: Path) -> str:
+    """Streaming text extraction via Poppler's pdftotext.
+    Memory-bounded regardless of input size."""
+    import subprocess
+    try:
+        out = subprocess.run(
+            ["pdftotext", "-layout", str(pdf_path), "-"],
+            capture_output=True, timeout=120, check=True,
+        )
+    except Exception as exc:
+        logger.warning("pdftotext failed on %s: %s", pdf_path.name, exc)
+        return ""
+    text = out.stdout.decode("utf-8", errors="replace")
+    text = re.sub(r"(?m)^\s*\d{1,4}\s*$", "", text)
+    text = re.sub(r"[ \t]+", " ", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
 
 
 def _write_failure(cfg: SourceConfig, doc: CuratedDoc, exc: Exception,
