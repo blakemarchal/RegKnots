@@ -844,6 +844,51 @@ async def send_workspace_payment_failed_email(
     })
 
 
+async def send_off_topic_abuse_alert(
+    user_email: str, user_full_name: str, capped_days: int,
+) -> None:
+    """D6.58 — admin alert when a user hits their 3rd off-topic cap-day
+    in any 30-day window.
+
+    Recipient: Owner only (blakemarchal@gmail.com), per project standing
+    rule on admin operational signals. Karynn doesn't want these.
+    """
+    safe_email = _html_lib.escape(user_email)
+    safe_name = _html_lib.escape(user_full_name or "(no name)")
+    admin_url = f"{APP_URL}/admin/users"
+    html = _html(f"""
+      <h1>Off-topic abuse threshold hit</h1>
+      <p>
+        User <strong style="color:#f0ece4;">{safe_name}</strong>
+        (<code>{safe_email}</code>) has hit the off-topic daily cap
+        (25 queries) on <strong>{capped_days}</strong> separate days
+        within the last 30. Each cap-day suggests deliberate burn-
+        through of free Haiku scope-check calls; sustained pattern is
+        likely abuse.
+      </p>
+      <p>
+        Their on-topic chat continues to work as normal. Off-topic
+        queries today are returning a rate-limit message until UTC
+        midnight rolls over.
+      </p>
+      <a href="{admin_url}" class="cta">Review user in admin</a>
+      <p style="font-size:12px; color:rgba(107,117,148,0.7); margin-top:16px;">
+        Decide manually whether to leave (accidental confusion?), warn,
+        or hard-block the account. The off_topic_queries table has the
+        full query log for context.
+      </p>
+    """)
+    resend.Emails.send({
+        "from": FROM_EMAIL,
+        "to": ["blakemarchal@gmail.com"],
+        "subject": (
+            f"RegKnot — off-topic abuse threshold ({capped_days} cap-days/30) "
+            f"— {user_email}"
+        ),
+        "html": html,
+    })
+
+
 async def send_workspace_invite_email(
     to_email: str,
     inviter_name: str,

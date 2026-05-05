@@ -1283,6 +1283,18 @@ async def chat(
     route = await route_query(query, anthropic_client)
     logger.info(f"Routed query to {route.model} (score={route.score})")
 
+    # D6.58 — off-topic gate. If the router classified the query as
+    # off-topic (score=0), short-circuit before any retrieval / fallback
+    # / ensemble fires. Apply daily-cap rate limiting and trigger admin
+    # alerts on repeat abuse. See _handle_off_topic for the full policy.
+    if route.is_off_topic:
+        return await _handle_off_topic(
+            pool=pool,
+            user_id=user_id,
+            conversation_id=conversation_id,
+            query=query,
+        )
+
     # Sprint D6.4 — conversational follow-up retrieval. If the new query
     # looks like a clarification or pushback ("So you can't tell me...",
     # "What about X?", "Are you sure?"), retrieve against the combined
@@ -1602,6 +1614,197 @@ async def _try_web_fallback(
     )
 
 
+# ── Off-topic gate (D6.58 prelude) ────────────────────────────────────────
+
+
+_OFF_TOPIC_DAILY_FLAG_THRESHOLD = 10  # admin sees flag at this count
+_OFF_TOPIC_DAILY_CAP            = 25  # 26th query returns rate-limit message
+_OFF_TOPIC_ABUSE_DAY_THRESHOLD  = 3   # cap-days/30 that trigger admin email
+
+_OFF_TOPIC_REFUSAL = (
+    "I'm focused on maritime compliance — vessel operations, CFR Titles 33/46/49, "
+    "SOLAS, STCW, IMDG, ISM, port-state regulations, your boat's certifications, "
+    "and the workflows around them. Ask me about anything in that domain and "
+    "I'll cite chapter and verse.\n\n"
+    "I won't help with general topics like cooking, entertainment, programming, "
+    "or casual chat — there are better tools for those."
+)
+
+_OFF_TOPIC_RATE_LIMITED = (
+    "You've hit today's limit for off-topic questions (25 in 24 hours). "
+    "I'll be available for off-topic questions again tomorrow.\n\n"
+    "Maritime compliance questions still work — ask me about vessel "
+    "regulations, certifications, or operations and I'll respond as usual."
+)
+
+
+async def _count_off_topic_today(pool, user_id) -> int:
+    """How many off-topic queries this user has already logged today (UTC)."""
+    if user_id is None:
+        return 0
+    return int(
+        await pool.fetchval(
+            "SELECT COUNT(*) FROM off_topic_queries "
+            "WHERE user_id = $1 "
+            "  AND created_at > date_trunc('day', NOW() AT TIME ZONE 'UTC')",
+            user_id,
+        )
+        or 0
+    )
+
+
+async def _count_capped_days_last_30(pool, user_id) -> int:
+    """Distinct days in the last 30 where this user hit the daily cap."""
+    if user_id is None:
+        return 0
+    return int(
+        await pool.fetchval(
+            """
+            SELECT COUNT(*) FROM (
+                SELECT date_trunc('day', created_at AT TIME ZONE 'UTC') AS d
+                FROM off_topic_queries
+                WHERE user_id = $1
+                  AND created_at > NOW() - INTERVAL '30 days'
+                GROUP BY 1
+                HAVING COUNT(*) >= $2
+            ) capped_days
+            """,
+            user_id, _OFF_TOPIC_DAILY_CAP,
+        )
+        or 0
+    )
+
+
+async def _log_off_topic_query(
+    *, pool, user_id, conversation_id, query: str,
+) -> None:
+    """Insert one row into off_topic_queries. Best-effort."""
+    try:
+        await pool.execute(
+            "INSERT INTO off_topic_queries "
+            "  (user_id, conversation_id, query) "
+            "VALUES ($1, $2, $3)",
+            user_id, conversation_id, query[:2000],
+        )
+    except Exception as exc:
+        logger.warning("off_topic_queries insert failed: %s", exc)
+
+
+async def _maybe_send_abuse_alert(
+    *, pool, user_id, today_count: int,
+) -> None:
+    """If the user just crossed their 3rd cap-day in 30 days, email Owner.
+
+    Only fires when this is the FIRST query in this session that put them
+    at-or-over the cap (today_count == _OFF_TOPIC_DAILY_CAP exactly).
+    Prevents resending on every query past the cap.
+    """
+    if today_count != _OFF_TOPIC_DAILY_CAP:
+        return
+    capped_days = await _count_capped_days_last_30(pool, user_id)
+    if capped_days < _OFF_TOPIC_ABUSE_DAY_THRESHOLD:
+        return
+    try:
+        user_row = await pool.fetchrow(
+            "SELECT email, full_name FROM users WHERE id = $1", user_id,
+        )
+        if user_row is None:
+            return
+        from app.email import send_off_topic_abuse_alert
+        await send_off_topic_abuse_alert(
+            user_email=user_row["email"],
+            user_full_name=user_row["full_name"] or "",
+            capped_days=capped_days,
+        )
+    except Exception as exc:
+        logger.warning("off_topic abuse alert email failed: %s", exc)
+
+
+async def _handle_off_topic(
+    *,
+    pool,
+    user_id,
+    conversation_id,
+    query: str,
+) -> "ChatResponse":
+    """Non-streaming off-topic short-circuit. Returns a polite refusal
+    or rate-limit message and persists the event.
+    """
+    today_count = await _count_off_topic_today(pool, user_id)
+
+    if today_count >= _OFF_TOPIC_DAILY_CAP:
+        # Already capped today — reply with rate-limit, do not log
+        # (cap is hit, no need to keep ratcheting; user_id is on the
+        # record from the cap-hit event).
+        return ChatResponse(
+            answer=_OFF_TOPIC_RATE_LIMITED,
+            conversation_id=conversation_id,
+            cited_regulations=[],
+            model_used="claude-haiku-4-5-20251001",
+            input_tokens=0,
+            output_tokens=0,
+        )
+
+    # Log this off-topic query.
+    await _log_off_topic_query(
+        pool=pool, user_id=user_id,
+        conversation_id=conversation_id, query=query,
+    )
+    new_today = today_count + 1
+    await _maybe_send_abuse_alert(
+        pool=pool, user_id=user_id, today_count=new_today,
+    )
+
+    return ChatResponse(
+        answer=_OFF_TOPIC_REFUSAL,
+        conversation_id=conversation_id,
+        cited_regulations=[],
+        model_used="claude-haiku-4-5-20251001",
+        input_tokens=0,
+        output_tokens=0,
+    )
+
+
+async def _handle_off_topic_stream(
+    *,
+    pool,
+    user_id,
+    conversation_id,
+    query: str,
+):
+    """Streaming variant of the off-topic short-circuit. Emits a single
+    `done` event with the same payload shape as a normal chat reply.
+    """
+    today_count = await _count_off_topic_today(pool, user_id)
+
+    if today_count >= _OFF_TOPIC_DAILY_CAP:
+        answer = _OFF_TOPIC_RATE_LIMITED
+    else:
+        await _log_off_topic_query(
+            pool=pool, user_id=user_id,
+            conversation_id=conversation_id, query=query,
+        )
+        await _maybe_send_abuse_alert(
+            pool=pool, user_id=user_id, today_count=today_count + 1,
+        )
+        answer = _OFF_TOPIC_REFUSAL
+
+    yield {
+        "event": "done",
+        "data": {
+            "answer": answer,
+            "cited_regulations": [],
+            "conversation_id": str(conversation_id),
+            "model_used": "claude-haiku-4-5-20251001",
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "unverified_citations": [],
+            "vessel_update": None,
+            "regenerated": False,
+        },
+    }
+
+
 async def _classify_and_persist_hedge(
     *,
     pool,
@@ -1773,6 +1976,20 @@ async def chat_with_progress(
     yield {"event": "status", "data": "Analyzing your question…"}
     route = await route_query(query, anthropic_client)
     logger.info(f"Routed query to {route.model} (score={route.score})")
+
+    # D6.58 — off-topic short-circuit (streaming path). Same gate as
+    # the non-streaming chat() function. Skip retrieval/fallback/
+    # ensemble entirely and emit a polite refusal as a single done
+    # event.
+    if route.is_off_topic:
+        async for event in _handle_off_topic_stream(
+            pool=pool,
+            user_id=user_id,
+            conversation_id=conversation_id,
+            query=query,
+        ):
+            yield event
+        return
 
     # Sprint D6.4 — same followup detection + escalation as chat().
     followup_match = detect_followup(query)

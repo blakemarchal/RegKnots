@@ -17,8 +17,12 @@ class CitedRegulation(BaseModel):
 
 
 class RouteDecision(BaseModel):
-    score: int   # 1, 2, or 3
-    model: str   # Anthropic model ID
+    # D6.58 prelude — score=0 means OFF-TOPIC. Engine short-circuits
+    # before retrieval / fallback / ensemble. Scores 1/2/3 are the
+    # original maritime complexity tiers.
+    score: int   # 0 (off-topic), 1, 2, or 3
+    model: str   # Anthropic model ID; "" when score=0
+    is_off_topic: bool = False
 
 
 class ChatRequest(BaseModel):

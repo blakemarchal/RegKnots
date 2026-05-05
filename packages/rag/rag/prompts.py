@@ -383,9 +383,17 @@ NAVIGATION_AID_REMINDER = (
 )
 
 CLASSIFIER_PROMPT = (
-    "Rate this maritime compliance question 1-3. "
-    "1=single regulation lookup. "
-    "2=multi-section synthesis or vessel applicability logic. "
-    "3=cross-regulation conflict or contradiction requiring deep analysis. "
-    "Return only the number."
+    "Classify this user query for the RegKnots maritime compliance assistant. "
+    "Return ONE digit:\n"
+    "  0 = OFF-TOPIC. Not maritime, not regulatory, not vessel-related. "
+    "Examples: cooking, entertainment, general programming, casual chat, "
+    "homework help on non-maritime subjects, jokes, role-play.\n"
+    "  1 = single regulation lookup (Haiku-tier maritime question).\n"
+    "  2 = multi-section synthesis or vessel applicability (Sonnet-tier).\n"
+    "  3 = cross-regulation conflict or contradiction requiring deep "
+    "analysis (Opus-tier).\n"
+    "Borderline cases (general maritime knowledge, ship history, knot tying, "
+    "navigation principles, weather): score 1 — they're maritime enough to "
+    "deserve a real attempt.\n"
+    "Return only the digit."
 )
