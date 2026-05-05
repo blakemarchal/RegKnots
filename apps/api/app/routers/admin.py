@@ -4283,6 +4283,11 @@ class FallbackEventDTO(BaseModel):
     user_email: str | None
     conversation_id: str | None
     answer_text: str | None
+    # D6.60 — Haiku judge verdict that gated this fallback firing.
+    # null on rows persisted before the judge shipped.
+    judge_verdict: str | None = None
+    judge_missing_topic: str | None = None
+    web_query_used: str | None = None  # populated when partial_miss override fired
 
 
 class FallbackStatsDTO(BaseModel):
@@ -4377,6 +4382,7 @@ async def list_web_fallback_events(
                wf.quote_verified, wf.surfaced,
                wf.surface_blocked_reason, wf.retrieval_top1_cosine,
                wf.latency_ms, wf.answer_text, wf.chat_message_id,
+               wf.judge_verdict, wf.judge_missing_topic, wf.web_query_used,
                u.email AS user_email
         FROM web_fallback_responses wf
         LEFT JOIN users u ON u.id = wf.user_id
@@ -4410,6 +4416,9 @@ async def list_web_fallback_events(
             user_email=r["user_email"],
             conversation_id=str(r["chat_message_id"]) if r["chat_message_id"] else None,
             answer_text=r["answer_text"],
+            judge_verdict=r["judge_verdict"],
+            judge_missing_topic=r["judge_missing_topic"],
+            web_query_used=r["web_query_used"],
         )
         for r in rows
     ]

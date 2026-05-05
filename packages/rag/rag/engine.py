@@ -1270,6 +1270,7 @@ async def chat(
     web_fallback_cosine_threshold: float = 0.5,
     web_fallback_daily_cap: int = 10,
     web_fallback_cascade_enabled: bool = True,
+    hedge_judge_enabled: bool = True,
 ) -> ChatResponse:
     """Run the full RAG pipeline and return a ChatResponse.
 
@@ -1429,9 +1430,51 @@ async def chat(
     # Sprint D2-LOG: if the final answer hedges on retrieval, log the miss
     # to `retrieval_misses` for offline analysis. Fire-and-forget — DB
     # errors never fail the chat response.
+    #
+    # D6.60 — when hedge_judge_enabled, the regex match is just the
+    # cheap pre-filter. We run a Haiku judge (~$0.004) on
+    # (question, answer, retrieved chunks) to decide whether this is
+    # a complete_miss, partial_miss, precision_callout, or false_hedge.
+    # Only complete_miss + partial_miss fire the ensemble; precision
+    # callouts and false hedges suppress.
     hedge_phrase = detect_hedge(cleaned_answer)
     web_fallback_card = None
+    judge_verdict: str | None = None
+    judge_reasoning: str | None = None
+    judge_missing_topic: str | None = None
+    chunks_truncated_for_judge = False
     if hedge_phrase is not None:
+        # 1. Judge — gates the fallback decision. Failure → default to
+        # complete_miss (preserves regex-only behavior on judge errors).
+        if hedge_judge_enabled:
+            from rag.hedge_judge import judge_hedge
+            try:
+                verdict = await judge_hedge(
+                    question=query,
+                    answer=cleaned_answer,
+                    chunks=chunks,
+                    citations=[
+                        {"source": c.source, "section_number": c.section_number,
+                         "section_title": c.section_title}
+                        for c in verified_cited
+                    ],
+                    anthropic_client=anthropic_client,
+                )
+                judge_verdict = verdict.verdict
+                judge_reasoning = verdict.reasoning or None
+                judge_missing_topic = verdict.missing_topic
+                chunks_truncated_for_judge = verdict.chunks_truncated
+            except Exception as exc:
+                logger.warning(
+                    "hedge_judge unexpected failure (defaulting to complete_miss): %s: %s",
+                    type(exc).__name__, str(exc)[:200],
+                )
+                judge_verdict = "complete_miss"
+        else:
+            # Judge disabled: behave like the legacy regex-only path.
+            judge_verdict = "complete_miss"
+
+        # 2. Log to retrieval_misses with the judge verdict.
         try:
             await _log_retrieval_miss(
                 pool=pool,
@@ -1445,6 +1488,10 @@ async def chat(
                 retrieved_chunks=chunks,
                 cited=verified_cited,
                 answer=cleaned_answer,
+                judge_verdict=judge_verdict,
+                judge_reasoning=judge_reasoning,
+                judge_missing_topic=judge_missing_topic,
+                chunks_truncated_for_judge=chunks_truncated_for_judge,
             )
         except Exception as exc:
             logger.warning(
@@ -1453,15 +1500,22 @@ async def chat(
                 str(exc)[:200],
             )
 
-        # Sprint D6.48 Phase 2 — when the corpus genuinely missed AND
-        # the kill switch is on AND the user has cap remaining, try a
-        # web search fallback. D6.58 Slice 3 — if the user's tier
-        # allows, escalate to the Big-3 ensemble (Claude+GPT+Grok)
-        # instead of the single-LLM Slice-1 path.
-        if web_fallback_enabled:
+        # 3. Fire fallback only on miss verdicts. precision_callout +
+        # false_hedge → suppress (the answer was good, no card needed).
+        should_fire_fallback = judge_verdict in ("complete_miss", "partial_miss")
+        if web_fallback_enabled and should_fire_fallback:
             top_cosine = (
                 chunks[0].get("similarity", 0.0) if chunks else 0.0
             )
+            # partial_miss → swap query to the focused missing topic so
+            # the ensemble searches for the gap, not the whole question.
+            override_query: str | None = None
+            if judge_verdict == "partial_miss" and judge_missing_topic:
+                override_query = judge_missing_topic
+                logger.info(
+                    "hedge_judge partial_miss: overriding ensemble query "
+                    "from %r to %r", query[:80], override_query,
+                )
             try:
                 web_fallback_card = await _dispatch_web_fallback(
                     query=query,
@@ -1476,6 +1530,9 @@ async def chat(
                     cosine_threshold=web_fallback_cosine_threshold,
                     daily_cap=web_fallback_daily_cap,
                     cascade_enabled=web_fallback_cascade_enabled,
+                    override_query=override_query,
+                    judge_verdict=judge_verdict,
+                    judge_missing_topic=judge_missing_topic,
                 )
             except Exception as exc:
                 logger.warning(
@@ -1483,12 +1540,17 @@ async def chat(
                     type(exc).__name__,
                     str(exc)[:200],
                 )
+        elif not should_fire_fallback:
+            logger.info(
+                "hedge_judge suppressed fallback: verdict=%s reasoning=%r",
+                judge_verdict, (judge_reasoning or "")[:200],
+            )
 
-        # Sprint D6.58 Slice 2 — fire the hedge classifier on every
-        # hedge. Fire-and-forget; never block the response. Result
-        # lands in hedge_audits for admin review. We classify even
-        # when web fallback succeeded — the corpus still missed, and
-        # Karynn might want to ingest the source the fallback found.
+        # 4. Sprint D6.58 Slice 2 hedge classifier — fires on every
+        # hedge regardless of judge verdict. Different from the judge:
+        # the classifier categorizes corpus failures (VOCAB / INTENT /
+        # RANKING / etc.) for sprint planning, the judge decides
+        # real-time fire/skip. Both pieces of data are useful.
         try:
             await _classify_and_persist_hedge(
                 pool=pool,
@@ -1535,6 +1597,9 @@ async def _dispatch_web_fallback(
     cosine_threshold: float,
     daily_cap: int,
     cascade_enabled: bool = True,
+    override_query: str | None = None,
+    judge_verdict: str | None = None,
+    judge_missing_topic: str | None = None,
 ) -> "WebFallbackCard | None":
     """Tier-aware fallback dispatcher (D6.58 Slice 3).
 
@@ -1558,6 +1623,9 @@ async def _dispatch_web_fallback(
             pool=pool, anthropic_client=anthropic_client,
             top_cosine=top_cosine, cosine_threshold=cosine_threshold,
             daily_cap=daily_cap,
+            override_query=override_query,
+            judge_verdict=judge_verdict,
+            judge_missing_topic=judge_missing_topic,
         )
 
     # Per-tier ensemble cap check.
@@ -1583,6 +1651,9 @@ async def _dispatch_web_fallback(
             pool=pool, anthropic_client=anthropic_client,
             top_cosine=top_cosine, cosine_threshold=cosine_threshold,
             daily_cap=daily_cap,
+            override_query=override_query,
+            judge_verdict=judge_verdict,
+            judge_missing_topic=judge_missing_topic,
         )
 
     # Big-3 ensemble path.
@@ -1592,6 +1663,9 @@ async def _dispatch_web_fallback(
         openai_api_key=openai_api_key, xai_api_key=xai_api_key,
         top_cosine=top_cosine,
         cascade_enabled=cascade_enabled,
+        override_query=override_query,
+        judge_verdict=judge_verdict,
+        judge_missing_topic=judge_missing_topic,
     )
 
 
@@ -1606,6 +1680,9 @@ async def _try_ensemble_fallback(
     xai_api_key: str,
     top_cosine: float,
     cascade_enabled: bool = True,
+    override_query: str | None = None,
+    judge_verdict: str | None = None,
+    judge_missing_topic: str | None = None,
 ) -> "WebFallbackCard | None":
     """Run the Big-3 ensemble + persist + return a card if surfaced.
 
@@ -1618,6 +1695,12 @@ async def _try_ensemble_fallback(
     out to GPT + Grok when needed. When False, uses the legacy always-
     parallel D6.58 Slice-3 orchestrator. The two share the same DB
     persistence shape so flipping the flag has no schema impact.
+
+    D6.60 — when judge_verdict is 'partial_miss', override_query is the
+    focused topic the judge identified as missing. We send THAT to the
+    LLMs but persist the user's original query in `query` (preserving
+    audit linkage to the actual chat turn) and the override in
+    `web_query_used`.
     """
     from rag.ensemble_fallback import (
         attempt_cascade_ensemble,
@@ -1625,16 +1708,20 @@ async def _try_ensemble_fallback(
     )
     from rag.models import WebFallbackCard
 
+    # Use override_query for the actual LLM calls; keep `query` as the
+    # canonical user-facing question for persistence + audit.
+    llm_query = override_query or query
+
     if cascade_enabled:
         result = await attempt_cascade_ensemble(
-            query=query,
+            query=llm_query,
             anthropic_client=anthropic_client,
             openai_api_key=openai_api_key,
             xai_api_key=xai_api_key,
         )
     else:
         result = await attempt_ensemble_fallback(
-            query=query,
+            query=llm_query,
             anthropic_client=anthropic_client,
             openai_api_key=openai_api_key,
             xai_api_key=xai_api_key,
@@ -1647,15 +1734,19 @@ async def _try_ensemble_fallback(
             """
             INSERT INTO web_fallback_responses
               (is_calibration, is_ensemble, user_id, chat_message_id, query,
+               web_query_used,
                confidence, source_url, source_domain, quote_text,
                quote_verified, surfaced, surface_tier, surface_blocked_reason,
                answer_text, latency_ms, retrieval_top1_cosine,
-               ensemble_providers, ensemble_agreement_count, provider_errors)
-            VALUES (FALSE, TRUE, $1, $2, $3, $4, $5, $6, $7, $8, $9,
-                    $10, $11, $12, $13, $14, $15::text[], $16, $17::jsonb)
+               ensemble_providers, ensemble_agreement_count, provider_errors,
+               judge_verdict, judge_missing_topic)
+            VALUES (FALSE, TRUE, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+                    $11, $12, $13, $14, $15, $16::text[], $17, $18::jsonb,
+                    $19, $20)
             RETURNING id
             """,
             user_id, conversation_id, query,
+            override_query,
             result.best_confidence, result.best_source_url,
             result.best_source_domain, result.best_quote,
             result.best_quote_verified, result.surfaced,
@@ -1664,6 +1755,7 @@ async def _try_ensemble_fallback(
             result.providers_succeeded or [],
             result.agreement_count,
             _json.dumps(result.provider_errors or {}),
+            judge_verdict, judge_missing_topic,
         )
         if row is not None:
             fallback_id = str(row["id"])
@@ -1694,6 +1786,9 @@ async def _try_web_fallback(
     top_cosine: float,
     cosine_threshold: float,
     daily_cap: int,
+    override_query: str | None = None,
+    judge_verdict: str | None = None,
+    judge_missing_topic: str | None = None,
 ) -> "WebFallbackCard | None":
     """Run one fallback attempt for a hedged answer. Returns a populated
     card iff all gates pass. Persists every attempt to
@@ -1738,8 +1833,11 @@ async def _try_web_fallback(
         except Exception as exc:
             logger.warning("web_fallback cap check failed: %s", exc)
 
+    # D6.60 — partial_miss verdict overrides the LLM-side query but
+    # leaves user-facing query intact for audit + persistence.
+    llm_query = override_query or query
     result = await attempt_web_fallback(
-        query=query, anthropic_client=anthropic_client,
+        query=llm_query, anthropic_client=anthropic_client,
     )
 
     # Persist (fire-and-forget — DB errors don't suppress the card if
@@ -1747,17 +1845,23 @@ async def _try_web_fallback(
     # on the attempt row so the admin tools see the full state.
     fallback_id: str | None = None
     try:
+        # web_query_used: prefer override_query (D6.60 partial_miss
+        # focused topic) over what attempt_web_fallback returned. The
+        # latter is just an internal fallback-side reformulation; the
+        # former is the judge's verdict on what's actually missing.
+        web_query_for_audit = override_query or result.web_query_used
         row = await pool.fetchrow(
             "INSERT INTO web_fallback_responses "
             "  (is_calibration, is_ensemble, user_id, chat_message_id, query, "
             "   web_query_used, top_urls, confidence, source_url, "
             "   source_domain, quote_text, quote_verified, surfaced, "
             "   surface_tier, surface_blocked_reason, answer_text, "
-            "   latency_ms, retrieval_top1_cosine) "
+            "   latency_ms, retrieval_top1_cosine, "
+            "   judge_verdict, judge_missing_topic) "
             "VALUES (FALSE, FALSE, $1, $2, $3, $4, $5::text[], $6, $7, $8, "
-            "        $9, $10, $11, $12, $13, $14, $15, $16) "
+            "        $9, $10, $11, $12, $13, $14, $15, $16, $17, $18) "
             "RETURNING id",
-            user_id, conversation_id, query, result.web_query_used,
+            user_id, conversation_id, query, web_query_for_audit,
             result.top_urls or [], result.confidence,
             result.source_url, result.source_domain, result.quote_text,
             result.quote_verified, result.surfaced,
@@ -1765,6 +1869,7 @@ async def _try_web_fallback(
             result.surface_blocked_reason, result.answer_text,
             result.latency_ms,
             top_cosine,
+            judge_verdict, judge_missing_topic,
         )
         if row is not None:
             fallback_id = str(row["id"])
@@ -2053,6 +2158,10 @@ async def _log_retrieval_miss(
     retrieved_chunks: list,
     cited: list[CitedRegulation],
     answer: str,
+    judge_verdict: str | None = None,
+    judge_reasoning: str | None = None,
+    judge_missing_topic: str | None = None,
+    chunks_truncated_for_judge: bool = False,
 ) -> None:
     """Insert a row into retrieval_misses for later analysis.
 
@@ -2110,9 +2219,12 @@ async def _log_retrieval_miss(
             vessel_profile_set, vessel_profile,
             hedge_phrase_matched, model_used,
             input_tokens, output_tokens,
-            retrieved_chunks, cited_regulations, answer_preview
+            retrieved_chunks, cited_regulations, answer_preview,
+            judge_verdict, judge_reasoning, judge_missing_topic,
+            chunks_truncated_for_judge
         )
-        VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10::jsonb, $11::jsonb, $12)
+        VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10::jsonb,
+                $11::jsonb, $12, $13, $14, $15, $16)
         """,
         user_id,
         conversation_id,
@@ -2126,6 +2238,10 @@ async def _log_retrieval_miss(
         _json.dumps(retrieved_payload, default=_json_default),
         _json.dumps(cited_payload, default=_json_default),
         answer[:2000],
+        judge_verdict,
+        judge_reasoning,
+        judge_missing_topic,
+        chunks_truncated_for_judge,
     )
 
 
@@ -2150,6 +2266,7 @@ async def chat_with_progress(
     web_fallback_cosine_threshold: float = 0.7,
     web_fallback_daily_cap: int = 10,
     web_fallback_cascade_enabled: bool = True,
+    hedge_judge_enabled: bool = True,
 ) -> AsyncIterator[dict]:
     """Same RAG pipeline as chat() but yields lightweight progress events.
 
@@ -2318,12 +2435,48 @@ async def chat_with_progress(
 
     # Sprint D2-LOG (also in chat() above) — detect hedges on the final
     # answer and log the miss to retrieval_misses. This path is the one
-    # real users hit via SSE streaming; the eval-only chat() path had the
-    # hook but this one was missing it prior to 2026-04-23 analysis.
+    # real users hit via SSE streaming.
+    #
+    # D6.60 — Haiku judge gates the fallback decision: complete_miss /
+    # partial_miss fire ensemble, precision_callout / false_hedge
+    # suppress. See the chat() path above for full rationale.
     # Fire-and-forget: DB errors never fail the SSE stream.
     hedge_phrase = detect_hedge(cleaned_answer)
     web_fallback_card = None
+    judge_verdict: str | None = None
+    judge_reasoning: str | None = None
+    judge_missing_topic: str | None = None
+    chunks_truncated_for_judge = False
     if hedge_phrase is not None:
+        # 1. Judge — gates the fallback decision.
+        if hedge_judge_enabled:
+            from rag.hedge_judge import judge_hedge
+            try:
+                verdict = await judge_hedge(
+                    question=query,
+                    answer=cleaned_answer,
+                    chunks=chunks,
+                    citations=[
+                        {"source": c.source, "section_number": c.section_number,
+                         "section_title": c.section_title}
+                        for c in verified_cited
+                    ],
+                    anthropic_client=anthropic_client,
+                )
+                judge_verdict = verdict.verdict
+                judge_reasoning = verdict.reasoning or None
+                judge_missing_topic = verdict.missing_topic
+                chunks_truncated_for_judge = verdict.chunks_truncated
+            except Exception as exc:
+                logger.warning(
+                    "hedge_judge unexpected failure (defaulting to complete_miss): %s: %s",
+                    type(exc).__name__, str(exc)[:200],
+                )
+                judge_verdict = "complete_miss"
+        else:
+            judge_verdict = "complete_miss"
+
+        # 2. Log to retrieval_misses with verdict.
         try:
             await _log_retrieval_miss(
                 pool=pool,
@@ -2337,6 +2490,10 @@ async def chat_with_progress(
                 retrieved_chunks=chunks,
                 cited=verified_cited,
                 answer=cleaned_answer,
+                judge_verdict=judge_verdict,
+                judge_reasoning=judge_reasoning,
+                judge_missing_topic=judge_missing_topic,
+                chunks_truncated_for_judge=chunks_truncated_for_judge,
             )
         except Exception as exc:
             logger.warning(
@@ -2345,15 +2502,19 @@ async def chat_with_progress(
                 str(exc)[:200],
             )
 
-        # Sprint D6.48 Phase 2 — fire web fallback for streaming users.
-        # This is the path real users hit through the chat UI. The
-        # non-streaming chat() function had this hook from D6.48 ship,
-        # but the streaming path was missed (caught by Blake's STRETCH
-        # DUCK 07 review 2026-05-02).
-        if web_fallback_enabled:
+        # 3. Fire fallback only on miss verdicts.
+        should_fire_fallback = judge_verdict in ("complete_miss", "partial_miss")
+        if web_fallback_enabled and should_fire_fallback:
             top_cosine = (
                 chunks[0].get("similarity", 0.0) if chunks else 0.0
             )
+            override_query: str | None = None
+            if judge_verdict == "partial_miss" and judge_missing_topic:
+                override_query = judge_missing_topic
+                logger.info(
+                    "hedge_judge partial_miss (streaming): overriding ensemble "
+                    "query from %r to %r", query[:80], override_query,
+                )
             yield {
                 "event": "status",
                 "data": "Searching authoritative sources…",
@@ -2372,6 +2533,9 @@ async def chat_with_progress(
                     cosine_threshold=web_fallback_cosine_threshold,
                     daily_cap=web_fallback_daily_cap,
                     cascade_enabled=web_fallback_cascade_enabled,
+                    override_query=override_query,
+                    judge_verdict=judge_verdict,
+                    judge_missing_topic=judge_missing_topic,
                 )
             except Exception as exc:
                 logger.warning(
@@ -2379,10 +2543,13 @@ async def chat_with_progress(
                     type(exc).__name__,
                     str(exc)[:200],
                 )
+        elif not should_fire_fallback:
+            logger.info(
+                "hedge_judge suppressed fallback (streaming): verdict=%s reasoning=%r",
+                judge_verdict, (judge_reasoning or "")[:200],
+            )
 
-        # Sprint D6.58 Slice 2 — hedge classifier (streaming path).
-        # Fire-and-forget; Haiku call adds <1s latency on the
-        # already-completed response.
+        # 4. Hedge classifier — fires on every hedge regardless of verdict.
         try:
             await _classify_and_persist_hedge(
                 pool=pool,

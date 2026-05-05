@@ -26,6 +26,9 @@ type Tier = 'verified' | 'consensus' | 'reference' | 'blocked'
 type TierFilter = Tier | 'all'
 type PathFilter = 'all' | 'ensemble' | 'single'
 
+type JudgeVerdict =
+  | 'complete_miss' | 'partial_miss' | 'precision_callout' | 'false_hedge'
+
 interface FallbackEvent {
   id: string
   created_at: string
@@ -46,6 +49,24 @@ interface FallbackEvent {
   user_email: string | null
   conversation_id: string | null
   answer_text: string | null
+  // D6.60 — Haiku judge verdict that gated this fire (null on rows
+  // persisted before judge shipped).
+  judge_verdict: JudgeVerdict | null
+  judge_missing_topic: string | null
+  web_query_used: string | null
+}
+
+// Visual styling for each judge verdict. complete_miss is the
+// "expected" verdict for a fired fallback (looks neutral); partial_miss
+// is the "smart routing" verdict (highlight). precision_callout +
+// false_hedge shouldn't appear on fired-event rows in normal operation
+// (those suppress fallback) — if they do, it's a logic bug worth
+// spotting fast.
+const JUDGE_VERDICT_INFO: Record<JudgeVerdict, { label: string; color: string }> = {
+  complete_miss:     { label: 'Complete miss',     color: 'bg-rose-500/15 text-rose-300 border-rose-500/30' },
+  partial_miss:      { label: 'Partial miss',      color: 'bg-amber-500/15 text-amber-300 border-amber-500/30' },
+  precision_callout: { label: 'Precision callout', color: 'bg-red-500/15 text-red-400 border-red-500/30' },
+  false_hedge:       { label: 'False hedge',       color: 'bg-red-500/15 text-red-400 border-red-500/30' },
 }
 
 interface FallbackStats {
@@ -284,6 +305,21 @@ function EventRow({
       —
     </span>
   )
+  // Judge verdict badge (D6.60). Only render if persisted; older rows
+  // pre-judge return null.
+  const judgeInfo = ev.judge_verdict ? JUDGE_VERDICT_INFO[ev.judge_verdict] : null
+  const judgeBadge = judgeInfo ? (
+    <span
+      className={`flex-shrink-0 px-1.5 py-0.5 rounded text-[10px] font-mono uppercase tracking-wider border ${judgeInfo.color}`}
+      title={
+        ev.judge_verdict === 'partial_miss' && ev.judge_missing_topic
+          ? `Judge → ${judgeInfo.label} · missing: ${ev.judge_missing_topic}`
+          : `Judge → ${judgeInfo.label}`
+      }
+    >
+      {judgeInfo.label}
+    </span>
+  ) : null
   return (
     <div className="rounded-lg border border-white/8 bg-[#0a0e1a]/60">
       <button
@@ -291,6 +327,7 @@ function EventRow({
         className="w-full text-left px-4 py-3 flex items-start gap-3 hover:bg-white/5 transition-colors"
       >
         {tierBadge}
+        {judgeBadge}
         {ev.is_ensemble && (
           <span className="flex-shrink-0 px-1.5 py-0.5 rounded text-[10px] font-mono uppercase tracking-wider border bg-purple-500/10 text-purple-300/80 border-purple-500/20">
             Big-3
@@ -316,6 +353,28 @@ function EventRow({
 
       {expanded && (
         <div className="border-t border-white/8 px-4 py-4 space-y-4 text-sm">
+          {/* D6.60 — judge verdict + override-query reasoning */}
+          {ev.judge_verdict && (
+            <div className="bg-[#0d1225] border border-white/8 rounded-md p-3">
+              <p className="text-[10px] font-mono uppercase tracking-wider text-[#6b7594] mb-1">
+                Hedge judge
+              </p>
+              <p className="text-xs text-[#f0ece4]/85">
+                Verdict: <span className="font-mono">{ev.judge_verdict}</span>
+              </p>
+              {ev.judge_verdict === 'partial_miss' && ev.judge_missing_topic && (
+                <p className="text-xs text-[#f0ece4]/85 mt-1">
+                  Missing topic: <span className="font-mono text-amber-300">{ev.judge_missing_topic}</span>
+                </p>
+              )}
+              {ev.web_query_used && ev.web_query_used !== ev.query && (
+                <p className="text-[11px] text-[#6b7594] mt-1">
+                  Ensemble searched on: <span className="font-mono">&ldquo;{ev.web_query_used}&rdquo;</span>
+                </p>
+              )}
+            </div>
+          )}
+
           {ev.is_ensemble && ev.ensemble_providers && (
             <div>
               <p className="text-[10px] font-mono uppercase tracking-wider text-[#6b7594] mb-1">

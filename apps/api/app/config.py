@@ -130,6 +130,20 @@ class Settings(BaseSettings):
     web_fallback_cascade_enabled: bool = Field(
         default=True, validation_alias="WEB_FALLBACK_CASCADE_ENABLED",
     )
+    # ── D6.60 Hedge judge ────────────────────────────────────────────
+    # When true, every regex hedge match runs through a Haiku judge
+    # that classifies the hedge as complete_miss / partial_miss /
+    # precision_callout / false_hedge. Only the first two fire the
+    # ensemble; precision callouts (e.g. "I gave you 8 citations, btw
+    # niche detail X isn't in my context") suppress, saving the spend
+    # and avoiding redundant yellow cards. False = legacy regex-only
+    # behavior (every regex match fires fallback).
+    # See packages/rag/rag/hedge_judge.py for the judge prompt and
+    # docs/proposals/d6-60-hedge-judge.md (forthcoming) for the
+    # design rationale.
+    hedge_judge_enabled: bool = Field(
+        default=True, validation_alias="HEDGE_JUDGE_ENABLED",
+    )
 
     # Monitoring
     sentry_dsn: str = Field(default="", validation_alias="SENTRY_DSN")
