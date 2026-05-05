@@ -152,8 +152,16 @@ async def classify_hedge(
     hedge_text: str,
     vessel_profile: Optional[dict],
     anthropic_client,
+    ensemble_context: Optional[dict] = None,
 ) -> Optional[HedgeAuditOutcome]:
-    """Run the classifier. Returns None on any error — caller swallows."""
+    """Run the classifier. Returns None on any error — caller swallows.
+
+    `ensemble_context`, when present (D6.58 Slice 3), tells the
+    classifier that a Big-3 ensemble fire surfaced a source, plus
+    the source domain. The classifier uses this to make
+    recommendations more pointed — e.g. "Ensemble found dnv.com on
+    this query; consider ingesting DNV-RU-NAV section X."
+    """
     vessel_line = ""
     if vessel_profile:
         flag = vessel_profile.get("flag_state") or "?"
@@ -165,9 +173,20 @@ async def classify_hedge(
             f"subchapter={sub}, routes={routes}"
         )
 
+    ensemble_line = ""
+    if ensemble_context:
+        tier = ensemble_context.get("tier") or "?"
+        domain = ensemble_context.get("source_domain") or "?"
+        agreement = ensemble_context.get("agreement_count")
+        ensemble_line = (
+            f"\nBig-3 ensemble fired: surface_tier={tier}, "
+            f"source_domain={domain}"
+            + (f", providers_agreed={agreement}/3" if agreement is not None else "")
+        )
+
     user_payload = (
         f"Query: {query}\n"
-        f"{vessel_line}\n\n"
+        f"{vessel_line}{ensemble_line}\n\n"
         f"Top retrieved sections (rank, similarity, source, section, title):\n"
         f"{_retrieval_summary(retrieved)}\n\n"
         f"Assistant's hedged response (first 800 chars):\n"

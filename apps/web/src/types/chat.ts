@@ -10,15 +10,20 @@ export interface CitedRegulation {
 // distinct card so users never confuse it with an authoritative
 // corpus answer.
 //
-// Sprint D6.58 Slice 1 — `surface_tier` distinguishes:
-//   'verified'  — confidence 4-5, quote verified verbatim. Card
-//                 reads as a RegKnots-authored answer with a
-//                 "Verified web result" badge.
-//   'reference' — confidence 2-3 OR quote unverifiable. Card reads
-//                 "We found this — verify yourself" with the source
-//                 URL prominent and an "External reference" badge.
-//                 Lower endorsement floor → more useful answers
-//                 reach the user without RegKnot vouching for them.
+// Sprint D6.58 Slice 1 + Slice 3 — `surface_tier` distinguishes:
+//   'verified'  — confidence 4-5, quote verified verbatim against
+//                 the source. RegKnots-authored answer, "Verified
+//                 web result" badge.
+//   'consensus' — Slice 3 Big-3 ensemble found ≥2/3 cross-LLM
+//                 agreement on the answer but no single citation
+//                 we'd vouch for. Badge: "AI consensus — verify
+//                 yourself." Premium signal but explicitly NOT a
+//                 RegKnots verified citation.
+//   'reference' — single-LLM (or single-provider) result with
+//                 confidence 2-3 OR quote unverifiable. Surfaces
+//                 the source URL with an "External reference"
+//                 badge. Lower endorsement floor → useful pointer
+//                 without RegKnot vouching for content.
 export interface WebFallbackCard {
   fallback_id: string
   source_url: string
@@ -26,7 +31,7 @@ export interface WebFallbackCard {
   quote: string
   summary: string
   confidence: number  // 1-5
-  surface_tier?: 'verified' | 'reference'
+  surface_tier?: 'verified' | 'consensus' | 'reference'
 }
 
 export interface Message {

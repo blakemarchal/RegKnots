@@ -1264,6 +1264,8 @@ async def chat(
     user_jurisdiction_focus: str | None = None,
     user_verbosity: str | None = None,
     user_id: UUID | None = None,
+    subscription_tier: str | None = None,
+    xai_api_key: str = "",
     web_fallback_enabled: bool = True,
     web_fallback_cosine_threshold: float = 0.5,
     web_fallback_daily_cap: int = 10,
@@ -1452,18 +1454,23 @@ async def chat(
 
         # Sprint D6.48 Phase 2 — when the corpus genuinely missed AND
         # the kill switch is on AND the user has cap remaining, try a
-        # web search fallback against the trusted-domain whitelist.
+        # web search fallback. D6.58 Slice 3 — if the user's tier
+        # allows, escalate to the Big-3 ensemble (Claude+GPT+Grok)
+        # instead of the single-LLM Slice-1 path.
         if web_fallback_enabled:
             top_cosine = (
                 chunks[0].get("similarity", 0.0) if chunks else 0.0
             )
             try:
-                web_fallback_card = await _try_web_fallback(
+                web_fallback_card = await _dispatch_web_fallback(
                     query=query,
                     conversation_id=conversation_id,
                     user_id=user_id,
+                    subscription_tier=subscription_tier,
                     pool=pool,
                     anthropic_client=anthropic_client,
+                    openai_api_key=openai_api_key,
+                    xai_api_key=xai_api_key,
                     top_cosine=top_cosine,
                     cosine_threshold=web_fallback_cosine_threshold,
                     daily_cap=web_fallback_daily_cap,
@@ -1509,6 +1516,147 @@ async def chat(
         vessel_update=vessel_update,
         regenerated=regenerated,
         web_fallback=web_fallback_card,
+    )
+
+
+async def _dispatch_web_fallback(
+    *,
+    query: str,
+    conversation_id: UUID,
+    user_id: UUID | None,
+    subscription_tier: str | None,
+    pool: asyncpg.Pool,
+    anthropic_client: AsyncAnthropic,
+    openai_api_key: str,
+    xai_api_key: str,
+    top_cosine: float,
+    cosine_threshold: float,
+    daily_cap: int,
+) -> "WebFallbackCard | None":
+    """Tier-aware fallback dispatcher (D6.58 Slice 3).
+
+    Decision tree:
+      1. If user has Big-3 ensemble cap remaining for their tier
+         AND xAI key is configured AND user_id is known →
+         fire ensemble (parallel Claude+GPT+Grok web search +
+         synthesis). Surfaces as 'verified' / 'consensus' /
+         'reference' / 'blocked' per the synthesizer's verdict.
+      2. Else → fall back to single-LLM (Slice 1) path. Surfaces as
+         'verified' / 'reference' / 'blocked'.
+
+    The ensemble strictly subsumes the single-LLM path — Claude with
+    web search is one of its three providers — so we never fire both.
+    """
+    # Anonymous users → single-LLM path only (no ensemble for unauth).
+    # User with empty xAI key → single-LLM (xAI couldn't fire anyway).
+    if user_id is None or not xai_api_key:
+        return await _try_web_fallback(
+            query=query, conversation_id=conversation_id, user_id=user_id,
+            pool=pool, anthropic_client=anthropic_client,
+            top_cosine=top_cosine, cosine_threshold=cosine_threshold,
+            daily_cap=daily_cap,
+        )
+
+    # Per-tier ensemble cap check.
+    from rag.ensemble_fallback import is_under_ensemble_cap
+    try:
+        allowed, used, cap = await is_under_ensemble_cap(
+            pool=pool, user_id=user_id,
+            subscription_tier=subscription_tier or "free",
+        )
+    except Exception as exc:
+        logger.warning("ensemble cap check failed: %s — falling back", exc)
+        allowed = False
+        used = 0
+        cap = 0
+
+    if not allowed:
+        logger.info(
+            "ensemble cap reached for user %s tier=%s (used %d/%d) — single-LLM fallback",
+            user_id, subscription_tier, used, cap,
+        )
+        return await _try_web_fallback(
+            query=query, conversation_id=conversation_id, user_id=user_id,
+            pool=pool, anthropic_client=anthropic_client,
+            top_cosine=top_cosine, cosine_threshold=cosine_threshold,
+            daily_cap=daily_cap,
+        )
+
+    # Big-3 ensemble path.
+    return await _try_ensemble_fallback(
+        query=query, conversation_id=conversation_id, user_id=user_id,
+        pool=pool, anthropic_client=anthropic_client,
+        openai_api_key=openai_api_key, xai_api_key=xai_api_key,
+        top_cosine=top_cosine,
+    )
+
+
+async def _try_ensemble_fallback(
+    *,
+    query: str,
+    conversation_id: UUID,
+    user_id: UUID,
+    pool: asyncpg.Pool,
+    anthropic_client: AsyncAnthropic,
+    openai_api_key: str,
+    xai_api_key: str,
+    top_cosine: float,
+) -> "WebFallbackCard | None":
+    """Run the Big-3 ensemble + persist + return a card if surfaced.
+
+    Logs to web_fallback_responses with is_ensemble=TRUE so per-tier
+    cap accounting works on subsequent calls. Caller already verified
+    the user is under cap.
+    """
+    from rag.ensemble_fallback import attempt_ensemble_fallback
+    from rag.models import WebFallbackCard
+
+    result = await attempt_ensemble_fallback(
+        query=query,
+        anthropic_client=anthropic_client,
+        openai_api_key=openai_api_key,
+        xai_api_key=xai_api_key,
+    )
+
+    fallback_id: str | None = None
+    try:
+        row = await pool.fetchrow(
+            """
+            INSERT INTO web_fallback_responses
+              (is_calibration, is_ensemble, user_id, chat_message_id, query,
+               confidence, source_url, source_domain, quote_text,
+               quote_verified, surfaced, surface_tier, surface_blocked_reason,
+               answer_text, latency_ms, retrieval_top1_cosine,
+               ensemble_providers, ensemble_agreement_count)
+            VALUES (FALSE, TRUE, $1, $2, $3, $4, $5, $6, $7, $8, $9,
+                    $10, $11, $12, $13, $14, $15::text[], $16)
+            RETURNING id
+            """,
+            user_id, conversation_id, query,
+            result.best_confidence, result.best_source_url,
+            result.best_source_domain, result.best_quote,
+            result.best_quote_verified, result.surfaced,
+            result.surface_tier, result.surface_blocked_reason,
+            result.best_answer, result.latency_ms, top_cosine,
+            result.providers_succeeded or [],
+            result.agreement_count,
+        )
+        if row is not None:
+            fallback_id = str(row["id"])
+    except Exception as exc:
+        logger.warning("ensemble persist failed (non-fatal): %s", exc)
+
+    if not result.surfaced:
+        return None
+
+    return WebFallbackCard(
+        fallback_id=fallback_id or "",
+        source_url=result.best_source_url or "",
+        source_domain=result.best_source_domain or "",
+        quote=result.best_quote or "",
+        summary=result.best_summary or result.best_answer or "",
+        confidence=result.best_confidence or 0,
+        surface_tier=result.surface_tier,
     )
 
 
@@ -1571,25 +1719,25 @@ async def _try_web_fallback(
     )
 
     # Persist (fire-and-forget — DB errors don't suppress the card if
-    # we managed to assemble one). top_cosine recorded on the attempt
-    # row so we can still see the retrieval signal at fire time even
-    # though we no longer gate on it.
+    # we managed to assemble one). top_cosine + surface_tier recorded
+    # on the attempt row so the admin tools see the full state.
     fallback_id: str | None = None
     try:
         row = await pool.fetchrow(
             "INSERT INTO web_fallback_responses "
-            "  (is_calibration, user_id, chat_message_id, query, "
+            "  (is_calibration, is_ensemble, user_id, chat_message_id, query, "
             "   web_query_used, top_urls, confidence, source_url, "
             "   source_domain, quote_text, quote_verified, surfaced, "
-            "   surface_blocked_reason, answer_text, latency_ms, "
-            "   retrieval_top1_cosine) "
-            "VALUES (FALSE, $1, $2, $3, $4, $5::text[], $6, $7, $8, $9, "
-            "        $10, $11, $12, $13, $14, $15) "
+            "   surface_tier, surface_blocked_reason, answer_text, "
+            "   latency_ms, retrieval_top1_cosine) "
+            "VALUES (FALSE, FALSE, $1, $2, $3, $4, $5::text[], $6, $7, $8, "
+            "        $9, $10, $11, $12, $13, $14, $15, $16) "
             "RETURNING id",
             user_id, conversation_id, query, result.web_query_used,
             result.top_urls or [], result.confidence,
             result.source_url, result.source_domain, result.quote_text,
             result.quote_verified, result.surfaced,
+            result.surface_tier,
             result.surface_blocked_reason, result.answer_text,
             result.latency_ms,
             top_cosine,
@@ -1828,22 +1976,33 @@ async def _classify_and_persist_hedge(
     """
     from rag.hedge_audit import classify_hedge, persist_hedge_audit
 
-    outcome = await classify_hedge(
-        query=query,
-        retrieved=retrieved or [],
-        hedge_text=hedge_text,
-        vessel_profile=vessel_profile,
-        anthropic_client=anthropic_client,
-    )
-    if outcome is None:
-        return
-
     web_fallback_id = (
         web_fallback_card.fallback_id if web_fallback_card else None
     )
     web_surface_tier = (
         web_fallback_card.surface_tier if web_fallback_card else None
     )
+
+    # D6.58 Slice 3 — give the classifier ensemble context so it can
+    # recommend more pointed actions (e.g. "ensemble surfaced
+    # dnv.com — ingest DNV section X").
+    ensemble_context = None
+    if web_fallback_card and web_surface_tier in ("consensus", "verified"):
+        ensemble_context = {
+            "tier": web_surface_tier,
+            "source_domain": web_fallback_card.source_domain,
+        }
+
+    outcome = await classify_hedge(
+        query=query,
+        retrieved=retrieved or [],
+        hedge_text=hedge_text,
+        vessel_profile=vessel_profile,
+        anthropic_client=anthropic_client,
+        ensemble_context=ensemble_context,
+    )
+    if outcome is None:
+        return
 
     await persist_hedge_audit(
         pool=pool,
@@ -1961,6 +2120,8 @@ async def chat_with_progress(
     user_jurisdiction_focus: str | None = None,
     user_verbosity: str | None = None,
     user_id: UUID | None = None,
+    subscription_tier: str | None = None,
+    xai_api_key: str = "",
     web_fallback_enabled: bool = True,
     web_fallback_cosine_threshold: float = 0.7,
     web_fallback_daily_cap: int = 10,
@@ -2173,12 +2334,15 @@ async def chat_with_progress(
                 "data": "Searching authoritative sources…",
             }
             try:
-                web_fallback_card = await _try_web_fallback(
+                web_fallback_card = await _dispatch_web_fallback(
                     query=query,
                     conversation_id=conversation_id,
                     user_id=user_id,
+                    subscription_tier=subscription_tier,
                     pool=pool,
                     anthropic_client=anthropic_client,
+                    openai_api_key=openai_api_key,
+                    xai_api_key=xai_api_key,
                     top_cosine=top_cosine,
                     cosine_threshold=web_fallback_cosine_threshold,
                     daily_cap=web_fallback_daily_cap,

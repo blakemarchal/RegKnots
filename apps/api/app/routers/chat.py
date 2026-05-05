@@ -662,6 +662,9 @@ async def chat_endpoint(
         user_jurisdiction_focus=user_jurisdiction_focus,
         user_verbosity=user_verbosity,
         user_id=uuid.UUID(current_user.user_id),
+        # D6.58 Slice 3 — ensemble cap is gated by user tier.
+        subscription_tier=current_user.tier,
+        xai_api_key=settings.xai_api_key,
         web_fallback_enabled=settings.web_fallback_enabled,
         web_fallback_cosine_threshold=settings.web_fallback_cosine_threshold,
         web_fallback_daily_cap=settings.web_fallback_daily_cap,
@@ -743,6 +746,9 @@ async def chat_stream_endpoint(
                 user_jurisdiction_focus=user_jurisdiction_focus,
                 user_verbosity=user_verbosity,
                 user_id=user_uuid,
+                # D6.58 Slice 3 — ensemble cap is gated by user tier.
+                subscription_tier=current_user.tier,
+                xai_api_key=settings.xai_api_key,
                 web_fallback_enabled=settings.web_fallback_enabled,
                 web_fallback_cosine_threshold=settings.web_fallback_cosine_threshold,
                 web_fallback_daily_cap=settings.web_fallback_daily_cap,

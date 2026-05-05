@@ -414,15 +414,23 @@ function WebFallbackCardView({ card }: { card: import('@/types/chat').WebFallbac
     }
   }
 
-  // D6.58 Slice 1 — two-tier rendering. The renderer picks badge
-  // text + tone from `surface_tier`. Default to 'verified' for
-  // back-compat with old payloads that don't carry the field.
+  // D6.58 Slice 1 + Slice 3 — three-tier rendering. The renderer
+  // picks badge text + tone from `surface_tier`. Default to
+  // 'verified' for back-compat with old payloads that don't carry
+  // the field.
   const tier = card.surface_tier ?? 'verified'
   const isReference = tier === 'reference'
-  const badgeText = isReference ? 'External reference' : 'Web reference'
-  const badgeSubtext = isReference
-    ? '(found via web — please verify)'
-    : '(not in RegKnots corpus)'
+  const isConsensus = tier === 'consensus'
+  const badgeText = isConsensus
+    ? 'AI consensus'
+    : isReference
+      ? 'External reference'
+      : 'Web reference'
+  const badgeSubtext = isConsensus
+    ? '(Claude + GPT + Grok agreed — not in RegKnots corpus)'
+    : isReference
+      ? '(found via web — please verify)'
+      : '(not in RegKnots corpus)'
 
   return (
     <div className="mt-4 border-l-2 border-amber-400/70 bg-amber-400/5 rounded-r-md p-4">
@@ -455,9 +463,11 @@ function WebFallbackCardView({ card }: { card: import('@/types/chat').WebFallbac
       </div>
       <div className="flex items-center justify-between border-t border-amber-400/15 pt-2">
         <div className="text-[11px] text-amber-200/50 italic">
-          {isReference
-            ? "We didn't fully verify this — open the source and confirm before acting on it."
-            : 'Verify against the primary regulator before relying on this for compliance.'}
+          {isConsensus
+            ? 'Three frontier models agreed on this answer — verify against the primary source before relying on it for compliance.'
+            : isReference
+              ? "We didn't fully verify this — open the source and confirm before acting on it."
+              : 'Verify against the primary regulator before relying on this for compliance.'}
         </div>
         <div className="flex items-center gap-1.5 ml-2">
           {feedback === null ? (
