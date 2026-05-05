@@ -4131,6 +4131,161 @@ async def get_chat(
     )
 
 
+# ── Web fallback events (Sprint D6.58 Slice 3 audit tooling) ──────────────
+
+
+class FallbackEventDTO(BaseModel):
+    id: str
+    created_at: str
+    query: str
+    surface_tier: str | None
+    is_ensemble: bool
+    ensemble_providers: list[str] | None
+    ensemble_agreement_count: int | None
+    confidence: int | None
+    source_url: str | None
+    source_domain: str | None
+    quote_text: str | None
+    quote_verified: bool
+    surfaced: bool
+    surface_blocked_reason: str | None
+    retrieval_top1_cosine: float | None
+    latency_ms: int
+    user_email: str | None
+    conversation_id: str | None
+    answer_text: str | None
+
+
+class FallbackStatsDTO(BaseModel):
+    total_7d: int
+    surfaced_7d: int
+    ensemble_7d: int
+    by_tier: dict[str, int]
+    by_blocked_reason: dict[str, int]
+
+
+@router.get("/web-fallback/stats", response_model=FallbackStatsDTO)
+async def web_fallback_stats(
+    _admin: Annotated[CurrentUser, Depends(require_admin)],
+    pool: Annotated[asyncpg.Pool, Depends(get_pool)],
+) -> FallbackStatsDTO:
+    """Aggregate counters for the admin web-fallback dashboard."""
+    total_7d = await pool.fetchval(
+        "SELECT COUNT(*) FROM web_fallback_responses "
+        "WHERE created_at > NOW() - INTERVAL '7 days' "
+        "AND is_calibration = FALSE"
+    ) or 0
+    surfaced_7d = await pool.fetchval(
+        "SELECT COUNT(*) FROM web_fallback_responses "
+        "WHERE created_at > NOW() - INTERVAL '7 days' "
+        "AND is_calibration = FALSE AND surfaced = TRUE"
+    ) or 0
+    ensemble_7d = await pool.fetchval(
+        "SELECT COUNT(*) FROM web_fallback_responses "
+        "WHERE created_at > NOW() - INTERVAL '7 days' "
+        "AND is_calibration = FALSE AND is_ensemble = TRUE"
+    ) or 0
+    tier_rows = await pool.fetch(
+        "SELECT COALESCE(surface_tier, 'unknown') AS tier, COUNT(*) AS n "
+        "FROM web_fallback_responses "
+        "WHERE created_at > NOW() - INTERVAL '7 days' "
+        "AND is_calibration = FALSE "
+        "GROUP BY 1"
+    )
+    blocked_rows = await pool.fetch(
+        "SELECT COALESCE(surface_blocked_reason, 'none') AS reason, COUNT(*) AS n "
+        "FROM web_fallback_responses "
+        "WHERE created_at > NOW() - INTERVAL '7 days' "
+        "AND is_calibration = FALSE AND surface_tier = 'blocked' "
+        "GROUP BY 1"
+    )
+    return FallbackStatsDTO(
+        total_7d=int(total_7d),
+        surfaced_7d=int(surfaced_7d),
+        ensemble_7d=int(ensemble_7d),
+        by_tier={r["tier"]: int(r["n"]) for r in tier_rows},
+        by_blocked_reason={
+            r["reason"]: int(r["n"]) for r in blocked_rows
+            if r["reason"] != "none"
+        },
+    )
+
+
+@router.get("/web-fallback", response_model=list[FallbackEventDTO])
+async def list_web_fallback_events(
+    _admin: Annotated[CurrentUser, Depends(require_admin)],
+    pool: Annotated[asyncpg.Pool, Depends(get_pool)],
+    tier: Annotated[str | None, Query()] = None,
+    path: Annotated[
+        Literal["all", "ensemble", "single"], Query()
+    ] = "all",
+    hours: Annotated[int, Query(ge=1, le=8760)] = 168,  # default 7 days
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
+) -> list[FallbackEventDTO]:
+    """List fallback events newest first, filtered by tier + path + window."""
+    where = [
+        f"wf.created_at > NOW() - INTERVAL '{int(hours)} hours'",
+        "wf.is_calibration = FALSE",
+    ]
+    params: list[object] = []
+    idx = 1
+    if tier and tier != "all":
+        where.append(f"wf.surface_tier = ${idx}")
+        params.append(tier)
+        idx += 1
+    if path == "ensemble":
+        where.append("wf.is_ensemble = TRUE")
+    elif path == "single":
+        where.append("wf.is_ensemble = FALSE")
+    where_sql = "WHERE " + " AND ".join(where)
+    params.append(limit)
+    rows = await pool.fetch(
+        f"""
+        SELECT wf.id, wf.created_at, wf.query, wf.surface_tier,
+               wf.is_ensemble, wf.ensemble_providers,
+               wf.ensemble_agreement_count, wf.confidence,
+               wf.source_url, wf.source_domain, wf.quote_text,
+               wf.quote_verified, wf.surfaced,
+               wf.surface_blocked_reason, wf.retrieval_top1_cosine,
+               wf.latency_ms, wf.answer_text, wf.chat_message_id,
+               u.email AS user_email
+        FROM web_fallback_responses wf
+        LEFT JOIN users u ON u.id = wf.user_id
+        {where_sql}
+        ORDER BY wf.created_at DESC
+        LIMIT ${idx}
+        """,
+        *params,
+    )
+    return [
+        FallbackEventDTO(
+            id=str(r["id"]),
+            created_at=r["created_at"].isoformat(),
+            query=r["query"],
+            surface_tier=r["surface_tier"],
+            is_ensemble=bool(r["is_ensemble"]),
+            ensemble_providers=list(r["ensemble_providers"] or []) or None,
+            ensemble_agreement_count=r["ensemble_agreement_count"],
+            confidence=r["confidence"],
+            source_url=r["source_url"],
+            source_domain=r["source_domain"],
+            quote_text=r["quote_text"],
+            quote_verified=bool(r["quote_verified"]),
+            surfaced=bool(r["surfaced"]),
+            surface_blocked_reason=r["surface_blocked_reason"],
+            retrieval_top1_cosine=(
+                float(r["retrieval_top1_cosine"])
+                if r["retrieval_top1_cosine"] is not None else None
+            ),
+            latency_ms=int(r["latency_ms"] or 0),
+            user_email=r["user_email"],
+            conversation_id=str(r["chat_message_id"]) if r["chat_message_id"] else None,
+            answer_text=r["answer_text"],
+        )
+        for r in rows
+    ]
+
+
 # ── Hedge audits (Sprint D6.58 Slice 2) ───────────────────────────────────
 
 
