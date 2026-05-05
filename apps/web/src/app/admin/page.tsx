@@ -1,7 +1,7 @@
 'use client'
 
-import { useEffect, useState, useCallback, useMemo } from 'react'
-import { useRouter } from 'next/navigation'
+import { useEffect, useState, useCallback, useMemo, Suspense } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import AuthGuard from '@/components/AuthGuard'
 import { AppHeader } from '@/components/AppHeader'
 import { useAuthStore } from '@/lib/auth'
@@ -296,6 +296,10 @@ function AdminContent() {
 
   // ── Tab state ───────────────────────────────────────────────────────────
   type AdminTab = 'overview' | 'users' | 'chats' | 'content' | 'email' | 'data' | 'jobs' | 'system' | 'partners' | 'features'
+  const ADMIN_TABS: ReadonlySet<AdminTab> = new Set([
+    'overview', 'users', 'chats', 'content', 'email',
+    'data', 'jobs', 'system', 'partners', 'features',
+  ])
   const [activeTab, setActiveTab] = useState<AdminTab>(() => {
     if (typeof window === 'undefined') return 'overview'
     const stored = window.localStorage.getItem('admin_active_tab') as AdminTab | null
@@ -306,6 +310,26 @@ function AdminContent() {
       window.localStorage.setItem('admin_active_tab', activeTab)
     }
   }, [activeTab])
+
+  // ── Deep-link support: /admin?tab=chats&conversation_id=<id> ────────────
+  // Used by /admin/hedge-audit + /admin/web-fallback to jump straight to a
+  // conversation. The searchParams are read once on mount; the tab switch
+  // wins over the localStorage-restored tab.
+  const searchParams = useSearchParams()
+  const [initialChatId, setInitialChatId] = useState<string | null>(null)
+  useEffect(() => {
+    const tabParam = searchParams.get('tab') as AdminTab | null
+    if (tabParam && ADMIN_TABS.has(tabParam)) {
+      setActiveTab(tabParam)
+    }
+    const cidParam = searchParams.get('conversation_id')
+    if (cidParam) {
+      setInitialChatId(cidParam)
+    }
+    // Intentionally not including ADMIN_TABS in deps — it's a stable Set
+    // declared in render, but we only want to react to URL changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams])
 
   // Analytics state
   const [messagesPerDay, setMessagesPerDay] = useState<DayMessageCount[]>([])
@@ -2213,7 +2237,7 @@ function AdminContent() {
           {activeTab === 'jobs' && <JobsTab />}
           {activeTab === 'system' && <SystemTab />}
           {activeTab === 'partners' && <PartnersPanel />}
-          {activeTab === 'chats' && <ChatsTab />}
+          {activeTab === 'chats' && <ChatsTab initialChatId={initialChatId} />}
           {activeTab === 'features' && <FeaturesTab />}
 
         </div>
@@ -2894,7 +2918,13 @@ interface ChatDetail {
   messages: ChatMessageDetail[]
 }
 
-function ChatsTab() {
+interface ChatsTabProps {
+  /** Conversation id to auto-open on mount (deep-link from hedge-audit
+   *  / web-fallback admin pages via ?conversation_id=...). */
+  initialChatId?: string | null
+}
+
+function ChatsTab({ initialChatId }: ChatsTabProps = {}) {
   const [items, setItems] = useState<ChatListItem[]>([])
   const [total, setTotal] = useState(0)
   const [offset, setOffset] = useState(0)
@@ -2949,6 +2979,17 @@ function ChatsTab() {
       setDetailLoading(false)
     }
   }, [])
+
+  // Deep-link: when navigated to with ?conversation_id=<id>, auto-open
+  // that chat in the detail panel. The chat detail comes from
+  // /admin/chats/<id> directly; it does not need to be in the filtered
+  // list. Runs once per distinct id.
+  useEffect(() => {
+    if (initialChatId && initialChatId !== selectedId) {
+      void openDetail(initialChatId)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialChatId])
 
   return (
     <div>
@@ -3411,9 +3452,13 @@ function FeaturesTab() {
 // ── Page ─────────────────────────────────────────────────────────────────────────
 
 export default function AdminPage() {
+  // Suspense boundary required by useSearchParams() in AdminContent —
+  // without it Next.js bails the whole route out of static prerendering.
   return (
     <AuthGuard>
-      <AdminContent />
+      <Suspense fallback={null}>
+        <AdminContent />
+      </Suspense>
     </AuthGuard>
   )
 }

@@ -355,7 +355,7 @@ function AuditRow({
           <div className="flex flex-wrap gap-2 pt-2 border-t border-white/8">
             {audit.conversation_id && (
               <Link
-                href={`/admin/chat-tail?conversation_id=${audit.conversation_id}`}
+                href={`/admin?tab=chats&conversation_id=${audit.conversation_id}`}
                 className="px-3 py-1.5 rounded-md border border-white/10
                            text-xs font-medium text-[#f0ece4]/80 hover:bg-white/5
                            transition-colors"
