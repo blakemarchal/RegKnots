@@ -243,6 +243,22 @@ def _parse_classifier_json(text: str) -> Optional[dict]:
     return None
 
 
+def _json_safe(obj):
+    """JSON encoder for retrieved-chunks payload.
+
+    The retrieved chunks coming from the retriever contain UUID and
+    datetime fields that json.dumps can't serialize by default. We
+    coerce both to str — lossy but safe; the audit table only needs
+    these for human inspection, not round-tripping.
+    """
+    from datetime import date, datetime, time
+    if isinstance(obj, UUID):
+        return str(obj)
+    if isinstance(obj, (datetime, date, time)):
+        return obj.isoformat()
+    raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
+
+
 async def persist_hedge_audit(
     *,
     pool,
@@ -267,7 +283,7 @@ async def persist_hedge_audit(
             VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7, $8, $9, $10)
             """,
             conversation_id, user_id, query,
-            json.dumps(retrieved or []),
+            json.dumps(retrieved or [], default=_json_safe),
             UUID(web_fallback_id) if web_fallback_id else None,
             web_surface_tier,
             outcome.classification,
