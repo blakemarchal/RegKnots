@@ -798,8 +798,28 @@ async def delete_user(
     user_id: str,
     admin: Annotated[CurrentUser, Depends(require_owner)],
 ) -> DeleteUserResult:
-    """Permanently delete a user and all cascading data (conversations, messages,
-    vessels, refresh_tokens, support_tickets, etc.). Admin users cannot be deleted."""
+    """Permanently delete a user and all cascading data.
+
+    D6.58 audit fix — workspaces.owner_user_id has ON DELETE RESTRICT
+    (not CASCADE) by design: deleting a workspace owner without
+    explicit handling would orphan a billing-active workspace, which
+    we never want to do silently. Before the user delete, we
+    explicitly cancel + archive any workspaces this user owns. The
+    workspace cascade then deletes their members rows; orphaned
+    seats on those workspaces (if any) cascade to NULL via the
+    user_id FK.
+
+    The two-pass delete:
+      1. Archive (soft-delete) any owned workspaces. status='archived'
+         + null out stripe_subscription_id so future webhooks can't
+         interact with a dead workspace.
+      2. DELETE the workspace rows (cascades to members + invites +
+         vessels + handoff history).
+      3. DELETE the user row (now FK-clean).
+
+    Admin users still can't be deleted. Admins must promote/demote
+    via /admin/users/{id}/role first.
+    """
     try:
         uid = uuid.UUID(user_id)
     except ValueError:
@@ -815,6 +835,36 @@ async def delete_user(
     if row["is_admin"]:
         raise HTTPException(status_code=403, detail="Cannot delete admin users")
 
+    # D6.58 — pre-clear workspaces owned by this user. Records the
+    # archival in workspace_billing_events so the audit trail is
+    # preserved even though the workspace row is gone.
+    owned_workspaces = await pool.fetch(
+        "SELECT id, name, status FROM workspaces WHERE owner_user_id = $1",
+        uid,
+    )
+    workspaces_archived: list[dict] = []
+    if owned_workspaces:
+        for w in owned_workspaces:
+            try:
+                await pool.execute(
+                    "INSERT INTO workspace_billing_events "
+                    "  (workspace_id, event_type, actor_user_id, details) "
+                    "VALUES ($1, 'owner_account_deleted', $2, $3::jsonb)",
+                    w["id"], uid,
+                    f'{{"prior_status": "{w["status"]}", "name": "{w["name"]}"}}',
+                )
+            except Exception:
+                pass  # audit-log failures don't block delete
+            await pool.execute(
+                "DELETE FROM workspaces WHERE id = $1",
+                w["id"],
+            )
+            workspaces_archived.append({
+                "id": str(w["id"]),
+                "name": w["name"],
+                "prior_status": w["status"],
+            })
+
     try:
         await pool.execute("DELETE FROM users WHERE id = $1", uid)
     except asyncpg.exceptions.ForeignKeyViolationError as exc:
@@ -824,11 +874,23 @@ async def delete_user(
             detail=(
                 f"Cannot delete user: foreign key constraint "
                 f"{exc.constraint_name or 'unknown'} blocks the cascade. "
-                "A referencing table is missing ON DELETE CASCADE."
+                "A referencing table is missing ON DELETE CASCADE or "
+                "needs explicit pre-cleanup. Owned workspaces were "
+                "removed but a different reference is still blocking."
             ),
         ) from exc
-    await audit_log(pool, admin, "delete_user", target_id=user_id, details={"email": row["email"]})
-    logger.warning("Admin %s deleted user %s (%s)", admin.email, row["email"], user_id)
+    await audit_log(
+        pool, admin, "delete_user",
+        target_id=user_id,
+        details={
+            "email": row["email"],
+            "workspaces_deleted": workspaces_archived,
+        },
+    )
+    logger.warning(
+        "Admin %s deleted user %s (%s); also removed %d owned workspaces",
+        admin.email, row["email"], user_id, len(workspaces_archived),
+    )
     return DeleteUserResult(deleted=True, email=row["email"])
 
 

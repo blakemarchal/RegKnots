@@ -60,10 +60,14 @@ logger = logging.getLogger(__name__)
 # the ensemble silently.
 _CLAUDE_MODEL = "claude-sonnet-4-6"
 _GPT_MODEL    = "gpt-4o"
-_GROK_MODEL   = "grok-4"
+# D6.58 audit fix — original `grok-4` doesn't exist; xAI deprecated
+# Live Search in favor of the Responses API + tools. Now using their
+# fast-reasoning model on the OpenAI-compatible Responses endpoint.
+_GROK_MODEL   = "grok-4-fast-reasoning"
 
-# xAI is OpenAI-compatible — same SDK, different base_url + api_key.
-_XAI_BASE_URL = "https://api.x.ai/v1"
+# xAI Responses endpoint (NOT chat/completions — they use a separate
+# OpenAI-compatible Responses API for tool-augmented queries).
+_XAI_RESPONSES_URL = "https://api.x.ai/v1/responses"
 
 # Synthesis call uses Sonnet (cheaper than Opus, plenty smart enough
 # to compare three short JSON responses). Output is a single JSON
@@ -150,6 +154,10 @@ class EnsembleResult:
     best_confidence:    int = 0
     providers_succeeded: list[str] = field(default_factory=list)
     per_provider_summaries: dict[str, str] = field(default_factory=dict)
+    # D6.58 audit — per-provider failure errors so the admin UI can
+    # show "claude:ok, gpt:ok, grok:http_404" instead of just listing
+    # the survivors. Empty dict = no failures.
+    provider_errors:    dict[str, str] = field(default_factory=dict)
     latency_ms:         int = 0
 
 
@@ -185,6 +193,10 @@ async def query_claude_web(
             _populate_from_payload(result, payload)
         else:
             result.error = "no_json_in_response"
+            logger.warning(
+                "Claude ensemble: no JSON in response (first 200 chars): %s",
+                text[:200],
+            )
     except Exception as exc:
         result.error = f"{type(exc).__name__}: {str(exc)[:200]}"
         logger.warning("Claude ensemble call failed: %s", result.error)
@@ -199,6 +211,7 @@ async def query_gpt_web(query: str, openai_api_key: str) -> ProviderResult:
     result = ProviderResult(provider="gpt")
     if not openai_api_key:
         result.error = "no_api_key"
+        logger.warning("GPT ensemble: no OPENAI_API_KEY configured")
         return result
     try:
         # Use the Responses API which supports the web_search_preview tool.
@@ -243,6 +256,10 @@ async def query_gpt_web(query: str, openai_api_key: str) -> ProviderResult:
             _populate_from_payload(result, payload)
         else:
             result.error = "no_json_in_response"
+            logger.warning(
+                "GPT ensemble: no JSON in response (first 200 chars): %s",
+                text[:200],
+            )
     except Exception as exc:
         result.error = f"{type(exc).__name__}: {str(exc)[:200]}"
         logger.warning("GPT ensemble call failed: %s", result.error)
@@ -252,55 +269,73 @@ async def query_gpt_web(query: str, openai_api_key: str) -> ProviderResult:
 
 
 async def query_grok_web(query: str, xai_api_key: str) -> ProviderResult:
-    """Grok via xAI's OpenAI-compatible API with Live Search.
+    """Grok via xAI Responses API + web_search tool.
 
-    xAI's Live Search is configured via the `search_parameters` field
-    on chat completions. We set mode='auto' so Grok decides when to
-    search; for our use case it almost always does.
+    D6.58 audit fix — xAI deprecated Live Search (`search_parameters`
+    on chat/completions); the new path is the Responses API with
+    tools, mirroring OpenAI's shape. Uses grok-4-fast-reasoning for
+    the cost/capability balance we want in the ensemble.
+
+    Response shape:
+      output: [
+        {type: 'web_search_call', action: {query, sources}},  # 0-N
+        {type: 'message', content: [{type: 'output_text', text: '...'}]}
+      ]
+    We extract the message text and parse our JSON envelope from it.
     """
     started = time.monotonic()
     result = ProviderResult(provider="grok")
     if not xai_api_key:
         result.error = "no_api_key"
+        logger.warning("Grok ensemble: no XAI_API_KEY configured")
         return result
     try:
         async with httpx.AsyncClient(timeout=60.0) as client:
             resp = await client.post(
-                f"{_XAI_BASE_URL}/chat/completions",
+                _XAI_RESPONSES_URL,
                 headers={
                     "Authorization": f"Bearer {xai_api_key}",
                     "Content-Type": "application/json",
                 },
                 json={
                     "model": _GROK_MODEL,
-                    "messages": [
-                        {"role": "system", "content": _PROVIDER_SYSTEM_PROMPT},
+                    # Responses API takes a single string OR a list
+                    # of message-shaped dicts. We use the list form so
+                    # we can include the system/developer prompt.
+                    "input": [
+                        {"role": "developer", "content": _PROVIDER_SYSTEM_PROMPT},
                         {"role": "user", "content": query},
                     ],
-                    "search_parameters": {
-                        "mode": "auto",
-                        "max_search_results": 8,
-                    },
-                    "max_tokens": 2048,
-                    "temperature": 0.0,
+                    "tools": [{"type": "web_search"}],
+                    "max_output_tokens": 2048,
                 },
             )
         if resp.status_code != 200:
             result.error = f"http_{resp.status_code}"
-            logger.warning("Grok ensemble HTTP %s: %s", resp.status_code, resp.text[:200])
+            logger.warning(
+                "Grok ensemble HTTP %s: %s",
+                resp.status_code, resp.text[:300],
+            )
             return result
         body = resp.json()
-        text = (
-            body.get("choices", [{}])[0]
-            .get("message", {})
-            .get("content", "")
-        )
+        # Pull message text from the output blocks. There may be 1+
+        # web_search_call blocks ahead of it; we just want the message.
+        text = ""
+        for item in body.get("output", []):
+            if item.get("type") == "message":
+                for part in item.get("content", []):
+                    if part.get("type") == "output_text":
+                        text += part.get("text", "")
         result.raw_response = text[:4000]
         payload = _parse_provider_json(text)
         if payload is not None:
             _populate_from_payload(result, payload)
         else:
             result.error = "no_json_in_response"
+            logger.warning(
+                "Grok ensemble: no JSON in response (first 200 chars): %s",
+                text[:200],
+            )
     except Exception as exc:
         result.error = f"{type(exc).__name__}: {str(exc)[:200]}"
         logger.warning("Grok ensemble call failed: %s", result.error)
@@ -502,6 +537,18 @@ async def attempt_ensemble_fallback(
         r.provider: (r.summary_text or r.answer_text or "")[:400]
         for r in raw_results
     }
+    # D6.58 audit — capture every per-provider error so the audit page
+    # can spotlight silent failures (Grok returning 404 on a stale model
+    # name, GPT timing out, etc.).
+    result.provider_errors = {
+        r.provider: r.error
+        for r in raw_results if r.error
+    }
+    if result.provider_errors:
+        logger.warning(
+            "ensemble fired with provider errors: %s",
+            result.provider_errors,
+        )
 
     if not succeeded:
         result.surface_tier = "blocked"
@@ -564,6 +611,31 @@ async def attempt_ensemble_fallback(
         if not verified:
             # Downgrade — synthesis was over-confident about the quote
             result.surface_tier = "consensus"
+
+    # D6.58 audit fix — domain-quality enforcement on consensus and
+    # verified tiers. The synthesis prompt biases toward authoritative
+    # domains but doesn't enforce; that's how made-in-china.com leaked
+    # through as a 'consensus' answer on 2026-05-05.
+    #
+    # Rule: consensus and verified tiers REQUIRE the picked source to
+    # be on the trusted-domain whitelist. If it isn't, we still
+    # surface (the answer might be useful) but as 'reference' tier
+    # with the "external source — verify yourself" framing. This
+    # preserves surface coverage while keeping the higher-trust tiers
+    # honest.
+    if (
+        result.surface_tier in ("consensus", "verified")
+        and result.best_source_url
+        and not is_trusted_domain(result.best_source_url)
+    ):
+        logger.info(
+            "ensemble: domain '%s' not trusted — downgrading %s → reference",
+            result.best_source_domain, result.surface_tier,
+        )
+        result.surface_tier = "reference"
+        # Keep surface_blocked_reason informational; doesn't block surfacing.
+        if not result.surface_blocked_reason:
+            result.surface_blocked_reason = "domain_not_in_whitelist_downgraded"
 
     # 'blocked' tier never surfaces; otherwise yes
     result.surfaced = result.surface_tier in ("verified", "consensus", "reference")

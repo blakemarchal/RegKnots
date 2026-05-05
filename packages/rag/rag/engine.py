@@ -1620,6 +1620,7 @@ async def _try_ensemble_fallback(
 
     fallback_id: str | None = None
     try:
+        import json as _json
         row = await pool.fetchrow(
             """
             INSERT INTO web_fallback_responses
@@ -1627,9 +1628,9 @@ async def _try_ensemble_fallback(
                confidence, source_url, source_domain, quote_text,
                quote_verified, surfaced, surface_tier, surface_blocked_reason,
                answer_text, latency_ms, retrieval_top1_cosine,
-               ensemble_providers, ensemble_agreement_count)
+               ensemble_providers, ensemble_agreement_count, provider_errors)
             VALUES (FALSE, TRUE, $1, $2, $3, $4, $5, $6, $7, $8, $9,
-                    $10, $11, $12, $13, $14, $15::text[], $16)
+                    $10, $11, $12, $13, $14, $15::text[], $16, $17::jsonb)
             RETURNING id
             """,
             user_id, conversation_id, query,
@@ -1640,6 +1641,7 @@ async def _try_ensemble_fallback(
             result.best_answer, result.latency_ms, top_cosine,
             result.providers_succeeded or [],
             result.agreement_count,
+            _json.dumps(result.provider_errors or {}),
         )
         if row is not None:
             fallback_id = str(row["id"])
