@@ -2892,6 +2892,17 @@ interface ChatMessageDetail {
   unverified_citations: string[]
   hedge_phrase: string | null
   created_at: string
+  // D6.59 — populated for assistant turns that fired the web fallback
+  // so admin chat preview can render the same yellow card the user saw.
+  web_fallback?: {
+    fallback_id: string
+    source_url: string
+    source_domain: string
+    quote: string
+    summary: string
+    confidence: number
+    surface_tier?: 'verified' | 'consensus' | 'reference' | null
+  } | null
 }
 
 interface VesselSnapshot {
@@ -3101,9 +3112,24 @@ function ChatsTab({ initialChatId }: ChatsTabProps = {}) {
             <>
               {/* Header */}
               <div className="border-b border-white/10 pb-2 mb-3">
-                <div className="text-sm font-mono text-[#f0ece4]">{detail.title || '(untitled)'}</div>
-                <div className="text-[10px] font-mono text-[#6b7594] mt-1">
-                  {detail.user_email} · {fmtDate(detail.created_at)}
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-mono text-[#f0ece4]">{detail.title || '(untitled)'}</div>
+                    <div className="text-[10px] font-mono text-[#6b7594] mt-1">
+                      {detail.user_email} · {fmtDate(detail.created_at)}
+                    </div>
+                  </div>
+                  <a
+                    href={`/admin/chat-preview/${detail.conversation_id}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex-shrink-0 px-2.5 py-1 rounded border border-[#2dd4bf]/30 bg-[#2dd4bf]/5
+                               text-[10px] font-mono text-[#2dd4bf] hover:bg-[#2dd4bf]/10
+                               transition-colors"
+                    title="Render this chat in the production UI to verify what the user actually saw"
+                  >
+                    View as user ↗
+                  </a>
                 </div>
               </div>
 

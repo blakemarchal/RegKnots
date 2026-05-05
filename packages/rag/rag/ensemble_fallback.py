@@ -498,7 +498,179 @@ async def synthesize_ensemble(
         _ = time.monotonic() - started
 
 
-# ── Orchestrator ────────────────────────────────────────────────────────────
+# ── Cascade tunables (D6.59) ────────────────────────────────────────────────
+#
+# These knobs control whether `attempt_cascade_ensemble` stops after the
+# first probe (Claude alone) or fans out to GPT + Grok. Defaults match
+# the conservative recommendations in d6-59-cascading-ensemble.md.
+#
+# To loosen: set `_CLAUDE_STOP_REQUIRE_VERIFIED_QUOTE = False` to allow
+#   stop on confidence+trusted-domain alone. Saves more $ but accepts
+#   single-source 'reference' answers without ensemble corroboration.
+# To tighten: raise `_CLAUDE_STOP_MIN_CONFIDENCE` to 5. Fewer stops,
+#   more cost, marginally higher trust floor.
+# Trusted-domain requirement should never be lowered — it's the
+#   anti-hallucination floor for any single-provider stop.
+_CLAUDE_STOP_MIN_CONFIDENCE: int = 4
+_CLAUDE_STOP_REQUIRE_VERIFIED_QUOTE: bool = True
+_CLAUDE_STOP_REQUIRE_TRUSTED_DOMAIN: bool = True
+
+
+def _should_stop_after_claude(claude: ProviderResult) -> Optional[str]:
+    """Decide whether Claude's first-pass result is good enough to
+    skip the GPT+Grok fan-out. Returns the surface tier to use
+    ('verified' or 'reference') or None if we should fan out.
+
+    See D6.59 proposal §"How the gating works" for rationale on each
+    branch.
+    """
+    if not claude.succeeded:
+        return None
+    if (claude.confidence or 0) < _CLAUDE_STOP_MIN_CONFIDENCE:
+        return None
+    if (
+        _CLAUDE_STOP_REQUIRE_TRUSTED_DOMAIN
+        and claude.source_url
+        and not is_trusted_domain(claude.source_url)
+    ):
+        return None
+
+    # Verified-tier stop: highest trust, requires a verbatim quote that
+    # programmatic verification confirms is on-page.
+    if claude.quote_verified:
+        return "verified"
+
+    # Reference-tier stop: high confidence + trusted domain but the
+    # quote couldn't be verified (page changed, JS-rendered, etc.). Only
+    # taken when the operator chose to loosen the gate.
+    if not _CLAUDE_STOP_REQUIRE_VERIFIED_QUOTE:
+        return "reference"
+
+    return None
+
+
+# ── Orchestrators ──────────────────────────────────────────────────────────
+
+
+async def _verify_claude_quote(claude: ProviderResult) -> None:
+    """Mutate `claude.quote_verified` in-place by checking the quote
+    against the cited source. No-op if no quote or no source URL.
+    Quietly absorbs network errors — failure to verify means we'll
+    treat it as unverified, which is the correct conservative default.
+    """
+    if not (claude.succeeded and claude.quote_text and claude.source_url):
+        return
+    try:
+        async with httpx.AsyncClient() as client:
+            claude.quote_verified = await verify_quote_in_source(
+                claude.quote_text, claude.source_url, client,
+            )
+    except Exception as exc:
+        logger.info(
+            "cascade: claude quote verify failed (treating as unverified): %s",
+            str(exc)[:200],
+        )
+        claude.quote_verified = False
+
+
+async def attempt_cascade_ensemble(
+    *,
+    query: str,
+    anthropic_client,
+    openai_api_key: str,
+    xai_api_key: str,
+) -> EnsembleResult:
+    """Cascading Big-3 ensemble (D6.59).
+
+    Strategy:
+      1. Probe with Claude alone (cheapest, ~$0.05).
+      2. If Claude returned a verified result on a trusted domain
+         (per `_should_stop_after_claude`), surface immediately.
+      3. Otherwise fan out to GPT + Grok in parallel, then synthesize
+         across all three providers — same logic as the legacy
+         `attempt_ensemble_fallback` path.
+
+    Saves ~35% on ensemble cost when Claude alone has the answer
+    (CFR / class society / NMC questions tend to land here). Falls
+    back gracefully — if Claude errors, we still fan out so a single
+    upstream blip can't silence the fallback entirely.
+
+    Caller responsibilities are identical to `attempt_ensemble_fallback`:
+    cap-check first, persist the result, wire into the chat response.
+    """
+    started = time.monotonic()
+
+    # Step 1: probe with Claude alone.
+    claude = await query_claude_web(query, anthropic_client)
+    await _verify_claude_quote(claude)
+
+    # Step 2: stop-or-fan-out gate.
+    stop_tier = _should_stop_after_claude(claude)
+
+    if stop_tier is not None:
+        # Single-provider surface. Skips synthesis entirely.
+        logger.info(
+            "cascade: claude-only stop tier=%s confidence=%s domain=%s "
+            "quote_verified=%s",
+            stop_tier, claude.confidence, claude.source_domain,
+            claude.quote_verified,
+        )
+        result = EnsembleResult(
+            surfaced=True,
+            surface_tier=stop_tier,
+            agreement_count=1,
+            best_answer=claude.answer_text,
+            best_summary=claude.summary_text,
+            best_quote=claude.quote_text,
+            best_quote_verified=claude.quote_verified,
+            best_source_url=claude.source_url,
+            best_source_domain=claude.source_domain,
+            best_confidence=claude.confidence or 0,
+            providers_succeeded=["claude"],
+            per_provider_summaries={
+                "claude": (claude.summary_text or claude.answer_text or "")[:400],
+            },
+            provider_errors={},
+            latency_ms=int((time.monotonic() - started) * 1000),
+        )
+        return result
+
+    # Step 3: fan out to GPT + Grok in parallel. Claude already ran;
+    # reuse its result. If Claude itself errored, we still fan out and
+    # the synthesizer makes do with the surviving providers.
+    logger.info(
+        "cascade: fanning out (claude succeeded=%s confidence=%s error=%s)",
+        claude.succeeded, claude.confidence, claude.error,
+    )
+    raw = await asyncio.gather(
+        query_gpt_web(query, openai_api_key),
+        query_grok_web(query, xai_api_key),
+        return_exceptions=True,
+    )
+    raw_results: list[ProviderResult] = [claude]
+    for i, item in enumerate(raw):
+        provider = ("gpt", "grok")[i]
+        if isinstance(item, ProviderResult):
+            raw_results.append(item)
+        elif isinstance(item, BaseException):
+            err = f"{type(item).__name__}: {str(item)[:200]}"
+            logger.warning(
+                "cascade: %s task raised unexpectedly: %s", provider, err,
+            )
+            raw_results.append(ProviderResult(
+                provider=provider, error=f"task_raised:{err}",
+            ))
+        else:
+            raw_results.append(ProviderResult(
+                provider=provider, error="unknown_gather_result",
+            ))
+
+    return await _finalize_with_synthesis(
+        query=query,
+        raw_results=raw_results,
+        anthropic_client=anthropic_client,
+        started=started,
+    )
 
 
 async def attempt_ensemble_fallback(
@@ -508,10 +680,16 @@ async def attempt_ensemble_fallback(
     openai_api_key: str,
     xai_api_key: str,
 ) -> EnsembleResult:
-    """Run the Big-3 ensemble. Always tries all three providers in
-    parallel; gracefully degrades if any provider fails or is missing
-    its API key. Synthesis pass produces the surface tier + best
-    answer, then we verify the picked quote against the picked source.
+    """Run the Big-3 ensemble in always-parallel mode. Tries all three
+    providers concurrently; gracefully degrades if any provider fails
+    or is missing its API key. Synthesis pass produces the surface
+    tier + best answer, then we verify the picked quote against the
+    picked source.
+
+    This is the legacy D6.58-Slice-3 entry point. The cascading
+    variant (`attempt_cascade_ensemble`, D6.59) is preferred for new
+    deploys and saves ~35% on cost. Kept here so a single config flag
+    can roll back if the cascade misbehaves under live load.
 
     Caller is responsible for:
       - Cap-checking before calling
@@ -519,7 +697,6 @@ async def attempt_ensemble_fallback(
       - Wiring the result into the chat response
     """
     started = time.monotonic()
-    result = EnsembleResult()
 
     # Fire all three in parallel. asyncio.gather with
     # return_exceptions=True defends against the case where one
@@ -558,6 +735,27 @@ async def attempt_ensemble_fallback(
                 provider=provider, error="unknown_gather_result",
             ))
 
+    return await _finalize_with_synthesis(
+        query=query,
+        raw_results=raw_results,
+        anthropic_client=anthropic_client,
+        started=started,
+    )
+
+
+async def _finalize_with_synthesis(
+    *,
+    query: str,
+    raw_results: list[ProviderResult],
+    anthropic_client,
+    started: float,
+) -> EnsembleResult:
+    """Shared synthesis-and-finalize tail used by both ensemble entry
+    points. Takes the per-provider results, runs the synthesizer,
+    enforces domain whitelist + quote-verification rules, and produces
+    the final EnsembleResult ready for persistence and surfacing.
+    """
+    result = EnsembleResult()
     succeeded = [r for r in raw_results if r.succeeded]
     result.providers_succeeded = [r.provider for r in succeeded]
     result.per_provider_summaries = {
@@ -583,14 +781,13 @@ async def attempt_ensemble_fallback(
         result.latency_ms = int((time.monotonic() - started) * 1000)
         return result
 
-    # Synthesis call — let Claude pick the best across all three.
+    # Synthesis call — let Claude pick the best across all providers.
     synth = await synthesize_ensemble(query, raw_results, anthropic_client)
     if synth is None:
         # Fallback: deterministic pick — highest-confidence succeeded
-        # provider with a trusted domain. Conservative default.
+        # provider. Conservative default tier.
         succeeded.sort(key=lambda r: (r.confidence or 0), reverse=True)
         best = succeeded[0]
-        result.best_provider = best.provider  # type: ignore[attr-defined]
         result.best_answer = best.answer_text
         result.best_summary = best.summary_text
         result.best_quote = best.quote_text

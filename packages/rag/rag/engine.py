@@ -1269,6 +1269,7 @@ async def chat(
     web_fallback_enabled: bool = True,
     web_fallback_cosine_threshold: float = 0.5,
     web_fallback_daily_cap: int = 10,
+    web_fallback_cascade_enabled: bool = True,
 ) -> ChatResponse:
     """Run the full RAG pipeline and return a ChatResponse.
 
@@ -1474,6 +1475,7 @@ async def chat(
                     top_cosine=top_cosine,
                     cosine_threshold=web_fallback_cosine_threshold,
                     daily_cap=web_fallback_daily_cap,
+                    cascade_enabled=web_fallback_cascade_enabled,
                 )
             except Exception as exc:
                 logger.warning(
@@ -1532,6 +1534,7 @@ async def _dispatch_web_fallback(
     top_cosine: float,
     cosine_threshold: float,
     daily_cap: int,
+    cascade_enabled: bool = True,
 ) -> "WebFallbackCard | None":
     """Tier-aware fallback dispatcher (D6.58 Slice 3).
 
@@ -1588,6 +1591,7 @@ async def _dispatch_web_fallback(
         pool=pool, anthropic_client=anthropic_client,
         openai_api_key=openai_api_key, xai_api_key=xai_api_key,
         top_cosine=top_cosine,
+        cascade_enabled=cascade_enabled,
     )
 
 
@@ -1601,22 +1605,40 @@ async def _try_ensemble_fallback(
     openai_api_key: str,
     xai_api_key: str,
     top_cosine: float,
+    cascade_enabled: bool = True,
 ) -> "WebFallbackCard | None":
     """Run the Big-3 ensemble + persist + return a card if surfaced.
 
     Logs to web_fallback_responses with is_ensemble=TRUE so per-tier
     cap accounting works on subsequent calls. Caller already verified
     the user is under cap.
+
+    When cascade_enabled is True (D6.59 default), uses the cost-aware
+    cascading orchestrator that probes Claude alone first and only fans
+    out to GPT + Grok when needed. When False, uses the legacy always-
+    parallel D6.58 Slice-3 orchestrator. The two share the same DB
+    persistence shape so flipping the flag has no schema impact.
     """
-    from rag.ensemble_fallback import attempt_ensemble_fallback
+    from rag.ensemble_fallback import (
+        attempt_cascade_ensemble,
+        attempt_ensemble_fallback,
+    )
     from rag.models import WebFallbackCard
 
-    result = await attempt_ensemble_fallback(
-        query=query,
-        anthropic_client=anthropic_client,
-        openai_api_key=openai_api_key,
-        xai_api_key=xai_api_key,
-    )
+    if cascade_enabled:
+        result = await attempt_cascade_ensemble(
+            query=query,
+            anthropic_client=anthropic_client,
+            openai_api_key=openai_api_key,
+            xai_api_key=xai_api_key,
+        )
+    else:
+        result = await attempt_ensemble_fallback(
+            query=query,
+            anthropic_client=anthropic_client,
+            openai_api_key=openai_api_key,
+            xai_api_key=xai_api_key,
+        )
 
     fallback_id: str | None = None
     try:
@@ -2127,6 +2149,7 @@ async def chat_with_progress(
     web_fallback_enabled: bool = True,
     web_fallback_cosine_threshold: float = 0.7,
     web_fallback_daily_cap: int = 10,
+    web_fallback_cascade_enabled: bool = True,
 ) -> AsyncIterator[dict]:
     """Same RAG pipeline as chat() but yields lightweight progress events.
 
@@ -2348,6 +2371,7 @@ async def chat_with_progress(
                     top_cosine=top_cosine,
                     cosine_threshold=web_fallback_cosine_threshold,
                     daily_cap=web_fallback_daily_cap,
+                    cascade_enabled=web_fallback_cascade_enabled,
                 )
             except Exception as exc:
                 logger.warning(

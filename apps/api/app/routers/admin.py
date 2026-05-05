@@ -3999,6 +3999,17 @@ async def list_chats(
     return ChatListResponse(items=items, total=total, limit=limit, offset=offset)
 
 
+class WebFallbackCardForAdmin(BaseModel):
+    """Mirrors the WebFallbackCard payload the user actually saw."""
+    fallback_id: str
+    source_url: str
+    source_domain: str
+    quote: str
+    summary: str
+    confidence: int
+    surface_tier: str | None  # 'verified' | 'consensus' | 'reference'
+
+
 class ChatMessageDetail(BaseModel):
     id: str
     role: str
@@ -4009,6 +4020,11 @@ class ChatMessageDetail(BaseModel):
     unverified_citations: list[str]    # display strings, from citation_errors
     hedge_phrase: str | None
     created_at: str
+    # D6.59 — when the assistant turn fired the web fallback, surface
+    # the same yellow-card payload here so admin can render the chat
+    # exactly the way the user saw it. None for user turns and for
+    # assistant turns where no fallback fired.
+    web_fallback: WebFallbackCardForAdmin | None = None
 
 
 class VesselSnapshot(BaseModel):
@@ -4135,7 +4151,24 @@ async def get_chat(
         m["hedge_phrase_matched"] for m in miss_rows if m["hedge_phrase_matched"]
     ]
 
+    # web_fallback_responses per conversation. NB: chat_message_id on this
+    # table holds the conversation_id (column name is misleading). Only
+    # surfaced rows have a yellow card the user actually saw.
+    fallback_rows = await pool.fetch(
+        """
+        SELECT id, query, source_url, source_domain, quote_text,
+               answer_text, confidence, surface_tier, surfaced, created_at
+        FROM web_fallback_responses
+        WHERE chat_message_id = $1 AND surfaced = TRUE
+        ORDER BY created_at ASC
+        """,
+        conv_uuid,
+    )
+
     messages: list[ChatMessageDetail] = []
+    # Track which fallback rows we've consumed so the same row isn't
+    # attached to multiple assistant turns.
+    consumed_fallbacks: set = set()
     for m in msg_rows:
         cited = [
             reg_lookup[rid] for rid in (m["cited_regulation_ids"] or [])
@@ -4153,6 +4186,39 @@ async def get_chat(
                 if phrase and phrase.lower() in (m["content"] or "").lower():
                     hedge_phrase = phrase
                     break
+
+        # Web fallback attribution: pair this assistant turn with the
+        # closest preceding fallback row (fallback fires before the
+        # assistant turn is persisted, so fallback.created_at <
+        # message.created_at by 1-10s typically). First-fit so multiple
+        # fallbacks across a long conversation each find one home.
+        attached_fb: WebFallbackCardForAdmin | None = None
+        if m["role"] == "assistant" and m["created_at"] is not None:
+            best = None  # (delta_seconds, row)
+            for fb in fallback_rows:
+                if fb["id"] in consumed_fallbacks:
+                    continue
+                if fb["created_at"] is None:
+                    continue
+                delta = (m["created_at"] - fb["created_at"]).total_seconds()
+                # Only attach if fallback fired BEFORE the assistant
+                # message and within a 5-minute sanity window.
+                if 0 <= delta <= 300:
+                    if best is None or delta < best[0]:
+                        best = (delta, fb)
+            if best is not None:
+                fb = best[1]
+                consumed_fallbacks.add(fb["id"])
+                attached_fb = WebFallbackCardForAdmin(
+                    fallback_id=str(fb["id"]),
+                    source_url=fb["source_url"] or "",
+                    source_domain=fb["source_domain"] or "",
+                    quote=fb["quote_text"] or "",
+                    summary=fb["answer_text"] or "",
+                    confidence=int(fb["confidence"] or 0),
+                    surface_tier=fb["surface_tier"],
+                )
+
         messages.append(ChatMessageDetail(
             id=str(m["id"]),
             role=m["role"],
@@ -4163,6 +4229,7 @@ async def get_chat(
             unverified_citations=unverified,
             hedge_phrase=hedge_phrase,
             created_at=m["created_at"].isoformat() if m["created_at"] else "",
+            web_fallback=attached_fb,
         ))
 
     vessel: VesselSnapshot | None = None

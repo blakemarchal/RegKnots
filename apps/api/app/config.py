@@ -119,6 +119,17 @@ class Settings(BaseSettings):
     web_fallback_daily_cap: int = Field(
         default=10, validation_alias="WEB_FALLBACK_DAILY_CAP",
     )
+    # ── D6.59 Cascading ensemble ─────────────────────────────────────
+    # When true, the Big-3 ensemble probes Claude alone first and only
+    # fans out to GPT + Grok if Claude's result doesn't pass the stop
+    # gate (verified quote on a trusted domain at confidence ≥4). Cuts
+    # ensemble cost roughly in half on common CFR / class society
+    # questions where Claude alone has the answer. Falls back to the
+    # legacy parallel fan-out (`attempt_ensemble_fallback`) when false.
+    # See docs/proposals/d6-59-cascading-ensemble.md.
+    web_fallback_cascade_enabled: bool = Field(
+        default=True, validation_alias="WEB_FALLBACK_CASCADE_ENABLED",
+    )
 
     # Monitoring
     sentry_dsn: str = Field(default="", validation_alias="SENTRY_DSN")

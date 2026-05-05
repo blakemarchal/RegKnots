@@ -668,6 +668,7 @@ async def chat_endpoint(
         web_fallback_enabled=settings.web_fallback_enabled,
         web_fallback_cosine_threshold=settings.web_fallback_cosine_threshold,
         web_fallback_daily_cap=settings.web_fallback_daily_cap,
+        web_fallback_cascade_enabled=settings.web_fallback_cascade_enabled,
     )
 
     await _persist_chat_outcome(
@@ -752,6 +753,7 @@ async def chat_stream_endpoint(
                 web_fallback_enabled=settings.web_fallback_enabled,
                 web_fallback_cosine_threshold=settings.web_fallback_cosine_threshold,
                 web_fallback_daily_cap=settings.web_fallback_daily_cap,
+                web_fallback_cascade_enabled=settings.web_fallback_cascade_enabled,
             ):
                 event_type = event["event"]
                 payload = event["data"]
