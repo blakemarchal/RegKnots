@@ -75,6 +75,31 @@ SYNONYM_DICT: dict[str, tuple[str, ...]] = {
     # directly as a search term; staying with targeted 2-word phrases
     # keeps the candidate pool focused on the user's intent.
     "stability": ("subdivision and stability", "damage stability", "intact stability"),
+    # Sprint D6.65 — added on documented evidence:
+    # 2026-05-06 user Dusekjordan (Jordan Dusek, M/V Southern Tide,
+    # Subchapter T) asked "Do ring buoy water lights need to be
+    # stenciled" → retrieval pulled water-light-specific chunks
+    # (117.70(d)(1), 180.70(d)(1), 144.01-25, 160.053-5) and missed
+    # 46 CFR 185.604 ("Lifesaving equipment markings") which directly
+    # answers the question. Web fallback surfaced 185.604 from
+    # law.cornell.edu — section was IN our corpus but never retrieved
+    # because "stencil" doesn't trigram-match a section titled "markings".
+    #
+    # Frequency-checked 2026-05-06 (corpus chunk counts):
+    #   block capital letters          34   (lifesaving + log-book marking)
+    #   clearly legible                31   (marking-clarity language)
+    #   marked with the vessel          7   (vessel-name marking — exact)
+    #   marked with the name           41   (broader name-marking phrasing)
+    #   approval number                broad — skipped
+    #   marking / markings           1546 / 606 — too broad to add directly
+    #
+    # Targeted multi-word phrases above keep the candidate pool focused
+    # on lifesaving-equipment marking sections (185.604, 184.604, 117.70,
+    # 180.70, 199.70). Bare "marking" stays out — it would flood with
+    # navigation aids, OPA-90 markings, ERG placards, etc.
+    "stencil":     ("clearly legible", "block capital letters", "marked with the name"),
+    "stenciled":   ("clearly legible", "block capital letters", "marked with the name"),
+    "stenciling":  ("clearly legible", "block capital letters", "marked with the name"),
 }
 
 
@@ -227,10 +252,137 @@ _DRILL_INTENT_VOCAB: tuple[str, ...] = (
 )
 
 
+# ── Equipment-marking intent (Sprint D6.65) ─────────────────────────────
+# When a user asks about marking / stenciling / labeling lifesaving or
+# safety equipment, the answer typically lives in a section TITLED
+# "Lifesaving equipment markings" or "Personal lifesaving appliances" —
+# words that don't appear in the user's query. Trigram retrieval misses
+# every time. This intent matcher injects the canonical CFR section
+# titles + marking phrasing so those sections rank in top-K.
+#
+# Motivating case: 2026-05-06 Jordan Dusek "Do ring buoy water lights
+# need to be stenciled" — retrieval pulled water-light-specific sections
+# but missed the controlling 46 CFR 185.604 ("Lifesaving equipment
+# markings") and 46 CFR 199.70 ("Personal lifesaving appliances"), both
+# of which were in the corpus.
+
+_MARKING_TOKENS: frozenset[str] = frozenset({
+    # Verbs / nouns the user types when they mean "marking required by reg"
+    "stencil", "stenciled", "stenciling",
+    "mark", "marked", "marking", "markings",
+    "label", "labeled", "labelled", "labeling", "labelling",
+    "lettering",
+    "imprint", "imprinted",
+    "engrave", "engraved",
+    "name",  # "name on the buoy" — paired with equipment via _MARKING_PHRASES
+})
+
+_MARKING_PHRASES: tuple[str, ...] = (
+    # Multi-word marker phrases checked against the raw query lowercase.
+    "vessel name", "vessel's name", "ship name", "ship's name",
+    "approval number",
+    "block letters", "block capital",
+    "stenciled with", "marked with",
+)
+
+# Equipment-class tokens (post-stopword extraction) that signal
+# lifesaving / safety equipment whose marking rule lives in a marking-
+# specific section rather than the equipment-spec section.
+_LIFESAVING_EQUIPMENT_TOKENS: frozenset[str] = frozenset({
+    "buoy", "buoys",
+    "lifebuoy", "lifebuoys",
+    "ring",  # "ring buoy", "ring life buoy"
+    "lifejacket", "lifejackets", "pfd",
+    "preserver", "preservers",
+    "vest", "vests",
+    "raft", "rafts", "liferaft", "liferafts",
+    "lifefloat", "float", "floats",
+    "suit", "suits",
+    "immersion",
+    "lifesaving",
+    "appliance", "appliances",
+    "lifeline", "lifelines",
+    "throwline", "throwlines",
+    "waterlight", "waterlights",
+})
+
+_LIFESAVING_EQUIPMENT_PHRASES: tuple[str, ...] = (
+    # Multi-word equipment phrases.
+    "ring buoy", "ring life buoy",
+    "life jacket", "life vest", "work vest",
+    "life ring", "life float",
+    "life raft", "life raft",
+    "immersion suit",
+    "water light",
+    "personal flotation",
+)
+
+# Canonical phrasing appended when marking-intent fires. Each is
+# narrow enough (frequency-checked 2026-05-06) to not flood the
+# candidate pool:
+#   lifesaving equipment markings    5 chunks   (185.604, 184.604, etc.)
+#   personal lifesaving appliances  12 chunks   (199.70 family)
+#   marked with the vessel           7 chunks
+#   block capital letters           34 chunks
+#   clearly legible                 31 chunks
+_MARKING_INTENT_VOCAB: tuple[str, ...] = (
+    "lifesaving equipment markings",
+    "personal lifesaving appliances",
+    "marked with the vessel",
+    "block capital letters",
+    "clearly legible",
+)
+
+
+def _drill_frequency_intent(
+    query_lower: str, keyword_set: set[str],
+) -> tuple[str, ...]:
+    """Return canonical drill/training vocab if (frequency × emergency-
+    equipment) signals both fire. Empty tuple otherwise."""
+    has_freq_token = any(k in _FREQUENCY_TOKENS for k in keyword_set)
+    has_freq_phrase = any(p in query_lower for p in _FREQUENCY_PHRASES)
+    if not (has_freq_token or has_freq_phrase):
+        return ()
+    has_eq_token = any(k in _EMERGENCY_EQUIPMENT for k in keyword_set)
+    has_eq_phrase = any(p in query_lower for p in _EMERGENCY_PHRASES)
+    if not (has_eq_token or has_eq_phrase):
+        return ()
+    return _DRILL_INTENT_VOCAB
+
+
+def _equipment_marking_intent(
+    query_lower: str, keyword_set: set[str],
+) -> tuple[str, ...]:
+    """Return canonical marking vocab if (marking-verb × lifesaving-
+    equipment) signals both fire. Empty tuple otherwise.
+
+    Both signals are required to keep the candidate pool focused. A
+    user asking about marking on a chart, on a hatch cover, or on a
+    cargo manifest hits the marking signal but not the equipment
+    signal — those queries should fall through to the standard
+    retrieval path.
+    """
+    has_mark_token = any(k in _MARKING_TOKENS for k in keyword_set)
+    has_mark_phrase = any(p in query_lower for p in _MARKING_PHRASES)
+    if not (has_mark_token or has_mark_phrase):
+        return ()
+    has_eq_token = any(k in _LIFESAVING_EQUIPMENT_TOKENS for k in keyword_set)
+    has_eq_phrase = any(p in query_lower for p in _LIFESAVING_EQUIPMENT_PHRASES)
+    if not (has_eq_token or has_eq_phrase):
+        return ()
+    return _MARKING_INTENT_VOCAB
+
+
 def expand_intent(
     query: str, keywords: list[str],
 ) -> tuple[list[str], list[str]]:
     """Detect intent patterns and append canonical vocab to keywords.
+
+    Each registered intent matcher (drill-frequency, equipment-marking,
+    …) returns a tuple of vocab to append when its dual-signal gate
+    fires. Multiple intents can fire on a single query — appended
+    vocab is merged in registration order, deduped against the
+    keyword set.
 
     Returns:
         (expanded_keywords, intent_added) where
@@ -247,23 +399,24 @@ def expand_intent(
     query_lower = query.lower()
     keyword_set = {k.lower() for k in keywords}
 
-    # Frequency signal: token-level OR phrase-level
-    has_freq_token = any(k in _FREQUENCY_TOKENS for k in keyword_set)
-    has_freq_phrase = any(p in query_lower for p in _FREQUENCY_PHRASES)
-    if not (has_freq_token or has_freq_phrase):
+    # Run every registered intent. Each returns either an empty tuple
+    # (didn't fire) or its canonical vocab additions.
+    matchers = (
+        _drill_frequency_intent,
+        _equipment_marking_intent,
+    )
+    additions: list[str] = []
+    for matcher in matchers:
+        for v in matcher(query_lower, keyword_set):
+            additions.append(v)
+
+    if not additions:
         return list(keywords), []
 
-    # Emergency-context signal: token-level OR phrase-level
-    has_eq_token = any(k in _EMERGENCY_EQUIPMENT for k in keyword_set)
-    has_eq_phrase = any(p in query_lower for p in _EMERGENCY_PHRASES)
-    if not (has_eq_token or has_eq_phrase):
-        return list(keywords), []
-
-    # Both fired — append the canonical drill/training vocabulary.
     out = list(keywords)
     seen = set(keyword_set)
     added: list[str] = []
-    for v in _DRILL_INTENT_VOCAB:
+    for v in additions:
         v_lower = v.lower()
         if v_lower in seen:
             continue
