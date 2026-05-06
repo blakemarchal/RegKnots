@@ -173,13 +173,22 @@ function Content() {
   function vesselPicked(vid: string) {
     if (!editing) return
     if (!vid) {
+      // Going back to "Manual entry" — drop the FK link but leave
+      // whatever the user typed alone. Manual mode shouldn't wipe
+      // their work.
       setEditing({ ...editing, vessel_id: null })
       return
     }
     const v = vessels.find((x) => x.id === vid)
     if (!v) return
-    // Pull what we can from the vessel record + latest COI extraction.
-    // User can still override anything in the form.
+    // Switching vessels — the form should reflect ONLY the new
+    // vessel's data. Clobber every vessel-derived field with the new
+    // value or null; don't fall through to the previous vessel's
+    // values (D6.62 hotfix — Blake reported Vessel A's horsepower
+    // sticking when switching to Vessel B that has none).
+    //
+    // Non-vessel fields (capacity_served, dates, employer_name,
+    // notes) are left intact — those are about the trip, not the boat.
     const officialNumber = pickField(v, 'official_number')
     const propulsion = pickField(v, 'propulsion')
     const horsepower = pickField(v, 'horsepower')
@@ -187,13 +196,13 @@ function Content() {
     setEditing({
       ...editing,
       vessel_id: v.id,
-      vessel_name: v.name || editing.vessel_name || '',
-      vessel_type: v.vessel_type ?? editing.vessel_type ?? null,
-      gross_tonnage: v.gross_tonnage ?? editing.gross_tonnage ?? null,
-      official_number: officialNumber || editing.official_number || null,
-      propulsion: propulsion || editing.propulsion || null,
-      horsepower: horsepower || editing.horsepower || null,
-      route_type: editing.route_type || route || null,
+      vessel_name: v.name || '',
+      vessel_type: v.vessel_type ?? null,
+      gross_tonnage: v.gross_tonnage ?? null,
+      official_number: officialNumber,
+      propulsion: propulsion,
+      horsepower: horsepower,
+      route_type: route,
     })
   }
 

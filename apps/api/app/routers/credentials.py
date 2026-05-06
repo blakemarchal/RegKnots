@@ -137,6 +137,40 @@ async def list_credentials(
 # with a 422 if it captures the path first. Route declaration order
 # wins in FastAPI on overlapping paths.
 
+def _latin1_safe(s: str | None) -> str:
+    """Coerce a string to fpdf2's core-font (Helvetica) charset.
+
+    Helvetica is Latin-1 only. Common smart-typography from Claude
+    Vision OCR or pasted user input (em-dash, smart quotes, arrows,
+    ellipsis) trips fpdf2 with FPDFUnicodeEncodingException → 500.
+
+    Strategy: replace well-known smart chars with ASCII equivalents,
+    then for anything else outside Latin-1 (cp1252) fall back to '?'
+    so the PDF still renders. User-controlled fields go through this
+    on the way into pdf.cell().
+    """
+    if not s:
+        return ""
+    # Replace common smart chars with ASCII so the document still
+    # reads naturally instead of getting littered with '?'.
+    replacements = {
+        "—": "-",   # em-dash
+        "–": "-",   # en-dash
+        "−": "-",   # math minus
+        "→": " to ",  # rightwards arrow
+        "←": " <- ",  # leftwards arrow
+        "‘": "'", "’": "'",  # smart single quotes
+        "“": '"', "”": '"',  # smart double quotes
+        "…": "...",  # ellipsis
+        "•": "*",    # bullet
+        " ": " ",    # non-breaking space
+    }
+    for src, dst in replacements.items():
+        s = s.replace(src, dst)
+    # Anything else outside Latin-1 becomes '?'.
+    return s.encode("latin-1", "replace").decode("latin-1")
+
+
 @router.get("/package")
 async def export_credential_package(
     user: Annotated[CurrentUser, Depends(get_current_user)],
@@ -237,10 +271,12 @@ async def export_credential_package(
     pdf.cell(0, 10, "Mariner Credential Package",
              new_x="LMARGIN", new_y="NEXT", align="L")
     pdf.set_font("Helvetica", "B", 14)
-    pdf.cell(0, 8, full_name, new_x="LMARGIN", new_y="NEXT", align="L")
+    pdf.cell(0, 8, _latin1_safe(full_name),
+             new_x="LMARGIN", new_y="NEXT", align="L")
     pdf.set_font("Helvetica", "", 10)
     if email:
-        pdf.cell(0, 5, email, new_x="LMARGIN", new_y="NEXT", align="L")
+        pdf.cell(0, 5, _latin1_safe(email),
+                 new_x="LMARGIN", new_y="NEXT", align="L")
     pdf.cell(
         0, 5, f"Generated {today_label} ({tz_label}) via RegKnots",
         new_x="LMARGIN", new_y="NEXT", align="L",
@@ -274,12 +310,16 @@ async def export_credential_package(
         for c in creds:
             type_label = (c["credential_type"] or "").upper()
             title = (c["title"] or "")[:40]
-            number = (c["credential_number"] or "—")[:18]
-            issued = c["issue_date"].isoformat() if c["issue_date"] else "—"
-            expires = c["expiry_date"].isoformat() if c["expiry_date"] else "—"
+            # Latin-1 only: fpdf2's core Helvetica font can't render em-dash
+            # or arrow glyphs. ASCII hyphen for missing data; "to" for
+            # date-range separator below. _latin1_safe() handles any
+            # smart-typography that may have crept in from OCR/paste.
+            number = (c["credential_number"] or "-")[:18]
+            issued = c["issue_date"].isoformat() if c["issue_date"] else "-"
+            expires = c["expiry_date"].isoformat() if c["expiry_date"] else "-"
             pdf.cell(35, 5, type_label, border=0, align="L")
-            pdf.cell(60, 5, title, border=0, align="L")
-            pdf.cell(35, 5, number, border=0, align="L")
+            pdf.cell(60, 5, _latin1_safe(title), border=0, align="L")
+            pdf.cell(35, 5, _latin1_safe(number), border=0, align="L")
             pdf.cell(25, 5, issued, border=0, align="L")
             pdf.cell(20, 5, expires, border=0, align="L",
                      new_x="LMARGIN", new_y="NEXT")
@@ -301,17 +341,17 @@ async def export_credential_package(
         pdf.ln(1)
         pdf.cell(
             0, 5,
-            "By route: " + ", ".join(
+            _latin1_safe("By route: " + ", ".join(
                 f"{k}: {v}d" for k, v in sorted(by_route.items(), key=lambda x: -x[1])
-            ),
+            )),
             new_x="LMARGIN", new_y="NEXT", align="L",
         )
     if by_capacity:
         pdf.cell(
             0, 5,
-            "By capacity: " + ", ".join(
+            _latin1_safe("By capacity: " + ", ".join(
                 f"{k}: {v}d" for k, v in sorted(by_capacity.items(), key=lambda x: -x[1])
-            ),
+            )),
             new_x="LMARGIN", new_y="NEXT", align="L",
         )
     pdf.ln(5)
@@ -339,8 +379,8 @@ async def export_credential_package(
         for r in sea_time_rows:
             vessel = (r["vessel_name"] or "")[:28]
             cap = (r["capacity_served"] or "")[:18]
-            route = (r["route_type"] or "—")[:15]
-            dates = f"{r['from_date'].isoformat()} → {r['to_date'].isoformat()}"
+            route = (r["route_type"] or "-")[:15]
+            dates = f"{r['from_date'].isoformat()} to {r['to_date'].isoformat()}"
             days = str(int(r["days_on_board"]))
             gt = r["gross_tonnage"]
             hp = r["horsepower"]
@@ -349,12 +389,12 @@ async def export_credential_package(
                 gt_hp = f"{gt} GT"
             elif hp:
                 gt_hp = f"{hp} HP"
-            pdf.cell(45, 5, vessel, border=0, align="L")
-            pdf.cell(28, 5, cap, border=0, align="L")
-            pdf.cell(22, 5, route, border=0, align="L")
+            pdf.cell(45, 5, _latin1_safe(vessel), border=0, align="L")
+            pdf.cell(28, 5, _latin1_safe(cap), border=0, align="L")
+            pdf.cell(22, 5, _latin1_safe(route), border=0, align="L")
             pdf.cell(45, 5, dates, border=0, align="L")
             pdf.cell(15, 5, days, border=0, align="R")
-            pdf.cell(20, 5, gt_hp[:14], border=0, align="L",
+            pdf.cell(20, 5, _latin1_safe(gt_hp)[:14], border=0, align="L",
                      new_x="LMARGIN", new_y="NEXT")
 
     # Footer disclaimer
