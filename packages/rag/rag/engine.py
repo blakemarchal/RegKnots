@@ -2761,6 +2761,15 @@ async def chat_with_progress(
     judge_missing_topic: str | None = None
     chunks_truncated_for_judge = False
     if hedge_phrase is not None:
+        # Sprint D6.74 — emit a status BEFORE the judge call so the
+        # user sees the message change between "Verifying citations…"
+        # and the post-judge oracle/fallback statuses. Without this,
+        # the same "Verifying citations…" can sit for the citation
+        # verification (5-15s if regen) PLUS the judge call (~2-3s)
+        # PLUS detection time — risking ~18s of static text and the
+        # "it stopped streaming" trust hit.
+        yield {"event": "status", "data": "Reviewing answer quality…"}
+
         # 1. Judge — gates the fallback decision.
         if hedge_judge_enabled:
             from rag.hedge_judge import judge_hedge
