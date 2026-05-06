@@ -183,6 +183,31 @@ class Settings(BaseSettings):
         default=True, validation_alias="CITATION_ORACLE_ENABLED",
     )
 
+    # ── D6.71 Sprint 7 — Hybrid BM25 + dense retrieval ──────────────────
+    # When true, every chat retrieval runs both dense (cosine over
+    # pgvector embeddings) AND lexical (ts_rank_cd over the FTS
+    # tsvector index added in migration 0088), then fuses the two
+    # rankings via Reciprocal Rank Fusion (RRF, k=60). Closes the
+    # vocab-mismatch failure mode where the user types literal CFR
+    # vocabulary ("subchapter M", "TSMS", "TPO") that embedding
+    # similarity can't reliably route to.
+    #
+    # Default OFF — dark-launched. Migration 0088 adds the column and
+    # index but no app code references it until this flag flips. When
+    # off, behavior is bit-for-bit identical to the pre-D6.71 path.
+    #
+    # See packages/rag/rag/retriever.py::retrieve_hybrid().
+    hybrid_retrieval_enabled: bool = Field(
+        default=False, validation_alias="HYBRID_RETRIEVAL_ENABLED",
+    )
+    # RRF constant. Higher k = ranks deeper in the lists matter less.
+    # 60 is canonical (Cormack et al. 2009). Tune lower (e.g. 30) to
+    # weight top-ranked chunks more heavily; higher (e.g. 100) to
+    # smooth across the candidate pool.
+    hybrid_rrf_k: int = Field(
+        default=60, validation_alias="HYBRID_RRF_K",
+    )
+
     # Monitoring
     sentry_dsn: str = Field(default="", validation_alias="SENTRY_DSN")
     sentry_auth_token: str = Field(default="", validation_alias="SENTRY_AUTH_TOKEN")

@@ -654,6 +654,9 @@ async def chat_endpoint(
         reranker_enabled=settings.reranker_enabled,
         # D6.70 Sprint 8 — Layer-2 citation oracle intervention.
         citation_oracle_enabled=settings.citation_oracle_enabled,
+        # D6.71 Sprint 7 — Hybrid BM25 + dense retrieval (default OFF).
+        hybrid_retrieval_enabled=settings.hybrid_retrieval_enabled,
+        hybrid_rrf_k=settings.hybrid_rrf_k,
     )
 
     await _persist_chat_outcome(
@@ -744,6 +747,9 @@ async def chat_stream_endpoint(
                 reranker_enabled=settings.reranker_enabled,
                 # D6.70 Sprint 8 — Layer-2 citation oracle intervention.
                 citation_oracle_enabled=settings.citation_oracle_enabled,
+                # D6.71 Sprint 7 — Hybrid BM25 + dense retrieval (default OFF).
+                hybrid_retrieval_enabled=settings.hybrid_retrieval_enabled,
+                hybrid_rrf_k=settings.hybrid_rrf_k,
             ):
                 event_type = event["event"]
                 payload = event["data"]

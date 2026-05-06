@@ -2147,6 +2147,325 @@ def _annotate_citation_chunks(rows) -> list[dict]:
     return out
 
 
+# ── Sprint D6.71 — Hybrid BM25 + dense retrieval (FTS variant) ─────────────
+#
+# Lexical fetch over Postgres' built-in tsvector (added by migration 0088).
+# Runs per-source-group, mirrors `_fetch_group()`'s contract so RRF can
+# combine the two lists by rank position. Uses websearch_to_tsquery so
+# user phrasing (quotes, OR, hyphens, partial words) is tolerated rather
+# than rejected at parse time.
+#
+# Why ts_rank_cd over ts_rank: cover-density ranking favors documents
+# where the query terms appear close together — a stronger relevance
+# signal for legal-text retrieval than raw frequency.
+async def _fetch_group_lexical(
+    pool: asyncpg.Pool,
+    query_text: str,
+    group_sources: list[str],
+    candidates: int,
+    allowed_jurisdictions: list[str] | None = None,
+) -> list[dict]:
+    """Fetch top-K lexical (BM25-flavored ts_rank_cd) candidates from one
+    source group.
+
+    Returns chunks with `similarity` populated by `ts_rank_cd` (NOT
+    cosine). Caller is expected to fold these into a fusion (RRF or
+    weighted) with the dense candidates rather than treating
+    similarity values as comparable across the two retrievers.
+    """
+    base = (
+        "SELECT id, source, section_number, section_title, full_text, "
+        "       ts_rank_cd(full_text_tsv, websearch_to_tsquery('english', $1)) AS similarity "
+        "FROM regulations "
+        "WHERE full_text_tsv @@ websearch_to_tsquery('english', $1) "
+        "  AND source = ANY($3) "
+    )
+    juris_clause = "  AND jurisdictions && $4::text[] " if allowed_jurisdictions is not None else ""
+    sql = (
+        base
+        + juris_clause
+        + "ORDER BY similarity DESC LIMIT $2"
+    )
+    args: list = [query_text, candidates, group_sources]
+    if allowed_jurisdictions is not None:
+        args.append(allowed_jurisdictions)
+    try:
+        rows = await pool.fetch(sql, *args)
+    except Exception as exc:
+        # If websearch_to_tsquery rejects the query (very unlikely — it's
+        # designed to be tolerant — but possible with malformed input),
+        # degrade to no lexical candidates rather than failing retrieval.
+        logger.info(
+            "lexical fetch failed (degrading to dense-only): %s: %s",
+            type(exc).__name__, str(exc)[:120],
+        )
+        return []
+    return [dict(r) for r in rows]
+
+
+def _rrf_fuse(
+    dense_groups: list[list[dict]],
+    lexical_groups: list[list[dict]],
+    *,
+    rrf_k: int = 60,
+) -> list[dict]:
+    """Reciprocal-rank-fusion combiner.
+
+    Each chunk gets:
+        rrf_score = 1/(k + dense_rank) + 1/(k + lex_rank)
+    where ranks are 1-based positions within the chunk's own source
+    group's list, or None (contributing 0) if the chunk wasn't found
+    by that retriever.
+
+    Why RRF rather than weighted-α score blending: dense cosine and
+    ts_rank_cd are NOT on comparable scales (cosine ~0.5–0.95, ts_rank
+    ~0.001–10). Min-max normalization is brittle per-query. RRF
+    combines purely by rank position, so no scale tuning is needed.
+
+    The fused score replaces `similarity` so downstream code (rerank,
+    title boost, vessel filter) operates on a single canonical score.
+    Downstream identifier/keyword merge in the caller still applies
+    its own additive boosts on top — those boosts (max_sim + 0.05 /
+    0.02) intentionally dominate RRF scores so identifier and
+    keyword priority is preserved, identical to the dense-only path.
+    """
+    fused_by_id: dict = {}
+
+    # First pass — dense ranks
+    for group in dense_groups:
+        for rank, chunk in enumerate(group, start=1):
+            cid = chunk["id"]
+            score = 1.0 / (rrf_k + rank)
+            if cid in fused_by_id:
+                fused_by_id[cid]["_rrf_score"] += score
+                fused_by_id[cid]["_dense_rank"] = rank
+            else:
+                c = dict(chunk)
+                c["_rrf_score"] = score
+                c["_dense_rank"] = rank
+                c["_lex_rank"] = None
+                fused_by_id[cid] = c
+
+    # Second pass — lexical ranks
+    for group in lexical_groups:
+        for rank, chunk in enumerate(group, start=1):
+            cid = chunk["id"]
+            score = 1.0 / (rrf_k + rank)
+            if cid in fused_by_id:
+                fused_by_id[cid]["_rrf_score"] += score
+                fused_by_id[cid]["_lex_rank"] = rank
+            else:
+                c = dict(chunk)
+                c["_rrf_score"] = score
+                c["_dense_rank"] = None
+                c["_lex_rank"] = rank
+                fused_by_id[cid] = c
+
+    # Promote RRF score into similarity so downstream code is unchanged.
+    out: list[dict] = []
+    for c in fused_by_id.values():
+        c["similarity"] = c.pop("_rrf_score")
+        out.append(c)
+    out.sort(key=lambda c: float(c.get("similarity", 0.0)), reverse=True)
+    return out
+
+
+async def retrieve_hybrid(
+    query: str,
+    pool: asyncpg.Pool,
+    openai_api_key: str,
+    vessel_profile: dict | None = None,
+    limit: int = 8,
+    sources: list[str] | None = None,
+    *,
+    rrf_k: int = 60,
+    lexical_per_group: int | None = None,
+) -> list[dict]:
+    """Sprint D6.71 — hybrid dense + lexical retrieval with RRF fusion.
+
+    Parallel structure to `retrieve()`. The DENSE path is identical
+    to retrieve()'s candidate generation; the LEXICAL path runs
+    `ts_rank_cd` over the FTS index added in migration 0088. Per-
+    source-group diversification is preserved so small sources
+    (COLREGs, ISM) aren't crushed by large ones (CFR).
+
+    Fusion is reciprocal-rank fusion (RRF, k=60). The fused score
+    replaces `similarity` so downstream identifier/keyword merge,
+    vessel filter, and rerank are unchanged.
+
+    Failure modes:
+      - Lexical fetch fails (e.g. tsvector column missing because
+        migration 0088 hasn't run) → log + degrade to dense-only
+        (identical to retrieve()'s output).
+      - websearch_to_tsquery rejects the query → same.
+
+    This function is dark-launched via the HYBRID_RETRIEVAL_ENABLED
+    flag. When the flag is OFF (default), `retrieve_enhanced` calls
+    `retrieve()` instead and this function is never reached.
+    """
+    t0 = time.perf_counter()
+
+    vec_literal = await _embed_query(openai_api_key, query)
+
+    from rag.jurisdiction import allowed_jurisdictions as _allowed_juris_fn
+    juris_allow = _allowed_juris_fn(query, vessel_profile)
+    juris_list = list(juris_allow) if juris_allow is not None else None
+
+    available = await _get_available_sources(pool)
+
+    # Plan per-group fetch sizes — same as dense retrieve(). Lexical
+    # uses the same per-group budget as dense by default, so a chunk
+    # that ranks well lexically but poorly densely (or vice versa)
+    # has comparable opportunity to land in the fused pool.
+    dense_tasks: list = []
+    lex_tasks: list = []
+    active_groups: list[str] = []
+    for group_name, group_sources in SOURCE_GROUPS.items():
+        present = [s for s in group_sources if s in available]
+        if not present:
+            continue
+        n_dense = _CANDIDATES_PER_GROUP.get(group_name, _DEFAULT_CANDIDATES_PER_GROUP)
+        n_lex = lexical_per_group if lexical_per_group is not None else n_dense
+        active_groups.append(group_name)
+        dense_tasks.append(_fetch_group(pool, vec_literal, present, n_dense, juris_list))
+        lex_tasks.append(_fetch_group_lexical(pool, query, present, n_lex, juris_list))
+
+    # Run all 2N fetches in parallel.
+    all_results = await asyncio.gather(*dense_tasks, *lex_tasks)
+    dense_groups = list(all_results[: len(dense_tasks)])
+    lexical_groups = list(all_results[len(dense_tasks):])
+
+    # Fuse via RRF.
+    fused = _rrf_fuse(dense_groups, lexical_groups, rrf_k=rrf_k)
+
+    # Per-section dedup with the same _MAX_CHUNKS_PER_SECTION cap as
+    # retrieve(). RRF already deduplicated by chunk id; this dedupes
+    # by section_number to prevent a single section from monopolizing
+    # the top of the candidate list.
+    candidates: list[dict] = []
+    section_indices: dict[str, list[int]] = {}
+    for chunk in fused:
+        sec = chunk.get("section_number", "")
+        if sec and sec in section_indices:
+            existing = section_indices[sec]
+            if len(existing) < _MAX_CHUNKS_PER_SECTION:
+                section_indices[sec].append(len(candidates))
+                candidates.append(chunk)
+            else:
+                weakest_idx = min(existing, key=lambda i: candidates[i]["similarity"])
+                if chunk["similarity"] > candidates[weakest_idx]["similarity"]:
+                    candidates[weakest_idx] = chunk
+            continue
+        if sec:
+            section_indices[sec] = [len(candidates)]
+        candidates.append(chunk)
+
+    # ── Identifier + keyword merge (mirror of retrieve()) ─────────────────
+    # Reused with synthetic similarities (max_sim + 0.05 / 0.02) that
+    # will dominate RRF scores (~0.03 max), preserving identifier and
+    # keyword priority identical to the dense-only path.
+    identifiers = _extract_identifiers(query)
+    keywords = _extract_keywords(query)
+    synonym_added: set[str] = set()
+    if keywords:
+        from .synonyms import expand_keywords, expand_intent
+        keywords, synonym_map = expand_keywords(keywords)
+        if synonym_map:
+            synonym_added = {s for syns in synonym_map.values() for s in syns}
+        keywords, intent_added = expand_intent(query, keywords)
+        if intent_added:
+            synonym_added.update(intent_added)
+
+    id_results: list[dict] = []
+    kw_results: list[dict] = []
+    specific_keywords: list[str] = []
+    if identifiers:
+        id_results = await _identifier_search(identifiers, pool, allowed_jurisdictions=juris_list)
+    if keywords:
+        kw_results, specific_keywords = await _broad_keyword_search(
+            keywords, pool, synonym_keywords=synonym_added,
+            allowed_jurisdictions=juris_list,
+        )
+
+    max_sim = max(
+        (float(c["similarity"]) for c in candidates),
+        default=0.0,
+    ) if candidates else 0.0
+
+    # In-memory keyword boost — same as retrieve().
+    if specific_keywords:
+        kw_boost_sim = max_sim + 0.02
+        for c in candidates:
+            if float(c["similarity"]) >= kw_boost_sim:
+                continue
+            text_lower = (c.get("full_text") or "").lower()
+            if any(kw in text_lower for kw in specific_keywords):
+                c["similarity"] = kw_boost_sim
+
+    if id_results or kw_results:
+        existing_sections = {
+            c.get("section_number", "")
+            for c in candidates
+            if c.get("section_number")
+        }
+        existing_ids = {c["id"] for c in candidates}
+
+        def _merge(chunks: list[dict], synthetic_sim: float) -> None:
+            for chunk in chunks:
+                sec = chunk.get("section_number", "")
+                if chunk["id"] in existing_ids:
+                    continue
+                if sec and sec in existing_sections:
+                    existing = section_indices.get(sec, [])
+                    if len(existing) < _MAX_CHUNKS_PER_SECTION:
+                        chunk["similarity"] = synthetic_sim
+                        section_indices[sec].append(len(candidates))
+                        candidates.append(chunk)
+                        existing_ids.add(chunk["id"])
+                    else:
+                        weakest_idx = min(existing, key=lambda i: candidates[i]["similarity"])
+                        if synthetic_sim > float(candidates[weakest_idx]["similarity"]):
+                            candidates[weakest_idx]["similarity"] = synthetic_sim
+                    continue
+                chunk["similarity"] = synthetic_sim
+                candidates.append(chunk)
+                if sec:
+                    existing_sections.add(sec)
+                    section_indices[sec] = [len(candidates) - 1]
+                existing_ids.add(chunk["id"])
+
+        if id_results:
+            _merge(id_results, max_sim + 0.05)
+        if kw_results:
+            _merge(kw_results, max_sim + 0.02)
+
+    if candidates:
+        candidates = _filter_by_vessel_applicability(candidates, vessel_profile)
+        candidates = _rerank(candidates, query, vessel_profile)
+
+    final = candidates[:limit]
+
+    elapsed_ms = (time.perf_counter() - t0) * 1000
+    dense_count = sum(len(g) for g in dense_groups)
+    lex_count = sum(len(g) for g in lexical_groups)
+    fused_count = len(fused)
+    logger.info(
+        "Hybrid retrieval: dense=%d lex=%d fused=%d candidates=%d top=%d "
+        "rrf_k=%d in %.1fms",
+        dense_count, lex_count, fused_count, len(candidates), len(final),
+        rrf_k, elapsed_ms,
+    )
+    if final:
+        chunk_summaries = ", ".join(
+            f"{c.get('source', '?')}/{c.get('section_number', '?')} "
+            f"(d={c.get('_dense_rank')},l={c.get('_lex_rank')},sim={c.get('_score', c.get('similarity', 0)):.4f})"
+            for c in final
+        )
+        logger.info("Hybrid selected: %s", chunk_summaries)
+
+    return final
+
+
 async def retrieve_enhanced(
     query: str,
     pool: asyncpg.Pool,
@@ -2159,6 +2478,13 @@ async def retrieve_enhanced(
     query_rewrite_enabled: bool = False,
     reranker_enabled: bool = False,
     rerank_pool_size: int = 30,
+    # Sprint D6.71 — hybrid BM25 + dense retrieval. Default OFF.
+    # When True, retrieve_hybrid() runs in place of retrieve().
+    # All other layers (rewrite, rerank, title boost) operate
+    # identically on the hybrid candidate set.
+    hybrid_retrieval_enabled: bool = False,
+    hybrid_rrf_k: int = 60,
+    hybrid_lexical_per_group: int | None = None,
 ) -> list[dict]:
     """Sprint D6.66 — enhanced retrieval orchestrator.
 
@@ -2214,14 +2540,57 @@ async def retrieve_enhanced(
     # limit directly.
     fetch_limit = rerank_pool_size if reranker_enabled else limit
 
-    primary = await retrieve(
-        query=query,
-        pool=pool,
-        openai_api_key=openai_api_key,
-        vessel_profile=vessel_profile,
-        limit=fetch_limit,
-        sources=sources,
-    )
+    # Sprint D6.71 — pick dense-only retrieve() vs hybrid retrieve_hybrid()
+    # at the top of the pipeline. All downstream layers (query rewrite,
+    # title boost, rerank) operate identically on either's output. When
+    # the flag is OFF (default), behavior is bit-for-bit identical to
+    # the pre-D6.71 path.
+    if hybrid_retrieval_enabled and sources is None:
+        # Hybrid path is per-source-group diversified; the explicit-
+        # source path (used by citation lookup) bypasses it and stays
+        # on dense-only for predictable single-source semantics.
+        primary = await retrieve_hybrid(
+            query=query,
+            pool=pool,
+            openai_api_key=openai_api_key,
+            vessel_profile=vessel_profile,
+            limit=fetch_limit,
+            sources=sources,
+            rrf_k=hybrid_rrf_k,
+            lexical_per_group=hybrid_lexical_per_group,
+        )
+    else:
+        primary = await retrieve(
+            query=query,
+            pool=pool,
+            openai_api_key=openai_api_key,
+            vessel_profile=vessel_profile,
+            limit=fetch_limit,
+            sources=sources,
+        )
+
+    # Reformulation retrievals also pick the same path so a hybrid run
+    # at the primary level isn't degraded back to dense-only on extras.
+    def _retrieve_one(q: str) -> "asyncio.Future":
+        if hybrid_retrieval_enabled and sources is None:
+            return retrieve_hybrid(
+                query=q,
+                pool=pool,
+                openai_api_key=openai_api_key,
+                vessel_profile=vessel_profile,
+                limit=limit,
+                sources=sources,
+                rrf_k=hybrid_rrf_k,
+                lexical_per_group=hybrid_lexical_per_group,
+            )
+        return retrieve(
+            query=q,
+            pool=pool,
+            openai_api_key=openai_api_key,
+            vessel_profile=vessel_profile,
+            limit=limit,
+            sources=sources,
+        )
 
     # 2. Pull reformulation results (if rewrite fired).
     extras: list[list[dict]] = []
@@ -2238,14 +2607,7 @@ async def retrieve_enhanced(
             # (limit, not rerank_pool_size) since the primary already
             # carries the wider pool.
             extra_tasks = [
-                retrieve(
-                    query=r,
-                    pool=pool,
-                    openai_api_key=openai_api_key,
-                    vessel_profile=vessel_profile,
-                    limit=limit,
-                    sources=sources,
-                )
+                _retrieve_one(r)
                 for r in rewrite_result.reformulations
             ]
             extra_results = await asyncio.gather(

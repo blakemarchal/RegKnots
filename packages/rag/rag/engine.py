@@ -1280,6 +1280,13 @@ async def chat(
     # falls through silently to the existing web fallback (additive-only
     # contract — never worse than today's behavior).
     citation_oracle_enabled: bool = True,
+    # Sprint D6.71 — Hybrid BM25 + dense retrieval. Default OFF.
+    # When True, retrieve_hybrid() runs in place of retrieve() inside
+    # retrieve_enhanced(). All other layers (rewrite, rerank, title
+    # boost, identifier/keyword merge, vessel filter) are unchanged.
+    # Behavior with the flag OFF is bit-for-bit identical to today.
+    hybrid_retrieval_enabled: bool = False,
+    hybrid_rrf_k: int = 60,
 ) -> ChatResponse:
     """Run the full RAG pipeline and return a ChatResponse.
 
@@ -1365,6 +1372,8 @@ async def chat(
         limit=8,
         query_rewrite_enabled=query_rewrite_enabled,
         reranker_enabled=reranker_enabled,
+        hybrid_retrieval_enabled=hybrid_retrieval_enabled,
+        hybrid_rrf_k=hybrid_rrf_k,
     )
     logger.info(f"Retrieved {len(chunks)} chunks")
 
@@ -2531,6 +2540,10 @@ async def chat_with_progress(
     # docstring for full contract. Defaults to True; flip via config to
     # disable instantly without redeploy.
     citation_oracle_enabled: bool = True,
+    # Sprint D6.71 — Hybrid BM25 + dense retrieval. Default OFF.
+    # See chat() docstring.
+    hybrid_retrieval_enabled: bool = False,
+    hybrid_rrf_k: int = 60,
 ) -> AsyncIterator[dict]:
     """Same RAG pipeline as chat() but yields lightweight progress events.
 
@@ -2611,6 +2624,8 @@ async def chat_with_progress(
         limit=8,
         query_rewrite_enabled=query_rewrite_enabled,
         reranker_enabled=reranker_enabled,
+        hybrid_retrieval_enabled=hybrid_retrieval_enabled,
+        hybrid_rrf_k=hybrid_rrf_k,
     )
     logger.info(f"Retrieved {len(chunks)} chunks")
 
