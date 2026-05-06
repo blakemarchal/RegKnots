@@ -151,17 +151,26 @@ def _existing_basenames(raw_dir: Path) -> set[str]:
     return {p.name.lower() for p in raw_dir.iterdir() if p.suffix.lower() == ".pdf"}
 
 
-async def _record_seen_urls(dsn: str, urls: Iterable[str]) -> None:
+async def _record_seen_urls(
+    dsn: str, urls_with_source: Iterable[tuple[str, str]],
+) -> None:
     """Mark URLs as seen in nmc_monitor_seen_urls so the admin-facing
-    monitor doesn't double-flag them as new."""
+    monitor doesn't double-flag them as new.
+
+    Schema requires url, filename, source_page (all NOT NULL); first_seen_at
+    has a default of now(). filename is derived via _safe_basename so the
+    admin monitor's filename column matches what's on disk.
+    """
     conn = await asyncpg.connect(dsn)
     try:
         async with conn.transaction():
-            for url in urls:
+            for url, source_page in urls_with_source:
                 await conn.execute(
-                    "INSERT INTO nmc_monitor_seen_urls (url) VALUES ($1) "
+                    "INSERT INTO nmc_monitor_seen_urls "
+                    "  (url, filename, source_page) "
+                    "VALUES ($1, $2, $3) "
                     "ON CONFLICT (url) DO NOTHING",
-                    url,
+                    url, _safe_basename(url), source_page,
                 )
     finally:
         await conn.close()
@@ -207,13 +216,17 @@ async def main() -> int:
     dsn = dsn_raw.replace("postgresql+asyncpg://", "postgresql://")
 
     session = requests.Session()
-    discovered: set[str] = set()
+    # Track which landing page each URL was found on so the seen-urls
+    # table records provenance (the admin-facing nmc-monitor digest
+    # groups by source_page).
+    discovered: dict[str, str] = {}   # url → first source_page that found it
     fetch_failures = 0
     for landing in _NMC_LANDING_PAGES:
         page_urls = _scrape_landing(landing, session)
         if not page_urls:
             fetch_failures += 1
-        discovered.update(page_urls)
+        for url in page_urls:
+            discovered.setdefault(url, landing)
 
     if not discovered and fetch_failures == len(_NMC_LANDING_PAGES):
         logger.error("All %d landing pages failed to scrape", fetch_failures)
@@ -224,7 +237,7 @@ async def main() -> int:
 
     # New = URL whose basename isn't already on disk
     new_urls: list[tuple[str, str]] = []   # (url, target_filename)
-    for url in sorted(discovered):
+    for url in sorted(discovered.keys()):
         target = _safe_basename(url)
         if target not in existing:
             new_urls.append((url, target))
@@ -232,7 +245,7 @@ async def main() -> int:
     if not new_urls:
         logger.info("No new PDFs found — nothing to ingest. Exiting clean.")
         # Still mark URLs as seen so admin monitor stays current.
-        await _record_seen_urls(dsn, discovered)
+        await _record_seen_urls(dsn, discovered.items())
         return 0
 
     logger.info("Downloading %d new PDFs:", len(new_urls))
@@ -261,7 +274,7 @@ async def main() -> int:
     if not _run_ingest("nmc_checklist", repo_root):
         return 2
 
-    await _record_seen_urls(dsn, discovered)
+    await _record_seen_urls(dsn, discovered.items())
     logger.info("Refresh complete: %d new PDFs downloaded, ingest re-run.", downloaded)
     return 0
 
