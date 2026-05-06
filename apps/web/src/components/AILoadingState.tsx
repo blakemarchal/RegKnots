@@ -51,7 +51,9 @@ export function AILoadingState({ messages, variant = 'inline' }: Props) {
   const totalScripted = messages.length
 
   useEffect(() => {
-    if (totalScripted <= 1 && FILLER_MESSAGES.length === 0) return
+    // FILLER_MESSAGES is non-empty; we always have something to rotate
+    // through, so always start the timer regardless of caller's
+    // message count.
     const id = setInterval(() => {
       setI((prev) => prev + 1)
     }, ROTATION_MS)
