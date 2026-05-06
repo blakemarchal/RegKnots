@@ -1,11 +1,17 @@
 """
 Model complexity router.
 
-Uses a single Haiku call to score query complexity 1-3 and select the
-appropriate Claude model. Falls back to score 2 (Sonnet) on any error.
+Uses Haiku to score query complexity 1-3 and select the appropriate Claude
+model. When Haiku returns 0 (off-topic), a Sonnet confirmation pass runs
+before the engine refuses — Haiku flakes ~20% on borderline maritime-
+adjacent queries (e.g. "military truck fire with UN2734 stowage"), and a
+single false-block of a legitimate compliance question is worse for trust
+than the ~$0.005 it costs to confirm with Sonnet on the rare off-topic
+verdicts. Falls back to score 2 (Sonnet) on any classifier error.
 """
 
 import logging
+import re
 
 from anthropic import AsyncAnthropic
 
@@ -35,44 +41,118 @@ REGENERATION_MODEL: str = "claude-opus-4-7"
 _DEFAULT_SCORE = 2
 
 
+async def _classify_once(
+    query: str, client: AsyncAnthropic, model: str,
+) -> int | None:
+    """Run a single classification pass with the given model.
+
+    Returns the integer score 0-3, or None if the response was unparseable
+    (caller decides whether to retry, escalate, or default).
+    """
+    response = await client.messages.create(
+        model=model,
+        max_tokens=10,
+        messages=[
+            {
+                "role": "user",
+                "content": f"{CLASSIFIER_PROMPT}\n\nQuestion: {query}",
+            }
+        ],
+    )
+    text = response.content[0].text.strip()
+    match = re.search(r"[0123]", text)
+    if not match:
+        return None
+    score = int(match.group())
+    if score not in (0, 1, 2, 3):
+        return None
+    return score
+
+
 async def route_query(query: str, client: AsyncAnthropic) -> RouteDecision:
     """Classify query complexity and return the appropriate model selection.
 
-    D6.58 prelude — now also returns score=0 for off-topic queries, in
-    which case the engine short-circuits before any retrieval / web
-    fallback / ensemble call. This is the cost-abuse gate.
+    Pipeline:
+      1. Haiku scores the query 0-3.
+      2. If Haiku says 0 (off-topic), a Sonnet second-opinion pass runs
+         BEFORE the engine refuses. Only when both Haiku AND Sonnet
+         agree on 0 do we honor the off-topic gate. Otherwise we
+         override with Sonnet's higher score and let retrieval +
+         answer generation proceed normally.
+      3. On any classifier error (parse failure, API exception), default
+         to score 2 — false-blocking a real maritime question is far
+         worse for trust than letting an off-topic query through, where
+         we only pay ~$0.005 of false-allow against rare 25/day cap.
 
-    Default behavior on classifier failure: assume on-topic (score=2)
-    rather than off-topic. False-blocking real maritime questions is
-    much worse for users than letting an off-topic query through —
-    we'd rather pay $0.001 of false-allow than 0% of false-block.
+    Sprint D6.73 — added the Sonnet confirmation pass after Karynn's
+    hazmat fire scenario ("military truck on fire next to generators
+    above a tank container with UN2734 and UN1202") was refused on the
+    third try while passing on the first two. Probe runs confirmed
+    Haiku returns 0 in ~20% of trials on this query (and 100% of
+    trials on simpler "military truck fire" variants), making single-
+    pass classification an unreliable hard-refusal gate for borderline
+    compliance scenarios that touch military/government cargo.
     """
     try:
-        response = await client.messages.create(
-            model=MODEL_MAP[1],  # always use Haiku for classification
-            max_tokens=10,
-            messages=[
-                {
-                    "role": "user",
-                    "content": f"{CLASSIFIER_PROMPT}\n\nQuestion: {query}",
-                }
-            ],
-        )
-        text = response.content[0].text.strip()
-        # Extract first digit. 0-3 valid; anything else falls through
-        # to the default (on-topic, Sonnet).
-        match = __import__("re").search(r"[0123]", text)
-        if not match:
-            raise ValueError(f"no valid score digit in response: {text!r}")
-        score = int(match.group())
-        if score not in (0, 1, 2, 3):
-            raise ValueError(f"score out of range: {score!r}")
+        primary = await _classify_once(query, client, MODEL_MAP[1])
+        if primary is None:
+            raise ValueError("primary classifier returned no valid score")
     except Exception as exc:
         logger.warning(f"Router classifier failed ({exc}), defaulting to score 2")
-        score = _DEFAULT_SCORE
+        return RouteDecision(
+            score=_DEFAULT_SCORE,
+            model=MODEL_MAP[_DEFAULT_SCORE],
+            is_off_topic=False,
+        )
+
+    # Defense-in-depth: a Haiku off-topic verdict triggers a Sonnet
+    # confirmation. The cost (Sonnet only fires on suspected off-topic,
+    # ~1 query per week in current volume) is negligible against the
+    # cost of false-blocking a real maritime question.
+    if primary == 0:
+        try:
+            confirm = await _classify_once(query, client, MODEL_MAP[2])
+            if confirm is None:
+                # Sonnet response unparseable — err toward allow, since
+                # a hard-refusal needs both passes to agree.
+                logger.info(
+                    "off_topic gate: Haiku=0, Sonnet unparseable → allowing (default to %d)",
+                    _DEFAULT_SCORE,
+                )
+                return RouteDecision(
+                    score=_DEFAULT_SCORE,
+                    model=MODEL_MAP[_DEFAULT_SCORE],
+                    is_off_topic=False,
+                )
+            if confirm >= 1:
+                logger.info(
+                    "off_topic gate: Haiku=0 → Sonnet=%d, overriding to allow "
+                    "(query=%r)",
+                    confirm, query[:120],
+                )
+                return RouteDecision(
+                    score=confirm,
+                    model=MODEL_MAP[confirm],
+                    is_off_topic=False,
+                )
+            # Both classifiers agree: genuinely off-topic.
+            logger.info(
+                "off_topic gate: 2-of-2 confirmed off-topic (query=%r)",
+                query[:120],
+            )
+        except Exception as exc:
+            # Sonnet API failure — err toward allow rather than refuse.
+            logger.warning(
+                "off_topic Sonnet confirm failed (%s) — defaulting to allow", exc,
+            )
+            return RouteDecision(
+                score=_DEFAULT_SCORE,
+                model=MODEL_MAP[_DEFAULT_SCORE],
+                is_off_topic=False,
+            )
 
     return RouteDecision(
-        score=score,
-        model=MODEL_MAP[score],
-        is_off_topic=(score == 0),
+        score=primary,
+        model=MODEL_MAP[primary],
+        is_off_topic=(primary == 0),
     )

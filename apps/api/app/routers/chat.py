@@ -44,6 +44,12 @@ router = APIRouter(prefix="/chat", tags=["chat"])
 _MODEL_ALIAS: dict[str, str] = {
     "claude-haiku-4-5-20251001": "haiku",
     "claude-sonnet-4-6": "sonnet",
+    # Sprint D6.73 — Sprint D4 upgraded the Opus version from 4-6 to 4-7
+    # in router.MODEL_MAP, but this alias map was missed. Result: every
+    # Opus answer was persisted with model_used = NULL because dict.get
+    # returned None. Both keys retained so historic stale data with
+    # the old version string still maps correctly during any backfill.
+    "claude-opus-4-7": "opus",
     "claude-opus-4-6": "opus",
     "fallback:gpt-4o": "fallback_gpt4o",
 }
