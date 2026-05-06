@@ -40,6 +40,8 @@ const TIER_FEATURES: Record<Tier, { headline: string; perks: string[] }> = {
       'Full reg corpus (see below)',
       '46 USC + WHO IHR (port health & seamen’s law)',
       'Vessel profile + chat history',
+      'Credential vault with auto-OCR',
+      'Renewal alerts (90 / 30 / 7 days)',
       'Cited regulation answers, not summaries',
     ],
   },
@@ -50,7 +52,8 @@ const TIER_FEATURES: Record<Tier, { headline: string; perks: string[] }> = {
       'Everything in Mate, plus:',
       'Priority regulation update notifications',
       'Audit-ready chat logs',
-      'PSC checklist builder & sea-service letters',
+      'USCG sea-service letter generator',
+      'PSC checklist builder',
     ],
   },
 }
@@ -346,6 +349,27 @@ export default function PricingPage() {
           maritime charities — see{' '}
           <Link href="/giving" className="text-[#2dd4bf] hover:underline">our giving page</Link>.
         </p>
+
+        {/* D6.61 — trust strip, mirroring landing. Security mentioned
+            so the buyer scanning for it is satisfied; framing makes
+            clear we don't think it deserves a billboard. */}
+        <div className="mt-8 max-w-3xl w-full">
+          <div className="rounded-xl border border-white/8 bg-[#0a0e1a]/60 px-5 py-4">
+            <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2
+              font-mono text-[10px] text-[#6b7594] uppercase tracking-[0.15em]">
+              <span>TLS 1.3 in transit</span>
+              <span className="text-white/15">·</span>
+              <span>AES-256 at rest</span>
+              <span className="text-white/15">·</span>
+              <span>Zero third-party tracking</span>
+              <span className="text-white/15">·</span>
+              <span>Your data, your delete button</span>
+            </div>
+            <p className="font-mono text-[11px] text-[#6b7594] text-center mt-2 italic">
+              Security is the floor, not the feature.
+            </p>
+          </div>
+        </div>
 
         {/* ════════════════════════════════════════════════════════════════════
             Wheelhouse (Sprint D6.57) — separate visual block. Conceptually

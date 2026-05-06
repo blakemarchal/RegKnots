@@ -389,6 +389,18 @@ export default function LandingPage() {
           7-day free trial · 50 messages · No credit card required
         </p>
 
+        {/* D6.61 — competitive wedge tagline. Single mariner-vault apps
+            (MarinerDocs etc.) sell the bookkeeping; we sell that AND
+            the regulatory reasoning behind it. */}
+        <p
+          className="font-mono text-[11px] text-[#f0ece4]/60 mt-3 tracking-wide max-w-md
+            animate-[heroFadeUp_0.8s_ease-out_0.7s]"
+          style={{ animationFillMode: 'both' }}
+        >
+          Track your credentials. Generate your USCG paperwork.{' '}
+          <span className="text-[#2dd4bf]/80">And actually understand the regulations behind them.</span>
+        </p>
+
         {/* Sprint D6.26 — flag strip moved out of hero into CorpusBadges
             "What we know" section so the hero stays uncluttered and
             jurisdictional signal lives right next to the actual sources. */}
@@ -661,6 +673,108 @@ export default function LandingPage() {
       </section>
 
       {/* ══════════════════════════════════════════════════════════════════════
+          SECTION 5b — MARINER VAULT — D6.61 surface what we already do
+          beyond chat. Single-feature competitor apps (MarinerDocs Vault,
+          eMariner, Mariner Hub) sell credential storage + expiry alerts
+          as their entire product; we ship those AND the regulatory
+          reasoning, but never advertised it on the marketing surface.
+      ══════════════════════════════════════════════════════════════════════ */}
+      <section className="bg-[#111827] px-5 md:px-10 py-20 md:py-28 border-t border-white/5">
+        <div className="max-w-5xl mx-auto">
+          <div className="text-center mb-12">
+            <p className="font-mono text-[11px] text-[#2dd4bf] uppercase tracking-[0.3em] mb-3">
+              Beyond Chat
+            </p>
+            <h2 className="font-display font-black text-[#f0ece4] leading-tight tracking-tight
+              text-[clamp(28px,5vw,48px)]">
+              Your credentials, organized<br />and reasoned over.
+            </h2>
+            <p className="font-mono text-[#6b7594] mt-4 max-w-2xl mx-auto text-sm md:text-base">
+              Snap a photo of your MMC, TWIC, or medical cert.
+              We extract the data, track the expiry, and answer the
+              regulatory questions only your credentials can trigger.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+            {/* Card 1 — Credential Vault */}
+            <div className="bg-[#0d1225] rounded-2xl border border-white/8 p-6 md:p-7">
+              <div className="w-10 h-10 rounded-lg bg-[#2dd4bf]/10 border border-[#2dd4bf]/20
+                flex items-center justify-center mb-4">
+                <svg className="w-5 h-5 text-[#2dd4bf]" viewBox="0 0 24 24" fill="none"
+                     stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="3" y="3" width="18" height="18" rx="2" />
+                  <path d="M3 9h18M9 21V9" />
+                </svg>
+              </div>
+              <h3 className="font-display font-bold text-[#f0ece4] text-lg mb-2">
+                Credential Vault
+              </h3>
+              <p className="font-mono text-xs text-[#6b7594] leading-relaxed mb-3">
+                MMC, TWIC, medical, STCW, passports, course certs, sea-service letters,
+                drug-test letters, vaccine records, union paperwork, pay stubs — all in one place.
+              </p>
+              <p className="font-mono text-[10px] text-[#2dd4bf]/70 uppercase tracking-wider">
+                Snap → extract → done
+              </p>
+            </div>
+
+            {/* Card 2 — Smart OCR + Reasoning */}
+            <div className="bg-[#0d1225] rounded-2xl border border-white/8 p-6 md:p-7">
+              <div className="w-10 h-10 rounded-lg bg-[#2dd4bf]/10 border border-[#2dd4bf]/20
+                flex items-center justify-center mb-4">
+                <svg className="w-5 h-5 text-[#2dd4bf]" viewBox="0 0 24 24" fill="none"
+                     stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="2" y="6" width="20" height="14" rx="2" />
+                  <path d="M22 6l-10 7L2 6M7 2v4M17 2v4" />
+                </svg>
+              </div>
+              <h3 className="font-display font-bold text-[#f0ece4] text-lg mb-2">
+                Snap + Understand
+              </h3>
+              <p className="font-mono text-xs text-[#6b7594] leading-relaxed mb-3">
+                One photo, structured data + the regulation behind it.
+                &ldquo;Your MMC says Master Inland 100 GT — here&apos;s what 46 CFR 11.422
+                requires to upgrade to 200 GT.&rdquo;
+              </p>
+              <p className="font-mono text-[10px] text-[#2dd4bf]/70 uppercase tracking-wider">
+                Other apps stop at the photo
+              </p>
+            </div>
+
+            {/* Card 3 — Renewal Co-Pilot */}
+            <div className="bg-[#0d1225] rounded-2xl border border-white/8 p-6 md:p-7">
+              <div className="w-10 h-10 rounded-lg bg-[#2dd4bf]/10 border border-[#2dd4bf]/20
+                flex items-center justify-center mb-4">
+                <svg className="w-5 h-5 text-[#2dd4bf]" viewBox="0 0 24 24" fill="none"
+                     stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="10" />
+                  <path d="M12 6v6l4 2" />
+                </svg>
+              </div>
+              <h3 className="font-display font-bold text-[#f0ece4] text-lg mb-2">
+                Renewal Co-Pilot
+              </h3>
+              <p className="font-mono text-xs text-[#6b7594] leading-relaxed mb-3">
+                Expiry alerts at 90 / 30 / 7 days, plus the actual CFR section
+                governing your renewal window and exactly what evidence the
+                NMC will demand. USCG sea-service letter generator built in.
+              </p>
+              <p className="font-mono text-[10px] text-[#2dd4bf]/70 uppercase tracking-wider">
+                Calendar + the rule
+              </p>
+            </div>
+          </div>
+
+          {/* The wedge — single line, low-key, devastating to mariner-vault apps */}
+          <p className="font-mono text-xs text-[#6b7594] text-center mt-10 max-w-2xl mx-auto">
+            Other mariner apps store the paperwork.{' '}
+            <span className="text-[#f0ece4]/85">RegKnots stores it AND explains the rule the paperwork points to.</span>
+          </p>
+        </div>
+      </section>
+
+      {/* ══════════════════════════════════════════════════════════════════════
           SECTION 6 — PRICING
       ══════════════════════════════════════════════════════════════════════ */}
       <section className="px-5 md:px-10 py-20 md:py-28">
@@ -727,6 +841,8 @@ export default function LandingPage() {
                 '100 messages per month',
                 'Full reg corpus (see above)',
                 'Vessel profile + chat history',
+                'Credential vault with auto-OCR',
+                'Renewal alerts (90 / 30 / 7 days)',
                 'Cited regulation answers, not summaries',
               ]}
               cta="Subscribe to Mate"
@@ -741,11 +857,35 @@ export default function LandingPage() {
                 'Everything in Mate',
                 'Priority regulation update notifications',
                 'Audit-ready chat logs',
-                'PSC checklist builder & sea-service letters',
+                'USCG sea-service letter generator',
+                'PSC checklist builder',
               ]}
               cta="Subscribe to Captain"
               featured
             />
+          </div>
+
+          {/* D6.61 — trust strip. Security is table stakes; competitors who
+              market AES-256 as a feature are flagging that they don't have
+              anything else to sell. We mention the controls so the buyer
+              who scans for them is satisfied, then immediately frame
+              security as the floor, not the brochure. */}
+          <div className="mt-10 max-w-3xl mx-auto">
+            <div className="rounded-xl border border-white/8 bg-[#0a0e1a]/60 px-5 py-4">
+              <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2
+                font-mono text-[10px] text-[#6b7594] uppercase tracking-[0.15em]">
+                <span>TLS 1.3 in transit</span>
+                <span className="text-white/15">·</span>
+                <span>AES-256 at rest</span>
+                <span className="text-white/15">·</span>
+                <span>Zero third-party tracking</span>
+                <span className="text-white/15">·</span>
+                <span>Your data, your delete button</span>
+              </div>
+              <p className="font-mono text-[11px] text-[#6b7594] text-center mt-2 italic">
+                Security is the floor, not the feature.
+              </p>
+            </div>
           </div>
 
           {/* D6.57 — Wheelhouse callout. Conceptually different (per-vessel,
