@@ -19,55 +19,95 @@ import { useEffect, useState } from 'react'
 
 interface Props {
   /**
-   * Sequence of messages to rotate through during the analysis.
-   * The first run advances 1→last linearly; once we hit the end,
-   * we keep cycling through the FILLER_MESSAGES below so the user
-   * never sees the same message stuck on screen for more than ~2s.
+   * Sequence of scripted progress messages, in order. Each shown
+   * for SCRIPTED_INTERVAL_MS, except the last (which holds for
+   * HOLD_LAST_MS — typically the "Synthesizing…" line where the
+   * model is doing the actual work). After the scripted timeline
+   * completes, we fire through the cheeky nautical-themed
+   * NAUTICAL_MESSAGES below — these communicate "the system is
+   * still working AND has personality" without the awkward
+   * loop-of-the-same-three-lines pattern.
    */
   messages: string[]
   /** Visual variant: 'inline' for narrow card slots, 'card' for the wider widget. */
   variant?: 'inline' | 'card'
 }
 
-const ROTATION_MS = 1800
+// Timing — three regimes.
+//   1. Scripted progress messages: 1.8s each, advance linearly.
+//   2. The LAST scripted message ("Synthesizing…"): held for 8s
+//      because that's the slow Sonnet phase where the model is
+//      actually generating. Static long enough to feel substantial,
+//      not so long it looks like a hang (the spinner is visible).
+//   3. Nautical filler messages: 2.5s each, fire through linearly.
+//      If the call somehow runs past all 10, we modulo-loop so the
+//      animation never goes blank.
+const SCRIPTED_INTERVAL_MS = 1800
+const HOLD_LAST_MS = 8000
+const NAUTICAL_INTERVAL_MS = 2500
 
-// Generic filler messages cycled after the caller's specific
-// progress messages run out. Sonnet calls can take 8-12s in
-// the worst case (heavy not_ready prose); without these the
-// "Synthesizing…" message would freeze and look like a hang.
-const FILLER_MESSAGES = [
-  'Verifying citations…',
-  'Tightening the wording…',
-  'Cross-checking against the corpus once more…',
-  'Drafting the final structured response…',
-  'Almost there — finishing up…',
+// Cheeky nautical filler. Reads as personality, not goofy. Curated
+// for length parity so the line doesn't reflow the layout when it
+// changes. Order randomized client-side so a chatty user doesn't see
+// the same opener twice in two consecutive calls.
+const NAUTICAL_MESSAGES = [
+  'All hands on deck — finalizing your answer…',
+  'Squaring away the citations…',
+  'Heading to the bridge for a second opinion…',
+  'Checking the chart for shoal water…',
+  'The chief engineer is reviewing this one…',
+  'Trimming the sails for accuracy…',
+  'Coffee’s brewing while we finalize…',
+  'Steady as she goes — almost there…',
+  'Polishing the brass before delivery…',
+  'Battening down the hatches on the final draft…',
 ] as const
+
+function shuffled<T>(arr: readonly T[]): T[] {
+  // Fisher-Yates. Cheap; we run it once per mount.
+  const out = [...arr]
+  for (let n = out.length - 1; n > 0; n--) {
+    const j = Math.floor(Math.random() * (n + 1))
+    ;[out[n], out[j]] = [out[j], out[n]]
+  }
+  return out
+}
 
 export function AILoadingState({ messages, variant = 'inline' }: Props) {
   const [i, setI] = useState(0)
-  // Combined timeline: caller's messages first, then filler in a loop.
-  // Filler loops indefinitely (modulo) so we never run out of
-  // motion regardless of how long the call actually takes.
-  const totalScripted = messages.length
+  // Shuffle nautical lines once per mount so consecutive calls don't
+  // surface the same opener.
+  const [nautical] = useState<readonly string[]>(() => shuffled(NAUTICAL_MESSAGES))
 
+  const totalScripted = messages.length
+  const lastScriptedIndex = totalScripted - 1
+  const inScripted = i < totalScripted
+  const onLastScripted = i === lastScriptedIndex
+
+  // Variable-delay timer: each setTimeout schedules the NEXT
+  // advance based on which message is currently shown.
   useEffect(() => {
-    // FILLER_MESSAGES is non-empty; we always have something to rotate
-    // through, so always start the timer regardless of caller's
-    // message count.
-    const id = setInterval(() => {
-      setI((prev) => prev + 1)
-    }, ROTATION_MS)
-    return () => clearInterval(id)
-  }, [totalScripted])
+    let delay: number
+    if (inScripted && onLastScripted) {
+      delay = HOLD_LAST_MS
+    } else if (inScripted) {
+      delay = SCRIPTED_INTERVAL_MS
+    } else {
+      delay = NAUTICAL_INTERVAL_MS
+    }
+    const id = setTimeout(() => setI((prev) => prev + 1), delay)
+    return () => clearTimeout(id)
+  }, [i, inScripted, onLastScripted])
 
   const currentMessage =
-    i < totalScripted
+    inScripted
       ? messages[i]
-      : FILLER_MESSAGES[(i - totalScripted) % FILLER_MESSAGES.length]
+      : nautical[(i - totalScripted) % nautical.length]
 
-  // Progress dots stop at the end of the scripted timeline; once we
-  // start cycling filler we hide the dots so it's not misleading.
-  const showDots = i < totalScripted && totalScripted > 1
+  // Progress dots track the scripted timeline only. Once we cross
+  // into nautical filler we drop them — there's no meaningful
+  // progress to indicate at that point.
+  const showDots = inScripted && totalScripted > 1
   const padding = variant === 'card' ? 'py-6' : 'py-3'
 
   return (
