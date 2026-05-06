@@ -57,7 +57,15 @@ logger = logging.getLogger(__name__)
 # No summarization is applied; trimming is purely FIFO.
 _MAX_HISTORY = 20
 _MAX_HISTORY_TOKENS = 12_000
-_MAX_TOKENS = 2048
+# Sprint D6.75 — Karynn report: complex Opus answers were truncating
+# mid-word. Diagnostic confirmed three of her hazmat-fire responses
+# were cut off at 1,300-1,400 output tokens, hitting the 2,048 cap
+# before Opus could finish a multi-section ERG analysis. Bumped to
+# 8,192 — gives Opus headroom for thorough cross-regulation answers
+# while still bounding Anthropic API cost (~$0.60 worst case per
+# Opus response, ~$0.12 worst case per Sonnet response). Real
+# average output is much smaller; we only pay for what's generated.
+_MAX_TOKENS = 8192
 
 _HISTORY_ENCODER = tiktoken.get_encoding("cl100k_base")
 
