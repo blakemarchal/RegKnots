@@ -256,7 +256,17 @@ async def main() -> int:
             downloaded += 1
 
     if downloaded == 0:
-        logger.warning("Discovered %d new URLs but downloaded 0 — exiting", len(new_urls))
+        # Most likely these URLs 403/404 (retired NMC content like cancelled
+        # policy letters, REC closures from 2017, etc.). Mark them as seen
+        # so the admin monitor digest doesn't keep flagging them as new
+        # every week — they're genuinely not retrievable, not new content
+        # we missed.
+        logger.warning(
+            "Discovered %d new URLs but downloaded 0 — exiting. Recording "
+            "as seen so weekly monitor digest stays quiet on these.",
+            len(new_urls),
+        )
+        await _record_seen_urls(dsn, discovered.items())
         return 0
 
     logger.info("Downloaded %d new PDFs. NOTE: ingest will only pick up files "
