@@ -2158,26 +2158,119 @@ def _annotate_citation_chunks(rows) -> list[dict]:
 # Why ts_rank_cd over ts_rank: cover-density ranking favors documents
 # where the query terms appear close together — a stronger relevance
 # signal for legal-text retrieval than raw frequency.
+async def _build_tsquery_specific(
+    query_text: str,
+    pool: asyncpg.Pool,
+    *,
+    extra_synonyms: set[str] | None = None,
+    min_terms: int = 2,
+) -> str | None:
+    """Build an OR-of-terms tsquery from the query's SPECIFIC keywords.
+
+    websearch_to_tsquery and plainto_tsquery both AND the user's terms,
+    which fails on long natural-language questions because no single
+    chunk contains every word. We need OR semantics: a chunk should
+    score on FTS if it contains ANY of the user's content terms.
+
+    Critically — and this is the difference from a naive OR-chain —
+    we filter out terms that appear in more than _MAX_KEYWORD_FREQ
+    chunks corpus-wide. Without that filter, generic words like
+    "vessel" / "towing" / "require" dominate ts_rank_cd because they
+    appear with high frequency across thousands of chunks, drowning
+    out specific routing terms ("subchapter", "tsms", "tpo") that
+    actually identify the controlling section.
+
+    The frequency cap matches _broad_keyword_search's behavior, so
+    the same specific-term set powers BOTH the existing trigram
+    keyword search and the new FTS lexical fetch.
+
+    `min_terms`: require at least this many surviving specific terms
+    before firing lexical at all. With 1 term the OR signal is too
+    broad — any chunk mentioning that single term scores, leading to
+    cross-source noise. 2+ terms means we're scoring chunks that
+    co-occur multiple specific signals (TF-IDF-flavored multi-term
+    relevance), the actual point of hybrid retrieval. Set to 1 to
+    fire on any specific term.
+
+    Returns None when fewer than `min_terms` specific terms survive
+    (caller treats None as "skip lexical fetch — degrade to dense").
+    """
+    raw_keywords = _extract_keywords(query_text)
+    if not raw_keywords:
+        return None
+    if extra_synonyms:
+        for s in extra_synonyms:
+            if s not in raw_keywords:
+                raw_keywords.append(s)
+    synonym_set = extra_synonyms or set()
+
+    # Filter by frequency cap — same logic as _broad_keyword_search
+    # without doing the actual ILIKE candidate fetch.
+    specific: list[str] = []
+    for kw in raw_keywords:
+        is_syn = kw in synonym_set
+        cap = _MAX_SYNONYM_FREQ if is_syn else _MAX_KEYWORD_FREQ
+        try:
+            freq = await pool.fetchval(
+                """
+                SELECT count(*) FROM (
+                    SELECT 1 FROM regulations
+                    WHERE full_text ILIKE '%' || $1 || '%'
+                    LIMIT $2
+                ) sub
+                """,
+                kw,
+                cap + 1,
+            )
+        except Exception:
+            # Don't let the freq probe fail the lexical path.
+            freq = 0
+        if freq > cap:
+            continue
+        specific.append(kw)
+
+    if len(specific) < min_terms:
+        return None
+
+    # Build OR chain with prefix matching (term:*) so 'subchapter'
+    # matches both 'subchapter' and 'subchapters'. Lower-case (the
+    # english tsearch config normalizes anyway, but be explicit).
+    seen: set[str] = set()
+    parts: list[str] = []
+    for kw in specific:
+        low = kw.lower()
+        if low in seen:
+            continue
+        seen.add(low)
+        parts.append(low + ":*")
+    return " | ".join(parts)
+
+
 async def _fetch_group_lexical(
     pool: asyncpg.Pool,
-    query_text: str,
+    tsquery_str: str,
     group_sources: list[str],
     candidates: int,
     allowed_jurisdictions: list[str] | None = None,
 ) -> list[dict]:
-    """Fetch top-K lexical (BM25-flavored ts_rank_cd) candidates from one
-    source group.
+    """Fetch top-K lexical (ts_rank_cd) candidates from one source group.
 
-    Returns chunks with `similarity` populated by `ts_rank_cd` (NOT
-    cosine). Caller is expected to fold these into a fusion (RRF or
-    weighted) with the dense candidates rather than treating
-    similarity values as comparable across the two retrievers.
+    Takes a pre-built OR-tsquery string (see `_build_tsquery_specific`).
+    The pre-build step filters out terms that appear in too many chunks
+    to be specific signal — without it, generic words like "vessel"
+    dominate the ranking.
+
+    Returns chunks with `similarity` populated by ts_rank_cd. Caller
+    folds these into RRF with the dense candidates; ts_rank scores
+    are NOT directly comparable to cosine.
     """
+    if not tsquery_str:
+        return []
     base = (
         "SELECT id, source, section_number, section_title, full_text, "
-        "       ts_rank_cd(full_text_tsv, websearch_to_tsquery('english', $1)) AS similarity "
+        "       ts_rank_cd(full_text_tsv, to_tsquery('english', $1)) AS similarity "
         "FROM regulations "
-        "WHERE full_text_tsv @@ websearch_to_tsquery('english', $1) "
+        "WHERE full_text_tsv @@ to_tsquery('english', $1) "
         "  AND source = ANY($3) "
     )
     juris_clause = "  AND jurisdictions && $4::text[] " if allowed_jurisdictions is not None else ""
@@ -2186,18 +2279,18 @@ async def _fetch_group_lexical(
         + juris_clause
         + "ORDER BY similarity DESC LIMIT $2"
     )
-    args: list = [query_text, candidates, group_sources]
+    args: list = [tsquery_str, candidates, group_sources]
     if allowed_jurisdictions is not None:
         args.append(allowed_jurisdictions)
     try:
         rows = await pool.fetch(sql, *args)
     except Exception as exc:
-        # If websearch_to_tsquery rejects the query (very unlikely — it's
-        # designed to be tolerant — but possible with malformed input),
-        # degrade to no lexical candidates rather than failing retrieval.
+        # If to_tsquery rejects the synthesized query (e.g. an exotic
+        # token that clashes with tsquery operators), degrade to no
+        # lexical candidates rather than failing retrieval.
         logger.info(
-            "lexical fetch failed (degrading to dense-only): %s: %s",
-            type(exc).__name__, str(exc)[:120],
+            "lexical fetch failed (degrading to dense-only): %s: %s tsq=%r",
+            type(exc).__name__, str(exc)[:120], tsquery_str[:120],
         )
         return []
     return [dict(r) for r in rows]
@@ -2313,6 +2406,15 @@ async def retrieve_hybrid(
 
     available = await _get_available_sources(pool)
 
+    # Build the OR-tsquery ONCE up front from the query's specific
+    # (post-frequency-cap) terms. This is the critical filter that
+    # keeps the FTS path useful: without it, generic terms like
+    # "vessel" / "towing" / "require" dominate ts_rank_cd because
+    # they appear with high frequency across thousands of chunks.
+    # Empty tsquery → lexical fetches all return [] → degrades
+    # cleanly to dense-only.
+    tsquery_str = await _build_tsquery_specific(query, pool)
+
     # Plan per-group fetch sizes — same as dense retrieve(). Lexical
     # uses the same per-group budget as dense by default, so a chunk
     # that ranks well lexically but poorly densely (or vice versa)
@@ -2328,7 +2430,7 @@ async def retrieve_hybrid(
         n_lex = lexical_per_group if lexical_per_group is not None else n_dense
         active_groups.append(group_name)
         dense_tasks.append(_fetch_group(pool, vec_literal, present, n_dense, juris_list))
-        lex_tasks.append(_fetch_group_lexical(pool, query, present, n_lex, juris_list))
+        lex_tasks.append(_fetch_group_lexical(pool, tsquery_str or "", present, n_lex, juris_list))
 
     # Run all 2N fetches in parallel.
     all_results = await asyncio.gather(*dense_tasks, *lex_tasks)
