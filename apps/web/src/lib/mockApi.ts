@@ -61,6 +61,15 @@ export async function sendMessageStream(
   // that workspace. The user must already be a member; the API
   // validates and 403s otherwise.
   workspaceId?: string | null,
+  // Sprint D6.68 — token-by-token streaming. Each `delta` event from
+  // the backend carries a chunk of the answer text; caller appends to
+  // the assistant message in real time. `delta_reset` clears the
+  // accumulated text (fired when Claude streaming fails and we fall
+  // back to OpenAI mid-flight). Both are optional — callers that
+  // don't pass onDelta will get the same final-answer-only behavior
+  // as before, since onDone always carries the full cleaned answer.
+  onDelta?: (chunkText: string) => void,
+  onDeltaReset?: () => void,
 ): Promise<void> {
   const body = JSON.stringify({
     query,
@@ -148,6 +157,16 @@ export async function sendMessageStream(
           } catch {
             onStatus(dataLine)
           }
+        } else if (eventType === 'delta') {
+          if (onDelta) {
+            try {
+              onDelta(JSON.parse(dataLine) as string)
+            } catch {
+              onDelta(dataLine)
+            }
+          }
+        } else if (eventType === 'delta_reset') {
+          if (onDeltaReset) onDeltaReset()
         } else if (eventType === 'done') {
           const parsed = JSON.parse(dataLine) as ChatStreamDone
           onDone(parsed)

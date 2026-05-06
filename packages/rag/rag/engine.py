@@ -2386,25 +2386,53 @@ async def chat_with_progress(
 
     yield {"event": "status", "data": "Consulting compliance engine…"}
     # Sprint D6.4 — followup turns escalate to Opus.
+    # Sprint D6.68 — answer text streams token-by-token instead of
+    # holding for the full response. Each text chunk goes out as a
+    # `delta` SSE event; the frontend accumulates into the assistant
+    # message in real time so the user starts reading at second 1
+    # rather than second 5-8.
     model_used = REGENERATION_MODEL if followup_match else route.model
+    answer_chunks: list[str] = []
+    input_tokens = 0
+    output_tokens = 0
+    streaming_failed_for_fallback = False
     try:
-        response = await anthropic_client.messages.create(
+        async with anthropic_client.messages.stream(
             model=model_used,
             max_tokens=_MAX_TOKENS,
             system=SYSTEM_PROMPT,
             messages=messages,
-        )
-        answer = response.content[0].text
-        input_tokens = response.usage.input_tokens
-        output_tokens = response.usage.output_tokens
+        ) as stream:
+            async for text_chunk in stream.text_stream:
+                if not text_chunk:
+                    continue
+                answer_chunks.append(text_chunk)
+                yield {"event": "delta", "data": text_chunk}
+            final_msg = await stream.get_final_message()
+        answer = "".join(answer_chunks)
+        input_tokens = final_msg.usage.input_tokens
+        output_tokens = final_msg.usage.output_tokens
     except _CLAUDE_FAILURE_EXCEPTIONS as exc:
         logger.warning(
-            "Claude API failed (%s: %s), falling back to OpenAI GPT-4o",
+            "Claude streaming failed (%s: %s), falling back to OpenAI GPT-4o",
             type(exc).__name__,
             str(exc)[:200],
         )
+        streaming_failed_for_fallback = True
+
+    if streaming_failed_for_fallback:
+        # If we got partial chunks before the failure, tell the client
+        # to discard and start over from the fallback. Cleanest UX is
+        # a 'reset' delta so the assistant message wipes back to empty
+        # before the OpenAI fallback streams its replacement.
+        if answer_chunks:
+            yield {"event": "delta_reset", "data": ""}
+            answer_chunks = []
         # Neutral status — never surface "Claude is down" to the user.
         yield {"event": "status", "data": "Processing your question…"}
+        # OpenAI fallback is currently non-streaming. Returns full text
+        # in one response; we yield it as a single delta so the same
+        # client-side accumulator path works.
         fallback_result = await fallback_chat(
             system_prompt=SYSTEM_PROMPT,
             messages=messages,
@@ -2415,6 +2443,8 @@ async def chat_with_progress(
         input_tokens = fallback_result["input_tokens"]
         output_tokens = fallback_result["output_tokens"]
         model_used = fallback_result["model"]
+        if answer:
+            yield {"event": "delta", "data": answer}
         logger.warning(
             "Fallback response received: %d input tokens, %d output tokens",
             input_tokens,

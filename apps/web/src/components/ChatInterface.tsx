@@ -49,6 +49,11 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
   const [loading, setLoading] = useState(false)
   const [progressMsg, setProgressMsg] = useState<string | null>(null)
   const [conversationId, setConversationId] = useState<string | null>(initialConversationId)
+  // D6.68 — id of the currently-streaming assistant message. Used to
+  // route incoming `delta` events into the right message bubble. Set
+  // on first delta, cleared on done. Ref (not state) because mutating
+  // it shouldn't trigger a re-render — the underlying setMessages does.
+  const streamingMsgIdRef = useRef<string | null>(null)
   const [menuOpen, setMenuOpen] = useState(false)
   const [surveyOpen, setSurveyOpen] = useState(false)
   const [restoring, setRestoring] = useState(!!initialConversationId)
@@ -476,14 +481,34 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
         (data) => {
           resolvedConvId = data.conversation_id
           setConversationId(data.conversation_id)
-          const assistantMsg: Message = {
-            id: crypto.randomUUID(),
-            role: 'assistant',
-            content: data.answer,
-            citations: data.cited_regulations,
-            web_fallback: data.web_fallback ?? null,
+          // D6.68 — if we've been streaming deltas into a placeholder
+          // message, swap its content for the cleaned answer (citation
+          // chips + verified citations + web-fallback card all come
+          // from the done payload). Otherwise (no deltas arrived —
+          // shouldn't happen on success path), append a new message.
+          const sid = streamingMsgIdRef.current
+          if (sid) {
+            setMessages(prev => prev.map(m =>
+              m.id === sid
+                ? {
+                    ...m,
+                    content: data.answer,
+                    citations: data.cited_regulations,
+                    web_fallback: data.web_fallback ?? null,
+                  }
+                : m
+            ))
+            streamingMsgIdRef.current = null
+          } else {
+            const assistantMsg: Message = {
+              id: crypto.randomUUID(),
+              role: 'assistant',
+              content: data.answer,
+              citations: data.cited_regulations,
+              web_fallback: data.web_fallback ?? null,
+            }
+            setMessages(prev => [...prev, assistantMsg])
           }
-          setMessages(prev => [...prev, assistantMsg])
           // Generation succeeded — drop the pending marker.
           clearPending(data.conversation_id)
           // Refresh billing status in background after each message
@@ -498,8 +523,52 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
         },
         turnVerbosity,
         activeWorkspaceId,
+        // D6.68 onDelta — stream-append text into the placeholder
+        // assistant message, creating it on the first chunk.
+        (chunk) => {
+          if (!streamingMsgIdRef.current) {
+            const newId = crypto.randomUUID()
+            streamingMsgIdRef.current = newId
+            const initial: Message = {
+              id: newId,
+              role: 'assistant',
+              content: chunk,
+              citations: [],
+            }
+            setMessages(prev => [...prev, initial])
+            // Streaming is now happening — clear the spinner status so
+            // the user sees text instead of "Searching authoritative sources…"
+            setProgressMsg(null)
+          } else {
+            const sid = streamingMsgIdRef.current
+            setMessages(prev => prev.map(m =>
+              m.id === sid ? { ...m, content: m.content + chunk } : m
+            ))
+          }
+        },
+        // D6.68 onDeltaReset — backend wipes accumulated deltas if
+        // Claude streaming failed mid-flight and OpenAI fallback is
+        // about to replace. Clear the placeholder content.
+        () => {
+          const sid = streamingMsgIdRef.current
+          if (sid) {
+            setMessages(prev => prev.map(m =>
+              m.id === sid ? { ...m, content: '' } : m
+            ))
+          }
+        },
       )
     } catch (err) {
+      // D6.68 — if we'd started streaming but errored out mid-flight,
+      // remove the partial assistant message before any error-specific
+      // cleanup. Sets streamingMsgIdRef back to null so subsequent
+      // sends start clean.
+      const streamingId = streamingMsgIdRef.current
+      if (streamingId) {
+        setMessages(prev => prev.filter(m => m.id !== streamingId))
+        streamingMsgIdRef.current = null
+      }
+
       if (err instanceof Error && err.message.includes('402')) {
         router.push('/pricing')
         return
@@ -574,14 +643,32 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
         (data) => {
           resolvedConvId = data.conversation_id
           setConversationId(data.conversation_id)
-          const assistantMsg: Message = {
-            id: crypto.randomUUID(),
-            role: 'assistant',
-            content: data.answer,
-            citations: data.cited_regulations,
-            web_fallback: data.web_fallback ?? null,
+          // D6.68 — same streaming-replace pattern as the main submit
+          // path. If deltas arrived, swap the placeholder's content;
+          // otherwise append a fresh message.
+          const sid = streamingMsgIdRef.current
+          if (sid) {
+            setMessages(prev => prev.map(m =>
+              m.id === sid
+                ? {
+                    ...m,
+                    content: data.answer,
+                    citations: data.cited_regulations,
+                    web_fallback: data.web_fallback ?? null,
+                  }
+                : m
+            ))
+            streamingMsgIdRef.current = null
+          } else {
+            const assistantMsg: Message = {
+              id: crypto.randomUUID(),
+              role: 'assistant',
+              content: data.answer,
+              citations: data.cited_regulations,
+              web_fallback: data.web_fallback ?? null,
+            }
+            setMessages(prev => [...prev, assistantMsg])
           }
-          setMessages(prev => [...prev, assistantMsg])
           clearPending(data.conversation_id)
           // Refresh billing status in background
           apiRequest<BillingStatus>('/billing/status').then(setBilling).catch(() => {})
@@ -595,8 +682,40 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
         },
         undefined,
         activeWorkspaceId,
+        // D6.68 onDelta — append streamed chunk into the placeholder.
+        (chunk) => {
+          if (!streamingMsgIdRef.current) {
+            const newId = crypto.randomUUID()
+            streamingMsgIdRef.current = newId
+            setMessages(prev => [
+              ...prev,
+              { id: newId, role: 'assistant', content: chunk, citations: [] },
+            ])
+            setProgressMsg(null)
+          } else {
+            const sid = streamingMsgIdRef.current
+            setMessages(prev => prev.map(m =>
+              m.id === sid ? { ...m, content: m.content + chunk } : m
+            ))
+          }
+        },
+        // D6.68 onDeltaReset — Claude failure → OpenAI fallback handoff.
+        () => {
+          const sid = streamingMsgIdRef.current
+          if (sid) {
+            setMessages(prev => prev.map(m =>
+              m.id === sid ? { ...m, content: '' } : m
+            ))
+          }
+        },
       )
         .catch(() => {
+          // D6.68 — drop the streaming placeholder before recovery / error UI.
+          const streamingId = streamingMsgIdRef.current
+          if (streamingId) {
+            setMessages(prev => prev.filter(m => m.id !== streamingId))
+            streamingMsgIdRef.current = null
+          }
           if (resolvedConvId) {
             setProgressMsg(null)
             setLoading(false)
