@@ -144,6 +144,29 @@ class Settings(BaseSettings):
     hedge_judge_enabled: bool = Field(
         default=True, validation_alias="HEDGE_JUDGE_ENABLED",
     )
+    # ── D6.66 Sprint 5 — multi-query rewrite + reranker ──────────────
+    # query_rewrite_enabled: every chat fire runs the user's query
+    # through Haiku to produce 2-3 alternative phrasings, then
+    # retrieves against the union of all variants. Closes the
+    # vocabulary-mismatch gap on retrieval (e.g., "stencil" vs
+    # "marking", "lifejacket" vs "lifesaving appliance").
+    # ~$0.001 + ~400ms per chat. Default on.
+    #
+    # reranker_enabled: after cosine retrieval, pull top-30
+    # candidates and ask Haiku to score each on actual relevance to
+    # the question 1-5. Reorder, return top-K. Catches the
+    # "controlling section was in candidates but ranked 12th by
+    # cosine" failure mode. ~$0.002 + ~600ms per chat. Default on.
+    #
+    # Flags are independent — either can be off without disabling
+    # the other. Setting both to false reverts to the legacy
+    # single-query, cosine-ordered retrieval path.
+    query_rewrite_enabled: bool = Field(
+        default=True, validation_alias="QUERY_REWRITE_ENABLED",
+    )
+    reranker_enabled: bool = Field(
+        default=True, validation_alias="RERANKER_ENABLED",
+    )
 
     # Monitoring
     sentry_dsn: str = Field(default="", validation_alias="SENTRY_DSN")

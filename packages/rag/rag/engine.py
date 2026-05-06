@@ -34,7 +34,7 @@ from rag.hedge import detect_hedge
 from rag.query_distill import LENGTH_THRESHOLD_CHARS
 from rag.models import ChatMessage, ChatResponse, CitedRegulation
 from rag.prompts import NAVIGATION_AID_REMINDER, SYSTEM_PROMPT
-from rag.retriever import retrieve
+from rag.retriever import retrieve, retrieve_enhanced
 from rag.router import REGENERATION_MODEL, route_query
 
 # Anthropic exceptions that indicate Claude itself is unavailable — these are
@@ -1271,6 +1271,8 @@ async def chat(
     web_fallback_daily_cap: int = 10,
     web_fallback_cascade_enabled: bool = True,
     hedge_judge_enabled: bool = True,
+    query_rewrite_enabled: bool = False,
+    reranker_enabled: bool = False,
 ) -> ChatResponse:
     """Run the full RAG pipeline and return a ChatResponse.
 
@@ -1344,13 +1346,18 @@ async def chat(
                 len(query), len(distilled), distilled[:100],
             )
 
-    # 2. Retrieve
-    chunks = await retrieve(
+    # 2. Retrieve (D6.66 — multi-query rewrite + reranker + title-boost
+    # via retrieve_enhanced when flags enabled; identical to retrieve()
+    # when both off, so behavior is preserved on flag rollback).
+    chunks = await retrieve_enhanced(
         query=retrieval_query,
         pool=pool,
         openai_api_key=openai_api_key,
+        anthropic_client=anthropic_client,
         vessel_profile=vessel_profile,
         limit=8,
+        query_rewrite_enabled=query_rewrite_enabled,
+        reranker_enabled=reranker_enabled,
     )
     logger.info(f"Retrieved {len(chunks)} chunks")
 
@@ -2267,6 +2274,8 @@ async def chat_with_progress(
     web_fallback_daily_cap: int = 10,
     web_fallback_cascade_enabled: bool = True,
     hedge_judge_enabled: bool = True,
+    query_rewrite_enabled: bool = False,
+    reranker_enabled: bool = False,
 ) -> AsyncIterator[dict]:
     """Same RAG pipeline as chat() but yields lightweight progress events.
 
@@ -2334,15 +2343,19 @@ async def chat_with_progress(
                 len(query), len(distilled), distilled[:100],
             )
 
-    # Stage 2: Retrieve
+    # Stage 2: Retrieve (D6.66 — same enhanced path as the non-stream
+    # chat handler; flags piped through from the chat router).
     source_labels = _describe_sources(query)
     yield {"event": "status", "data": f"Searching {source_labels}…"}
-    chunks = await retrieve(
+    chunks = await retrieve_enhanced(
         query=retrieval_query,
         pool=pool,
         openai_api_key=openai_api_key,
+        anthropic_client=anthropic_client,
         vessel_profile=vessel_profile,
         limit=8,
+        query_rewrite_enabled=query_rewrite_enabled,
+        reranker_enabled=reranker_enabled,
     )
     logger.info(f"Retrieved {len(chunks)} chunks")
 

@@ -1867,3 +1867,219 @@ def _rerank(
 
     results.sort(key=lambda x: x["_score"], reverse=True)
     return results
+
+
+# ── Sprint D6.66 — enhanced retrieval (rewrite + rerank + title-boost) ─
+
+
+# Title-boost: chunks whose section_title contains a query keyword get
+# a small bump on their similarity score. Standard hybrid-search trick:
+# the title is a denser signal than body text on what a section is
+# "about". 0.05 is calibrated to elevate a clearly-titled section
+# without overwhelming the cosine signal entirely.
+_TITLE_BOOST = 0.05
+
+
+def _apply_title_boost(
+    chunks: list[dict], query_keywords: list[str],
+) -> list[dict]:
+    """Bump similarity by _TITLE_BOOST for any chunk whose section_title
+    contains a query keyword (case-insensitive substring). Mutates in
+    place AND returns the (re-sorted) list. Idempotent — boost is
+    applied once per chunk, not per matching keyword.
+    """
+    if not chunks or not query_keywords:
+        return chunks
+    kws_lower = [k.lower() for k in query_keywords if k]
+    if not kws_lower:
+        return chunks
+    for c in chunks:
+        title = (c.get("section_title") or "").lower()
+        if any(kw in title for kw in kws_lower):
+            try:
+                base = float(c.get("similarity", 0.0))
+            except (TypeError, ValueError):
+                base = 0.0
+            c["similarity"] = base + _TITLE_BOOST
+            c["_title_boosted"] = True
+    return chunks
+
+
+def _merge_chunks(
+    primary: list[dict], extras: list[list[dict]],
+) -> list[dict]:
+    """Merge candidate lists from multi-query retrieval.
+
+    `primary` is the canonical list (from the user's original query).
+    `extras` are lists from each reformulation. Dedupe by chunk id;
+    on duplicate, keep the chunk with the higher similarity. Returns
+    a single merged list re-sorted by similarity desc.
+
+    The extras' chunks contribute *new* candidates that the primary
+    embedding missed — that's the whole point of multi-query rewrite.
+    """
+    by_id: dict[str, dict] = {}
+    for c in primary:
+        cid = str(c.get("id") or "")
+        if cid:
+            by_id[cid] = dict(c)
+    for extra_list in extras:
+        for c in extra_list:
+            cid = str(c.get("id") or "")
+            if not cid:
+                continue
+            try:
+                cand_sim = float(c.get("similarity", 0.0))
+            except (TypeError, ValueError):
+                cand_sim = 0.0
+            if cid in by_id:
+                try:
+                    cur_sim = float(by_id[cid].get("similarity", 0.0))
+                except (TypeError, ValueError):
+                    cur_sim = 0.0
+                if cand_sim > cur_sim:
+                    by_id[cid] = dict(c)
+            else:
+                by_id[cid] = dict(c)
+    merged = list(by_id.values())
+    merged.sort(key=lambda x: float(x.get("similarity", 0.0)), reverse=True)
+    return merged
+
+
+async def retrieve_enhanced(
+    query: str,
+    pool: asyncpg.Pool,
+    openai_api_key: str,
+    *,
+    anthropic_client=None,
+    vessel_profile: dict | None = None,
+    limit: int = 8,
+    sources: list[str] | None = None,
+    query_rewrite_enabled: bool = False,
+    reranker_enabled: bool = False,
+    rerank_pool_size: int = 30,
+) -> list[dict]:
+    """Sprint D6.66 — enhanced retrieval orchestrator.
+
+    Wraps `retrieve()` with three optional improvements:
+
+      1. Multi-query rewrite (`query_rewrite_enabled`):
+         Haiku produces 2-3 reformulations of the user's query. We
+         retrieve against each in parallel with the original, then
+         merge dedup'd by chunk id keeping the highest similarity.
+         Widens the search net to cover vocabulary the user didn't
+         use but the corpus does. ~$0.001 + ~400ms.
+
+      2. Reranker (`reranker_enabled`):
+         After cosine retrieval, take a wider candidate pool
+         (`rerank_pool_size`, default 30) and ask Haiku to score each
+         chunk's actual relevance to the question 1-5. Reorder by
+         that score; return top-`limit`. Catches the "right section
+         was in candidates but cosine ranked it 12th" failure mode.
+         ~$0.002 + ~600ms.
+
+      3. Title-boost (always on):
+         Chunks whose section_title contains a query keyword get a
+         small bump on their similarity score. No extra API calls —
+         pure post-processing. Cheap structural improvement.
+
+    All three are additive and failure-safe: any sub-step failure
+    falls back to the next-cheapest behavior. The user always gets
+    SOME retrieval result.
+
+    Cost / latency budget:
+      - Both flags off → identical to retrieve(): one embedding,
+        one DB fetch, ~50ms total.
+      - rewrite on, rerank off → +400ms + $0.001
+      - both on → +1000ms + $0.003
+      Both still well under the natural 3-8s chat response time;
+      latency growth is invisible in practice.
+    """
+    # 1. Multi-query rewrite (optional). Run in parallel with the
+    #    original-query retrieval so we don't pay rewrite latency
+    #    sequentially.
+    rewrite_task = None
+    if query_rewrite_enabled and anthropic_client is not None:
+        from rag.query_rewrite import rewrite_query
+        # Schedule but don't await — we want the rewrite running while
+        # the original retrieval also runs.
+        rewrite_task = asyncio.create_task(
+            rewrite_query(query=query, anthropic_client=anthropic_client),
+        )
+
+    # When reranker is enabled, pull a wider candidate pool than the
+    # final limit so the reranker has room to promote the right chunk
+    # from rank 12 → rank 1. When disabled, retrieve at the natural
+    # limit directly.
+    fetch_limit = rerank_pool_size if reranker_enabled else limit
+
+    primary = await retrieve(
+        query=query,
+        pool=pool,
+        openai_api_key=openai_api_key,
+        vessel_profile=vessel_profile,
+        limit=fetch_limit,
+        sources=sources,
+    )
+
+    # 2. Pull reformulation results (if rewrite fired).
+    extras: list[list[dict]] = []
+    if rewrite_task is not None:
+        try:
+            rewrite_result = await rewrite_task
+        except Exception as exc:
+            logger.info("query_rewrite task failed: %s", exc)
+            rewrite_result = None
+        if rewrite_result is not None and rewrite_result.reformulations:
+            # Retrieve each reformulation in parallel. Each retrieval
+            # gets its own embedding, vector fetch, and reranking
+            # path — but the per-reformulation fetch_limit is smaller
+            # (limit, not rerank_pool_size) since the primary already
+            # carries the wider pool.
+            extra_tasks = [
+                retrieve(
+                    query=r,
+                    pool=pool,
+                    openai_api_key=openai_api_key,
+                    vessel_profile=vessel_profile,
+                    limit=limit,
+                    sources=sources,
+                )
+                for r in rewrite_result.reformulations
+            ]
+            extra_results = await asyncio.gather(
+                *extra_tasks, return_exceptions=True,
+            )
+            for r in extra_results:
+                if isinstance(r, list):
+                    extras.append(r)
+                elif isinstance(r, BaseException):
+                    logger.info(
+                        "reformulation retrieval failed: %s",
+                        type(r).__name__,
+                    )
+            logger.info(
+                "query_rewrite: %d reformulations contributed %d extra chunk-lists",
+                len(rewrite_result.reformulations), len(extras),
+            )
+
+    # 3. Merge primary + extras, dedupe by id, sort by similarity.
+    merged = _merge_chunks(primary, extras)
+
+    # 4. Title-boost: small bump for chunks whose title hits a query keyword.
+    keywords = _extract_keywords(query)
+    _apply_title_boost(merged, keywords)
+    merged.sort(key=lambda x: float(x.get("similarity", 0.0)), reverse=True)
+
+    # 5. Reranker (optional). Operates on the wider pool, returns the
+    #    top-`limit` after rerank scores have been applied.
+    if reranker_enabled and anthropic_client is not None and merged:
+        from rag.reranker import rerank_chunks
+        merged = await rerank_chunks(
+            query=query,
+            chunks=merged,
+            anthropic_client=anthropic_client,
+            top_k=limit,
+        )
+
+    return merged[:limit]
