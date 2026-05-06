@@ -168,6 +168,21 @@ class Settings(BaseSettings):
         default=True, validation_alias="RERANKER_ENABLED",
     )
 
+    # ── D6.70 Sprint 8 — Citation oracle (Layer-2 retrieval intervention) ──
+    # When true, hedge events fire a Haiku-with-web-search call to identify
+    # the controlling CFR / SOLAS / MARPOL / NVIC / STCW section, look it
+    # up in OUR corpus, and synthesize a verbatim-quote-anchored answer
+    # from the matched corpus chunks. If the oracle locates a corpus-
+    # backed answer, we surface a 'verified' tier card and skip the
+    # existing web fallback entirely. On any failure (no citation, not
+    # in corpus, synthesis hedged, etc.) we fall through to today's
+    # web fallback — additive-only contract, never worse than today.
+    # ~$0.002 + ~1.5-2.5s per intervention. Only fires on hedge.
+    # See packages/rag/rag/citation_oracle.py.
+    citation_oracle_enabled: bool = Field(
+        default=True, validation_alias="CITATION_ORACLE_ENABLED",
+    )
+
     # Monitoring
     sentry_dsn: str = Field(default="", validation_alias="SENTRY_DSN")
     sentry_auth_token: str = Field(default="", validation_alias="SENTRY_AUTH_TOKEN")

@@ -1273,6 +1273,13 @@ async def chat(
     hedge_judge_enabled: bool = True,
     query_rewrite_enabled: bool = False,
     reranker_enabled: bool = False,
+    # Sprint D6.70 — Layer-2 citation-oracle intervention. Runs after the
+    # judge confirms a miss but BEFORE the existing web fallback. If the
+    # oracle locates the controlling citation in our corpus, we surface a
+    # 'verified' tier card and skip the web fallback. Any failure path
+    # falls through silently to the existing web fallback (additive-only
+    # contract — never worse than today's behavior).
+    citation_oracle_enabled: bool = True,
 ) -> ChatResponse:
     """Run the full RAG pipeline and return a ChatResponse.
 
@@ -1523,30 +1530,54 @@ async def chat(
                     "hedge_judge partial_miss: overriding ensemble query "
                     "from %r to %r", query[:80], override_query,
                 )
-            try:
-                web_fallback_card = await _dispatch_web_fallback(
-                    query=query,
-                    conversation_id=conversation_id,
-                    user_id=user_id,
-                    subscription_tier=subscription_tier,
-                    pool=pool,
-                    anthropic_client=anthropic_client,
-                    openai_api_key=openai_api_key,
-                    xai_api_key=xai_api_key,
-                    top_cosine=top_cosine,
-                    cosine_threshold=web_fallback_cosine_threshold,
-                    daily_cap=web_fallback_daily_cap,
-                    cascade_enabled=web_fallback_cascade_enabled,
-                    override_query=override_query,
-                    judge_verdict=judge_verdict,
-                    judge_missing_topic=judge_missing_topic,
-                )
-            except Exception as exc:
-                logger.warning(
-                    "web fallback failed (non-fatal): %s: %s",
-                    type(exc).__name__,
-                    str(exc)[:200],
-                )
+
+            # Sprint D6.70 — Layer-2 citation-oracle intervention. Try
+            # the web-routing → corpus-answering split BEFORE falling
+            # back to the existing web ensemble. On any failure the
+            # function returns None and we fall through to the
+            # existing _dispatch_web_fallback below.
+            if citation_oracle_enabled:
+                try:
+                    web_fallback_card = await _try_citation_oracle_intervention(
+                        query=query,
+                        conversation_id=conversation_id,
+                        user_id=user_id,
+                        pool=pool,
+                        anthropic_client=anthropic_client,
+                        top_cosine=top_cosine,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "citation_oracle intervention failed (non-fatal): %s: %s",
+                        type(exc).__name__, str(exc)[:200],
+                    )
+                    web_fallback_card = None
+
+            if web_fallback_card is None:
+                try:
+                    web_fallback_card = await _dispatch_web_fallback(
+                        query=query,
+                        conversation_id=conversation_id,
+                        user_id=user_id,
+                        subscription_tier=subscription_tier,
+                        pool=pool,
+                        anthropic_client=anthropic_client,
+                        openai_api_key=openai_api_key,
+                        xai_api_key=xai_api_key,
+                        top_cosine=top_cosine,
+                        cosine_threshold=web_fallback_cosine_threshold,
+                        daily_cap=web_fallback_daily_cap,
+                        cascade_enabled=web_fallback_cascade_enabled,
+                        override_query=override_query,
+                        judge_verdict=judge_verdict,
+                        judge_missing_topic=judge_missing_topic,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "web fallback failed (non-fatal): %s: %s",
+                        type(exc).__name__,
+                        str(exc)[:200],
+                    )
         elif not should_fire_fallback:
             logger.info(
                 "hedge_judge suppressed fallback: verdict=%s reasoning=%r",
@@ -1587,6 +1618,226 @@ async def chat(
         vessel_update=vessel_update,
         regenerated=regenerated,
         web_fallback=web_fallback_card,
+    )
+
+
+async def _try_citation_oracle_intervention(
+    *,
+    query: str,
+    conversation_id: UUID,
+    user_id: "UUID | None",
+    pool: asyncpg.Pool,
+    anthropic_client: AsyncAnthropic,
+    top_cosine: float,
+) -> "WebFallbackCard | None":
+    """Sprint D6.70 — Layer-2 retrieval intervention.
+
+    Splits the routing problem from the answering problem:
+      1. Web identifies the citation (Haiku + web_search → e.g., "46 CFR 138.305").
+      2. We look up that section in OUR corpus.
+      3. Sonnet synthesizes a verbatim-quote-anchored answer using
+         only that corpus chunk.
+      4. Surface as a 'verified' tier card — strictly higher trust
+         than today's 'reference' web-fallback yellow card because
+         the source IS our verified corpus, not external content.
+
+    Returns None on any failure path. Caller MUST treat None as
+    "fall through to existing _dispatch_web_fallback" — never as
+    a final negative answer. This is the additive-only contract.
+
+    Failure paths (all degrade gracefully):
+      - oracle returned no citation       → None
+      - citation not parseable            → None
+      - citation not in our corpus        → None (try alt_citations first)
+      - synthesis Sonnet call failed      → None
+      - synthesized answer hedged itself  → None (let web fallback try)
+    """
+    from rag.citation_oracle import find_citation_hint
+    from rag.retriever import fetch_chunks_by_citation
+    from rag.models import WebFallbackCard
+
+    # Step 1 — ask the web what citation answers this.
+    hint = await find_citation_hint(query=query, anthropic_client=anthropic_client)
+    if not hint.has_citation:
+        logger.info("citation_oracle: no citation hint, deferring to web fallback")
+        return None
+
+    # Step 2 — try to resolve the citation in OUR corpus. Walk the
+    # primary citation first; if not found, try alternates in order.
+    corpus_chunks: list[dict] = []
+    matched_citation: str | None = None
+    for citation in [hint.primary_citation, *hint.alt_citations]:
+        if not citation:
+            continue
+        try:
+            corpus_chunks = await fetch_chunks_by_citation(
+                pool=pool, citation=citation, limit=6,
+            )
+        except Exception as exc:
+            logger.warning(
+                "citation_oracle: fetch_chunks_by_citation(%r) failed: %s",
+                citation, exc,
+            )
+            continue
+        if corpus_chunks:
+            matched_citation = citation
+            break
+
+    if not corpus_chunks or not matched_citation:
+        logger.info(
+            "citation_oracle: hint=%r not in corpus; alt=%s also not found",
+            hint.primary_citation, hint.alt_citations,
+        )
+        return None
+
+    # Step 3 — synthesize a focused answer from the corpus chunks.
+    # Single Sonnet call with a constrained prompt: read these chunks,
+    # quote verbatim, return JSON with the same shape as
+    # web_fallback's FallbackResult so the persistence layer below
+    # treats it identically.
+    chunks_block = "\n\n".join(
+        f"[{i + 1}] {c.get('section_number')} — {c.get('section_title') or ''}\n"
+        f"{(c.get('full_text') or c.get('text') or '')[:2000]}"
+        for i, c in enumerate(corpus_chunks[:5])
+    )
+    user_payload = (
+        f"USER QUESTION:\n{query[:1500]}\n\n"
+        f"CORPUS PASSAGES (matched citation: {matched_citation}):\n{chunks_block}\n\n"
+        f"Produce the JSON. Quote verbatim from the matched citation."
+    )
+    synthesis_prompt = (
+        "You are RegKnots' citation-oracle answerer. The user's question hedged on initial corpus "
+        "retrieval. A separate web search has identified the controlling section, and we've pulled "
+        "the verbatim text from our verified corpus. Your job is to answer the question using ONLY "
+        "the supplied corpus passages, anchored on a verbatim quote from the matched section.\n\n"
+        "Output JSON only — no prose, no markdown fences:\n\n"
+        "{\n"
+        '  "confidence": 1-5 (5 = certain, 1 = guessing),\n'
+        '  "answer":     "direct answer to the user\'s question, anchored on the quote",\n'
+        '  "summary":    "≤200 words plain-English explanation",\n'
+        '  "quote":      "verbatim string from the corpus passage",\n'
+        '  "section":    "the matched section number"\n'
+        "}\n\n"
+        "Hard rules: quote MUST be verbatim from a corpus passage above; do not invent. If the "
+        "passages don't actually answer the question, return confidence ≤ 2."
+    )
+    try:
+        response = await anthropic_client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=1500,
+            system=synthesis_prompt,
+            messages=[{"role": "user", "content": user_payload}],
+        )
+        text = "".join(
+            getattr(b, "text", "") for b in response.content
+            if getattr(b, "type", None) == "text"
+        )
+    except Exception as exc:
+        logger.warning(
+            "citation_oracle synthesis failed: %s: %s",
+            type(exc).__name__, str(exc)[:200],
+        )
+        return None
+
+    # Parse synthesized JSON (re-use the tolerant parser pattern).
+    import json as _json
+    import re as _re
+    cleaned = text.strip()
+    if cleaned.startswith("```"):
+        cleaned = _re.sub(r"^```(?:json)?\s*", "", cleaned)
+        cleaned = _re.sub(r"\s*```$", "", cleaned)
+    parsed = None
+    try:
+        parsed = _json.loads(cleaned)
+    except _json.JSONDecodeError:
+        m = _re.search(r"\{.*\}", cleaned, flags=_re.DOTALL)
+        if m:
+            try:
+                parsed = _json.loads(m.group(0))
+            except _json.JSONDecodeError:
+                parsed = None
+    if parsed is None:
+        logger.warning(
+            "citation_oracle synthesis returned no JSON: %s", text[:200],
+        )
+        return None
+
+    confidence = int(parsed.get("confidence") or 0)
+    quote = (parsed.get("quote") or "").strip()
+    answer_text = (parsed.get("answer") or "").strip()
+    summary = (parsed.get("summary") or "").strip()
+    section = (parsed.get("section") or matched_citation).strip()
+
+    # Verify the quote is actually present in one of the corpus chunks.
+    # If it's not — Sonnet drifted off-source — refuse to surface.
+    quote_verified = False
+    if quote:
+        for c in corpus_chunks:
+            corpus_text = (c.get("full_text") or c.get("text") or "").lower()
+            if quote.lower() in corpus_text:
+                quote_verified = True
+                break
+
+    # Confidence floor: don't surface if the synthesis itself wasn't
+    # confident or the quote didn't verify against corpus.
+    if confidence < 3 or not quote_verified:
+        logger.info(
+            "citation_oracle: synthesis confidence=%d quote_verified=%s — not surfacing",
+            confidence, quote_verified,
+        )
+        return None
+
+    # Step 4 — persist + return as a 'verified' tier card. Persisted
+    # exactly like a web_fallback row so the audit page shows it
+    # alongside other fallback events; source_domain marks it as
+    # corpus-backed for differentiation.
+    fallback_id: str | None = None
+    try:
+        row = await pool.fetchrow(
+            """
+            INSERT INTO web_fallback_responses
+              (is_calibration, is_ensemble, user_id, chat_message_id, query,
+               web_query_used,
+               confidence, source_url, source_domain, quote_text,
+               quote_verified, surfaced, surface_tier,
+               surface_blocked_reason, answer_text, latency_ms,
+               retrieval_top1_cosine)
+            VALUES (FALSE, FALSE, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+                    $11, $12, $13, $14, $15)
+            RETURNING id
+            """,
+            user_id, conversation_id, query,
+            f"oracle:{matched_citation}",
+            confidence,
+            None,                                   # no external source_url
+            "regknots-corpus",                      # distinctive marker
+            quote,
+            True,                                   # quote_verified above
+            True,                                   # surfaced
+            "verified",                             # tier — corpus-backed
+            None,
+            answer_text or summary,
+            0,                                      # latency tracking TBD
+            top_cosine,
+        )
+        if row is not None:
+            fallback_id = str(row["id"])
+    except Exception as exc:
+        logger.warning("citation_oracle persist failed (non-fatal): %s", exc)
+
+    logger.info(
+        "citation_oracle SUCCESS: %r → corpus[%s] quote_verified=%s confidence=%d",
+        query[:80], section, quote_verified, confidence,
+    )
+
+    return WebFallbackCard(
+        fallback_id=fallback_id or "",
+        source_url="",                              # corpus-backed; no URL
+        source_domain="regknots-corpus",
+        quote=quote,
+        summary=summary or answer_text,
+        confidence=confidence,
+        surface_tier="verified",
     )
 
 
@@ -2276,6 +2527,10 @@ async def chat_with_progress(
     hedge_judge_enabled: bool = True,
     query_rewrite_enabled: bool = False,
     reranker_enabled: bool = False,
+    # Sprint D6.70 — Layer-2 citation-oracle intervention. See chat()
+    # docstring for full contract. Defaults to True; flip via config to
+    # disable instantly without redeploy.
+    citation_oracle_enabled: bool = True,
 ) -> AsyncIterator[dict]:
     """Same RAG pipeline as chat() but yields lightweight progress events.
 
@@ -2558,34 +2813,63 @@ async def chat_with_progress(
                     "hedge_judge partial_miss (streaming): overriding ensemble "
                     "query from %r to %r", query[:80], override_query,
                 )
-            yield {
-                "event": "status",
-                "data": "Searching authoritative sources…",
-            }
-            try:
-                web_fallback_card = await _dispatch_web_fallback(
-                    query=query,
-                    conversation_id=conversation_id,
-                    user_id=user_id,
-                    subscription_tier=subscription_tier,
-                    pool=pool,
-                    anthropic_client=anthropic_client,
-                    openai_api_key=openai_api_key,
-                    xai_api_key=xai_api_key,
-                    top_cosine=top_cosine,
-                    cosine_threshold=web_fallback_cosine_threshold,
-                    daily_cap=web_fallback_daily_cap,
-                    cascade_enabled=web_fallback_cascade_enabled,
-                    override_query=override_query,
-                    judge_verdict=judge_verdict,
-                    judge_missing_topic=judge_missing_topic,
-                )
-            except Exception as exc:
-                logger.warning(
-                    "web fallback failed (non-fatal): %s: %s",
-                    type(exc).__name__,
-                    str(exc)[:200],
-                )
+
+            # Sprint D6.70 — Layer-2 citation-oracle intervention. Same
+            # additive-only contract as chat(): if the oracle finds
+            # the controlling citation in our corpus, we surface a
+            # 'verified' tier card and skip the web ensemble. On any
+            # failure path the function returns None and we fall
+            # through to the existing _dispatch_web_fallback below.
+            if citation_oracle_enabled:
+                yield {
+                    "event": "status",
+                    "data": "Locating the relevant regulation…",
+                }
+                try:
+                    web_fallback_card = await _try_citation_oracle_intervention(
+                        query=query,
+                        conversation_id=conversation_id,
+                        user_id=user_id,
+                        pool=pool,
+                        anthropic_client=anthropic_client,
+                        top_cosine=top_cosine,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "citation_oracle intervention failed (non-fatal): %s: %s",
+                        type(exc).__name__, str(exc)[:200],
+                    )
+                    web_fallback_card = None
+
+            if web_fallback_card is None:
+                yield {
+                    "event": "status",
+                    "data": "Searching authoritative sources…",
+                }
+                try:
+                    web_fallback_card = await _dispatch_web_fallback(
+                        query=query,
+                        conversation_id=conversation_id,
+                        user_id=user_id,
+                        subscription_tier=subscription_tier,
+                        pool=pool,
+                        anthropic_client=anthropic_client,
+                        openai_api_key=openai_api_key,
+                        xai_api_key=xai_api_key,
+                        top_cosine=top_cosine,
+                        cosine_threshold=web_fallback_cosine_threshold,
+                        daily_cap=web_fallback_daily_cap,
+                        cascade_enabled=web_fallback_cascade_enabled,
+                        override_query=override_query,
+                        judge_verdict=judge_verdict,
+                        judge_missing_topic=judge_missing_topic,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "web fallback failed (non-fatal): %s: %s",
+                        type(exc).__name__,
+                        str(exc)[:200],
+                    )
         elif not should_fire_fallback:
             logger.info(
                 "hedge_judge suppressed fallback (streaming): verdict=%s reasoning=%r",

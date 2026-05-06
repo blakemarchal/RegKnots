@@ -652,6 +652,8 @@ async def chat_endpoint(
         hedge_judge_enabled=settings.hedge_judge_enabled,
         query_rewrite_enabled=settings.query_rewrite_enabled,
         reranker_enabled=settings.reranker_enabled,
+        # D6.70 Sprint 8 — Layer-2 citation oracle intervention.
+        citation_oracle_enabled=settings.citation_oracle_enabled,
     )
 
     await _persist_chat_outcome(
@@ -740,6 +742,8 @@ async def chat_stream_endpoint(
                 hedge_judge_enabled=settings.hedge_judge_enabled,
                 query_rewrite_enabled=settings.query_rewrite_enabled,
                 reranker_enabled=settings.reranker_enabled,
+                # D6.70 Sprint 8 — Layer-2 citation oracle intervention.
+                citation_oracle_enabled=settings.citation_oracle_enabled,
             ):
                 event_type = event["event"]
                 payload = event["data"]

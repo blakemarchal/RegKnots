@@ -1981,6 +1981,172 @@ def _merge_chunks(
     return merged
 
 
+async def fetch_chunks_by_citation(
+    pool: asyncpg.Pool,
+    citation: str,
+    *,
+    limit: int = 6,
+) -> list[dict]:
+    """Sprint D6.70 — fetch corpus chunks for an explicit citation.
+
+    The citation_oracle returns a structured pointer like "46 CFR 138.305"
+    or "SOLAS Ch.II-2 Reg.10". This helper resolves it to a list of
+    chunks from our corpus that match. Multi-chunk sections (e.g.
+    161.010-1, -2, -3, -4) all get returned. Returns empty list if
+    nothing matches — caller treats that as "oracle pointed at a
+    section we don't have in corpus, fall through."
+
+    Each returned chunk gets `similarity` set high (0.95+) so the
+    downstream merge + reranker treat it as authoritative. Adds
+    a `_citation_hint=True` flag so callers can distinguish forced
+    chunks from cosine-retrieved ones for logging.
+    """
+    if not citation or not citation.strip():
+        return []
+    cit = citation.strip()
+
+    # CFR citation: "46 CFR 138.305" or "33 CFR 144.01-25" → exact match
+    # in section_number (which is stored in that format). Also try a
+    # prefix match for partial citations like "46 CFR 138" (whole part).
+    cfr_match = re.match(
+        r"^(\d{1,2})\s+CFR\s+(\d+(?:\.[\dT]+(?:-\d+)?)?)$",
+        cit, re.IGNORECASE,
+    )
+    if cfr_match:
+        title = cfr_match.group(1)
+        section = cfr_match.group(2)
+        # If the section has a dot or hyphen, it's a specific subsection —
+        # exact match. Otherwise it's a part-level pointer — match all
+        # subsections within the part.
+        if "." in section or "-" in section:
+            target = f"{title} CFR {section}"
+            rows = await pool.fetch(
+                "SELECT id, source, section_number, section_title, full_text "
+                "FROM regulations "
+                "WHERE section_number = $1 OR section_number ILIKE $2 "
+                "LIMIT $3",
+                target, target + "%", limit,
+            )
+        else:
+            target_prefix = f"{title} CFR {section}."
+            target_prefix_alt = f"{title} CFR {section}-"
+            rows = await pool.fetch(
+                "SELECT id, source, section_number, section_title, full_text "
+                "FROM regulations "
+                "WHERE section_number ILIKE $1 OR section_number ILIKE $2 "
+                "ORDER BY section_number "
+                "LIMIT $3",
+                target_prefix + "%", target_prefix_alt + "%", limit,
+            )
+        return _annotate_citation_chunks(rows)
+
+    # SOLAS citation: "SOLAS Ch.II-2 Reg.10" → match section_number on
+    # the "Ch.II-2" + Reg portion. Section storage varies; we match
+    # tolerantly via ILIKE.
+    solas_match = re.match(
+        r"^SOLAS\s+Ch\.?\s*([IVX]+(?:-\d+)?)(?:\s+Reg\.?\s*(\d+(?:\.\d+)?))?$",
+        cit, re.IGNORECASE,
+    )
+    if solas_match:
+        chapter = solas_match.group(1)
+        reg = solas_match.group(2)
+        if reg:
+            pattern = f"%Ch.{chapter}%Reg.{reg}%"
+        else:
+            pattern = f"%Ch.{chapter}%"
+        rows = await pool.fetch(
+            "SELECT id, source, section_number, section_title, full_text "
+            "FROM regulations "
+            "WHERE source IN ('solas', 'solas_supplement') "
+            "  AND section_number ILIKE $1 "
+            "LIMIT $2",
+            pattern, limit,
+        )
+        return _annotate_citation_chunks(rows)
+
+    # MARPOL — "MARPOL Annex I Reg.14"
+    marpol_match = re.match(
+        r"^MARPOL\s+Annex\s+([IVX]+)(?:\s+Reg\.?\s*(\d+(?:\.\d+)?))?$",
+        cit, re.IGNORECASE,
+    )
+    if marpol_match:
+        annex = marpol_match.group(1)
+        reg = marpol_match.group(2)
+        if reg:
+            pattern = f"%Annex {annex}%Reg%{reg}%"
+        else:
+            pattern = f"%Annex {annex}%"
+        rows = await pool.fetch(
+            "SELECT id, source, section_number, section_title, full_text "
+            "FROM regulations "
+            "WHERE source IN ('marpol', 'marpol_supplement') "
+            "  AND section_number ILIKE $1 "
+            "LIMIT $2",
+            pattern, limit,
+        )
+        return _annotate_citation_chunks(rows)
+
+    # NVIC — "NVIC 04-08"
+    nvic_match = re.match(r"^NVIC\s+(\d{2}-\d{2})$", cit, re.IGNORECASE)
+    if nvic_match:
+        nvic_num = nvic_match.group(1)
+        rows = await pool.fetch(
+            "SELECT id, source, section_number, section_title, full_text "
+            "FROM regulations "
+            "WHERE source = 'nvic' AND section_number ILIKE $1 "
+            "LIMIT $2",
+            f"NVIC {nvic_num}%", limit,
+        )
+        return _annotate_citation_chunks(rows)
+
+    # ISM Code — "ISM 10.1"
+    ism_match = re.match(r"^ISM(?:\s+Code)?\s+(\d+(?:\.\d+)?)$", cit, re.IGNORECASE)
+    if ism_match:
+        section = ism_match.group(1)
+        rows = await pool.fetch(
+            "SELECT id, source, section_number, section_title, full_text "
+            "FROM regulations "
+            "WHERE source IN ('ism', 'ism_supplement') "
+            "  AND section_number ILIKE $1 "
+            "LIMIT $2",
+            f"ISM {section}%", limit,
+        )
+        return _annotate_citation_chunks(rows)
+
+    # STCW — "STCW A-VI/1"
+    stcw_match = re.match(r"^STCW\s+([A-Z]?-?[IVX]+/\d+)$", cit, re.IGNORECASE)
+    if stcw_match:
+        section = stcw_match.group(1)
+        rows = await pool.fetch(
+            "SELECT id, source, section_number, section_title, full_text "
+            "FROM regulations "
+            "WHERE source IN ('stcw', 'stcw_supplement') "
+            "  AND section_number ILIKE $1 "
+            "LIMIT $2",
+            f"%{section}%", limit,
+        )
+        return _annotate_citation_chunks(rows)
+
+    # Unknown citation shape — caller falls through.
+    return []
+
+
+def _annotate_citation_chunks(rows) -> list[dict]:
+    """Convert asyncpg Records to dicts with high synthetic similarity
+    + the citation-hint flag, so the downstream merge treats them as
+    authoritative."""
+    out: list[dict] = []
+    for r in rows:
+        chunk = dict(r)
+        # 0.99 puts these above any cosine result (which tops out
+        # around 0.95 for legal text). The reranker still gets to
+        # decide actual order.
+        chunk["similarity"] = 0.99
+        chunk["_citation_hint"] = True
+        out.append(chunk)
+    return out
+
+
 async def retrieve_enhanced(
     query: str,
     pool: asyncpg.Pool,
