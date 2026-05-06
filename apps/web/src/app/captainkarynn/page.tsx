@@ -1,9 +1,16 @@
 'use client'
 
-import React, { useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { CompassRose } from '@/components/CompassRose'
 import { CorpusBadges } from '@/components/CorpusBadges'
+import {
+  SeeItInActionSection,
+  WhyNotChatGPTSection,
+  HallucinationProofSection,
+  HowItWorksSection,
+  MarinerVaultSection,
+} from '@/components/marketing/MarketingSections'
 import { apiRequest } from '@/lib/api'
 import { useAuthStore } from '@/lib/auth'
 
@@ -58,127 +65,6 @@ const PRICING = {
     ],
   },
 } as const
-
-// Same sample-answer carousel as /womenoffshore — keep the demo identical
-// so we don't fragment the "show the product" content. If we update the
-// canonical demo later, both pages should track together; consider
-// extracting to a shared component when a third page wants the same.
-const SAMPLE_ANSWERS: Array<{
-  sourceTag: string
-  question: string
-  answer: string
-}> = [
-  {
-    sourceTag: 'COLREGs Rule 13',
-    question: 'I’m overtaking another vessel at night — what light configuration tells me they’re a power-driven vessel longer than 50 meters underway?',
-    answer: 'A power-driven vessel of 50 meters or more underway shall exhibit a forward masthead light, a second masthead light abaft of and higher than the forward one, sidelights, and a sternlight {citation: COLREGs Rule 23(a)}. As the overtaking vessel under {citation: COLREGs Rule 13}, you are the give-way vessel and must keep clear.',
-  },
-  {
-    sourceTag: '46 CFR 199.175',
-    question: 'How many parachute flares does my lifeboat need to carry?',
-    answer: 'For a containership operating internationally, each lifeboat must carry 4 rocket parachute flares per {citation: 46 CFR 199.175}. SOLAS-equipped vessels follow the equivalent {citation: SOLAS Ch.III LSA Code 4.4} which mandates the same 4 rocket parachute flares per lifeboat.',
-  },
-  {
-    sourceTag: 'NVIC 04-08',
-    question: 'My MMC medical certificate expires in two weeks but I’m stuck overseas — what are my options?',
-    answer: 'Per {citation: NVIC 04-08 Ch-2}, a mariner whose medical certificate expires while at sea may continue to serve until reaching the next port where renewal is practical, provided you apply through the {citation: NMC} as soon as you’re able. Document the circumstances in your logbook for any subsequent inspection.',
-  },
-  {
-    sourceTag: 'WHO IHR Annex 3',
-    question: 'When does my Ship Sanitation Control Certificate need to be renewed?',
-    answer: 'Per {citation: WHO IHR Annex 3}, the Ship Sanitation Control Certificate is valid for six months from the date of issue. Renewal must occur at any port equipped to issue SSCCs — typically a designated port of entry of a State Party to the IHR. The certificate is the modern replacement for the legacy "deratting certificate."',
-  },
-  {
-    sourceTag: '46 USC 11103',
-    question: 'Is a vessel on a foreign voyage required to have a slop chest, and what does it need to contain?',
-    answer: 'Per {citation: 46 USC 11103}, a vessel on a voyage of more than 78 hours from a U.S. port to a foreign port (other than to Canada or the West Indies) must carry a slop chest containing sufficient clothing, including boots/shoes, hats, underclothing, outer clothing, foul-weather gear, and tobacco — sufficient for the intended voyage of each seaman.',
-  },
-]
-
-function renderAnswerWithChips(text: string): React.ReactNode {
-  const parts = text.split(/\{citation: ([^}]+)\}/)
-  return parts.map((part, i) => {
-    if (i % 2 === 0) return <span key={i}>{part}</span>
-    return (
-      <span
-        key={i}
-        className="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium
-          bg-amber-950/70 text-amber-400 border border-amber-800/50 leading-none mx-0.5"
-      >
-        {part}
-      </span>
-    )
-  })
-}
-
-function SampleAnswerCarousel() {
-  const [index, setIndex] = useState(0)
-  const [paused, setPaused] = useState(false)
-
-  useEffect(() => {
-    if (paused) return
-    const handle = window.setInterval(() => {
-      setIndex(i => (i + 1) % SAMPLE_ANSWERS.length)
-    }, 7000)
-    return () => window.clearInterval(handle)
-  }, [paused])
-
-  const current = SAMPLE_ANSWERS[index]
-
-  return (
-    <section className="px-5 pb-20 bg-[#0a0e1a]">
-      <div className="max-w-3xl mx-auto">
-        <h2 className="font-display text-2xl font-bold text-[#f0ece4] text-center mb-2 tracking-wide">
-          Cited answers, not summaries
-        </h2>
-        <p className="font-mono text-sm text-[#6b7594] text-center mb-8 max-w-md mx-auto">
-          Every answer references the specific regulation paragraph it came from — so you can
-          verify before you act.
-        </p>
-
-        <div
-          className="rounded-2xl border border-white/8 bg-[#0d1225] p-6 transition-opacity duration-300 min-h-[260px]"
-          onMouseEnter={() => setPaused(true)}
-          onMouseLeave={() => setPaused(false)}
-        >
-          <p className="font-mono text-xs text-[#6b7594] mb-3 uppercase tracking-wider">
-            Question · {current.sourceTag}
-          </p>
-          <p className="font-mono text-sm text-[#f0ece4]/90 leading-relaxed mb-4">
-            “{current.question}”
-          </p>
-          <div className="border-t border-white/8 pt-4">
-            <p className="font-mono text-xs text-[#6b7594] mb-3 uppercase tracking-wider">
-              RegKnot answer
-            </p>
-            <p className="font-mono text-sm text-[#f0ece4]/80 leading-relaxed">
-              {renderAnswerWithChips(current.answer)}
-            </p>
-          </div>
-        </div>
-
-        <div className="flex items-center justify-center gap-2 mt-5">
-          {SAMPLE_ANSWERS.map((_, i) => (
-            <button
-              key={i}
-              onClick={() => { setIndex(i); setPaused(true) }}
-              aria-label={`Show example ${i + 1}`}
-              className={`h-1.5 rounded-full transition-all duration-200
-                ${i === index
-                  ? 'w-8 bg-[#2dd4bf]'
-                  : 'w-1.5 bg-white/15 hover:bg-white/30'
-                }`}
-            />
-          ))}
-        </div>
-        <p className="font-mono text-[10px] uppercase tracking-widest text-[#6b7594] text-center mt-3">
-          {index + 1} of {SAMPLE_ANSWERS.length}
-          {paused && <span className="ml-2 text-[#2dd4bf]/60">paused</span>}
-        </p>
-      </div>
-    </section>
-  )
-}
 
 const ANNUAL_DESCRIPTORS = {
   mate_annual: {
@@ -462,11 +348,21 @@ export default function CaptainKarynnPage() {
         </div>
       </section>
 
-      {/* ── Sample answers carousel ───────────────────────────────────── */}
-      <SampleAnswerCarousel />
+      {/* ── Sprint D6.72 — shared marketing sections ───────────────────────
+          Same wow-factor surface as /landing: polished demo, ChatGPT
+          comparison, hallucination proof, how-it-works, mariner-vault.
+          Single source of truth in @/components/marketing/MarketingSections.
+          Each page keeps its unique hero + plans + closing pitch but
+          shares this central narrative so visitors get the full picture
+          regardless of entry point. */}
+      <SeeItInActionSection />
+      <WhyNotChatGPTSection />
+      <HallucinationProofSection />
+      <HowItWorksSection />
+      <MarinerVaultSection />
 
       {/* ── Corpus badges — what we know ────────────────────────────────── */}
-      <section className="px-5 pb-20 bg-[#0a0e1a]">
+      <section className="px-5 md:px-10 py-20 md:py-28 border-t border-white/5">
         <CorpusBadges
           heading="What we know"
           subhead="Every reg in our index, sorted by where it comes from. Click any chip to open the source."
