@@ -3,6 +3,8 @@
 import { useEffect, useState, useRef } from 'react'
 import AuthGuard from '@/components/AuthGuard'
 import { AppHeader } from '@/components/AppHeader'
+import { CareerPathWidget } from '@/components/CareerPathWidget'
+import { RenewalCoPilotCard } from '@/components/RenewalCoPilotCard'
 import { apiRequest, apiUpload } from '@/lib/api'
 
 const CREDENTIAL_TYPES = [
@@ -543,9 +545,21 @@ function CredentialsContent() {
                     </button>
                   )}
                 </div>
+
+                {/* D6.63 Move B — Renewal Co-Pilot card. Shown for any
+                    credential approaching expiry (within 180d) or already
+                    expired. The card is collapsed by default; lazy-loads
+                    the analysis when the user clicks. */}
+                {c.expiry_date && days !== null && days <= 180 && (
+                  <RenewalCoPilotCard credentialId={c.id} />
+                )}
               </section>
             )
           })}
+
+          {/* D6.63 Move C — Career Path widget. Shown only when the
+              user has at least one credential to reason against. */}
+          {!loading && credentials.length > 0 && <CareerPathWidget />}
 
         </div>
       </main>

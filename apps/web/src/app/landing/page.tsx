@@ -681,23 +681,24 @@ export default function LandingPage() {
           reasoning, but never advertised it on the marketing surface.
       ══════════════════════════════════════════════════════════════════════ */}
       <section className="bg-[#111827] px-5 md:px-10 py-20 md:py-28 border-t border-white/5">
-        <div className="max-w-5xl mx-auto">
+        <div className="max-w-6xl mx-auto">
           <div className="text-center mb-12">
             <p className="font-mono text-[11px] text-[#2dd4bf] uppercase tracking-[0.3em] mb-3">
               Beyond Chat
             </p>
             <h2 className="font-display font-black text-[#f0ece4] leading-tight tracking-tight
               text-[clamp(28px,5vw,48px)]">
-              Your credentials, organized<br />and reasoned over.
+              Your record, your career,<br />reasoned against the regulation.
             </h2>
             <p className="font-mono text-[#6b7594] mt-4 max-w-2xl mx-auto text-sm md:text-base">
-              Snap a photo of your MMC, TWIC, or medical cert.
-              We extract the data, track the expiry, and answer the
-              regulatory questions only your credentials can trigger.
+              Snap a photo of your MMC, TWIC, or medical cert. We extract
+              the data, track the expiry, and answer the regulatory questions
+              only your stored record can trigger — including which
+              credential upgrade you&apos;re closest to qualifying for.
             </p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
             {/* Card 1 — Credential Vault */}
             <div className="bg-[#0d1225] rounded-2xl border border-white/8 p-6 md:p-7">
               <div className="w-10 h-10 rounded-lg bg-[#2dd4bf]/10 border border-[#2dd4bf]/20
@@ -757,12 +758,35 @@ export default function LandingPage() {
                 Renewal Co-Pilot
               </h3>
               <p className="font-mono text-xs text-[#6b7594] leading-relaxed mb-3">
-                Expiry alerts at 90 / 30 / 7 days, plus the actual CFR section
-                governing your renewal window and exactly what evidence the
-                NMC will demand. USCG sea-service letter generator built in.
+                Personalized readiness for every credential. ✓ medical cert valid,
+                ✗ drug-test letter missing per 46 CFR 16.230, ✓ sea-time exceeds
+                threshold — not just &ldquo;your MMC expires in 47 days.&rdquo;
               </p>
               <p className="font-mono text-[10px] text-[#2dd4bf]/70 uppercase tracking-wider">
-                Calendar + the rule
+                Calendar + the rule + your record
+              </p>
+            </div>
+
+            {/* Card 4 — Career Path (D6.63) */}
+            <div className="bg-[#0d1225] rounded-2xl border border-white/8 p-6 md:p-7">
+              <div className="w-10 h-10 rounded-lg bg-[#2dd4bf]/10 border border-[#2dd4bf]/20
+                flex items-center justify-center mb-4">
+                <svg className="w-5 h-5 text-[#2dd4bf]" viewBox="0 0 24 24" fill="none"
+                     stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M3 17l6-6 4 4 8-8" />
+                  <path d="M14 7h7v7" />
+                </svg>
+              </div>
+              <h3 className="font-display font-bold text-[#f0ece4] text-lg mb-2">
+                Career Path
+              </h3>
+              <p className="font-mono text-xs text-[#6b7594] leading-relaxed mb-3">
+                We read your stored credentials + sea-time, then look at the actual
+                CFR ladder. &ldquo;You&apos;re cap-eligible for Master Inland 200 GT now;
+                Master Near-Coastal 200 GT is 180 days away under 46 CFR 11.422.&rdquo;
+              </p>
+              <p className="font-mono text-[10px] text-[#2dd4bf]/70 uppercase tracking-wider">
+                What credentialing services charge for, free
               </p>
             </div>
           </div>

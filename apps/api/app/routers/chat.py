@@ -263,55 +263,35 @@ async def _run_chat_preflight(
                     len(doc_data_list), body.vessel_id,
                 )
 
-    # 1c. Load user credentials for context injection.
-    # Only include credentials within 180 days of expiry or already expired.
+    # 1c. Load user credentials + sea-time for context injection (D6.63).
+    # Replaces the older credential-only loader: build_user_context now
+    # returns a single block covering the full mariner record so the
+    # chat can reason against the user's qualifications, expirations,
+    # and sea-time aggregations in one breath. The block is empty
+    # (and skipped from the prompt) when the user has no data.
     credential_context: str | None = None
-    cred_rows = await pool.fetch(
-        """
-        SELECT credential_type, title, expiry_date
-        FROM user_credentials
-        WHERE user_id = $1
-        ORDER BY expiry_date ASC NULLS LAST
-        """,
-        uuid.UUID(current_user.user_id),
-    )
-    if cred_rows:
-        from datetime import date
-        today = date.today()
-        total = len(cred_rows)
-        lines: list[str] = []
-        for r in cred_rows:
-            exp = r["expiry_date"]
-            if exp is None:
-                # No expiry tracked — summarize in count only
-                continue
-            days_left = (exp - today).days
-            if days_left > 180:
-                continue
-            type_labels = {"mmc": "MMC", "stcw": "STCW", "medical": "Medical Certificate", "twic": "TWIC", "other": "Other"}
-            label = r["title"] or type_labels.get(r["credential_type"], r["credential_type"].upper())
-            if days_left < 0:
-                lines.append(f"- {label}: EXPIRED {abs(days_left)} days ago")
-            else:
-                lines.append(f"- {label}: expires {exp.isoformat()} ({days_left} days)")
-
-        expiring_count = len(lines)
-        no_expiry_count = sum(1 for r in cred_rows if r["expiry_date"] is None)
-
-        if lines or total > 0:
-            header = f"User credentials ({total} tracked"
-            if expiring_count > 0:
-                header += f", {expiring_count} expiring soon"
-            header += "):"
-            parts = [header]
-            parts.extend(lines)
-            if no_expiry_count > 0:
-                parts.append(f"- {no_expiry_count} credential(s) with no expiry date tracked")
-            credential_context = "\n".join(parts)
+    try:
+        from rag.user_context import build_user_context
+        user_ctx = await build_user_context(
+            pool=pool,
+            user_id=uuid.UUID(current_user.user_id),
+            active_vessel_id=body.vessel_id,
+        )
+        block = user_ctx.as_prompt_block()
+        if block:
+            credential_context = block
             logger.info(
-                "Credential context: %d total, %d expiring/expired within 180d",
-                total, expiring_count,
+                "user_context: %d credentials, sea_time=%s, vessel=%s",
+                len(user_ctx.credentials),
+                user_ctx.sea_time is not None,
+                user_ctx.active_vessel.name if user_ctx.active_vessel else None,
             )
+    except Exception as exc:
+        # Never let a context-injection failure block the chat itself.
+        logger.warning(
+            "user_context build failed (chat continues without it): %s: %s",
+            type(exc).__name__, str(exc)[:200],
+        )
 
     # 2. Resolve conversation — load history or create new record
     conversation_id = body.conversation_id
