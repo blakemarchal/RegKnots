@@ -204,6 +204,30 @@ _STCW_TERMS: tuple[str, ...] = (
     "endorsement", "certificate of competency", "watchkeeping",
 )
 
+# Sprint D6.69 — Subchapter M (Towing Vessels). Documented miss
+# 2026-05-06 14:29: query "Subchapter M TSMS requirements for M/V Bay
+# Pioneer" pulled NVIC 01-89 + USCG MSM + ISM Code chunks (top sim
+# 0.61) but missed all 17 chunks of 46 CFR Part 138 (TSMS framework)
+# that are in the corpus. Embedding model treats "Towing Safety
+# Management System" as semantically near "Safety Management System"
+# and gravitates to ISM Code chunks. CFR Part 138 has clinical section
+# titles ("TSMS certificate", "Internal audits for a TSMS certificate")
+# that don't naturally embed near a colloquial "Subchapter M TSMS"
+# query. Source-affinity boost overrides the natural embedding bias.
+_SUBCHAPTER_M_TERMS: tuple[str, ...] = (
+    "subchapter m",
+    "tsms",
+    "towing safety management",
+    "third party organization", "third-party organization",
+    "towing vessel inspection",
+    "towing vessel record",
+    "tvr",
+    # Towing-vessel-class trigger words. "Towing vessel" alone is too
+    # broad on its own (matches general operational queries) so it's
+    # paired with TSMS / Subchapter M signals via the inclusive any-of
+    # match. Each term is precise enough on its own to anchor.
+)
+
 _NVIC_TERMS: tuple[str, ...] = (
     "nvic", "navigation vessel inspection circular",
     "uscg policy", "coast guard guidance", "coast guard policy",
@@ -472,6 +496,17 @@ def _source_affinity(query: str) -> dict[str, float]:
 
     if any(t in q for t in _STCW_TERMS):
         boosts["stcw"] = 0.20
+
+    # Sprint D6.69 — Subchapter M / TSMS queries. The 0.30 boost is
+    # higher than the standard 0.20 because the embedding model has a
+    # documented bias toward ISM Code chunks for SMS-shaped queries;
+    # we need extra lift to clear it. CFR group includes cfr_46 where
+    # Part 138 lives (138.225, 138.305, 138.310, 138.315 — the actual
+    # TSMS framework). NVIC also gets a boost since NVIC 01-89 §8 is
+    # the canonical guidance and was already retrieving correctly.
+    if any(t in q for t in _SUBCHAPTER_M_TERMS):
+        boosts["cfr"] = max(boosts.get("cfr", 0.0), 0.30)
+        boosts.setdefault("nvic", 0.20)
 
     if any(t in q for t in _NVIC_TERMS):
         boosts["nvic"] = 0.20
