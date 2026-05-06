@@ -3,7 +3,9 @@
 import { useEffect, useState, useRef } from 'react'
 import AuthGuard from '@/components/AuthGuard'
 import { AppHeader } from '@/components/AppHeader'
+import { AuditReadinessCard } from '@/components/AuditReadinessCard'
 import { CareerPathWidget } from '@/components/CareerPathWidget'
+import { ComplianceChangelogCard } from '@/components/ComplianceChangelogCard'
 import { RenewalCoPilotCard } from '@/components/RenewalCoPilotCard'
 import { apiRequest, apiUpload } from '@/lib/api'
 
@@ -564,6 +566,17 @@ function CredentialsContent() {
           {/* D6.63 Move C — Career Path widget. Shown only when the
               user has at least one credential to reason against. */}
           {!loading && credentials.length > 0 && <CareerPathWidget />}
+
+          {/* D6.64 — Audit Readiness card. Aggregates credentials +
+              vessel docs + sea-time into a "where do I stand right now"
+              score + findings. */}
+          {!loading && credentials.length > 0 && <AuditReadinessCard />}
+
+          {/* D6.64 — Compliance Changelog. What changed in the corpus
+              recently that affects THIS user's profile. */}
+          {!loading && credentials.length > 0 && (
+            <ComplianceChangelogCard defaultWindowDays={7} />
+          )}
 
         </div>
       </main>

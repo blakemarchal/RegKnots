@@ -32,6 +32,8 @@ const PRICING = {
       'Full reg corpus (see below)',
       '46 USC + WHO IHR (port health & seamen\u2019s law)',
       'Vessel profile + chat history',
+      'Credential vault with auto-OCR',
+      'Renewal alerts (90 / 30 / 7 days)',
     ],
   },
   captain_promo: {
@@ -42,9 +44,11 @@ const PRICING = {
     features: [
       'Unlimited messages',
       'Everything in Mate',
-      'Priority regulation update notifications',
+      'AI Renewal Co-Pilot + Career Path',
+      'PSC Co-Pilot + Vessel Analysis',
+      'Compliance Changelog + Audit Readiness',
+      'USCG sea-service letter generator',
       'Audit-ready chat logs',
-      'PSC checklist builder & sea-service letters',
     ],
   },
 } as const

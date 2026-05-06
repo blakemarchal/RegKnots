@@ -20,8 +20,9 @@ import { useEffect, useState } from 'react'
 interface Props {
   /**
    * Sequence of messages to rotate through during the analysis.
-   * Each ~1.8 s on screen. The component holds on the last message
-   * until the parent cleans up (which signals the call returned).
+   * The first run advances 1→last linearly; once we hit the end,
+   * we keep cycling through the FILLER_MESSAGES below so the user
+   * never sees the same message stuck on screen for more than ~2s.
    */
   messages: string[]
   /** Visual variant: 'inline' for narrow card slots, 'card' for the wider widget. */
@@ -30,26 +31,51 @@ interface Props {
 
 const ROTATION_MS = 1800
 
+// Generic filler messages cycled after the caller's specific
+// progress messages run out. Sonnet calls can take 8-12s in
+// the worst case (heavy not_ready prose); without these the
+// "Synthesizing…" message would freeze and look like a hang.
+const FILLER_MESSAGES = [
+  'Verifying citations…',
+  'Tightening the wording…',
+  'Cross-checking against the corpus once more…',
+  'Drafting the final structured response…',
+  'Almost there — finishing up…',
+] as const
+
 export function AILoadingState({ messages, variant = 'inline' }: Props) {
   const [i, setI] = useState(0)
+  // Combined timeline: caller's messages first, then filler in a loop.
+  // Filler loops indefinitely (modulo) so we never run out of
+  // motion regardless of how long the call actually takes.
+  const totalScripted = messages.length
 
   useEffect(() => {
-    if (messages.length <= 1) return
+    if (totalScripted <= 1 && FILLER_MESSAGES.length === 0) return
     const id = setInterval(() => {
-      setI((prev) => Math.min(prev + 1, messages.length - 1))
+      setI((prev) => prev + 1)
     }, ROTATION_MS)
     return () => clearInterval(id)
-  }, [messages.length])
+  }, [totalScripted])
 
+  const currentMessage =
+    i < totalScripted
+      ? messages[i]
+      : FILLER_MESSAGES[(i - totalScripted) % FILLER_MESSAGES.length]
+
+  // Progress dots stop at the end of the scripted timeline; once we
+  // start cycling filler we hide the dots so it's not misleading.
+  const showDots = i < totalScripted && totalScripted > 1
   const padding = variant === 'card' ? 'py-6' : 'py-3'
+
   return (
     <div className={`flex items-center gap-3 ${padding}`}>
       <Spinner />
       <div className="flex-1 min-w-0">
         <p className="font-mono text-xs text-[#f0ece4]/85 truncate">
-          {messages[i]}
+          {currentMessage}
         </p>
-        <Dots count={messages.length} active={i} />
+        {showDots && <Dots count={totalScripted} active={i} />}
       </div>
     </div>
   )

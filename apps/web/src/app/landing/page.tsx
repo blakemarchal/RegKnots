@@ -791,6 +791,41 @@ export default function LandingPage() {
             </div>
           </div>
 
+          {/* D6.64 — additional AI co-pilots strip. Beyond Chat caps at
+              4 headline cards; the rest live here as a tight set of
+              chips so the page doesn't bloat. */}
+          <div className="mt-8 max-w-4xl mx-auto">
+            <p className="font-mono text-[10px] text-[#2dd4bf] uppercase tracking-[0.25em] text-center mb-3">
+              Plus four more AI co-pilots reasoning over your record
+            </p>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+              <div className="bg-[#0d1225] border border-white/8 rounded-lg p-3">
+                <p className="font-mono text-[11px] text-[#f0ece4] font-bold mb-1">Vessel Analysis</p>
+                <p className="font-mono text-[10px] text-[#6b7594] leading-snug">
+                  Drop in a COI, get the regulatory implications mapped.
+                </p>
+              </div>
+              <div className="bg-[#0d1225] border border-white/8 rounded-lg p-3">
+                <p className="font-mono text-[11px] text-[#f0ece4] font-bold mb-1">PSC Co-Pilot</p>
+                <p className="font-mono text-[10px] text-[#6b7594] leading-snug">
+                  Inspection prep tailored to vessel + flag + MOU region.
+                </p>
+              </div>
+              <div className="bg-[#0d1225] border border-white/8 rounded-lg p-3">
+                <p className="font-mono text-[11px] text-[#f0ece4] font-bold mb-1">Compliance Changelog</p>
+                <p className="font-mono text-[10px] text-[#6b7594] leading-snug">
+                  What changed in the regs that affects your record.
+                </p>
+              </div>
+              <div className="bg-[#0d1225] border border-white/8 rounded-lg p-3">
+                <p className="font-mono text-[11px] text-[#f0ece4] font-bold mb-1">Audit Readiness</p>
+                <p className="font-mono text-[10px] text-[#6b7594] leading-snug">
+                  Score, gaps, and what to fix first across credentials + vessels.
+                </p>
+              </div>
+            </div>
+          </div>
+
           {/* The wedge — single line, low-key, devastating to mariner-vault apps */}
           <p className="font-mono text-xs text-[#6b7594] text-center mt-10 max-w-2xl mx-auto">
             Other mariner apps store the paperwork.{' '}

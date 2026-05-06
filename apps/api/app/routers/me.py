@@ -685,6 +685,654 @@ def _format_chunks(chunks: list[dict], per_chunk_chars: int = 1500) -> str:
     return "\n\n".join(parts)
 
 
+# ── Sprint 4 endpoints ────────────────────────────────────────────────────
+
+
+# ── /me/vessel-analysis/{vessel_id} ────────────────────────────────────────
+
+
+class RegulatoryImplication(BaseModel):
+    """One regulation area that applies to this vessel + how."""
+    area: str          # "Minimum manning", "MARPOL Annex I", "ISM Code", etc.
+    citation: str      # "46 CFR 15.515" or "MARPOL Annex I Reg 14"
+    summary: str       # 1-2 sentences anchored to the vessel's actual profile
+
+
+class VesselAnalysisDTO(BaseModel):
+    vessel_id: str
+    vessel_name: str
+    narrative: str
+    applicable_regulations: list[RegulatoryImplication]
+    inspection_focus: list[str]
+    required_certificates: list[str]
+    citations: list[str]
+    model_used: str
+
+
+_VESSEL_ANALYSIS_SYSTEM_PROMPT = """You are RegKnots' Vessel Compliance auditor. Given a vessel's profile (and its COI extraction if available), plus the controlling US Coast Guard / IMO regulations from the corpus, produce a structured regulatory implications report.
+
+Hard rules:
+  1. Use the vessel's ACTUAL profile (subchapter, GT, route, cargo, flag). Don't invent fields.
+  2. Cite the exact CFR / SOLAS / MARPOL section for every claim. No hand-wavy "the regs require..."
+  3. Tailor to this vessel — a 95 GT inland tug doesn't get SOLAS Ch II-2, a 850 GT containership doesn't get Subchapter T.
+  4. Tone: a port engineer briefing a new captain. Practical, not academic.
+
+Output JSON ONLY (no markdown fences, no prose around it):
+
+{
+  "narrative": "1-2 paragraph plain-English overview of this vessel's regulatory posture.",
+  "applicable_regulations": [
+    {
+      "area": "Short name like 'Minimum manning' or 'MARPOL Annex I'",
+      "citation": "Exact section like '46 CFR 15.515' or 'MARPOL Annex I Reg 14'",
+      "summary": "1-2 sentences. Anchor to vessel: 'For your 850 GT containership in near-coastal trade, 46 CFR 15.515 sets a minimum complement of...'"
+    }
+  ],
+  "inspection_focus": [
+    "Specific items USCG/PSC will look at on THIS vessel during inspection. 5-10 items, ordered by likelihood."
+  ],
+  "required_certificates": [
+    "Per-document list: COI under Subchapter X, IOPP if oceans, etc. Each anchored to a citation."
+  ],
+  "citations": ["all unique CFR/SOLAS/MARPOL sections referenced above"]
+}
+"""
+
+
+@router.get("/vessel-analysis/{vessel_id}", response_model=VesselAnalysisDTO)
+async def get_vessel_analysis(
+    vessel_id: str,
+    request: Request,
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+) -> VesselAnalysisDTO:
+    """Sprint 4 — drop-a-vessel-in, get the regulatory implications."""
+    try:
+        vid = _uuid.UUID(vessel_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="invalid vessel id")
+
+    pool = await get_pool()
+    user_uuid = _uuid.UUID(current_user.user_id)
+
+    v = await pool.fetchrow(
+        """
+        SELECT id, name, vessel_type, flag_state, gross_tonnage, subchapter,
+               route_types, cargo_types, additional_details
+        FROM vessels
+        WHERE id = $1 AND user_id = $2
+        """,
+        vid, user_uuid,
+    )
+    if v is None:
+        raise HTTPException(status_code=404, detail="vessel not found")
+
+    # Pull latest COI extraction if available — gives the analysis
+    # access to issue date / inspector name / specific equipment lists.
+    coi = await pool.fetchrow(
+        """
+        SELECT extracted_data, created_at FROM vessel_documents
+        WHERE vessel_id = $1 AND document_type = 'coi'
+          AND extraction_status IN ('extracted', 'confirmed')
+        ORDER BY created_at DESC LIMIT 1
+        """,
+        vid,
+    )
+    coi_data = None
+    if coi:
+        coi_data = coi["extracted_data"]
+        if isinstance(coi_data, str):
+            try:
+                coi_data = json.loads(coi_data)
+            except Exception:
+                coi_data = None
+
+    # Retrieve broad-coverage regs for the vessel's profile.
+    retrieval_query = (
+        f"vessel inspection certificate manning requirements MARPOL ISM SOLAS "
+        f"{v['vessel_type'] or ''} subchapter {v['subchapter'] or ''} "
+        f"{' '.join(v['route_types'] or [])} {' '.join(v['cargo_types'] or [])}"
+    )
+    chunks = await _retrieve_supporting_chunks(retrieval_query, k=10)
+
+    user_payload = (
+        f"VESSEL PROFILE:\n"
+        f"- Name: {v['name']}\n"
+        f"- Type: {v['vessel_type']}\n"
+        f"- Flag: {v['flag_state']}\n"
+        f"- Gross tonnage: {v['gross_tonnage']}\n"
+        f"- Subchapter: {v['subchapter']}\n"
+        f"- Route types: {', '.join(v['route_types'] or [])}\n"
+        f"- Cargo types: {', '.join(v['cargo_types'] or [])}\n"
+        f"- Additional details: {json.dumps(v['additional_details'] or {})[:500]}\n"
+    )
+    if coi_data:
+        user_payload += f"\nCOI EXTRACTION:\n{json.dumps(coi_data, indent=2)[:1500]}\n"
+    user_payload += (
+        f"\nREGULATION CONTEXT (retrieved corpus passages):\n"
+        f"{_format_chunks(chunks)}\n\n"
+        f"Produce the JSON. Anchor every applicable_regulation entry to the "
+        f"vessel's actual profile, and cite the exact section."
+    )
+
+    anthropic_client: AsyncAnthropic = request.app.state.anthropic
+    try:
+        response = await anthropic_client.messages.create(
+            model=_REASONING_MODEL,
+            max_tokens=3000,
+            system=_VESSEL_ANALYSIS_SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": user_payload}],
+        )
+        text = "".join(
+            getattr(b, "text", "") for b in response.content
+            if getattr(b, "type", None) == "text"
+        )
+    except Exception as exc:
+        logger.warning("vessel-analysis Sonnet call failed: %s", exc)
+        raise HTTPException(status_code=503, detail="Vessel analysis unavailable. Try again.")
+
+    parsed = _parse_json(text) or _salvage_truncated_json(text)
+    if parsed is None:
+        raise HTTPException(status_code=503, detail="Vessel analysis returned malformed output.")
+
+    apps_raw = parsed.get("applicable_regulations") or []
+    apps: list[RegulatoryImplication] = []
+    for a in apps_raw[:15]:
+        if not isinstance(a, dict):
+            continue
+        apps.append(RegulatoryImplication(
+            area=str(a.get("area") or "")[:80],
+            citation=str(a.get("citation") or "")[:80],
+            summary=str(a.get("summary") or "")[:600],
+        ))
+
+    return VesselAnalysisDTO(
+        vessel_id=str(vid),
+        vessel_name=v["name"],
+        narrative=str(parsed.get("narrative") or "")[:2000],
+        applicable_regulations=apps,
+        inspection_focus=[
+            str(x)[:300] for x in (parsed.get("inspection_focus") or [])[:12]
+        ],
+        required_certificates=[
+            str(x)[:300] for x in (parsed.get("required_certificates") or [])[:12]
+        ],
+        citations=[str(c)[:80] for c in (parsed.get("citations") or [])[:20]],
+        model_used=_REASONING_MODEL,
+    )
+
+
+# ── /me/psc-prep — personalized Port State Control preparation ────────────
+
+
+class PSCFocusArea(BaseModel):
+    """One specific thing PSC officers will check during inspection."""
+    title: str
+    rationale: str
+    citation: str
+
+
+class PSCPrepDTO(BaseModel):
+    vessel_id: Optional[str]
+    vessel_name: Optional[str]
+    flag_state: Optional[str]
+    target_port_region: Optional[str]
+    narrative: str
+    focus_areas: list[PSCFocusArea]
+    common_deficiencies: list[str]
+    documents_to_have_ready: list[str]
+    citations: list[str]
+    model_used: str
+
+
+_PSC_PREP_SYSTEM_PROMPT = """You are RegKnots' Port State Control prep advisor. Given a specific vessel's profile and the port region they're heading to, plus the controlling regulations + recent MOU concentrated inspection campaigns, produce a focused inspection prep brief.
+
+Hard rules:
+  1. Tailor to THE VESSEL — a 95 GT inland tug heading to USCG inspection has different concerns than a 50,000 GT containership entering Singapore.
+  2. Focus areas should be the items PSC officers actually check on this profile, not a textbook of every regulation.
+  3. "Common deficiencies" should reflect what THIS class of vessel actually fails on (lifejacket counts on small boats, stability data on bulkers, oil record book on tankers, etc.). If you don't know, omit rather than invent.
+  4. Cite specific regulations / MOU / CIC references. No "the regs require..." without a section.
+  5. Tone: a chief mate briefing the bridge before arrival. Direct, no fluff.
+
+Output JSON ONLY:
+
+{
+  "narrative": "1-2 paragraphs on what kind of PSC inspection THIS vessel can expect at THIS port region.",
+  "focus_areas": [
+    {
+      "title": "Specific check item like 'Bridge fire detection panel functionality'",
+      "rationale": "1-2 sentences on why PSC will look here for this vessel.",
+      "citation": "Exact regulation"
+    }
+  ],
+  "common_deficiencies": [
+    "Specific historical deficiency patterns for this vessel class. Each <= 200 chars."
+  ],
+  "documents_to_have_ready": [
+    "Concrete docs: 'COI', 'IOPP if oceans', 'crew STCW endorsements', 'oil record book current to within 24h', etc."
+  ],
+  "citations": ["all unique sections cited above"]
+}
+"""
+
+
+@router.get("/psc-prep", response_model=PSCPrepDTO)
+async def get_psc_prep(
+    request: Request,
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    vessel_id: Optional[str] = None,
+    target_port_region: Optional[str] = None,  # e.g. "Paris MOU", "Tokyo MOU", "USCG"
+) -> PSCPrepDTO:
+    """Personalized PSC inspection prep grounded in the vessel + region."""
+    pool = await get_pool()
+    user_uuid = _uuid.UUID(current_user.user_id)
+
+    vessel: Optional[dict[str, Any]] = None
+    if vessel_id:
+        try:
+            vid = _uuid.UUID(vessel_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="invalid vessel id")
+        v = await pool.fetchrow(
+            """
+            SELECT id, name, vessel_type, flag_state, gross_tonnage, subchapter,
+                   route_types, cargo_types
+            FROM vessels WHERE id = $1 AND user_id = $2
+            """,
+            vid, user_uuid,
+        )
+        if v is None:
+            raise HTTPException(status_code=404, detail="vessel not found")
+        vessel = dict(v)
+
+    region = (target_port_region or "USCG").strip()
+    retrieval_query = (
+        f"port state control PSC inspection {region} concentrated inspection "
+        f"campaign deficiencies common findings "
+        f"{vessel['vessel_type'] if vessel else 'merchant vessel'} "
+        f"{vessel['subchapter'] if vessel else ''}"
+    )
+    chunks = await _retrieve_supporting_chunks(retrieval_query, k=10)
+
+    profile_block = "(no specific vessel selected — produce a generic prep brief)"
+    if vessel:
+        profile_block = (
+            f"- Name: {vessel['name']}\n"
+            f"- Type: {vessel['vessel_type']}\n"
+            f"- Flag: {vessel['flag_state']}\n"
+            f"- Gross tonnage: {vessel['gross_tonnage']}\n"
+            f"- Subchapter: {vessel['subchapter']}\n"
+            f"- Route types: {', '.join(vessel['route_types'] or [])}\n"
+            f"- Cargo types: {', '.join(vessel['cargo_types'] or [])}\n"
+        )
+
+    user_payload = (
+        f"VESSEL PROFILE:\n{profile_block}\n\n"
+        f"TARGET PORT REGION: {region}\n\n"
+        f"REGULATION CONTEXT (retrieved corpus passages):\n"
+        f"{_format_chunks(chunks)}\n\n"
+        f"Produce the PSC prep JSON. Tailored to THIS vessel and THIS region."
+    )
+
+    anthropic_client: AsyncAnthropic = request.app.state.anthropic
+    try:
+        response = await anthropic_client.messages.create(
+            model=_REASONING_MODEL,
+            max_tokens=3000,
+            system=_PSC_PREP_SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": user_payload}],
+        )
+        text = "".join(
+            getattr(b, "text", "") for b in response.content
+            if getattr(b, "type", None) == "text"
+        )
+    except Exception as exc:
+        logger.warning("psc-prep Sonnet call failed: %s", exc)
+        raise HTTPException(status_code=503, detail="PSC prep unavailable. Try again.")
+
+    parsed = _parse_json(text) or _salvage_truncated_json(text)
+    if parsed is None:
+        raise HTTPException(status_code=503, detail="PSC prep returned malformed output.")
+
+    focus_raw = parsed.get("focus_areas") or []
+    focus: list[PSCFocusArea] = []
+    for f in focus_raw[:15]:
+        if not isinstance(f, dict):
+            continue
+        focus.append(PSCFocusArea(
+            title=str(f.get("title") or "")[:120],
+            rationale=str(f.get("rationale") or "")[:600],
+            citation=str(f.get("citation") or "")[:80],
+        ))
+
+    return PSCPrepDTO(
+        vessel_id=str(vessel["id"]) if vessel else None,
+        vessel_name=vessel["name"] if vessel else None,
+        flag_state=vessel["flag_state"] if vessel else None,
+        target_port_region=region,
+        narrative=str(parsed.get("narrative") or "")[:2000],
+        focus_areas=focus,
+        common_deficiencies=[
+            str(d)[:300] for d in (parsed.get("common_deficiencies") or [])[:12]
+        ],
+        documents_to_have_ready=[
+            str(d)[:300] for d in (parsed.get("documents_to_have_ready") or [])[:15]
+        ],
+        citations=[str(c)[:80] for c in (parsed.get("citations") or [])[:20]],
+        model_used=_REASONING_MODEL,
+    )
+
+
+# ── /me/compliance-changelog — what changed in the regs that affects me ───
+
+
+class ChangelogItem(BaseModel):
+    """One regulatory change relevant to this user's profile."""
+    title: str
+    citation: str
+    why_it_affects_you: str
+    severity: str  # 'high' | 'medium' | 'low'
+    effective_date: Optional[str]
+
+
+class ComplianceChangelogDTO(BaseModel):
+    window_days: int
+    items: list[ChangelogItem]
+    narrative: str
+    model_used: str
+
+
+_CHANGELOG_SYSTEM_PROMPT = """You are RegKnots' Compliance Changelog editor. Given a list of regulation passages that have been added or updated recently in the corpus AND a user's mariner profile (credentials + sea-time + active vessel), identify which changes actually affect this user. For each, explain WHY in plain English.
+
+Hard rules:
+  1. Filter ruthlessly. Most regulatory changes don't affect a given mariner. If a change is irrelevant to this user's profile, leave it out.
+  2. Anchor to specific facts: "You hold a Master Inland 1600 GT MMC; this NVIC change to 46 CFR 11.426 affects your renewal pathway."
+  3. Severity rule:
+       'high'   — changes a requirement the user already meets / will meet (renewal, manning, equipment)
+       'medium' — affects vessel operations / inspections the user is involved in
+       'low'    — adjacent / informational
+  4. Tone: editorial, not academic. Each "why_it_affects_you" is 1-2 sentences max.
+
+Output JSON ONLY:
+
+{
+  "narrative": "1-2 sentences summarizing what's worth this user's attention this week. If nothing meaningful changed, say so directly.",
+  "items": [
+    {
+      "title": "Plain-English headline (≤80 chars)",
+      "citation": "46 CFR 11.426" or similar exact reference,
+      "why_it_affects_you": "1-2 sentences anchored to user's actual profile.",
+      "severity": "high" | "medium" | "low",
+      "effective_date": "ISO date if known, else null"
+    }
+  ]
+}
+
+If there are NO relevant changes for this user, return items=[] and a narrative like "No regulatory changes in the past 7 days affect your profile."
+"""
+
+
+@router.get("/compliance-changelog", response_model=ComplianceChangelogDTO)
+async def get_compliance_changelog(
+    request: Request,
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    window_days: int = 7,
+) -> ComplianceChangelogDTO:
+    """What changed recently in the corpus that affects this mariner?
+
+    Window default: 7 days. Caps at 90 to keep prompt size reasonable.
+    """
+    window_days = max(1, min(window_days, 90))
+    pool = await get_pool()
+    user_uuid = _uuid.UUID(current_user.user_id)
+
+    from rag.user_context import build_user_context
+    user_ctx = await build_user_context(pool=pool, user_id=user_uuid)
+
+    # Pull recent regulation changes from the corpus.
+    recent_rows = await pool.fetch(
+        """
+        SELECT source, section_number, section_title, full_text,
+               effective_date, created_at
+        FROM regulations
+        WHERE created_at > NOW() - ($1 || ' days')::INTERVAL
+        ORDER BY created_at DESC
+        LIMIT 40
+        """,
+        str(window_days),
+    )
+    if not recent_rows:
+        return ComplianceChangelogDTO(
+            window_days=window_days,
+            items=[],
+            narrative=f"No regulatory changes ingested in the past {window_days} days.",
+            model_used=_REASONING_MODEL,
+        )
+
+    # Format changes for the prompt.
+    chunks_block = "\n\n".join(
+        f"[{i + 1}] {r['section_number']} — {r['section_title']} "
+        f"(source: {r['source']}, ingested {r['created_at'].date().isoformat()})\n"
+        f"{(r['full_text'] or '')[:600]}"
+        for i, r in enumerate(recent_rows[:25])
+    )
+
+    user_payload = (
+        f"USER PROFILE:\n{user_ctx.as_prompt_block() or '(no record on file)'}\n\n"
+        f"RECENT CORPUS CHANGES (past {window_days} days):\n{chunks_block}\n\n"
+        f"Produce the changelog JSON. Filter to items that actually affect "
+        f"this user. If nothing is meaningful, say so directly."
+    )
+
+    anthropic_client: AsyncAnthropic = request.app.state.anthropic
+    try:
+        response = await anthropic_client.messages.create(
+            model=_REASONING_MODEL,
+            max_tokens=2500,
+            system=_CHANGELOG_SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": user_payload}],
+        )
+        text = "".join(
+            getattr(b, "text", "") for b in response.content
+            if getattr(b, "type", None) == "text"
+        )
+    except Exception as exc:
+        logger.warning("compliance-changelog Sonnet call failed: %s", exc)
+        raise HTTPException(status_code=503, detail="Changelog unavailable. Try again.")
+
+    parsed = _parse_json(text) or _salvage_truncated_json(text)
+    if parsed is None:
+        raise HTTPException(status_code=503, detail="Changelog returned malformed output.")
+
+    items_raw = parsed.get("items") or []
+    items: list[ChangelogItem] = []
+    for it in items_raw[:20]:
+        if not isinstance(it, dict):
+            continue
+        sev = (it.get("severity") or "low").strip().lower()
+        if sev not in ("high", "medium", "low"):
+            sev = "low"
+        items.append(ChangelogItem(
+            title=str(it.get("title") or "")[:120],
+            citation=str(it.get("citation") or "")[:80],
+            why_it_affects_you=str(it.get("why_it_affects_you") or "")[:600],
+            severity=sev,
+            effective_date=(
+                str(it["effective_date"])[:32] if it.get("effective_date") else None
+            ),
+        ))
+
+    return ComplianceChangelogDTO(
+        window_days=window_days,
+        items=items,
+        narrative=str(parsed.get("narrative") or "")[:1500],
+        model_used=_REASONING_MODEL,
+    )
+
+
+# ── /me/audit-readiness — Wheelhouse fleet view ───────────────────────────
+
+
+class AuditFinding(BaseModel):
+    severity: str  # 'critical' | 'warning' | 'info'
+    area: str      # "Credentials" | "Vessel docs" | "Sea-time" | "Operational"
+    headline: str
+    detail: str
+    affected: str  # "Captain Smith" / "M/V Pacific Crossing" / etc.
+    citation: Optional[str]
+
+
+class AuditReadinessDTO(BaseModel):
+    workspace_id: Optional[str]
+    score_percent: int  # 0-100
+    score_label: str    # "Audit-ready", "Minor gaps", "Significant gaps"
+    narrative: str
+    findings: list[AuditFinding]
+    counts: dict[str, int]  # {'critical': N, 'warning': N, 'info': N}
+    model_used: str
+
+
+_AUDIT_READINESS_SYSTEM_PROMPT = """You are RegKnots' Audit Readiness assessor. Given a fleet (or single mariner) snapshot — credentials, vessel documents, sea-time logs — produce a deterministic compliance assessment.
+
+Hard rules:
+  1. Score is 0-100. Anchor to actual gaps:
+       100 — everything in order, no expirations within 90d, all required docs present
+        85 — minor gaps (one expiry within 90d, one missing supporting doc)
+        65 — significant (multiple expiring soon, key docs missing)
+       <50 — critical (expired credentials, missing primary documentation)
+  2. Findings ordered by severity. Critical (expired or actively non-compliant) first; warnings (90d expiry, gaps); info (good housekeeping).
+  3. Cite the regulation when a finding is gated by one. Don't fabricate citations.
+  4. Tone: audit-firm partner reviewing a client. Direct, fact-anchored, no padding.
+
+Output JSON ONLY:
+
+{
+  "score_percent": 87,
+  "score_label": "Minor gaps" (one of: Audit-ready, Minor gaps, Significant gaps, Critical gaps),
+  "narrative": "1-2 paragraphs summarizing the overall posture.",
+  "findings": [
+    {
+      "severity": "critical" | "warning" | "info",
+      "area": "Credentials" | "Vessel docs" | "Sea-time" | "Operational",
+      "headline": "One-line summary",
+      "detail": "1-3 sentences anchored to actual data.",
+      "affected": "Mariner or vessel name affected",
+      "citation": "46 CFR 10.227" or null
+    }
+  ]
+}
+"""
+
+
+@router.get("/audit-readiness", response_model=AuditReadinessDTO)
+async def get_audit_readiness(
+    request: Request,
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    workspace_id: Optional[str] = None,
+) -> AuditReadinessDTO:
+    """Compliance assessment across credentials, vessels, sea-time.
+
+    workspace_id (Wheelhouse tier) — assess across the workspace's
+    vessels + members. Without it, assesses just the user.
+    """
+    pool = await get_pool()
+    user_uuid = _uuid.UUID(current_user.user_id)
+
+    # For v1 we focus on the calling user. Workspace fan-out is a
+    # straightforward extension once Wheelhouse customers actually
+    # exercise it; the prompt already accepts a fleet-shaped input.
+    from rag.user_context import build_user_context
+    user_ctx = await build_user_context(pool=pool, user_id=user_uuid)
+
+    # Vessel summary
+    vessels_block = ""
+    vessel_rows = await pool.fetch(
+        """
+        SELECT v.id, v.name, v.vessel_type, v.gross_tonnage, v.subchapter,
+               (
+                 SELECT COUNT(*) FROM vessel_documents vd
+                 WHERE vd.vessel_id = v.id AND vd.extraction_status IN ('extracted','confirmed')
+               ) AS confirmed_docs,
+               (
+                 SELECT COUNT(*) FROM vessel_documents vd
+                 WHERE vd.vessel_id = v.id AND vd.extraction_status = 'pending'
+               ) AS pending_docs
+        FROM vessels v
+        WHERE v.user_id = $1 AND v.workspace_id IS NULL
+        """,
+        user_uuid,
+    )
+    if vessel_rows:
+        vessels_block = "VESSELS:\n" + "\n".join(
+            f"- {v['name']} ({v['vessel_type']}, {v['gross_tonnage']} GT, "
+            f"Subchapter {v['subchapter']}). Confirmed docs: {v['confirmed_docs']}, "
+            f"pending: {v['pending_docs']}"
+            for v in vessel_rows
+        )
+
+    user_payload = (
+        f"USER RECORD:\n{user_ctx.as_prompt_block() or '(no record)'}\n\n"
+        f"{vessels_block}\n\n"
+        f"Produce the audit-readiness JSON. Anchor every finding to "
+        f"specific data above. Don't fabricate."
+    )
+
+    anthropic_client: AsyncAnthropic = request.app.state.anthropic
+    try:
+        response = await anthropic_client.messages.create(
+            model=_REASONING_MODEL,
+            max_tokens=2500,
+            system=_AUDIT_READINESS_SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": user_payload}],
+        )
+        text = "".join(
+            getattr(b, "text", "") for b in response.content
+            if getattr(b, "type", None) == "text"
+        )
+    except Exception as exc:
+        logger.warning("audit-readiness Sonnet call failed: %s", exc)
+        raise HTTPException(status_code=503, detail="Audit readiness unavailable. Try again.")
+
+    parsed = _parse_json(text) or _salvage_truncated_json(text)
+    if parsed is None:
+        raise HTTPException(status_code=503, detail="Audit readiness returned malformed output.")
+
+    findings_raw = parsed.get("findings") or []
+    findings: list[AuditFinding] = []
+    counts = {"critical": 0, "warning": 0, "info": 0}
+    for f in findings_raw[:25]:
+        if not isinstance(f, dict):
+            continue
+        sev = (f.get("severity") or "info").strip().lower()
+        if sev not in ("critical", "warning", "info"):
+            sev = "info"
+        counts[sev] += 1
+        findings.append(AuditFinding(
+            severity=sev,
+            area=str(f.get("area") or "")[:40],
+            headline=str(f.get("headline") or "")[:200],
+            detail=str(f.get("detail") or "")[:600],
+            affected=str(f.get("affected") or "")[:120],
+            citation=(str(f["citation"])[:80] if f.get("citation") else None),
+        ))
+
+    score = parsed.get("score_percent")
+    try:
+        score_int = max(0, min(100, int(score))) if score is not None else 0
+    except (ValueError, TypeError):
+        score_int = 0
+    label = (parsed.get("score_label") or "").strip() or "Assessment"
+
+    return AuditReadinessDTO(
+        workspace_id=workspace_id,
+        score_percent=score_int,
+        score_label=label[:40],
+        narrative=str(parsed.get("narrative") or "")[:2000],
+        findings=findings,
+        counts=counts,
+        model_used=_REASONING_MODEL,
+    )
+
+
 def _parse_json(text: str) -> Optional[dict]:
     """Tolerantly extract the JSON object from a model response.
     Mirrors the parser pattern used in ensemble_fallback / hedge_judge.

@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import AuthGuard from '@/components/AuthGuard'
 import { AppHeader } from '@/components/AppHeader'
+import { PSCPrepCard } from '@/components/PSCPrepCard'
 import { apiRequest, ApiError } from '@/lib/api'
 import { useAuthStore } from '@/lib/auth'
 
@@ -791,6 +792,13 @@ function PSCContent() {
                 Add a vessel profile first to generate a PSC inspection checklist.
               </p>
             </section>
+          )}
+
+          {/* D6.64 — PSC Co-Pilot. AI-driven inspection prep brief
+              tailored to vessel + target port region. Renders below the
+              static checklist so admins / mariners can use both. */}
+          {selectedVessel && (
+            <PSCPrepCard vesselId={selectedVessel} />
           )}
 
         </div>

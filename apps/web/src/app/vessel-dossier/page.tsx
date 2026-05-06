@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import AuthGuard from '@/components/AuthGuard'
 import { AppHeader } from '@/components/AppHeader'
+import { VesselAnalysisCard } from '@/components/VesselAnalysisCard'
 import { apiRequest } from '@/lib/api'
 import { useAuthStore } from '@/lib/auth'
 
@@ -293,6 +294,22 @@ function DossierContent() {
                     )}
                   </>
                 }
+              </section>
+
+              {/* D6.64 — Vessel Analysis card. AI-driven regulatory
+                  implications report grounded in this vessel's profile +
+                  COI extraction. */}
+              <section className="bg-[#111827] border border-[#2dd4bf]/20 rounded-xl p-5 flex flex-col gap-3">
+                <div>
+                  <p className="font-mono text-xs text-[#2dd4bf] uppercase tracking-wider mb-1">
+                    Vessel Analysis
+                  </p>
+                  <p className="font-mono text-[11px] text-[#6b7594]">
+                    AI-driven regulatory implications for this vessel — applicable
+                    CFR / SOLAS / MARPOL, inspection focus, required certificates.
+                  </p>
+                </div>
+                <VesselAnalysisCard vesselId={dossier.vessel_id} />
               </section>
 
               <p className="font-mono text-[10px] text-[#6b7594]/50 text-center pb-4">

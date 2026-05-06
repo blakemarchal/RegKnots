@@ -70,7 +70,9 @@ const MENU_SECTIONS: MenuSection[] = [
   {
     label: 'Help & Account',
     items: [
-      { icon: '\u2750', label: 'Reference', action: 'reference', path: '/reference' },
+      // D6.63 \u2014 Reference removed: it was an offline-content stub
+      // and we don't actually work offline. Re-introduce when (if)
+      // we ship a real offline pack.
       { icon: '?', label: 'Help', action: 'help', path: '/support' },
       { icon: '\u2709', label: 'Give Feedback', action: 'feedback' },
       { icon: '\u2665', label: 'Giving Back', action: 'giving', path: '/giving' },
