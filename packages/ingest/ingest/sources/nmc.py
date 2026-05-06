@@ -71,6 +71,18 @@ _POLICY_FILES: frozenset[str] = frozenset({
     "PolicyLetter01_16.pdf",  # CG-OES PL 01-16 — Polar Code training (different letter from 01-16.pdf)
     "cg-mmc_policy_letter_01-17_final_3_9_17-date.pdf",
     "crediting_military_ss.pdf",
+    # Sprint D6.75 — 2026 NMC announcements + FAQs. Same "Mariner Ready,
+    # Mission Steady" newsletter format as the policy letters and
+    # mariner-impacting in the same way (process changes, credential
+    # validity extensions). Bundled into nmc_policy because they're
+    # functionally interpretive guidance from NMC even if not formally
+    # "policy letters" — and the source-affinity / retrieval pathways
+    # already privilege this source for medical-cert / MMC questions.
+    "nmc_asap_portal_launch_010726.pdf",        # ASAP portal launch (2026-01-26)
+    "nmc_digital_medical_cert_032626.pdf",      # Digital med cert launch (2026-03-26)
+    "nmc_med_cert_faq.pdf",                     # Medical cert FAQ (2026-04-07)
+    "nmc_credential_faq.pdf",                   # Credential FAQ (2026-01-23)
+    "nmc_govt_shutdown_update_031926.pdf",      # Govt shutdown extensions (2026-03-19)
 })
 
 _CHECKLIST_FILES: frozenset[str] = frozenset({
@@ -161,6 +173,30 @@ _DOC_META: dict[str, dict[str, str]] = {
     "crediting_military_ss.pdf": {
         "section_number": "NMC Military Sea Service Crediting",
         "section_title": "Crediting Military Sea Service Toward MMC",
+    },
+    # ── 2026 NMC announcements (Sprint D6.75) ─────────────────────────────
+    # Section numbers prefixed with the publication date so they sort
+    # chronologically and mariners citing them on a deficiency report
+    # can include the date inline.
+    "nmc_asap_portal_launch_010726.pdf": {
+        "section_number": "NMC Announcement 2026-01-26",
+        "section_title": "ASAP Portal and Redesigned Website Launch (Application Submission and Additional Information Portal — online MMC and medical certificate submission)",
+    },
+    "nmc_digital_medical_cert_032626.pdf": {
+        "section_number": "NMC Announcement 2026-03-26",
+        "section_title": "Digital Medical Certificate Launch (electronic delivery of medical certificates begins)",
+    },
+    "nmc_med_cert_faq.pdf": {
+        "section_number": "NMC Medical Certificate FAQ",
+        "section_title": "Medical Certificate FAQ — email delivery, ASAP portal submission, signed copies, waiver exceptions",
+    },
+    "nmc_credential_faq.pdf": {
+        "section_number": "NMC Credential FAQ",
+        "section_title": "Merchant Mariner Credential FAQ — application submission, ASAP portal, REC vs NMC, processing times",
+    },
+    "nmc_govt_shutdown_update_031926.pdf": {
+        "section_number": "NMC Announcement 2026-03-19",
+        "section_title": "Lapse in Appropriations / Government Shutdown Update — credential validity extensions and STCW dispensations through 2026",
     },
     # ── Checklists & form guides ──────────────────────────────────────────
     "application_acceptance_checklist.pdf": {
