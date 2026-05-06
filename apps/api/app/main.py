@@ -19,7 +19,7 @@ if settings.sentry_dsn:
         environment=settings.environment,
     )
 from app.db import init_pool, close_pool, close_redis
-from app.routers import admin, auth, billing, checklists, coming_up, contact, credentials, documents, dossier, export, health, chat, logs, onboarding, preferences, sea_service, transcribe, vessels, regulations, conversations, notifications, support, survey, waitlist, web_fallback, workspaces
+from app.routers import admin, auth, billing, checklists, coming_up, contact, credentials, documents, dossier, export, health, chat, logs, onboarding, preferences, sea_service, sea_time, transcribe, vessels, regulations, conversations, notifications, support, survey, waitlist, web_fallback, workspaces
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +88,7 @@ app.include_router(export.router)
 app.include_router(dossier.router)
 app.include_router(coming_up.router)
 app.include_router(sea_service.router)
+app.include_router(sea_time.router)
 app.include_router(onboarding.router)
 app.include_router(admin.router)
 app.include_router(web_fallback.router)

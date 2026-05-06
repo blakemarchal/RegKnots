@@ -79,7 +79,45 @@ function CredentialsContent() {
   const [formExpiryDate, setFormExpiryDate] = useState('')
   const [formNotes, setFormNotes] = useState('')
   const [scanning, setScanning] = useState(false)
+  // D6.62 Sprint 2 — package PDF download
+  const [packaging, setPackaging] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  async function downloadPackage() {
+    setPackaging(true)
+    setError(null)
+    try {
+      const { useAuthStore } = await import('@/lib/auth')
+      const token = useAuthStore.getState().accessToken
+      const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+      const resp = await fetch(`${API_URL}/credentials/package`, {
+        method: 'GET',
+        credentials: 'include',
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      })
+      if (!resp.ok) {
+        let detail = `Request failed (${resp.status})`
+        try {
+          const body = await resp.json()
+          if (body?.detail) detail = typeof body.detail === 'string' ? body.detail : JSON.stringify(body.detail)
+        } catch { /* noop */ }
+        throw new Error(detail)
+      }
+      const blob = await resp.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      // Filename comes back via Content-Disposition; browser will pick it up.
+      // Fallback name in case the header isn't surfaced.
+      a.download = `credential_package.pdf`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to build package')
+    } finally {
+      setPackaging(false)
+    }
+  }
 
   async function handlePhotoScan(file: File) {
     setScanning(true)
@@ -248,6 +286,28 @@ function CredentialsContent() {
                 }}
               />
             </div>
+          )}
+
+          {/* D6.62 Sprint 2 — Build Package CTA. The "share with employer
+              / manning agency / port agent" PDF other apps gate behind
+              Pro tier. Auth'd fetch → blob → download. */}
+          {!showForm && credentials.length > 0 && (
+            <button
+              onClick={() => void downloadPackage()}
+              disabled={packaging}
+              className="font-mono text-xs text-[#2dd4bf]
+                border border-[#2dd4bf]/30 bg-[#2dd4bf]/5 hover:bg-[#2dd4bf]/10
+                disabled:opacity-50
+                rounded-lg py-2 px-3 transition-colors flex items-center
+                justify-center gap-2"
+              title="One PDF with all credentials + sea-time totals + log"
+            >
+              <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none"
+                   stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" />
+              </svg>
+              {packaging ? 'Building package…' : 'Download credential package (PDF)'}
+            </button>
           )}
 
           {/* Add/Edit form */}

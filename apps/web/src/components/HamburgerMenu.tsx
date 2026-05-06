@@ -56,7 +56,8 @@ const MENU_SECTIONS: MenuSection[] = [
     label: 'My Credentials',
     items: [
       { icon: '\u2299', label: 'Credentials Tracker', action: 'credentials', path: '/credentials' },
-      { icon: '\u270D', label: 'Sea Service Letter', action: 'sea-service-letter', path: '/sea-service-letter' },
+      { icon: '\u2693', label: 'Sea-Time Log',         action: 'sea-time',           path: '/sea-time' },
+      { icon: '\u270D', label: 'Sea Service Letter',   action: 'sea-service-letter', path: '/sea-service-letter' },
     ],
   },
   {

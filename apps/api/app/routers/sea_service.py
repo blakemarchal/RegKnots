@@ -74,11 +74,31 @@ class PrefillVessel(BaseModel):
     route_type: str | None  # primary route from route_types array
 
 
+class PrefillSeaTimeEntry(BaseModel):
+    """A logged sea-time block, mapped to VesselEntry's shape so the
+    UI can drop it directly into the letter form."""
+    id: str
+    vessel_id: str | None
+    vessel_name: str
+    official_number: str | None
+    gross_tonnage: float | None
+    vessel_type: str | None
+    route_type: str | None
+    horsepower: str | None
+    propulsion: str | None
+    capacity_served: str
+    from_date: str
+    to_date: str
+    days_on_board: int
+
+
 class PrefillResponse(BaseModel):
     applicant_full_name: str
     applicant_mmc_number: str | None
     suggested_role: str | None  # from users.role for capacity hint
     vessels: list[PrefillVessel]
+    # D6.62 — logged sea-time blocks pulled in for one-tap inclusion.
+    sea_time_entries: list[PrefillSeaTimeEntry] = []
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────
@@ -170,11 +190,45 @@ async def prefill_sea_service_letter(
             route_type=_primary_route(list(v["route_types"] or [])),
         ))
 
+    # D6.62 — pull logged sea-time blocks. Most-recent first so the UI's
+    # natural order is sensible. The form can include all, some, or none
+    # — we hand them over and let the user decide.
+    sea_time_rows = await pool.fetch(
+        """
+        SELECT id, vessel_id, vessel_name, official_number, vessel_type,
+               gross_tonnage, horsepower, propulsion, route_type,
+               capacity_served, from_date, to_date, days_on_board
+        FROM sea_time_entries
+        WHERE user_id = $1
+        ORDER BY from_date DESC, created_at DESC
+        """,
+        user_id,
+    )
+    sea_time_entries = [
+        PrefillSeaTimeEntry(
+            id=str(r["id"]),
+            vessel_id=str(r["vessel_id"]) if r["vessel_id"] else None,
+            vessel_name=r["vessel_name"],
+            official_number=r["official_number"],
+            gross_tonnage=float(r["gross_tonnage"]) if r["gross_tonnage"] is not None else None,
+            vessel_type=r["vessel_type"],
+            route_type=r["route_type"],
+            horsepower=r["horsepower"],
+            propulsion=r["propulsion"],
+            capacity_served=r["capacity_served"],
+            from_date=r["from_date"].isoformat(),
+            to_date=r["to_date"].isoformat(),
+            days_on_board=int(r["days_on_board"]),
+        )
+        for r in sea_time_rows
+    ]
+
     return PrefillResponse(
         applicant_full_name=full_name,
         applicant_mmc_number=mmc_number,
         suggested_role=_role_to_capacity(role),
         vessels=vessels,
+        sea_time_entries=sea_time_entries,
     )
 
 

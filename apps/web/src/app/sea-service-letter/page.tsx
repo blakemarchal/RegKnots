@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback } from 'react'
+import Link from 'next/link'
 import AuthGuard from '@/components/AuthGuard'
 import { AppHeader } from '@/components/AppHeader'
 import { apiRequest } from '@/lib/api'
@@ -17,11 +18,28 @@ interface PrefillVessel {
   route_type: string | null
 }
 
+interface PrefillSeaTimeEntry {
+  id: string
+  vessel_id: string | null
+  vessel_name: string
+  official_number: string | null
+  gross_tonnage: number | null
+  vessel_type: string | null
+  route_type: string | null
+  horsepower: string | null
+  propulsion: string | null
+  capacity_served: string
+  from_date: string
+  to_date: string
+  days_on_board: number
+}
+
 interface PrefillResponse {
   applicant_full_name: string
   applicant_mmc_number: string | null
   suggested_role: string | null
   vessels: PrefillVessel[]
+  sea_time_entries?: PrefillSeaTimeEntry[]
 }
 
 interface VesselEntry {
@@ -183,6 +201,40 @@ function SeaServiceLetterContent() {
       gross_tonnage: v.gross_tonnage ? String(v.gross_tonnage) : '',
       vessel_type: v.vessel_type ?? '',
       route_type: v.route_type ?? '',
+    })
+  }
+
+  // D6.62 — drop a logged sea-time entry directly into the form. Adds
+  // it as a new VesselEntry row (replacing the row if it's the empty
+  // bootstrap; appending otherwise). Already-included entries are
+  // tracked so the UI can hide them from the picker.
+  const includedSeaTimeIds = new Set(
+    entries.map((e) => (e as VesselEntry & { _sourceSeaTimeId?: string })._sourceSeaTimeId).filter(Boolean) as string[],
+  )
+  function includeSeaTimeEntry(s: PrefillSeaTimeEntry) {
+    const newRow: VesselEntry = {
+      vessel_id: s.vessel_id,
+      vessel_name: s.vessel_name,
+      official_number: s.official_number ?? '',
+      gross_tonnage: s.gross_tonnage !== null ? String(s.gross_tonnage) : '',
+      vessel_type: s.vessel_type ?? '',
+      route_type: s.route_type ?? '',
+      horsepower: s.horsepower ?? '',
+      propulsion: s.propulsion ?? '',
+      capacity_served: s.capacity_served,
+      from_date: s.from_date,
+      to_date: s.to_date,
+      days_on_board: String(s.days_on_board),
+    }
+    // Tag with source id so we don't double-include and can hide from picker
+    ;(newRow as VesselEntry & { _sourceSeaTimeId?: string })._sourceSeaTimeId = s.id
+
+    setEntries((prev) => {
+      // If only the empty bootstrap row exists, replace it. Otherwise append.
+      if (prev.length === 1 && !prev[0].vessel_name && !prev[0].from_date) {
+        return [newRow]
+      }
+      return [...prev, newRow]
     })
   }
 
@@ -388,6 +440,62 @@ function SeaServiceLetterContent() {
                   <input type="text" value={companyOfficialTitle} onChange={(e) => setCompanyOfficialTitle(e.target.value)} placeholder="e.g. Operations Manager, HR Director" className={inputClass} />
                 </Field>
               </section>
+
+              {/* D6.62 — Sea-time log picker. Lets the user drop logged
+                  blocks directly into the form instead of retyping. */}
+              {prefill?.sea_time_entries && prefill.sea_time_entries.length > 0 && (
+                <section className="bg-[#0d1225] border border-[#2dd4bf]/20 rounded-xl p-4 flex flex-col gap-3">
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <p className="font-mono text-xs text-[#2dd4bf] uppercase tracking-wider">
+                      Pull from your sea-time log
+                    </p>
+                    <Link
+                      href="/sea-time"
+                      className="font-mono text-[10px] text-[#2dd4bf]/80 hover:underline"
+                    >
+                      Open log →
+                    </Link>
+                  </div>
+                  <p className="font-mono text-[11px] text-[#6b7594]">
+                    Tap an entry to drop it into the form below.
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {prefill.sea_time_entries
+                      .filter((s) => !includedSeaTimeIds.has(s.id))
+                      .slice(0, 12)
+                      .map((s) => (
+                        <button
+                          key={s.id}
+                          type="button"
+                          onClick={() => includeSeaTimeEntry(s)}
+                          className="text-left bg-[#0a0e1a] hover:bg-[#0a0e1a]/70
+                            border border-white/8 hover:border-[#2dd4bf]/40
+                            rounded-lg px-3 py-2 transition-colors"
+                        >
+                          <div className="font-mono text-xs text-[#f0ece4]">
+                            {s.vessel_name}{' '}
+                            <span className="text-[#2dd4bf]">·</span>{' '}
+                            <span className="text-[#f0ece4]/70">{s.capacity_served}</span>
+                          </div>
+                          <div className="font-mono text-[10px] text-[#6b7594] mt-0.5">
+                            {new Date(s.from_date + 'T00:00:00Z').toLocaleDateString(undefined, {
+                              year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC',
+                            })}{' '}
+                            → {new Date(s.to_date + 'T00:00:00Z').toLocaleDateString(undefined, {
+                              year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC',
+                            })}{' '}
+                            · {s.days_on_board}d
+                          </div>
+                        </button>
+                      ))}
+                    {prefill.sea_time_entries.filter((s) => !includedSeaTimeIds.has(s.id)).length === 0 && (
+                      <p className="font-mono text-[11px] text-[#6b7594] italic">
+                        All logged entries already added.
+                      </p>
+                    )}
+                  </div>
+                </section>
+              )}
 
               {/* Vessel entries */}
               {entries.map((entry, idx) => (
