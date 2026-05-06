@@ -13,6 +13,7 @@
 // the (~$0.03 Sonnet) analysis when the user clicks the button.
 
 import { useState } from 'react'
+import { AILoadingState } from './AILoadingState'
 import { apiRequest } from '@/lib/api'
 
 interface RenewalRequirement {
@@ -92,9 +93,15 @@ export function RenewalCoPilotCard({ credentialId }: { credentialId: string }) {
   if (loading) {
     return (
       <div className="mt-3 pt-3 border-t border-white/8">
-        <div className="font-mono text-xs text-[#6b7594] py-2 text-center">
-          Reading your record + the controlling CFR…
-        </div>
+        <AILoadingState
+          variant="inline"
+          messages={[
+            'Reading your stored record…',
+            'Retrieving controlling CFR sections…',
+            'Cross-checking required supporting documents…',
+            'Synthesizing your readiness verdict…',
+          ]}
+        />
       </div>
     )
   }

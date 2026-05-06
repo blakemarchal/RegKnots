@@ -15,6 +15,7 @@
 // next step" against the actual CFR ladder.
 
 import { useState } from 'react'
+import { AILoadingState } from './AILoadingState'
 import { apiRequest } from '@/lib/api'
 
 interface CareerUpgrade {
@@ -44,30 +45,39 @@ function UpgradeCard({ u, accent }: { u: CareerUpgrade; accent: 'cap' | 'reach' 
   const accentText =
     accent === 'cap' ? 'text-emerald-300' : 'text-amber-300'
   return (
-    <div className={`rounded-lg border p-3 flex flex-col gap-2 ${accentClass}`}>
-      <div className="flex items-start justify-between gap-2">
-        <p className={`font-mono text-sm font-bold ${accentText}`}>{u.title}</p>
+    // overflow-hidden + min-w-0 prevents long titles / citations from
+    // bursting their grid cell on narrow viewports (Blake's screenshot
+    // showed text overlapping the timeline badge on mobile).
+    <div className={`rounded-lg border p-4 flex flex-col gap-2 overflow-hidden min-w-0 ${accentClass}`}>
+      {/* Stack title above timeline so a long title doesn't fight the
+          timeline badge for horizontal room. */}
+      <div className="flex flex-col gap-1 min-w-0">
+        <p className={`font-mono text-sm font-bold leading-snug break-words ${accentText}`}>
+          {u.title}
+        </p>
         {u.estimated_timeline && (
-          <span className="font-mono text-[10px] text-[#6b7594] flex-shrink-0">
+          <span className="font-mono text-[10px] text-[#6b7594] uppercase tracking-wider">
             {u.estimated_timeline}
           </span>
         )}
       </div>
       {u.summary && (
-        <p className="font-mono text-xs text-[#f0ece4]/85 leading-relaxed">{u.summary}</p>
+        <p className="font-mono text-xs text-[#f0ece4]/85 leading-relaxed break-words">
+          {u.summary}
+        </p>
       )}
       {u.gap && (
-        <p className="font-mono text-xs text-amber-300">
+        <p className="font-mono text-xs text-amber-300 break-words">
           Gap: <span className="text-[#f0ece4]">{u.gap}</span>
         </p>
       )}
       {u.citations.length > 0 && (
-        <div className="flex flex-wrap gap-1">
+        <div className="flex flex-wrap gap-1 mt-1">
           {u.citations.map((c, i) => (
             <span
               key={i}
               className="font-mono text-[9px] px-1.5 py-0.5 rounded
-                bg-white/5 border border-white/10 text-[#2dd4bf]"
+                bg-white/5 border border-white/10 text-[#2dd4bf] whitespace-nowrap"
             >
               {c}
             </span>
@@ -136,9 +146,16 @@ export function CareerPathWidget() {
       </div>
 
       {loading && (
-        <div className="font-mono text-xs text-[#6b7594] py-3 text-center">
-          Reading your record + the CFR officer-endorsement ladder…
-        </div>
+        <AILoadingState
+          variant="card"
+          messages={[
+            'Reading your credentials and sea-time totals…',
+            'Walking the 46 CFR 11 officer-endorsement ladder…',
+            'Quantifying gaps to your next upgrade…',
+            'Identifying credentials you’re cap-eligible for now…',
+            'Synthesizing your career path…',
+          ]}
+        />
       )}
 
       {error && (
@@ -179,7 +196,7 @@ export function CareerPathWidget() {
               <p className="font-mono text-[10px] text-emerald-300 uppercase tracking-wider mb-2">
                 Cap-eligible right now
               </p>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
                 {analysis.cap_eligible_now.map((u, i) => (
                   <UpgradeCard key={i} u={u} accent="cap" />
                 ))}
@@ -193,7 +210,7 @@ export function CareerPathWidget() {
               <p className="font-mono text-[10px] text-amber-300 uppercase tracking-wider mb-2">
                 Within reach
               </p>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
                 {analysis.within_reach.map((u, i) => (
                   <UpgradeCard key={i} u={u} accent="reach" />
                 ))}

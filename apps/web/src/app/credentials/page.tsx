@@ -258,7 +258,11 @@ function CredentialsContent() {
       <AppHeader title="Credentials" />
 
       <main className="flex-1 overflow-y-auto px-4 py-6">
-        <div className="max-w-sm mx-auto flex flex-col gap-5">
+        {/* D6.63 hotfix — page was max-w-sm (384px), too cramped for
+            the wider Co-Pilot + Career Path widgets. Pump up to 3xl
+            on desktop so the widgets have horizontal room to breathe;
+            mobile stays at full width. */}
+        <div className="max-w-sm md:max-w-3xl mx-auto flex flex-col gap-5">
 
           {/* Add buttons */}
           {!showForm && (

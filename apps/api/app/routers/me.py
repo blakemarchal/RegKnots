@@ -302,7 +302,11 @@ async def get_renewal_readiness(
     try:
         response = await anthropic_client.messages.create(
             model=_REASONING_MODEL,
-            max_tokens=1500,
+            # 2500 (was 1500). 1500 truncated mid-narrative on a thin
+            # record (heavy not_ready prose + multi-action remediation
+            # easily exceeds the cap). 2500 covers the worst-case
+            # output without meaningful cost impact.
+            max_tokens=2500,
             system=_RENEWAL_SYSTEM_PROMPT,
             messages=[{"role": "user", "content": user_payload}],
         )
@@ -320,7 +324,10 @@ async def get_renewal_readiness(
             detail="Readiness analysis temporarily unavailable. Try again.",
         )
 
-    parsed = _parse_json(text)
+    # Tolerant parse: strict first, then salvage from a truncated
+    # response (max_tokens hit). Truncated JSON still has the prefix
+    # fields populated; we surface what we can rather than 503.
+    parsed = _parse_json(text) or _salvage_truncated_json(text)
     if parsed is None:
         logger.warning("renewal-readiness: no JSON in response: %s", text[:200])
         raise HTTPException(
@@ -480,7 +487,9 @@ async def get_career_progression(
     try:
         response = await anthropic_client.messages.create(
             model=_REASONING_MODEL,
-            max_tokens=2000,
+            # 3000 (was 2000) — career narratives + 6+ upgrade cards
+            # with citations + gaps occasionally tipped over 2000.
+            max_tokens=3000,
             system=_CAREER_SYSTEM_PROMPT,
             messages=[{"role": "user", "content": user_payload}],
         )
@@ -498,7 +507,7 @@ async def get_career_progression(
             detail="Career analysis temporarily unavailable. Try again.",
         )
 
-    parsed = _parse_json(text)
+    parsed = _parse_json(text) or _salvage_truncated_json(text)
     if parsed is None:
         logger.warning("career-progression: no JSON in response: %s", text[:200])
         raise HTTPException(
@@ -696,4 +705,80 @@ def _parse_json(text: str) -> Optional[dict]:
             return json.loads(m.group(0))
         except json.JSONDecodeError:
             return None
+    return None
+
+
+def _salvage_truncated_json(text: str) -> Optional[dict]:
+    """Last-ditch parse when the model hit max_tokens mid-output.
+
+    The narrative + leading fields are usually fully written before
+    truncation; only the tail (citations, suggested_actions, etc.)
+    gets clipped. Strategy: walk back from the end pruning the last
+    incomplete element until json.loads succeeds, returning whatever
+    structured prefix we can recover.
+
+    Returns None if even the front of the response is unparseable
+    (e.g. the model never produced valid JSON to begin with).
+    """
+    if not text:
+        return None
+    cleaned = text.strip()
+    if cleaned.startswith("```"):
+        cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
+    # Find the opening brace
+    start = cleaned.find("{")
+    if start < 0:
+        return None
+    body = cleaned[start:]
+
+    # Try truncating at progressively earlier closing punctuation +
+    # closing all open structures. We walk the string forward keeping
+    # a running brace/bracket/string-literal depth; at each "safe"
+    # boundary (after a complete value finishing with a comma) we
+    # snapshot a candidate. Then try to close + parse the latest
+    # snapshot first.
+    depth_stack: list[str] = []
+    in_string = False
+    escape = False
+    safe_points: list[int] = []  # positions after which we could close
+    for i, ch in enumerate(body):
+        if in_string:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_string = False
+            continue
+        if ch == '"':
+            in_string = True
+            continue
+        if ch in "{[":
+            depth_stack.append(ch)
+            continue
+        if ch in "}]":
+            if depth_stack:
+                depth_stack.pop()
+            continue
+        # After a comma at depth 1 (inside top-level object), the
+        # response so far is recoverable: we can drop everything from
+        # here forward and add closing braces.
+        if ch == "," and len(depth_stack) == 1:
+            safe_points.append(i)
+
+    # Try the latest safe point first (preserves the most data).
+    for cut in reversed(safe_points):
+        candidate = body[:cut]
+        # Close every still-open container.
+        # depth_stack reconstruction is out of order — simpler to count
+        # opens/closes in candidate and append matching closers.
+        opens_obj = candidate.count("{") - candidate.count("}")
+        opens_arr = candidate.count("[") - candidate.count("]")
+        if opens_obj < 0 or opens_arr < 0:
+            continue
+        closer = "]" * opens_arr + "}" * opens_obj
+        try:
+            return json.loads(candidate + closer)
+        except json.JSONDecodeError:
+            continue
     return None
