@@ -1,0 +1,21 @@
+[Unit]
+Description=Weekly RegKnots NMC corpus refresh
+Documentation=https://github.com/blakemarchal/RegKnots
+Requires=regknots-nmc-refresh.service
+
+[Timer]
+# Every Monday at 06:00 UTC (~1:00 AM US Central). NMC publishes newsletters
+# on weekday mornings; running early Monday catches anything posted over
+# the weekend or late Friday before the work week starts.
+OnCalendar=Mon *-*-* 06:00:00
+# If the system was off at the scheduled time (unlikely on a VPS but
+# bulletproof), run as soon as it boots. Keeps us from missing a refresh
+# during emergency reboots.
+Persistent=true
+# Random delay so a fleet of VPSes (if we ever have them) don't all hit
+# the NMC server at the exact same second. 0-300s spread.
+RandomizedDelaySec=300
+Unit=regknots-nmc-refresh.service
+
+[Install]
+WantedBy=timers.target

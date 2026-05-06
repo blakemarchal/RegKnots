@@ -1,0 +1,21 @@
+[Unit]
+Description=RegKnots NMC corpus refresh — discover + download new NMC PDFs and re-ingest
+Documentation=https://github.com/blakemarchal/RegKnots
+After=network-online.target regknots-postgres.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/RegKnots
+EnvironmentFile=/opt/RegKnots/.env
+Environment="PATH=/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+# Idempotent — safe to re-run; no-op when no new PDFs found.
+ExecStart=/root/.local/bin/uv run --project /opt/RegKnots/apps/api python /opt/RegKnots/scripts/refresh_nmc_corpus.py
+StandardOutput=journal
+StandardError=journal
+# Non-zero exit codes from the script signal real failure (network down,
+# ingest crash). 0 = clean (with or without changes).
+TimeoutStartSec=600
+
+[Install]
+WantedBy=multi-user.target
