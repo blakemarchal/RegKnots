@@ -318,10 +318,10 @@ function SeaServiceLetterContent() {
       try {
         tz = Intl.DateTimeFormat().resolvedOptions().timeZone || ''
       } catch { /* fallthrough to UTC */ }
-      const url = tz
+      const fetchUrl = tz
         ? `${API_URL}/credentials/sea-service-letter?tz=${encodeURIComponent(tz)}`
         : `${API_URL}/credentials/sea-service-letter`
-      const resp = await fetch(url, {
+      const resp = await fetch(fetchUrl, {
         method: 'POST',
         credentials: 'include',
         headers: {

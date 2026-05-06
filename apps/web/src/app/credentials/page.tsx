@@ -96,10 +96,10 @@ function CredentialsContent() {
       try {
         tz = Intl.DateTimeFormat().resolvedOptions().timeZone || ''
       } catch { /* old browsers — fallthrough to UTC server-side */ }
-      const url = tz
+      const fetchUrl = tz
         ? `${API_URL}/credentials/package?tz=${encodeURIComponent(tz)}`
         : `${API_URL}/credentials/package`
-      const resp = await fetch(url, {
+      const resp = await fetch(fetchUrl, {
         method: 'GET',
         credentials: 'include',
         headers: token ? { Authorization: `Bearer ${token}` } : undefined,
