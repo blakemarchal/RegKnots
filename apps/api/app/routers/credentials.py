@@ -29,7 +29,17 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/credentials", tags=["credentials"])
 
-_VALID_TYPES = {"mmc", "stcw", "medical", "twic", "other"}
+# Sprint D6.67 — expanded type allow-list. Migration 0087 widened the
+# DB CHECK constraint to match. Adding more types here without bumping
+# the migration will cause CREATE/UPDATE inserts to fail at the DB.
+_VALID_TYPES = {
+    "mmc", "stcw", "medical", "twic",
+    "passport", "passport_card",
+    "gmdss", "dp",
+    "drug_test", "vaccine",
+    "sea_service", "course_cert",
+    "other",
+}
 
 
 class CredentialCreate(BaseModel):
@@ -514,20 +524,109 @@ async def delete_credential(
 # ── Photo extraction ──────────────────────────────────────────────────────
 
 _CREDENTIAL_EXTRACTION_PROMPT = """\
-You are analyzing a photo of a U.S. maritime personal credential document.
-This could be a Merchant Mariner Credential (MMC), STCW endorsement,
-medical certificate, TWIC card, or other mariner credential.
+You are analyzing a photo of a personal credential document — typically
+a maritime credential, but the user may also scan adjacent travel /
+identification / training documents we track alongside.
 
-Extract the following fields from the image:
-- credential_type: one of "mmc", "stcw", "medical", "twic", or "other"
-- title: the credential title or endorsement name (e.g., "Master 1600 GRT", "STCW II/1", "Medical Certificate")
-- credential_number: the credential/document number if visible
-- issuing_authority: the issuing authority (e.g., "USCG NMC", "USCG", "TSA")
-- issue_date: date issued in YYYY-MM-DD format if visible
-- expiry_date: expiration date in YYYY-MM-DD format if visible
+Classify the document into ONE of these credential_type values, using
+the visual + textual cues listed for each. Pick the most specific
+match; fall back to "other" only if nothing fits.
 
-Return ONLY a JSON object with these fields. Use null for fields you cannot identify.
-Do not include any explanation or markdown — just the JSON."""
+  "mmc"           — U.S. Merchant Mariner Credential. USCG seal, the
+                    words "Merchant Mariner Credential" or "Merchant
+                    Mariner's Document", endorsement listings (Master,
+                    Mate, AB, etc.). Issuing authority is "USCG NMC"
+                    or "U.S. Coast Guard".
+
+  "stcw"          — STCW endorsement certificate. Header references
+                    "STCW" (Standards of Training, Certification, and
+                    Watchkeeping) plus a Roman-numeral regulation
+                    (II/1, III/2, A-VI/1, etc.) OR a named training:
+                    "Basic Safety Training", "Advanced Firefighting",
+                    "Radar Observer", "GMDSS Operator".
+
+  "medical"       — USCG Medical Certificate (Form CG-719K). Header
+                    "Merchant Mariner Medical Certificate", USCG NMC
+                    Medical Evaluation Branch.
+
+  "twic"          — Transportation Worker Identification Credential.
+                    TSA seal, "TWIC" text, holographic security card
+                    layout, gold-embossed strip.
+
+  "passport"      — U.S. Passport (book). U.S. Department of State
+                    seal, "PASSPORT" header, photo + biographical
+                    page, machine-readable zone (MRZ) at bottom.
+
+  "passport_card" — U.S. Passport Card (wallet-sized). Says "PASSPORT
+                    CARD" explicitly, smaller than a passport book,
+                    valid for land/sea entry from Canada/Mexico/
+                    Bermuda/Caribbean only. Has its own MRZ.
+
+  "gmdss"         — GMDSS Radio Operator certificate. Either FCC
+                    Restricted/General Radiotelephone Operator
+                    Permit, or USCG GMDSS endorsement. References
+                    "Global Maritime Distress and Safety System".
+
+  "dp"            — Dynamic Positioning operator certificate. Issued
+                    by Nautical Institute or DNV. Says "Dynamic
+                    Positioning" + level (Limited / Unlimited).
+
+  "drug_test"     — DOT 5-panel drug test letter. Letterhead from a
+                    medical clinic / collection site, MRO (Medical
+                    Review Officer) signature, "DRUG TEST" or "Drug
+                    Screen", typically a one-page negative-result
+                    letter.
+
+  "vaccine"       — Vaccination record. Yellow Fever WHO yellow card,
+                    CDC COVID-19 vaccination card, or similar
+                    immunization record. References specific
+                    vaccine + administration date.
+
+  "sea_service"   — Sea-service letter / discharge. Company letterhead
+                    addressed to USCG NMC, lists vessel + dates +
+                    capacity served. Signed by an authorized company
+                    official. NOT a card — a typed letter.
+
+  "course_cert"   — Generic training course completion certificate
+                    that ISN'T a named STCW endorsement. Typically a
+                    school/training-provider certificate (Maritime
+                    Professional Training, MITAGS, Calhoon MEBA, etc.)
+                    for non-STCW courses (firefighting refresher, OUPV
+                    prep, lifeboatman, etc.).
+
+  "other"         — Doesn't fit any of the above. Common fallback:
+                    union membership card, employment contract,
+                    company ID, etc.
+
+Now extract the following fields from the image:
+
+- credential_type: ONE value from the list above
+- title: the document's title or specific endorsement (e.g., "Master
+         1600 GRT Near-Coastal", "STCW II/1 Officer in Charge of
+         Navigational Watch on Vessels of 500 GT or More", "United
+         States Passport", "DOT 5-Panel Drug Test Letter")
+- credential_number: the document number if visible. For passports,
+                     use the 9-character passport number. For TWIC, the
+                     T-prefixed number. For MMC, the format is
+                     typically "MMC-YYYY-NNNNNN". Return null if not
+                     clearly visible.
+- issuing_authority: who issued it. Examples: "USCG National Maritime
+                     Center", "TSA", "U.S. Department of State",
+                     "Nautical Institute", "Maritime Professional
+                     Training", a clinic name for drug tests.
+- issue_date: date issued in YYYY-MM-DD format. Many documents show
+              this as "Issue Date" or "Date of Issue".
+- expiry_date: expiration date in YYYY-MM-DD format. For documents
+               without an explicit expiry (some sea-service letters,
+               drug-test letters), return null. For passports with
+               "Date of Expiration", that's the expiry.
+
+Return ONLY a JSON object with these six fields. Use null for fields
+you cannot identify. Do not include any explanation or markdown —
+just the JSON.
+
+If the document is clearly NOT a credential (e.g., a random photo,
+a vessel COI, a chart), return null for ALL fields."""
 
 _MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
 _ALLOWED_TYPES = {"image/jpeg", "image/png", "image/webp", "application/pdf"}

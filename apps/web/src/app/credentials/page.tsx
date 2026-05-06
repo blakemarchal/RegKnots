@@ -9,12 +9,24 @@ import { ComplianceChangelogCard } from '@/components/ComplianceChangelogCard'
 import { RenewalCoPilotCard } from '@/components/RenewalCoPilotCard'
 import { apiRequest, apiUpload } from '@/lib/api'
 
+// D6.67 — expanded type list. Order matters: most-common-first
+// keeps the dropdown sensible, with the "non-card" types at the
+// bottom and "Other" as the final escape hatch. Migration 0087 holds
+// the matching DB CHECK constraint.
 const CREDENTIAL_TYPES = [
-  { value: 'mmc', label: 'MMC' },
-  { value: 'stcw', label: 'STCW Endorsement' },
-  { value: 'medical', label: 'Medical Certificate' },
-  { value: 'twic', label: 'TWIC' },
-  { value: 'other', label: 'Other' },
+  { value: 'mmc',           label: 'MMC' },
+  { value: 'stcw',          label: 'STCW Endorsement' },
+  { value: 'medical',       label: 'Medical Certificate (CG-719K)' },
+  { value: 'twic',          label: 'TWIC' },
+  { value: 'passport',      label: 'Passport' },
+  { value: 'passport_card', label: 'Passport Card' },
+  { value: 'gmdss',         label: 'GMDSS Operator' },
+  { value: 'dp',            label: 'DP Certificate' },
+  { value: 'drug_test',     label: 'Drug Test Letter' },
+  { value: 'vaccine',       label: 'Vaccination Record' },
+  { value: 'sea_service',   label: 'Sea-Service Letter' },
+  { value: 'course_cert',   label: 'Course Certificate' },
+  { value: 'other',         label: 'Other' },
 ]
 
 const TYPE_LABELS: Record<string, string> = Object.fromEntries(
