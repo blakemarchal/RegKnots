@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { CompassRose } from '@/components/CompassRose'
 import { ContactModal } from '@/components/ContactModal'
 import { CorpusBadges } from '@/components/CorpusBadges'
+import { EmailComposeButton } from '@/components/EmailComposeButton'
 import { HallucinationCarousel } from '@/components/HallucinationCarousel'
 
 // ── Static citation chip (non-interactive, landing page only) ─────────────────
@@ -927,9 +928,12 @@ export default function LandingPage() {
               Contact us
             </button>
             {' '}or email{' '}
-            <a href="mailto:hello@regknots.com" className="text-[#2dd4bf] hover:underline">
-              hello@regknots.com
-            </a>
+            <EmailComposeButton
+              mode="address"
+              recipient="hello@regknots.com"
+              buttonClassName="text-[#2dd4bf] hover:underline"
+              buttonChildren="hello@regknots.com"
+            />
           </p>
           <p className="font-mono text-xs text-[#6b7594] text-center mt-2 text-balance break-words">
             Fleet operators: request a custom subdomain (

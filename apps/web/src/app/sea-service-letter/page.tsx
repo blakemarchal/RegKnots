@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from 'react'
 import Link from 'next/link'
 import AuthGuard from '@/components/AuthGuard'
 import { AppHeader } from '@/components/AppHeader'
+import { EmailComposeButton } from '@/components/EmailComposeButton'
 import { apiRequest } from '@/lib/api'
 import { useAuthStore } from '@/lib/auth'
 
@@ -311,7 +312,16 @@ function SeaServiceLetterContent() {
       const token = useAuthStore.getState().accessToken
       const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
-      const resp = await fetch(`${API_URL}/credentials/sea-service-letter`, {
+      // D6.62 hotfix — pass IANA tz so the letter's dateline matches
+      // the user's local wall clock instead of UTC midnight.
+      let tz = ''
+      try {
+        tz = Intl.DateTimeFormat().resolvedOptions().timeZone || ''
+      } catch { /* fallthrough to UTC */ }
+      const url = tz
+        ? `${API_URL}/credentials/sea-service-letter?tz=${encodeURIComponent(tz)}`
+        : `${API_URL}/credentials/sea-service-letter`
+      const resp = await fetch(url, {
         method: 'POST',
         credentials: 'include',
         headers: {
@@ -344,19 +354,6 @@ function SeaServiceLetterContent() {
     } finally {
       setGenerating(false)
     }
-  }
-
-  function emailToEmployer() {
-    const subject = encodeURIComponent('Sea Service Letter for Signature')
-    const body = encodeURIComponent(
-      `Hi${companyOfficialName ? ' ' + companyOfficialName.split(' ')[0] : ''},\n\n` +
-      `Please find attached a Sea Service Letter that I need signed for my USCG credential application` +
-      (targetEndorsement ? ` (${targetEndorsement})` : '') + `.\n\n` +
-      `The dates and vessel details are based on company records — please review for accuracy, ` +
-      `sign at the bottom, and return to me at your earliest convenience.\n\n` +
-      `Thank you,\n${applicantName}`
-    )
-    window.location.href = `mailto:?subject=${subject}&body=${body}`
   }
 
   const totalDays = entries.reduce((sum, e) => sum + (parseInt(e.days_on_board || '0', 10) || 0), 0)
@@ -673,16 +670,27 @@ function SeaServiceLetterContent() {
                   <p className="font-mono text-xs text-[#2dd4bf]">
                     PDF downloaded. Send it to your employer to sign and return.
                   </p>
-                  <button
-                    onClick={emailToEmployer}
-                    className="font-mono text-xs font-bold text-[#2dd4bf]
+                  {/* D6.62 hotfix — replaces brittle mailto: with a modal
+                      that copies / opens-in-webmail. mailto: is still
+                      offered as a fallback inside the modal. */}
+                  <EmailComposeButton
+                    mode="compose"
+                    subject="Sea Service Letter for Signature"
+                    body={
+                      `Hi${companyOfficialName ? ' ' + companyOfficialName.split(' ')[0] : ''},\n\n` +
+                      `Please find attached a Sea Service Letter that I need signed for my USCG credential application` +
+                      (targetEndorsement ? ` (${targetEndorsement})` : '') + `.\n\n` +
+                      `The dates and vessel details are based on company records — please review for accuracy, ` +
+                      `sign at the bottom, and return to me at your earliest convenience.\n\n` +
+                      `Thank you,\n${applicantName}`
+                    }
+                    buttonClassName="font-mono text-xs font-bold text-[#2dd4bf]
                       border border-[#2dd4bf]/40 hover:bg-[#2dd4bf]/10
                       rounded-lg py-2 transition-colors duration-150"
-                  >
-                    Open email to send to employer
-                  </button>
+                    buttonChildren="Email this letter to your employer"
+                  />
                   <p className="font-mono text-[10px] text-[#6b7594]">
-                    Don't forget to attach the downloaded PDF before sending.
+                    Don&apos;t forget to attach the downloaded PDF before sending.
                   </p>
                 </div>
               )}

@@ -130,6 +130,268 @@ async def list_credentials(
     return [_row_to_out(r) for r in rows]
 
 
+# ── D6.62 Sprint 2 — PDF Package export ───────────────────────────────────
+#
+# IMPORTANT: this route MUST be declared before /{credential_id} because
+# `/{credential_id}` is typed as UUID and "package" fails validation
+# with a 422 if it captures the path first. Route declaration order
+# wins in FastAPI on overlapping paths.
+
+@router.get("/package")
+async def export_credential_package(
+    user: Annotated[CurrentUser, Depends(get_current_user)],
+    tz: str | None = None,
+) -> StreamingResponse:
+    """Generate a single PDF bundling all of the user's credentials +
+    sea-time totals and entries.
+
+    The "share with employer / manning agency / port agent" file
+    competitors paywall as a Pro feature. We build it from data the
+    user already entered — no extra work, just the existing records
+    rendered into a clean handoff document.
+
+    `tz` is the IANA timezone the client is in (e.g. America/Chicago).
+    Used to compute "today" so the cover-page date matches what the
+    user sees on their wall clock. Falls back to UTC if absent or
+    unrecognized.
+    """
+    import io
+    from fpdf import FPDF
+
+    # Resolve "today" in the user's timezone, falling back to UTC.
+    try:
+        if tz:
+            from zoneinfo import ZoneInfo
+            today_dt = datetime.now(ZoneInfo(tz))
+            today = today_dt.date()
+            today_label = today.isoformat()
+            tz_label = tz
+        else:
+            today = date.today()
+            today_label = today.isoformat()
+            tz_label = "UTC"
+    except Exception:
+        today = date.today()
+        today_label = today.isoformat()
+        tz_label = "UTC"
+
+    pool = await get_pool()
+    user_uuid = _uuid.UUID(user.user_id)
+
+    # User basics
+    user_row = await pool.fetchrow(
+        "SELECT full_name, email FROM users WHERE id = $1", user_uuid,
+    )
+    full_name = (user_row["full_name"] if user_row else "") or "(unnamed mariner)"
+    email = (user_row["email"] if user_row else "") or ""
+
+    # Credentials
+    creds = await pool.fetch(
+        "SELECT credential_type, title, credential_number, issuing_authority, "
+        "issue_date, expiry_date, notes "
+        "FROM user_credentials WHERE user_id = $1 "
+        "ORDER BY credential_type, issue_date DESC NULLS LAST",
+        user_uuid,
+    )
+
+    # Sea-time totals + entries (sourced from the same place the
+    # logger UI reads). Computed inline because we don't want a circular
+    # import to sea_time router.
+    sea_time_rows = await pool.fetch(
+        "SELECT vessel_name, official_number, vessel_type, gross_tonnage, "
+        "horsepower, propulsion, route_type, capacity_served, "
+        "from_date, to_date, days_on_board, employer_name "
+        "FROM sea_time_entries WHERE user_id = $1 "
+        "ORDER BY from_date DESC",
+        user_uuid,
+    )
+    cutoff_3yr = today - timedelta(days=365 * 3)
+    cutoff_5yr = today - timedelta(days=365 * 5)
+    total_days = days_3yr = days_5yr = 0
+    by_route: dict[str, int] = {}
+    by_capacity: dict[str, int] = {}
+    for r in sea_time_rows:
+        d = int(r["days_on_board"])
+        total_days += d
+        rt = r["route_type"] or "Unspecified"
+        cap = r["capacity_served"] or "Unspecified"
+        by_route[rt] = by_route.get(rt, 0) + d
+        by_capacity[cap] = by_capacity.get(cap, 0) + d
+        for cutoff, key in ((cutoff_3yr, "3yr"), (cutoff_5yr, "5yr")):
+            o_start = max(r["from_date"], cutoff)
+            o_end = min(r["to_date"], today)
+            if o_end >= o_start:
+                ov = min((o_end - o_start).days + 1, d)
+                if key == "3yr":
+                    days_3yr += ov
+                else:
+                    days_5yr += ov
+
+    # ── Build the PDF ─────────────────────────────────────────────────────
+    pdf = FPDF(orientation="portrait", unit="mm", format="letter")
+    pdf.set_auto_page_break(auto=True, margin=20)
+    pdf.add_page()
+
+    # Cover header
+    pdf.set_font("Helvetica", "B", 18)
+    pdf.cell(0, 10, "Mariner Credential Package",
+             new_x="LMARGIN", new_y="NEXT", align="L")
+    pdf.set_font("Helvetica", "B", 14)
+    pdf.cell(0, 8, full_name, new_x="LMARGIN", new_y="NEXT", align="L")
+    pdf.set_font("Helvetica", "", 10)
+    if email:
+        pdf.cell(0, 5, email, new_x="LMARGIN", new_y="NEXT", align="L")
+    pdf.cell(
+        0, 5, f"Generated {today_label} ({tz_label}) via RegKnots",
+        new_x="LMARGIN", new_y="NEXT", align="L",
+    )
+    pdf.ln(3)
+    pdf.set_draw_color(140, 140, 140)
+    pdf.line(20, pdf.get_y(), 195, pdf.get_y())
+    pdf.ln(5)
+
+    # ── Credentials section ───────────────────────────────────────────────
+    pdf.set_font("Helvetica", "B", 12)
+    pdf.cell(0, 7, "Credentials", new_x="LMARGIN", new_y="NEXT", align="L")
+    pdf.ln(1)
+
+    if not creds:
+        pdf.set_font("Helvetica", "I", 10)
+        pdf.cell(0, 6, "  (no credentials on file)",
+                 new_x="LMARGIN", new_y="NEXT", align="L")
+    else:
+        # Header row
+        pdf.set_font("Helvetica", "B", 9)
+        pdf.set_fill_color(230, 230, 230)
+        pdf.cell(35, 6, "Type", border=0, fill=True, align="L")
+        pdf.cell(60, 6, "Title", border=0, fill=True, align="L")
+        pdf.cell(35, 6, "Number", border=0, fill=True, align="L")
+        pdf.cell(25, 6, "Issued", border=0, fill=True, align="L")
+        pdf.cell(20, 6, "Expires", border=0, fill=True, align="L",
+                 new_x="LMARGIN", new_y="NEXT")
+
+        pdf.set_font("Helvetica", "", 9)
+        for c in creds:
+            type_label = (c["credential_type"] or "").upper()
+            title = (c["title"] or "")[:40]
+            number = (c["credential_number"] or "—")[:18]
+            issued = c["issue_date"].isoformat() if c["issue_date"] else "—"
+            expires = c["expiry_date"].isoformat() if c["expiry_date"] else "—"
+            pdf.cell(35, 5, type_label, border=0, align="L")
+            pdf.cell(60, 5, title, border=0, align="L")
+            pdf.cell(35, 5, number, border=0, align="L")
+            pdf.cell(25, 5, issued, border=0, align="L")
+            pdf.cell(20, 5, expires, border=0, align="L",
+                     new_x="LMARGIN", new_y="NEXT")
+
+    pdf.ln(5)
+
+    # ── Sea-time summary ──────────────────────────────────────────────────
+    pdf.set_font("Helvetica", "B", 12)
+    pdf.cell(0, 7, "Sea-time Summary", new_x="LMARGIN", new_y="NEXT", align="L")
+    pdf.ln(1)
+    pdf.set_font("Helvetica", "", 10)
+    pdf.cell(0, 5, f"Total days on board: {total_days}",
+             new_x="LMARGIN", new_y="NEXT", align="L")
+    pdf.cell(0, 5, f"Last 3 years: {days_3yr} days",
+             new_x="LMARGIN", new_y="NEXT", align="L")
+    pdf.cell(0, 5, f"Last 5 years: {days_5yr} days",
+             new_x="LMARGIN", new_y="NEXT", align="L")
+    if by_route:
+        pdf.ln(1)
+        pdf.cell(
+            0, 5,
+            "By route: " + ", ".join(
+                f"{k}: {v}d" for k, v in sorted(by_route.items(), key=lambda x: -x[1])
+            ),
+            new_x="LMARGIN", new_y="NEXT", align="L",
+        )
+    if by_capacity:
+        pdf.cell(
+            0, 5,
+            "By capacity: " + ", ".join(
+                f"{k}: {v}d" for k, v in sorted(by_capacity.items(), key=lambda x: -x[1])
+            ),
+            new_x="LMARGIN", new_y="NEXT", align="L",
+        )
+    pdf.ln(5)
+
+    # ── Sea-time entries (full log) ───────────────────────────────────────
+    pdf.set_font("Helvetica", "B", 12)
+    pdf.cell(0, 7, "Sea-time Log", new_x="LMARGIN", new_y="NEXT", align="L")
+    pdf.ln(1)
+
+    if not sea_time_rows:
+        pdf.set_font("Helvetica", "I", 10)
+        pdf.cell(0, 6, "  (no entries logged)",
+                 new_x="LMARGIN", new_y="NEXT", align="L")
+    else:
+        pdf.set_font("Helvetica", "B", 9)
+        pdf.set_fill_color(230, 230, 230)
+        pdf.cell(45, 6, "Vessel", border=0, fill=True, align="L")
+        pdf.cell(28, 6, "Capacity", border=0, fill=True, align="L")
+        pdf.cell(22, 6, "Route", border=0, fill=True, align="L")
+        pdf.cell(45, 6, "Dates", border=0, fill=True, align="L")
+        pdf.cell(15, 6, "Days", border=0, fill=True, align="R")
+        pdf.cell(20, 6, "GT/HP", border=0, fill=True, align="L",
+                 new_x="LMARGIN", new_y="NEXT")
+        pdf.set_font("Helvetica", "", 9)
+        for r in sea_time_rows:
+            vessel = (r["vessel_name"] or "")[:28]
+            cap = (r["capacity_served"] or "")[:18]
+            route = (r["route_type"] or "—")[:15]
+            dates = f"{r['from_date'].isoformat()} → {r['to_date'].isoformat()}"
+            days = str(int(r["days_on_board"]))
+            gt = r["gross_tonnage"]
+            hp = r["horsepower"]
+            gt_hp = ""
+            if gt is not None:
+                gt_hp = f"{gt} GT"
+            elif hp:
+                gt_hp = f"{hp} HP"
+            pdf.cell(45, 5, vessel, border=0, align="L")
+            pdf.cell(28, 5, cap, border=0, align="L")
+            pdf.cell(22, 5, route, border=0, align="L")
+            pdf.cell(45, 5, dates, border=0, align="L")
+            pdf.cell(15, 5, days, border=0, align="R")
+            pdf.cell(20, 5, gt_hp[:14], border=0, align="L",
+                     new_x="LMARGIN", new_y="NEXT")
+
+    # Footer disclaimer
+    pdf.ln(8)
+    pdf.set_font("Helvetica", "I", 8)
+    pdf.set_text_color(110, 110, 110)
+    pdf.multi_cell(
+        0, 4,
+        "This document is a self-reported summary generated by RegKnots from the "
+        "mariner's stored credentials and sea-time log. It is not an official "
+        "USCG document. Original credentials and signed sea-service letters "
+        "remain the authoritative source.",
+    )
+
+    # ── Stream out ────────────────────────────────────────────────────────
+    pdf_bytes = pdf.output()
+    if isinstance(pdf_bytes, str):
+        pdf_bytes = pdf_bytes.encode("latin-1")
+    elif isinstance(pdf_bytes, bytearray):
+        pdf_bytes = bytes(pdf_bytes)
+
+    safe_name = (full_name or "mariner").replace(" ", "_").replace("/", "-")
+    filename = f"{safe_name}_credential_package_{today_label}.pdf"
+
+    logger.info(
+        "credential package generated: user=%s creds=%d sea_time_entries=%d "
+        "total_days=%d tz=%s",
+        user.email, len(creds), len(sea_time_rows), total_days, tz_label,
+    )
+
+    return StreamingResponse(
+        io.BytesIO(pdf_bytes),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 @router.get("/{credential_id}", response_model=CredentialOut)
 async def get_credential(
     credential_id: _uuid.UUID,
@@ -307,238 +569,3 @@ async def extract_credential_from_photo(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Could not extract data from this document. Try a clearer photo.",
         )
-
-
-# ── D6.62 Sprint 2 — PDF Package export ───────────────────────────────────
-
-
-@router.get("/package")
-async def export_credential_package(
-    user: Annotated[CurrentUser, Depends(get_current_user)],
-) -> StreamingResponse:
-    """Generate a single PDF bundling all of the user's credentials +
-    sea-time totals and entries.
-
-    The "share with employer / manning agency / port agent" file
-    competitors paywall as a Pro feature. We build it from data the
-    user already entered — no extra work, just the existing records
-    rendered into a clean handoff document.
-    """
-    import io
-    from fpdf import FPDF
-
-    pool = await get_pool()
-    user_uuid = _uuid.UUID(user.user_id)
-
-    # User basics
-    user_row = await pool.fetchrow(
-        "SELECT full_name, email FROM users WHERE id = $1", user_uuid,
-    )
-    full_name = (user_row["full_name"] if user_row else "") or "(unnamed mariner)"
-    email = (user_row["email"] if user_row else "") or ""
-
-    # Credentials
-    creds = await pool.fetch(
-        "SELECT credential_type, title, credential_number, issuing_authority, "
-        "issue_date, expiry_date, notes "
-        "FROM user_credentials WHERE user_id = $1 "
-        "ORDER BY credential_type, issue_date DESC NULLS LAST",
-        user_uuid,
-    )
-
-    # Sea-time totals + entries (sourced from the same place the
-    # logger UI reads). Computed inline because we don't want a circular
-    # import to sea_time router.
-    sea_time_rows = await pool.fetch(
-        "SELECT vessel_name, official_number, vessel_type, gross_tonnage, "
-        "horsepower, propulsion, route_type, capacity_served, "
-        "from_date, to_date, days_on_board, employer_name "
-        "FROM sea_time_entries WHERE user_id = $1 "
-        "ORDER BY from_date DESC",
-        user_uuid,
-    )
-    today = date.today()
-    cutoff_3yr = today - timedelta(days=365 * 3)
-    cutoff_5yr = today - timedelta(days=365 * 5)
-    total_days = days_3yr = days_5yr = 0
-    by_route: dict[str, int] = {}
-    by_capacity: dict[str, int] = {}
-    for r in sea_time_rows:
-        d = int(r["days_on_board"])
-        total_days += d
-        rt = r["route_type"] or "Unspecified"
-        cap = r["capacity_served"] or "Unspecified"
-        by_route[rt] = by_route.get(rt, 0) + d
-        by_capacity[cap] = by_capacity.get(cap, 0) + d
-        for cutoff, key in ((cutoff_3yr, "3yr"), (cutoff_5yr, "5yr")):
-            o_start = max(r["from_date"], cutoff)
-            o_end = min(r["to_date"], today)
-            if o_end >= o_start:
-                ov = min((o_end - o_start).days + 1, d)
-                if key == "3yr":
-                    days_3yr += ov
-                else:
-                    days_5yr += ov
-
-    # ── Build the PDF ─────────────────────────────────────────────────────
-    pdf = FPDF(orientation="portrait", unit="mm", format="letter")
-    pdf.set_auto_page_break(auto=True, margin=20)
-    pdf.add_page()
-
-    # Cover header
-    pdf.set_font("Helvetica", "B", 18)
-    pdf.cell(0, 10, "Mariner Credential Package",
-             new_x="LMARGIN", new_y="NEXT", align="L")
-    pdf.set_font("Helvetica", "B", 14)
-    pdf.cell(0, 8, full_name, new_x="LMARGIN", new_y="NEXT", align="L")
-    pdf.set_font("Helvetica", "", 10)
-    if email:
-        pdf.cell(0, 5, email, new_x="LMARGIN", new_y="NEXT", align="L")
-    pdf.cell(
-        0, 5, f"Generated {today.isoformat()} via RegKnots",
-        new_x="LMARGIN", new_y="NEXT", align="L",
-    )
-    pdf.ln(3)
-    pdf.set_draw_color(140, 140, 140)
-    pdf.line(20, pdf.get_y(), 195, pdf.get_y())
-    pdf.ln(5)
-
-    # ── Credentials section ───────────────────────────────────────────────
-    pdf.set_font("Helvetica", "B", 12)
-    pdf.cell(0, 7, "Credentials", new_x="LMARGIN", new_y="NEXT", align="L")
-    pdf.ln(1)
-
-    if not creds:
-        pdf.set_font("Helvetica", "I", 10)
-        pdf.cell(0, 6, "  (no credentials on file)",
-                 new_x="LMARGIN", new_y="NEXT", align="L")
-    else:
-        # Header row
-        pdf.set_font("Helvetica", "B", 9)
-        pdf.set_fill_color(230, 230, 230)
-        pdf.cell(35, 6, "Type", border=0, fill=True, align="L")
-        pdf.cell(60, 6, "Title", border=0, fill=True, align="L")
-        pdf.cell(35, 6, "Number", border=0, fill=True, align="L")
-        pdf.cell(25, 6, "Issued", border=0, fill=True, align="L")
-        pdf.cell(20, 6, "Expires", border=0, fill=True, align="L",
-                 new_x="LMARGIN", new_y="NEXT")
-
-        pdf.set_font("Helvetica", "", 9)
-        for c in creds:
-            type_label = (c["credential_type"] or "").upper()
-            title = (c["title"] or "")[:40]
-            number = (c["credential_number"] or "—")[:18]
-            issued = c["issue_date"].isoformat() if c["issue_date"] else "—"
-            expires = c["expiry_date"].isoformat() if c["expiry_date"] else "—"
-            pdf.cell(35, 5, type_label, border=0, align="L")
-            pdf.cell(60, 5, title, border=0, align="L")
-            pdf.cell(35, 5, number, border=0, align="L")
-            pdf.cell(25, 5, issued, border=0, align="L")
-            pdf.cell(20, 5, expires, border=0, align="L",
-                     new_x="LMARGIN", new_y="NEXT")
-
-    pdf.ln(5)
-
-    # ── Sea-time summary ──────────────────────────────────────────────────
-    pdf.set_font("Helvetica", "B", 12)
-    pdf.cell(0, 7, "Sea-time Summary", new_x="LMARGIN", new_y="NEXT", align="L")
-    pdf.ln(1)
-    pdf.set_font("Helvetica", "", 10)
-    pdf.cell(0, 5, f"Total days on board: {total_days}",
-             new_x="LMARGIN", new_y="NEXT", align="L")
-    pdf.cell(0, 5, f"Last 3 years: {days_3yr} days",
-             new_x="LMARGIN", new_y="NEXT", align="L")
-    pdf.cell(0, 5, f"Last 5 years: {days_5yr} days",
-             new_x="LMARGIN", new_y="NEXT", align="L")
-    if by_route:
-        pdf.ln(1)
-        pdf.cell(
-            0, 5,
-            "By route: " + ", ".join(
-                f"{k}: {v}d" for k, v in sorted(by_route.items(), key=lambda x: -x[1])
-            ),
-            new_x="LMARGIN", new_y="NEXT", align="L",
-        )
-    if by_capacity:
-        pdf.cell(
-            0, 5,
-            "By capacity: " + ", ".join(
-                f"{k}: {v}d" for k, v in sorted(by_capacity.items(), key=lambda x: -x[1])
-            ),
-            new_x="LMARGIN", new_y="NEXT", align="L",
-        )
-    pdf.ln(5)
-
-    # ── Sea-time entries (full log) ───────────────────────────────────────
-    pdf.set_font("Helvetica", "B", 12)
-    pdf.cell(0, 7, "Sea-time Log", new_x="LMARGIN", new_y="NEXT", align="L")
-    pdf.ln(1)
-
-    if not sea_time_rows:
-        pdf.set_font("Helvetica", "I", 10)
-        pdf.cell(0, 6, "  (no entries logged)",
-                 new_x="LMARGIN", new_y="NEXT", align="L")
-    else:
-        pdf.set_font("Helvetica", "B", 9)
-        pdf.set_fill_color(230, 230, 230)
-        pdf.cell(45, 6, "Vessel", border=0, fill=True, align="L")
-        pdf.cell(28, 6, "Capacity", border=0, fill=True, align="L")
-        pdf.cell(22, 6, "Route", border=0, fill=True, align="L")
-        pdf.cell(45, 6, "Dates", border=0, fill=True, align="L")
-        pdf.cell(15, 6, "Days", border=0, fill=True, align="R")
-        pdf.cell(20, 6, "GT/HP", border=0, fill=True, align="L",
-                 new_x="LMARGIN", new_y="NEXT")
-        pdf.set_font("Helvetica", "", 9)
-        for r in sea_time_rows:
-            vessel = (r["vessel_name"] or "")[:28]
-            cap = (r["capacity_served"] or "")[:18]
-            route = (r["route_type"] or "—")[:15]
-            dates = f"{r['from_date'].isoformat()} → {r['to_date'].isoformat()}"
-            days = str(int(r["days_on_board"]))
-            gt = r["gross_tonnage"]
-            hp = r["horsepower"]
-            gt_hp = ""
-            if gt is not None:
-                gt_hp = f"{gt} GT"
-            elif hp:
-                gt_hp = f"{hp} HP"
-            pdf.cell(45, 5, vessel, border=0, align="L")
-            pdf.cell(28, 5, cap, border=0, align="L")
-            pdf.cell(22, 5, route, border=0, align="L")
-            pdf.cell(45, 5, dates, border=0, align="L")
-            pdf.cell(15, 5, days, border=0, align="R")
-            pdf.cell(20, 5, gt_hp[:14], border=0, align="L",
-                     new_x="LMARGIN", new_y="NEXT")
-
-    # Footer disclaimer
-    pdf.ln(8)
-    pdf.set_font("Helvetica", "I", 8)
-    pdf.set_text_color(110, 110, 110)
-    pdf.multi_cell(
-        0, 4,
-        "This document is a self-reported summary generated by RegKnots from the "
-        "mariner's stored credentials and sea-time log. It is not an official "
-        "USCG document. Original credentials and signed sea-service letters "
-        "remain the authoritative source.",
-    )
-
-    # ── Stream out ────────────────────────────────────────────────────────
-    pdf_bytes = pdf.output()
-    if isinstance(pdf_bytes, str):
-        pdf_bytes = pdf_bytes.encode("latin-1")
-    elif isinstance(pdf_bytes, bytearray):
-        pdf_bytes = bytes(pdf_bytes)
-
-    safe_name = (full_name or "mariner").replace(" ", "_").replace("/", "-")
-    filename = f"{safe_name}_credential_package_{today.isoformat()}.pdf"
-
-    logger.info(
-        "credential package generated: user=%s creds=%d sea_time_entries=%d total_days=%d",
-        user.email, len(creds), len(sea_time_rows), total_days,
-    )
-
-    return StreamingResponse(
-        io.BytesIO(pdf_bytes),
-        media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-    )

@@ -35,6 +35,14 @@ class VesselListItem(BaseModel):
     route_limitations: str | None = None
     # D6.55 — populated when the vessel belongs to a workspace.
     workspace_id: str | None = None
+    # D6.62 hotfix — surface fields callers (sea-time logger, sea-service
+    # letter generator) need for autopopulation. additional_details is
+    # the JSONB column where official_number / propulsion / horsepower
+    # live for human-edited vessels; latest_coi_extracted is the most-
+    # recent COI document's extracted_data so we can pre-fill from a
+    # scanned cert without making the user retype.
+    additional_details: dict | None = None
+    latest_coi_extracted: dict | None = None
 
 
 async def _require_workspace_member(
@@ -75,7 +83,17 @@ async def list_vessels(
                 """
                 SELECT id, name, vessel_type, route_types, cargo_types,
                        gross_tonnage, subchapter, inspection_certificate_type,
-                       manning_requirement, route_limitations, workspace_id
+                       manning_requirement, route_limitations, workspace_id,
+                       additional_details,
+                       (
+                         SELECT extracted_data
+                         FROM vessel_documents
+                         WHERE vessel_id = vessels.id
+                           AND document_type = 'coi'
+                           AND extraction_status IN ('extracted', 'confirmed')
+                         ORDER BY created_at DESC
+                         LIMIT 1
+                       ) AS latest_coi_extracted
                 FROM vessels
                 WHERE workspace_id = $1
                 ORDER BY created_at ASC
@@ -87,15 +105,44 @@ async def list_vessels(
                 """
                 SELECT id, name, vessel_type, route_types, cargo_types,
                        gross_tonnage, subchapter, inspection_certificate_type,
-                       manning_requirement, route_limitations, workspace_id
+                       manning_requirement, route_limitations, workspace_id,
+                       additional_details,
+                       (
+                         SELECT extracted_data
+                         FROM vessel_documents
+                         WHERE vessel_id = vessels.id
+                           AND document_type = 'coi'
+                           AND extraction_status IN ('extracted', 'confirmed')
+                         ORDER BY created_at DESC
+                         LIMIT 1
+                       ) AS latest_coi_extracted
                 FROM vessels
                 WHERE user_id = $1 AND workspace_id IS NULL
                 ORDER BY created_at ASC
                 """,
                 uuid.UUID(user.user_id),
             )
-    return [
-        VesselListItem(
+    out: list[VesselListItem] = []
+    for r in rows:
+        # additional_details + latest_coi_extracted may come back as
+        # JSON string (asyncpg returns jsonb as str by default unless
+        # decoder is registered). Tolerate both shapes.
+        addn = r["additional_details"]
+        if isinstance(addn, str):
+            try:
+                import json as _json
+                addn = _json.loads(addn)
+            except Exception:
+                addn = None
+        coi_ex = r["latest_coi_extracted"]
+        if isinstance(coi_ex, str):
+            try:
+                import json as _json
+                coi_ex = _json.loads(coi_ex)
+            except Exception:
+                coi_ex = None
+
+        out.append(VesselListItem(
             id=str(r["id"]),
             name=r["name"],
             vessel_type=r["vessel_type"],
@@ -107,9 +154,10 @@ async def list_vessels(
             manning_requirement=r["manning_requirement"],
             route_limitations=r["route_limitations"],
             workspace_id=str(r["workspace_id"]) if r["workspace_id"] else None,
-        )
-        for r in rows
-    ]
+            additional_details=addn if isinstance(addn, dict) else None,
+            latest_coi_extracted=coi_ex if isinstance(coi_ex, dict) else None,
+        ))
+    return out
 
 
 class VesselCreate(BaseModel):

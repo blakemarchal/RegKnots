@@ -236,8 +236,14 @@ async def prefill_sea_service_letter(
 async def generate_sea_service_letter(
     body: SeaServiceRequest,
     user: Annotated[CurrentUser, Depends(get_current_user)],
+    tz: str | None = None,
 ) -> StreamingResponse:
-    """Generate a USCG-formatted Sea Service Letter as a PDF."""
+    """Generate a USCG-formatted Sea Service Letter as a PDF.
+
+    `tz` is the IANA timezone the client is in (e.g. America/Chicago).
+    Used so the letter's date stamp matches the user's wall clock
+    instead of UTC. Falls back to UTC.
+    """
     if not body.vessel_entries:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -257,7 +263,7 @@ async def generate_sea_service_letter(
                 detail=f"Vessel entry {i + 1}: days_on_board must be non-negative",
             )
 
-    pdf_bytes = _generate_pdf(body)
+    pdf_bytes = _generate_pdf(body, tz=tz)
 
     safe_name = body.applicant_full_name.replace(" ", "_").replace("/", "-")
     filename = f"sea_service_letter_{safe_name}.pdf"
@@ -278,9 +284,24 @@ async def generate_sea_service_letter(
 # ── PDF generation ─────────────────────────────────────────────────────────
 
 
-def _generate_pdf(body: SeaServiceRequest) -> bytes:
-    """Generate the USCG-formatted Sea Service Letter PDF using fpdf2."""
+def _generate_pdf(body: SeaServiceRequest, tz: str | None = None) -> bytes:
+    """Generate the USCG-formatted Sea Service Letter PDF using fpdf2.
+
+    `tz` resolves the dateline shown at the top of the letter. UTC
+    fallback when missing or unparseable.
+    """
     from fpdf import FPDF
+    from datetime import datetime as _dt
+
+    # Resolve "today" in the user's timezone for the date line.
+    try:
+        if tz:
+            from zoneinfo import ZoneInfo
+            today = _dt.now(ZoneInfo(tz)).date()
+        else:
+            today = date.today()
+    except Exception:
+        today = date.today()
 
     pdf = FPDF(orientation="portrait", unit="mm", format="letter")
     pdf.set_auto_page_break(auto=True, margin=20)
@@ -302,7 +323,7 @@ def _generate_pdf(body: SeaServiceRequest) -> bytes:
     pdf.ln(8)
 
     # ── Date + To: USCG NMC ───────────────────────────────────────────────
-    today_str = date.today().strftime("%B %d, %Y")
+    today_str = today.strftime("%B %d, %Y")
     pdf.set_font("Helvetica", "", 11)
     pdf.cell(0, 6, today_str, new_x="LMARGIN", new_y="NEXT")
     pdf.ln(4)

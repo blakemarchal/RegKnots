@@ -60,6 +60,37 @@ interface VesselOption {
   vessel_type: string | null
   flag_state: string | null
   gross_tonnage: number | null
+  // D6.62 hotfix — surfaces JSONB columns the modal autofills from.
+  // additional_details holds human-edited fields (official_number,
+  // propulsion, horsepower); latest_coi_extracted holds the most-recent
+  // COI document's Claude-Vision-extracted fields, when available.
+  route_types?: string[] | null
+  additional_details?: Record<string, unknown> | null
+  latest_coi_extracted?: Record<string, unknown> | null
+}
+
+// Map a vessel's primary route_types entry to the sea-time form's
+// route enum. Mirrors the heuristic in apps/api/app/routers/sea_service.py
+// _primary_route() so the two surfaces stay consistent.
+function primaryRoute(routes?: string[] | null): string | null {
+  if (!routes || routes.length === 0) return null
+  if (routes.includes('international')) return 'Oceans'
+  if (routes.includes('coastal')) return 'Near-Coastal'
+  if (routes.includes('inland')) return 'Inland'
+  const first = routes[0]
+  return first ? first[0].toUpperCase() + first.slice(1) : null
+}
+
+// Pull a string field from either additional_details or
+// latest_coi_extracted (additional_details wins because it's
+// human-edited; COI is fallback). Tolerates both JSONB shapes.
+function pickField(v: VesselOption, key: string): string | null {
+  const addn = v.additional_details
+  const coi = v.latest_coi_extracted
+  const fromAddn = addn && typeof addn[key] === 'string' ? (addn[key] as string) : null
+  if (fromAddn) return fromAddn
+  const fromCoi = coi && typeof coi[key] === 'string' ? (coi[key] as string) : null
+  return fromCoi
 }
 
 function fmtDate(iso: string): string {
@@ -135,9 +166,9 @@ function Content() {
 
   useEffect(() => { void load() }, [load])
 
-  function startNew() { setEditing(emptyEntry()) }
+  function startNew() { setError(null); setEditing(emptyEntry()) }
 
-  function startEdit(e: SeaTimeEntry) { setEditing({ ...e }) }
+  function startEdit(e: SeaTimeEntry) { setError(null); setEditing({ ...e }) }
 
   function vesselPicked(vid: string) {
     if (!editing) return
@@ -147,12 +178,22 @@ function Content() {
     }
     const v = vessels.find((x) => x.id === vid)
     if (!v) return
+    // Pull what we can from the vessel record + latest COI extraction.
+    // User can still override anything in the form.
+    const officialNumber = pickField(v, 'official_number')
+    const propulsion = pickField(v, 'propulsion')
+    const horsepower = pickField(v, 'horsepower')
+    const route = primaryRoute(v.route_types)
     setEditing({
       ...editing,
       vessel_id: v.id,
       vessel_name: v.name || editing.vessel_name || '',
       vessel_type: v.vessel_type ?? editing.vessel_type ?? null,
       gross_tonnage: v.gross_tonnage ?? editing.gross_tonnage ?? null,
+      official_number: officialNumber || editing.official_number || null,
+      propulsion: propulsion || editing.propulsion || null,
+      horsepower: horsepower || editing.horsepower || null,
+      route_type: editing.route_type || route || null,
     })
   }
 
@@ -402,13 +443,22 @@ function Content() {
                 {editing.id ? 'Edit Entry' : 'New Entry'}
               </h3>
               <button
-                onClick={() => setEditing(null)}
+                onClick={() => { setEditing(null); setError(null) }}
                 className="text-[#6b7594] hover:text-[#f0ece4] text-xl leading-none"
                 aria-label="Close"
               >
                 ×
               </button>
             </div>
+
+            {/* D6.62 hotfix — render validation error INSIDE the modal so
+                it's not hidden behind the modal scrim. */}
+            {error && (
+              <div className="bg-red-500/10 border border-red-500/30 rounded-lg
+                px-3 py-2 mb-4 font-mono text-xs text-red-400">
+                {error}
+              </div>
+            )}
 
             {/* Existing vessel quick-pick */}
             {vessels.length > 0 && !editing.id && (
