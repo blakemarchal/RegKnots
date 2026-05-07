@@ -13,6 +13,8 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import AuthGuard from '@/components/AuthGuard'
 import { AppHeader } from '@/components/AppHeader'
 import { AILoadingState } from '@/components/AILoadingState'
@@ -596,8 +598,61 @@ function GuideResult({ detail }: { detail: GenerationDetail }) {
             <h3 className="font-display text-base font-bold text-[#2dd4bf] tracking-wide mb-2">
               {s.heading}
             </h3>
-            <div className="font-mono text-sm text-[#f0ece4]/85 leading-relaxed whitespace-pre-wrap">
-              {s.content_md}
+            {/* Sprint D6.83 — render `content_md` as proper markdown
+                instead of pre-wrapped text. The model emits **bold**
+                and numbered lists which previously appeared as literal
+                asterisks. Reuses react-markdown + remark-gfm
+                (already bundled by ChatMessage). Component map kept
+                minimal — guides don't need code blocks, tables, or
+                inline citation injection (citations live in their own
+                chip strip below). */}
+            <div className="font-mono text-sm text-[#f0ece4]/85 leading-relaxed">
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                components={{
+                  p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+                  strong: ({ children }) => (
+                    <strong className="font-semibold text-[#f0ece4]">{children}</strong>
+                  ),
+                  em: ({ children }) => (
+                    <em className="italic text-[#f0ece4]/80">{children}</em>
+                  ),
+                  ul: ({ children }) => (
+                    <ul className="list-disc list-outside pl-5 mb-2 space-y-1">{children}</ul>
+                  ),
+                  ol: ({ children }) => (
+                    <ol className="list-decimal list-outside pl-5 mb-2 space-y-1">{children}</ol>
+                  ),
+                  li: ({ children }) => <li className="leading-relaxed">{children}</li>,
+                  h1: ({ children }) => (
+                    <h4 className="font-display text-base font-bold text-[#f0ece4] mt-3 mb-1.5">
+                      {children}
+                    </h4>
+                  ),
+                  h2: ({ children }) => (
+                    <h4 className="font-display text-base font-bold text-[#f0ece4] mt-3 mb-1.5">
+                      {children}
+                    </h4>
+                  ),
+                  h3: ({ children }) => (
+                    <h5 className="font-display text-sm font-bold text-[#f0ece4] mt-2 mb-1">
+                      {children}
+                    </h5>
+                  ),
+                  blockquote: ({ children }) => (
+                    <blockquote className="border-l-2 border-amber-400/30 pl-3 my-2 text-[#f0ece4]/70 italic">
+                      {children}
+                    </blockquote>
+                  ),
+                  code: ({ children }) => (
+                    <code className="px-1 py-0.5 rounded bg-[#0d1225] text-[#2dd4bf] text-[12px] border border-white/8">
+                      {children}
+                    </code>
+                  ),
+                }}
+              >
+                {s.content_md}
+              </ReactMarkdown>
             </div>
             {s.citations && s.citations.length > 0 && (
               <div className="mt-2 flex flex-wrap gap-1.5">
