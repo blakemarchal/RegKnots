@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, useTransition } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import { useAuthStore } from '@/lib/auth'
 import { useViewMode } from '@/lib/useViewMode'
+import { apiRequest } from '@/lib/api'
 import { signalNavigation } from './NavigationProgress'
 
 interface Props {
@@ -136,6 +137,26 @@ export function HamburgerMenu({ open, onClose, onNewChat, onOpenVessels, onOpenS
   const [pendingAction, setPendingAction] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
 
+  // Sprint D6.83 follow-up — Study Tools nav visibility. The backend
+  // resolves the boolean (explicit user choice > persona default >
+  // false). Fetched once when the drawer first opens; cheap GET that
+  // also primes future renders if the user toggles in the Account
+  // page mid-session. Defaults to false on fetch failure so we err
+  // on the side of hiding rather than showing an unwanted entry.
+  const [studyToolsEnabled, setStudyToolsEnabled] = useState<boolean>(false)
+  const [studyPrefLoaded, setStudyPrefLoaded] = useState(false)
+  useEffect(() => {
+    if (!open || studyPrefLoaded) return
+    let cancelled = false
+    apiRequest<{ study_tools_enabled?: boolean }>('/onboarding/persona')
+      .then((r) => {
+        if (!cancelled) setStudyToolsEnabled(r.study_tools_enabled === true)
+      })
+      .catch(() => { /* silent — leave default false */ })
+      .finally(() => { if (!cancelled) setStudyPrefLoaded(true) })
+    return () => { cancelled = true }
+  }, [open, studyPrefLoaded])
+
   // Track `isPending` transitions so we know when a navigation completes.
   const wasPendingRef = useRef(false)
 
@@ -238,14 +259,19 @@ export function HamburgerMenu({ open, onClose, onNewChat, onOpenVessels, onOpenS
   // Filter out items hidden for wheelhouse_only users, and drop any
   // section that ends up empty so we don't render dangling section
   // headers.
+  // Sprint D6.83 follow-up — also drop the Study Tools entry when the
+  // user has it toggled off. We hide the row, not the whole section,
+  // and the empty-section filter at the end drops the "Study Tools"
+  // header automatically once the only entry is gone.
   const filteredSections: MenuSection[] = MENU_SECTIONS
     .map((s) => ({
       ...s,
-      items: isWheelhouseOnly
-        ? s.items.filter(
-            (it) => !WHEELHOUSE_ONLY_HIDDEN_ACTIONS.has(it.action),
-          )
-        : s.items,
+      items: s.items
+        .filter(
+          (it) =>
+            !isWheelhouseOnly || !WHEELHOUSE_ONLY_HIDDEN_ACTIONS.has(it.action),
+        )
+        .filter((it) => it.action !== 'study' || studyToolsEnabled),
     }))
     .filter((s) => s.items.length > 0)
 

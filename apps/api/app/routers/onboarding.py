@@ -65,12 +65,31 @@ VALID_VERBOSITY = {"brief", "standard", "detailed"}
 # Sprint D6.37 — UI theme preference. NULL = "dark" (current default).
 VALID_THEME = {"dark", "light", "auto"}
 
+# Sprint D6.83 follow-up — personas that get Study Tools enabled by
+# default. Everyone else has it hidden from the nav until they opt in
+# from the account page. Source of truth for the "this user is here
+# for exam prep" signal.
+STUDY_DEFAULT_PERSONAS = {"cadet_student", "teacher_instructor"}
+
+
+def _resolve_study_enabled(stored: bool | None, persona: str | None) -> bool:
+    """Translate a (possibly NULL) DB value + the user's persona into
+    the boolean the frontend reads. NULL means "user hasn't customized
+    it" — fall back to persona-based default. Once the user explicitly
+    toggles, the stored boolean wins regardless of persona."""
+    if stored is not None:
+        return stored
+    return persona in STUDY_DEFAULT_PERSONAS if persona else False
+
 
 class PersonaRequest(BaseModel):
     persona: str | None = None
     jurisdiction_focus: str | None = None
     verbosity_preference: str | None = None
     theme_preference: str | None = None
+    # D6.83 follow-up — explicit toggle for Study Tools nav visibility.
+    # Optional; passing None leaves the stored value unchanged.
+    study_tools_enabled: bool | None = None
 
 
 @router.get("/status", response_model=StatusResponse)
@@ -209,15 +228,35 @@ async def update_persona(
         SET persona = COALESCE($1, persona),
             jurisdiction_focus = COALESCE($2, jurisdiction_focus),
             verbosity_preference = COALESCE($3, verbosity_preference),
-            theme_preference = COALESCE($4, theme_preference)
-        WHERE id = $5
+            theme_preference = COALESCE($4, theme_preference),
+            study_tools_enabled = COALESCE($5, study_tools_enabled)
+        WHERE id = $6
         """,
         body.persona,
         body.jurisdiction_focus,
         body.verbosity_preference,
         body.theme_preference,
+        body.study_tools_enabled,
         _uuid.UUID(user.user_id),
     )
+
+    # Seed the Study Tools default the first time a user picks a persona.
+    # If study_tools_enabled is still NULL after the COALESCE above
+    # (i.e. the user hasn't ever toggled it explicitly) AND a persona
+    # was just set, write the persona-based default. We do this AFTER
+    # the COALESCE update so an explicit body.study_tools_enabled
+    # always wins over the seeded default.
+    if body.persona is not None and body.study_tools_enabled is None:
+        seed_default = body.persona in STUDY_DEFAULT_PERSONAS
+        await pool.execute(
+            """
+            UPDATE users
+            SET study_tools_enabled = $1
+            WHERE id = $2 AND study_tools_enabled IS NULL
+            """,
+            seed_default,
+            _uuid.UUID(user.user_id),
+        )
     return {"ok": True}
 
 
@@ -229,12 +268,18 @@ async def get_persona(
     can pre-fill its edit form."""
     pool = await get_pool()
     row = await pool.fetchrow(
-        "SELECT persona, jurisdiction_focus, verbosity_preference, theme_preference FROM users WHERE id = $1",
+        "SELECT persona, jurisdiction_focus, verbosity_preference, theme_preference, "
+        "study_tools_enabled "
+        "FROM users WHERE id = $1",
         _uuid.UUID(user.user_id),
     )
+    persona_val = row["persona"] if row else None
+    study_stored = row["study_tools_enabled"] if row else None
     return {
-        "persona": row["persona"] if row else None,
+        "persona": persona_val,
         "jurisdiction_focus": row["jurisdiction_focus"] if row else None,
         "verbosity_preference": row["verbosity_preference"] if row else None,
         "theme_preference": row["theme_preference"] if row else None,
+        # Resolved boolean for the frontend; never NULL.
+        "study_tools_enabled": _resolve_study_enabled(study_stored, persona_val),
     }

@@ -66,6 +66,10 @@ function AccountContent() {
   const [jurisdictionFocus, setJurisdictionFocus] = useState<string>('')
   const [verbosityPreference, setVerbosityPreference] = useState<string>('')
   const [themePreference, setThemePreference] = useState<string>('')
+  // Sprint D6.83 follow-up — Study Tools nav-visibility toggle.
+  // Resolved server-side: defaults to true for cadet_student/teacher_instructor
+  // personas, false for everyone else, until the user explicitly toggles.
+  const [studyToolsEnabled, setStudyToolsEnabled] = useState<boolean>(false)
   const [personaSaving, setPersonaSaving] = useState(false)
   const [personaMsg, setPersonaMsg] = useState<string | null>(null)
 
@@ -115,12 +119,16 @@ function AccountContent() {
       jurisdiction_focus: string | null
       verbosity_preference: string | null
       theme_preference: string | null
+      study_tools_enabled?: boolean
     }>('/onboarding/persona')
       .then((r) => {
         setPersona(r.persona ?? '')
         setJurisdictionFocus(r.jurisdiction_focus ?? '')
         setVerbosityPreference(r.verbosity_preference ?? '')
         setThemePreference(r.theme_preference ?? '')
+        // Backend resolves NULL → persona-default; defensive fallback for
+        // older API responses that don't include the field at all.
+        setStudyToolsEnabled(r.study_tools_enabled ?? false)
       })
       .catch(() => {})
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
@@ -136,6 +144,12 @@ function AccountContent() {
           jurisdiction_focus: jurisdictionFocus || null,
           verbosity_preference: verbosityPreference || null,
           theme_preference: themePreference || null,
+          // Always send the explicit boolean (not null) so we capture
+          // the user's intent even on first save — otherwise a student
+          // who flipped off and saved would re-default back to true on
+          // the next persona-change because the server-side seed only
+          // fires when study_tools_enabled is NULL.
+          study_tools_enabled: studyToolsEnabled,
         }),
       })
       // Sprint D6.37 — apply theme immediately so the user sees the
@@ -455,6 +469,43 @@ function AccountContent() {
               </select>
               <p className="font-mono text-[10px] text-[#6b7594] leading-relaxed mt-1">
                 Light mode is best for daylight reading. Saved to your account so it persists across devices.
+              </p>
+            </div>
+
+            {/* Sprint D6.83 follow-up — Study Tools nav visibility toggle.
+                Defaults on for cadet_student / teacher_instructor personas,
+                off for everyone else; user can flip either way and the
+                explicit choice wins over the persona default. */}
+            <div className="flex flex-col gap-1">
+              <label className="font-mono text-xs text-[#6b7594]">Study Tools</label>
+              <button
+                type="button"
+                onClick={() => setStudyToolsEnabled((v) => !v)}
+                role="switch"
+                aria-checked={studyToolsEnabled}
+                className={`flex items-center justify-between px-3 py-2 rounded-lg border transition-colors duration-150
+                  ${studyToolsEnabled
+                    ? 'border-[#2dd4bf]/40 bg-[#2dd4bf]/5'
+                    : 'border-white/10 bg-[#0d1225] hover:border-white/20'
+                  }`}
+              >
+                <span className={`font-mono text-sm ${studyToolsEnabled ? 'text-[#2dd4bf]' : 'text-[#f0ece4]/80'}`}>
+                  Quizzes &amp; Guides {studyToolsEnabled ? 'enabled' : 'hidden'}
+                </span>
+                <span
+                  aria-hidden="true"
+                  className={`relative inline-block w-10 h-5 rounded-full transition-colors duration-150
+                    ${studyToolsEnabled ? 'bg-[#2dd4bf]' : 'bg-white/15'}`}
+                >
+                  <span
+                    className={`absolute top-0.5 w-4 h-4 rounded-full bg-[#0a0e1a] transition-all duration-150
+                      ${studyToolsEnabled ? 'left-[1.375rem]' : 'left-0.5'}`}
+                  />
+                </span>
+              </button>
+              <p className="font-mono text-[10px] text-[#6b7594] leading-relaxed mt-1">
+                Hides &ldquo;Quizzes &amp; Guides&rdquo; from the menu when off. The page is still
+                reachable by direct link if you want it later. Defaulted on for students and teachers.
               </p>
             </div>
 
