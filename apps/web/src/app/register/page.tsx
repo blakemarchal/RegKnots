@@ -82,11 +82,34 @@ function RegisterForm() {
       // checkout intent now so they don't have to navigate back manually.
       let pendingPlan: string | null = null
       let referralSource: string | null = null
+      let pendingPersona: string | null = null
       try {
         pendingPlan = localStorage.getItem('pending_checkout_plan')
         referralSource = localStorage.getItem('regknot_referral_source')
+        // Sprint B — /education and similar persona-targeted landing pages
+        // can pre-set the user's persona so they skip the onboarding step
+        // 0 dropdown and land on the right post-onboarding home (/study
+        // for cadet_student / teacher_instructor, /chat for everyone else).
+        pendingPersona = localStorage.getItem('pending_persona')
       } catch {
         // localStorage unavailable — skip resume, go to default landing.
+      }
+      // Apply pending persona BEFORE checkout, so the welcome wizard can
+      // read it back from /onboarding/persona on first load. Best-effort —
+      // a 4xx here just leaves the user with no persona pre-set; they'll
+      // pick one in step 0 of the welcome wizard.
+      if (pendingPersona) {
+        try { localStorage.removeItem('pending_persona') } catch {}
+        try {
+          const { apiRequest } = await import('@/lib/api')
+          await apiRequest('/onboarding/persona', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ persona: pendingPersona }),
+          })
+        } catch {
+          // Silent — persona is a soft profile field, don't block signup.
+        }
       }
       if (pendingPlan) {
         try { localStorage.removeItem('pending_checkout_plan') } catch {}

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import AuthGuard from '@/components/AuthGuard'
 import { apiRequest, apiUpload } from '@/lib/api'
@@ -164,6 +164,27 @@ function WelcomeContent() {
   const [persona, setPersona] = useState<string>('')
   const [jurisdictionFocus, setJurisdictionFocus] = useState<string>('')
   const [personaSubmitting, setPersonaSubmitting] = useState(false)
+
+  // Sprint B — pre-fill persona on mount so users coming from a
+  // persona-targeted landing page (e.g. /education sets persona to
+  // cadet_student during signup) see it already selected at step 0
+  // and can just hit Continue.
+  useEffect(() => {
+    let cancelled = false
+    apiRequest<{
+      persona: string | null
+      jurisdiction_focus: string | null
+    }>('/onboarding/persona')
+      .then((r) => {
+        if (cancelled) return
+        if (r.persona) setPersona(r.persona)
+        if (r.jurisdiction_focus) setJurisdictionFocus(r.jurisdiction_focus)
+      })
+      .catch(() => {
+        // Silent — fields stay empty, user picks at step 0.
+      })
+    return () => { cancelled = true }
+  }, [])
 
   // ── Step 1 (COI upload) ─────────────────────────────────────────────
   const [coiPreview, setCoiPreview] = useState<PreviewExtraction | null>(null)
