@@ -1,6 +1,7 @@
 """
 GET /conversations                       — list current user's conversations (newest first, limit 50)
 GET /conversations/search?q=<term>       — search across the user's message content
+GET /conversations/{id}                  — single-conversation metadata (vessel_id, workspace_id, title)
 GET /conversations/{id}/messages         — full message thread with citations resolved
 GET /conversations/{id}/export           — single conversation export (JSON, with citations)
 GET /conversations/export-all            — bulk export of last 100 conversations
@@ -27,6 +28,26 @@ class ConversationSummary(BaseModel):
     title: str
     updated_at: str
     vessel_name: str | None
+    # Sprint D6.79 — vessel_id surfaced so /history can auto-populate the
+    # vessel selector when the user opens a conversation. Without this,
+    # the user clicks a chat tied to "MV TENNESSEE" and the app keeps
+    # whatever vessel was previously active — confusing context drift.
+    vessel_id: str | None
+
+
+class ConversationMetadata(BaseModel):
+    """Single-conversation metadata for direct opens / deep links.
+    Sprint D6.79 — used by ChatInterface when restoring a conversation
+    from a deep link (?conversation_id=...) where the user didn't pass
+    through the /history list and therefore doesn't have the vessel_id
+    cached. The endpoint is enforced through the same access checks as
+    /messages so workspace-scoped conversations stay locked down.
+    """
+    id: str
+    title: str | None
+    vessel_id: str | None
+    vessel_name: str | None
+    workspace_id: str | None
 
 
 class ConversationSearchResult(BaseModel):
@@ -35,6 +56,7 @@ class ConversationSearchResult(BaseModel):
     title: str
     updated_at: str
     vessel_name: str | None
+    vessel_id: str | None
     matched_role: str          # 'user' or 'assistant' for the matched message
     matched_preview: str       # ≤280 char excerpt of the matched message
     matched_at: str            # ISO timestamp of the matched message
@@ -92,6 +114,7 @@ async def list_conversations(
                         )
                     ) AS title,
                     c.updated_at,
+                    c.vessel_id,
                     v.name AS vessel_name
                 FROM conversations c
                 LEFT JOIN vessels v ON v.id = c.vessel_id
@@ -129,6 +152,7 @@ async def list_conversations(
                         )
                     ) AS title,
                     c.updated_at,
+                    c.vessel_id,
                     v.name AS vessel_name
                 FROM conversations c
                 LEFT JOIN vessels v ON v.id = c.vessel_id
@@ -144,6 +168,7 @@ async def list_conversations(
             id=str(r["id"]),
             title=r["title"] or "Untitled conversation",
             updated_at=r["updated_at"].isoformat(),
+            vessel_id=str(r["vessel_id"]) if r["vessel_id"] else None,
             vessel_name=r["vessel_name"],
         )
         for r in rows
@@ -191,6 +216,7 @@ async def search_conversations(
                     )
                 ) AS title,
                 c.updated_at,
+                c.vessel_id,
                 v.name AS vessel_name,
                 hit.matched_role,
                 hit.matched_preview,
@@ -222,6 +248,7 @@ async def search_conversations(
             id=str(r["id"]),
             title=r["title"] or "Untitled conversation",
             updated_at=r["updated_at"].isoformat(),
+            vessel_id=str(r["vessel_id"]) if r["vessel_id"] else None,
             vessel_name=r["vessel_name"],
             matched_role=r["matched_role"],
             matched_preview=r["matched_preview"],
@@ -229,6 +256,59 @@ async def search_conversations(
         )
         for r in rows
     ]
+
+
+@router.get("/{conversation_id}", response_model=ConversationMetadata)
+async def get_conversation_metadata(
+    conversation_id: Annotated[uuid.UUID, Path()],
+    user: Annotated[CurrentUser, Depends(get_current_user)],
+    pool=Depends(get_pool),
+) -> ConversationMetadata:
+    """Single-conversation metadata for direct opens / deep links.
+
+    Sprint D6.79 — used by ChatInterface when restoring a conversation
+    from a deep link (?conversation_id=...). The /history list passes
+    vessel_id along via the auth store, so users coming through that
+    path don't need this endpoint — but a direct URL share / bookmark
+    bypasses the list, and we still want the vessel selector to
+    populate correctly. Same access checks as /messages.
+    """
+    user_uuid = uuid.UUID(user.user_id)
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT c.id, c.title, c.vessel_id, c.user_id, c.workspace_id,
+                   v.name AS vessel_name
+            FROM conversations c
+            LEFT JOIN vessels v ON v.id = c.vessel_id
+            WHERE c.id = $1
+            """,
+            conversation_id,
+        )
+        if not row:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
+
+        # Same access enforcement as /messages: personal conversations
+        # require owner match; workspace conversations require membership.
+        if row["workspace_id"] is None:
+            if row["user_id"] != user_uuid:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
+        else:
+            role = await conn.fetchval(
+                "SELECT role FROM workspace_members "
+                "WHERE workspace_id = $1 AND user_id = $2",
+                row["workspace_id"], user_uuid,
+            )
+            if role is None:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
+
+    return ConversationMetadata(
+        id=str(row["id"]),
+        title=row["title"],
+        vessel_id=str(row["vessel_id"]) if row["vessel_id"] else None,
+        vessel_name=row["vessel_name"],
+        workspace_id=str(row["workspace_id"]) if row["workspace_id"] else None,
+    )
 
 
 @router.get("/{conversation_id}/messages", response_model=list[ConversationMessage])

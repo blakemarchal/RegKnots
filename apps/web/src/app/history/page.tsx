@@ -19,6 +19,11 @@ interface ConversationSummary {
   title: string
   updated_at: string
   vessel_name: string | null
+  // Sprint D6.79 — surfaced so openConversation can sync the auth-store
+  // active vessel before navigating, eliminating the context-drift where
+  // a user clicks a chat tied to vessel A but the selector still shows
+  // whatever was active before.
+  vessel_id: string | null
 }
 
 // Sprint D6.3c — discreet history search. Returned by /conversations/search
@@ -28,6 +33,7 @@ interface ConversationSearchResult {
   title: string
   updated_at: string
   vessel_name: string | null
+  vessel_id: string | null
   matched_role: 'user' | 'assistant'
   matched_preview: string
   matched_at: string
@@ -173,6 +179,10 @@ function VesselGroupSection({
 function HistoryContent() {
   const router = useRouter()
   const vessels = useAuthStore((s) => s.vessels)
+  // Sprint D6.79 — sync active vessel when opening a chat from history
+  // so the vessel selector reflects the conversation's context instead
+  // of whatever was previously active.
+  const setActiveVessel = useAuthStore((s) => s.setActiveVessel)
   const [conversations, setConversations] = useState<ConversationSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(false)
@@ -249,6 +259,19 @@ function HistoryContent() {
 
   function openConversation(id: string) {
     signalNavigation()
+    // Sprint D6.79 — sync the active vessel to whatever this conversation
+    // is bound to BEFORE navigating, so the vessel selector reflects the
+    // chat's context the moment ChatInterface mounts. Look up vessel_id
+    // from either the main list OR the search results (both carry it).
+    const conv =
+      conversations.find(c => c.id === id) ??
+      searchResults?.find(c => c.id === id)
+    if (conv) {
+      // null vessel_id (general chats) is a valid value to pass through —
+      // it explicitly clears the active vessel, matching the conversation's
+      // "no vessel" state. The auth store accepts string|null.
+      setActiveVessel(conv.vessel_id ?? null)
+    }
     // Preserve workspace context if currently viewing workspace history,
     // so the chat opens in the right context (Sprint D6.49).
     const params = new URLSearchParams(window.location.search)

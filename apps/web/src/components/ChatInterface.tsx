@@ -257,13 +257,26 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
     []
   )
 
-  // Restore existing conversation on mount
+  // Restore existing conversation on mount.
+  // Sprint D6.79 — also fetch the conversation's metadata (vessel_id +
+  // workspace_id) so the vessel selector and workspace context can sync
+  // when a user lands here via deep link / direct URL share rather than
+  // through the /history list (the list pre-syncs vessel before push).
   useEffect(() => {
     if (!initialConversationId) return
 
     let cancelled = false
-    apiRequest<ConversationMessage[]>(`/conversations/${initialConversationId}/messages`)
-      .then(rows => {
+    Promise.all([
+      apiRequest<ConversationMessage[]>(`/conversations/${initialConversationId}/messages`),
+      apiRequest<{
+        id: string
+        title: string | null
+        vessel_id: string | null
+        vessel_name: string | null
+        workspace_id: string | null
+      }>(`/conversations/${initialConversationId}`).catch(() => null),
+    ])
+      .then(([rows, meta]) => {
         if (cancelled) return
         const restored: Message[] = rows.map(r => ({
           id: crypto.randomUUID(),
@@ -272,6 +285,12 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
           citations: r.cited_regulations,
         }))
         setMessages(restored)
+        // Sync vessel selector if the conversation has one. Skip when
+        // metadata fetch failed (rare; messages succeeded so we still
+        // render the chat — just without the vessel-context sync).
+        if (meta && meta.vessel_id !== activeVesselId) {
+          setActiveVessel(meta.vessel_id ?? null)
+        }
       })
       .catch(() => {
         // Network failure — start fresh
@@ -281,6 +300,7 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
       })
 
     return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialConversationId])
 
   // Auto-send a pre-filled query from URL (e.g., ?q=... from PSC checklist "Ask" button)
