@@ -152,6 +152,18 @@ function AccountContent() {
           study_tools_enabled: studyToolsEnabled,
         }),
       })
+      // Bug fix: propagate the toggle to the HamburgerMenu without
+      // requiring a page refresh. The menu listens for this event and
+      // re-renders the nav row in/out of view immediately. Network-free
+      // same-tab handoff; cross-tab cases get reconciled on next drawer
+      // open via the menu's fetch-on-open path.
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(
+          new CustomEvent('regknot:study-tools-changed', {
+            detail: studyToolsEnabled,
+          }),
+        )
+      }
       // Sprint D6.37 — apply theme immediately so the user sees the
       // change without reloading. localStorage cache + DOM attribute
       // both updated. Empty string = revert to "dark" default.

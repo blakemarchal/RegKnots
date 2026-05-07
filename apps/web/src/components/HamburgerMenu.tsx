@@ -137,25 +137,49 @@ export function HamburgerMenu({ open, onClose, onNewChat, onOpenVessels, onOpenS
   const [pendingAction, setPendingAction] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
 
-  // Sprint D6.83 follow-up — Study Tools nav visibility. The backend
-  // resolves the boolean (explicit user choice > persona default >
-  // false). Fetched once when the drawer first opens; cheap GET that
-  // also primes future renders if the user toggles in the Account
-  // page mid-session. Defaults to false on fetch failure so we err
-  // on the side of hiding rather than showing an unwanted entry.
+  // Sprint D6.83 follow-up — Study Tools nav visibility.
+  //
+  // Propagation model (fixed after the first cut had a stale-cache bug):
+  //   1. INSTANT same-tab updates via the 'regknot:study-tools-changed'
+  //      CustomEvent dispatched by the Account page on successful save.
+  //      No network round-trip; the user sees the menu update the moment
+  //      they hit Save.
+  //   2. EVENTUAL cross-tab / cross-page consistency by re-fetching on
+  //      every drawer-open transition. Cheap GET; we keep the previous
+  //      value rendered while the fetch is in flight so there's no
+  //      flicker if the answer is unchanged.
+  //
+  // Earlier attempt: a `studyPrefLoaded` flag that short-circuited the
+  // fetch after the first drawer-open. That broke propagation — the
+  // user had to refresh the page to see toggle changes reflected.
+  // Removed.
   const [studyToolsEnabled, setStudyToolsEnabled] = useState<boolean>(false)
-  const [studyPrefLoaded, setStudyPrefLoaded] = useState(false)
+
+  // Fetch on every drawer-open. State stays put while the fetch runs,
+  // so the menu doesn't flash if the value is unchanged.
   useEffect(() => {
-    if (!open || studyPrefLoaded) return
+    if (!open) return
     let cancelled = false
     apiRequest<{ study_tools_enabled?: boolean }>('/onboarding/persona')
       .then((r) => {
         if (!cancelled) setStudyToolsEnabled(r.study_tools_enabled === true)
       })
-      .catch(() => { /* silent — leave default false */ })
-      .finally(() => { if (!cancelled) setStudyPrefLoaded(true) })
+      .catch(() => { /* silent — keep prior value on transient failure */ })
     return () => { cancelled = true }
-  }, [open, studyPrefLoaded])
+  }, [open])
+
+  // Listen for explicit-update events from the Account page so the
+  // toggle change shows up the next paint frame, not on next drawer
+  // open. The detail payload carries the new boolean directly so we
+  // don't even need a network round-trip in the same-tab case.
+  useEffect(() => {
+    function handleChanged(e: Event) {
+      const detail = (e as CustomEvent<boolean>).detail
+      if (typeof detail === 'boolean') setStudyToolsEnabled(detail)
+    }
+    window.addEventListener('regknot:study-tools-changed', handleChanged)
+    return () => window.removeEventListener('regknot:study-tools-changed', handleChanged)
+  }, [])
 
   // Track `isPending` transitions so we know when a navigation completes.
   const wasPendingRef = useRef(false)
