@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import json
 import logging
+import random
 import re
 import uuid as _uuid
 from datetime import datetime, timezone
@@ -376,6 +377,97 @@ def _parse_json_response(text: str) -> Optional[dict]:
     return None
 
 
+# ── Citation verification ──────────────────────────────────────────────────
+
+
+# Match the leading "base" portion of a citation, stripping any
+# subsection parenthetical. Examples:
+#   "46 CFR 199.45(a)(1)"  → "46 CFR 199.45"
+#   "COLREGs Rule 13"      → "COLREGs Rule 13"
+#   "SOLAS Ch.III Reg.19"  → "SOLAS Ch.III Reg.19"
+# The corpus stores section_number at the base level; cited subsections
+# from the model don't appear verbatim in DB, so we match on the base.
+_CITATION_BASE_RE = re.compile(r"^([^(]+)")
+
+
+def _citation_base(cite: str) -> str:
+    """Strip subsection parentheticals from a citation. Returns the
+    portion the corpus indexes at section_number granularity."""
+    if not cite:
+        return ""
+    m = _CITATION_BASE_RE.match(cite.strip())
+    return (m.group(1) if m else cite).strip()
+
+
+async def _verify_citations(pool, citations: list[str]) -> dict[str, bool]:
+    """Given a list of citation strings, return {citation: True/False}
+    indicating whether each citation's base section number resolves to
+    a real entry in the regulations corpus.
+
+    This is the same quality moat the chat product uses — every cited
+    section must exist in the corpus, otherwise it's potentially a
+    Haiku hallucination. We don't BLOCK generation on a bad citation
+    (would frustrate users when one of ten missed); we surface the
+    rate to the frontend so users see a verification confidence."""
+    if not citations:
+        return {}
+    bases = list({_citation_base(c) for c in citations if c})
+    if not bases:
+        return {c: False for c in citations}
+    rows = await pool.fetch(
+        "SELECT DISTINCT section_number FROM regulations "
+        "WHERE section_number = ANY($1::text[])",
+        bases,
+    )
+    verified_bases: set[str] = {r["section_number"] for r in rows}
+    return {
+        c: _citation_base(c) in verified_bases
+        for c in citations
+    }
+
+
+# ── Option shuffling (Haiku positional-bias fix) ──────────────────────────
+
+
+_LETTERS: tuple[str, str, str, str] = ("A", "B", "C", "D")
+
+
+def _shuffle_question_options(question: dict) -> None:
+    """Randomly permute the (A,B,C,D) options of a single question and
+    remap `correct_letter` to follow the correct text into its new slot.
+
+    Why this exists: Haiku (and other small instruction-tuned models)
+    have measurable positional bias — they cluster correct answers in
+    the middle slots (B/C) and rarely place them at A or D. Asking the
+    model to "balance the distribution" via prompt is unreliable. We
+    fix it server-side by shuffling each question independently.
+
+    Mutates the question dict in place.
+    """
+    opts = question.get("options") or {}
+    correct_old = question.get("correct_letter")
+    if not correct_old or correct_old not in _LETTERS:
+        return  # malformed question — leave it alone for the parser to handle
+
+    # Capture (original_letter, text) pairs, then shuffle the order.
+    # Tracking by original letter (not by text) avoids mis-resolving
+    # when two distractors happen to share text.
+    pairs = [(L, opts.get(L, "")) for L in _LETTERS]
+    random.shuffle(pairs)
+
+    new_options: dict[str, str] = {}
+    new_correct: Optional[str] = None
+    for new_idx, (old_letter, text) in enumerate(pairs):
+        new_letter = _LETTERS[new_idx]
+        new_options[new_letter] = text
+        if old_letter == correct_old:
+            new_correct = new_letter
+
+    question["options"] = new_options
+    if new_correct:
+        question["correct_letter"] = new_correct
+
+
 # ── Endpoints — generation ─────────────────────────────────────────────────
 
 
@@ -435,6 +527,30 @@ async def generate_quiz(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="Quiz generator returned an unparseable response. Please try again.",
         )
+
+    # Bias fix — shuffle each question's options so the correct answer
+    # isn't clustered in B/C (Haiku positional bias). Done BEFORE citation
+    # verification so all subsequent metadata reads from the post-shuffle
+    # question shape.
+    questions = parsed.get("questions") or []
+    for q in questions:
+        _shuffle_question_options(q)
+
+    # Citation verification — every question's citation must resolve to
+    # a real entry in the regulations corpus. We don't reject the
+    # generation on a partial miss; we annotate per-question and surface
+    # an aggregate confidence to the frontend.
+    quiz_citations = [(q.get("citation") or "").strip() for q in questions]
+    verification = await _verify_citations(pool, quiz_citations)
+    for q in questions:
+        cite = (q.get("citation") or "").strip()
+        q["verified"] = bool(verification.get(cite, False))
+    verified_count = sum(1 for q in questions if q.get("verified"))
+    parsed["citation_verification_rate"] = (
+        round(verified_count / len(questions), 4) if questions else 0.0
+    )
+    parsed["citations_verified"] = verified_count
+    parsed["citations_total"] = len(questions)
 
     title = (parsed.get("title") or f"Quiz: {body.topic}")[:200]
     topic_key = (parsed.get("topic_key") or "").strip() or None
@@ -520,6 +636,41 @@ async def generate_guide(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="Study guide generator returned an unparseable response. Please try again.",
         )
+
+    # Citation verification — collect every citation from all sections
+    # and key_citations, batch-verify, then annotate. We compute the
+    # rate at the unique-citation level so a section with 5 citations
+    # doesn't dominate the aggregate.
+    sections = parsed.get("sections") or []
+    all_cites: list[str] = []
+    for sec in sections:
+        for raw in (sec.get("citations") or []):
+            stripped = (raw or "").strip()
+            if stripped:
+                all_cites.append(stripped)
+    for raw in (parsed.get("key_citations") or []):
+        stripped = (raw or "").strip()
+        if stripped:
+            all_cites.append(stripped)
+    unique_cites = list(dict.fromkeys(all_cites))   # preserve order, dedupe
+    verification = await _verify_citations(pool, unique_cites)
+    # Annotate each section with verified_citations / unverified_citations
+    for sec in sections:
+        sec_cites = [(c or "").strip() for c in (sec.get("citations") or []) if c]
+        sec["verified_citations"] = [c for c in sec_cites if verification.get(c, False)]
+        sec["unverified_citations"] = [c for c in sec_cites if not verification.get(c, False)]
+    parsed["verified_key_citations"] = [
+        c for c in (parsed.get("key_citations") or []) if verification.get((c or "").strip(), False)
+    ]
+    parsed["unverified_key_citations"] = [
+        c for c in (parsed.get("key_citations") or []) if not verification.get((c or "").strip(), False)
+    ]
+    verified_unique = sum(1 for c in unique_cites if verification.get(c, False))
+    parsed["citation_verification_rate"] = (
+        round(verified_unique / len(unique_cites), 4) if unique_cites else 0.0
+    )
+    parsed["citations_verified"] = verified_unique
+    parsed["citations_total"] = len(unique_cites)
 
     title = (parsed.get("title") or f"Study Guide: {body.topic}")[:200]
     topic_key = (parsed.get("topic_key") or "").strip() or None
@@ -842,6 +993,58 @@ async def finish_quiz_session(
         started_at=started_at.isoformat(),
         finished_at=finished_at.isoformat(),
         elapsed_seconds=elapsed,
+    )
+
+
+@router.get("/quiz-sessions/active", response_model=QuizSessionDetail)
+async def get_active_quiz_session(
+    generation_id: str,
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+) -> QuizSessionDetail:
+    """Return the most recent UNFINISHED session for this generation.
+
+    Used by the take-quiz page on load to resume across page refreshes
+    instead of orphaning the prior session by always creating a new one.
+    Returns 404 when there's no resumable session — the frontend treats
+    that as a signal to POST /quiz-sessions and create a fresh one.
+
+    NOTE: This route is registered BEFORE `/quiz-sessions/{session_id}`
+    on purpose — FastAPI matches in declaration order, and a path
+    parameter would otherwise swallow the literal "active" segment.
+    """
+    pool = await get_pool()
+    user_uuid = _uuid.UUID(current_user.user_id)
+    try:
+        gen_uuid = _uuid.UUID(generation_id)
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid generation_id")
+
+    row = await pool.fetchrow(
+        """
+        SELECT id, generation_id, answers, score_pct, started_at,
+               finished_at, elapsed_seconds
+        FROM study_quiz_sessions
+        WHERE user_id = $1 AND generation_id = $2 AND finished_at IS NULL
+        ORDER BY started_at DESC
+        LIMIT 1
+        """,
+        user_uuid, gen_uuid,
+    )
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No active session")
+
+    answers = row["answers"]
+    if isinstance(answers, str):
+        answers = json.loads(answers)
+
+    return QuizSessionDetail(
+        id=str(row["id"]),
+        generation_id=str(row["generation_id"]),
+        answers=[QuizSessionAnswer(**a) for a in (answers or [])],
+        score_pct=float(row["score_pct"]) if row["score_pct"] is not None else None,
+        started_at=row["started_at"].isoformat(),
+        finished_at=None,
+        elapsed_seconds=row["elapsed_seconds"],
     )
 
 

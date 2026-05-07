@@ -26,12 +26,19 @@ interface QuizQuestion {
   explanation: string
   citation: string
   difficulty: 'easy' | 'medium' | 'hard'
+  // Phase A5 — backend annotates each question with whether the
+  // citation's base section resolved against the regulations corpus.
+  verified?: boolean
 }
 
 interface QuizContent {
   title: string
   topic: string
   questions: QuizQuestion[]
+  // Phase A5 — aggregate verification stats. Optional for legacy quizzes.
+  citation_verification_rate?: number
+  citations_verified?: number
+  citations_total?: number
 }
 
 interface GenerationDetail {
@@ -87,7 +94,13 @@ function TakeQuizContent() {
   const [picks, setPicks] = useState<Record<number, Letter>>({})
   const [submitting, setSubmitting] = useState(false)
 
-  // ── Load quiz + start session on mount ────────────────────────────────
+  // ── Load quiz + resume-or-create session on mount ─────────────────────
+  //
+  // Bug fix (post-A5 follow-up): previously this always POSTed a fresh
+  // session on every page load, orphaning the prior in-progress one and
+  // resetting the user's picks. Now we first try GET /quiz-sessions/active
+  // for this generation; if 200, we resume — the user sees their prior
+  // selections re-lit; if 404, we create a fresh session.
   useEffect(() => {
     let cancelled = false
     async function load() {
@@ -100,16 +113,43 @@ function TakeQuizContent() {
           return
         }
         setQuiz(detail)
-        // Start a fresh session. Phase A4 is one-attempt-per-page-load
-        // for simplicity; resume across page loads is on the roadmap
-        // (would query by generation_id and pick the most recent
-        // un-finished session).
-        const sess = await apiRequest<QuizSessionDetail>('/study/quiz-sessions', {
-          method: 'POST',
-          body: JSON.stringify({ generation_id: generationId }),
-        })
+
+        // Try to resume an existing unfinished session for this quiz.
+        let sess: QuizSessionDetail
+        try {
+          sess = await apiRequest<QuizSessionDetail>(
+            `/study/quiz-sessions/active?generation_id=${encodeURIComponent(generationId)}`,
+          )
+        } catch (resumeErr) {
+          // 404 = no resumable session → create a fresh one.
+          // Any other error (network, etc.) falls through to the same
+          // create path; if creation also fails, the outer catch handles it.
+          const msg = resumeErr instanceof Error ? resumeErr.message : ''
+          if (!msg.includes('404')) {
+            // Log but don't surface — fallback path is well-defined.
+            console.warn('Resume lookup failed; creating new session.', msg)
+          }
+          sess = await apiRequest<QuizSessionDetail>('/study/quiz-sessions', {
+            method: 'POST',
+            body: JSON.stringify({ generation_id: generationId }),
+          })
+        }
         if (cancelled) return
+
         setSession(sess)
+        // Hydrate local picks from server-side answers so the radio
+        // buttons re-light on resume. The server is the source of truth
+        // for "what did the user pick" — picks is just a UI mirror.
+        if (sess.answers && sess.answers.length > 0) {
+          const hydrated: Record<number, Letter> = {}
+          for (const a of sess.answers) {
+            const letter = a.selected as Letter
+            if (letter === 'A' || letter === 'B' || letter === 'C' || letter === 'D') {
+              hydrated[a.q] = letter
+            }
+          }
+          setPicks(hydrated)
+        }
         setLoading(false)
       } catch (err) {
         if (cancelled) return
@@ -246,6 +286,14 @@ function TakeQuizContent() {
                 <h1 className="font-display text-base font-bold text-[#f0ece4] tracking-wide">
                   {quiz.title}
                 </h1>
+                {quiz.content_json.citations_total !== undefined && (
+                  <div className="mt-1.5">
+                    <HeaderVerificationBadge
+                      verified={quiz.content_json.citations_verified}
+                      total={quiz.content_json.citations_total}
+                    />
+                  </div>
+                )}
               </div>
               <div className="flex flex-col items-end gap-1">
                 <p className="font-mono text-xs text-[#6b7594]">
@@ -313,13 +361,25 @@ function TakeQuizContent() {
               >
                 ← Back to Study Tools
               </Link>
-              <button
-                onClick={() => router.push(`/study/${generationId}/take`)}
-                className="font-mono text-sm font-bold text-[#0a0e1a] bg-[#2dd4bf]
-                  hover:brightness-110 rounded-lg px-4 py-2 transition-[filter] duration-150"
-              >
-                Retake quiz →
-              </button>
+              <div className="flex items-center gap-2 flex-wrap">
+                <Link
+                  href={`/study/${generationId}/print`}
+                  target="_blank"
+                  rel="noopener"
+                  title="Open a printable version of this quiz with answer key"
+                  className="font-mono text-xs text-[#6b7594] border border-white/10 rounded-lg
+                    px-3 py-1.5 hover:text-[#f0ece4] hover:border-white/20 transition-colors"
+                >
+                  Print / PDF
+                </Link>
+                <button
+                  onClick={() => router.push(`/study/${generationId}/take`)}
+                  className="font-mono text-sm font-bold text-[#0a0e1a] bg-[#2dd4bf]
+                    hover:brightness-110 rounded-lg px-4 py-2 transition-[filter] duration-150"
+                >
+                  Retake quiz →
+                </button>
+              </div>
             </div>
           )}
         </div>
@@ -474,10 +534,7 @@ function QuestionCard({
           <p className="font-mono text-xs text-[#f0ece4]/80 leading-relaxed mb-2">
             {question.explanation}
           </p>
-          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium
-            bg-amber-950/70 text-amber-400 border border-amber-800/50 leading-none">
-            {question.citation}
-          </span>
+          <ReviewCitationChip label={question.citation} verified={question.verified} />
         </div>
       )}
     </li>
@@ -494,6 +551,85 @@ function DifficultyChip({ difficulty }: { difficulty: 'easy' | 'medium' | 'hard'
     <span className={`ml-2 inline-flex items-center px-1.5 py-0.5 rounded text-[10px]
       font-medium border ${colors} leading-none align-baseline`}>
       {difficulty}
+    </span>
+  )
+}
+
+function HeaderVerificationBadge({
+  verified, total,
+}: {
+  verified?: number
+  total?: number
+}) {
+  if (verified === undefined || total === undefined || total === 0) return null
+  const rate = verified / total
+  const tone =
+    rate >= 0.9
+      ? 'bg-emerald-950/70 text-emerald-400 border-emerald-800/50'
+      : rate >= 0.7
+        ? 'bg-teal-950/70 text-teal-400 border-teal-800/50'
+        : rate >= 0.5
+          ? 'bg-amber-950/70 text-amber-400 border-amber-800/50'
+          : 'bg-rose-950/70 text-rose-400 border-rose-800/50'
+  return (
+    <span
+      title="Share of citations whose base section was found in the regulations corpus"
+      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium
+        border leading-none align-baseline ${tone}`}
+    >
+      <svg className="w-2.5 h-2.5" viewBox="0 0 12 12" fill="none" stroke="currentColor"
+           strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <polyline points="2,6 5,9 10,3" />
+      </svg>
+      {verified}/{total} citations verified
+    </span>
+  )
+}
+
+// ── Citation chip with Phase A5 verification state ────────────────────────
+//
+// Three states:
+//   verified === true  → emerald with check icon (corpus-verified)
+//   verified === false → dim rose with caution icon (could not verify)
+//   verified === undefined → legacy amber (pre-A5 generations)
+
+function ReviewCitationChip({ label, verified }: { label: string; verified?: boolean }) {
+  if (verified === true) {
+    return (
+      <span
+        title="Verified — citation found in the regulations corpus"
+        className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-medium
+          bg-emerald-950/70 text-emerald-400 border border-emerald-800/50 leading-none"
+      >
+        <svg className="w-2.5 h-2.5" viewBox="0 0 12 12" fill="none" stroke="currentColor"
+             strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <polyline points="2,6 5,9 10,3" />
+        </svg>
+        {label}
+      </span>
+    )
+  }
+  if (verified === false) {
+    return (
+      <span
+        title="Not verified — could not match this citation against the regulations corpus. Double-check before relying on it."
+        className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-medium
+          bg-rose-950/40 text-rose-300/80 border border-rose-800/40 leading-none"
+      >
+        <svg className="w-2.5 h-2.5" viewBox="0 0 12 12" fill="none" stroke="currentColor"
+             strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <circle cx="6" cy="6" r="4.5" />
+          <line x1="6" y1="3.5" x2="6" y2="6.5" />
+          <circle cx="6" cy="8.5" r="0.5" fill="currentColor" />
+        </svg>
+        {label}
+      </span>
+    )
+  }
+  return (
+    <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium
+      bg-amber-950/70 text-amber-400 border border-amber-800/50 leading-none">
+      {label}
     </span>
   )
 }

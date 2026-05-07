@@ -29,18 +29,30 @@ interface QuizQuestion {
   explanation: string
   citation: string
   difficulty: 'easy' | 'medium' | 'hard'
+  // Phase A5 — backend annotates each question with `verified: true`
+  // when the citation's base section resolves to a real entry in the
+  // regulations corpus.
+  verified?: boolean
 }
 
 interface QuizContent {
   title: string
   topic: string
   questions: QuizQuestion[]
+  // Phase A5 — aggregate verification stats. Optional because older
+  // pre-A5 generations in the library don't have these fields.
+  citation_verification_rate?: number
+  citations_verified?: number
+  citations_total?: number
 }
 
 interface GuideSection {
   heading: string
   content_md: string
   citations: string[]
+  // Phase A5 — backend splits citations into verified vs unverified.
+  verified_citations?: string[]
+  unverified_citations?: string[]
 }
 
 interface GuideContent {
@@ -48,6 +60,11 @@ interface GuideContent {
   topic: string
   sections: GuideSection[]
   key_citations: string[]
+  verified_key_citations?: string[]
+  unverified_key_citations?: string[]
+  citation_verification_rate?: number
+  citations_verified?: number
+  citations_total?: number
 }
 
 interface GenerationDetail {
@@ -500,8 +517,14 @@ function QuizResult({
           <h2 className="font-display text-xl font-bold text-[#f0ece4] tracking-wide">
             {quiz.title}
           </h2>
+          <div className="mt-1.5">
+            <VerificationBadge
+              verified={quiz.citations_verified}
+              total={quiz.citations_total}
+            />
+          </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <Link
             href={`/study/${detail.id}/take`}
             className="font-mono text-xs font-bold text-[#0a0e1a] bg-[#2dd4bf]
@@ -516,6 +539,16 @@ function QuizResult({
           >
             {showAnswers ? 'Hide answers' : 'Show answers'}
           </button>
+          <Link
+            href={`/study/${detail.id}/print`}
+            target="_blank"
+            rel="noopener"
+            title="Open a printable version of this quiz with answer key + explanations"
+            className="font-mono text-xs text-[#6b7594] border border-white/10 rounded-lg
+              px-3 py-1.5 hover:text-[#f0ece4] hover:border-white/20 transition-colors"
+          >
+            Print / PDF
+          </Link>
         </div>
       </header>
 
@@ -554,7 +587,7 @@ function QuizResult({
                 <p className="font-mono text-xs text-[#f0ece4]/80 leading-relaxed mb-1">
                   {q.explanation}
                 </p>
-                <StaticChip label={q.citation} />
+                <CitationChip label={q.citation} verified={q.verified} />
               </div>
             )}
           </li>
@@ -583,13 +616,31 @@ function GuideResult({ detail }: { detail: GenerationDetail }) {
 
   return (
     <section className="bg-[#111827] border border-white/8 rounded-xl p-5 flex flex-col gap-4">
-      <header>
-        <p className="font-mono text-[10px] text-[#2dd4bf] uppercase tracking-widest mb-1">
-          Study guide · {guide.sections?.length ?? 0} sections
-        </p>
-        <h2 className="font-display text-xl font-bold text-[#f0ece4] tracking-wide">
-          {guide.title}
-        </h2>
+      <header className="flex items-start justify-between gap-3 flex-wrap">
+        <div>
+          <p className="font-mono text-[10px] text-[#2dd4bf] uppercase tracking-widest mb-1">
+            Study guide · {guide.sections?.length ?? 0} sections
+          </p>
+          <h2 className="font-display text-xl font-bold text-[#f0ece4] tracking-wide">
+            {guide.title}
+          </h2>
+          <div className="mt-1.5">
+            <VerificationBadge
+              verified={guide.citations_verified}
+              total={guide.citations_total}
+            />
+          </div>
+        </div>
+        <Link
+          href={`/study/${detail.id}/print`}
+          target="_blank"
+          rel="noopener"
+          title="Open a printable version of this study guide"
+          className="font-mono text-xs text-[#6b7594] border border-white/10 rounded-lg
+            px-3 py-1.5 hover:text-[#f0ece4] hover:border-white/20 transition-colors"
+        >
+          Print / PDF
+        </Link>
       </header>
 
       <div className="flex flex-col gap-5">
@@ -656,9 +707,19 @@ function GuideResult({ detail }: { detail: GenerationDetail }) {
             </div>
             {s.citations && s.citations.length > 0 && (
               <div className="mt-2 flex flex-wrap gap-1.5">
-                {s.citations.map((c) => (
-                  <StaticChip key={c} label={c} />
-                ))}
+                {s.citations.map((c) => {
+                  const verifiedSet = new Set(s.verified_citations || [])
+                  const unverifiedSet = new Set(s.unverified_citations || [])
+                  // If neither set knows about this citation (legacy
+                  // generation), pass undefined to render the neutral
+                  // amber StaticChip via CitationChip.
+                  const v = verifiedSet.has(c)
+                    ? true
+                    : unverifiedSet.has(c)
+                      ? false
+                      : undefined
+                  return <CitationChip key={c} label={c} verified={v} />
+                })}
               </div>
             )}
           </article>
@@ -671,9 +732,16 @@ function GuideResult({ detail }: { detail: GenerationDetail }) {
             Key citations
           </p>
           <div className="flex flex-wrap gap-1.5">
-            {guide.key_citations.map((c) => (
-              <StaticChip key={c} label={c} />
-            ))}
+            {guide.key_citations.map((c) => {
+              const verifiedSet = new Set(guide.verified_key_citations || [])
+              const unverifiedSet = new Set(guide.unverified_key_citations || [])
+              const v = verifiedSet.has(c)
+                ? true
+                : unverifiedSet.has(c)
+                  ? false
+                  : undefined
+              return <CitationChip key={c} label={c} verified={v} />
+            })}
           </div>
         </div>
       )}
@@ -773,6 +841,80 @@ function StaticChip({ label }: { label: string }) {
     <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium
       bg-amber-950/70 text-amber-400 border border-amber-800/50 leading-none align-baseline mr-1">
       {label}
+    </span>
+  )
+}
+
+// ── Citation chip variants for Phase A5 verification ──────────────────────
+//
+// `verified` = base section resolved in the regulations corpus
+// `undefined` (legacy / pre-A5) renders as the neutral StaticChip
+// `false` = corpus miss; surface dimmer styling + tooltip so the user
+//           knows to double-check before relying on it.
+
+function CitationChip({ label, verified }: { label: string; verified?: boolean }) {
+  if (verified === undefined) return <StaticChip label={label} />
+  if (verified) {
+    return (
+      <span
+        title="Verified — citation found in the regulations corpus"
+        className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[11px] font-medium
+          bg-emerald-950/70 text-emerald-400 border border-emerald-800/50
+          leading-none align-baseline mr-1"
+      >
+        <svg className="w-2.5 h-2.5" viewBox="0 0 12 12" fill="none" stroke="currentColor"
+             strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <polyline points="2,6 5,9 10,3" />
+        </svg>
+        {label}
+      </span>
+    )
+  }
+  return (
+    <span
+      title="Not verified — this citation could not be matched against the regulations corpus. Double-check before relying on it."
+      className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[11px] font-medium
+        bg-rose-950/40 text-rose-300/80 border border-rose-800/40
+        leading-none align-baseline mr-1"
+    >
+      <svg className="w-2.5 h-2.5" viewBox="0 0 12 12" fill="none" stroke="currentColor"
+           strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <circle cx="6" cy="6" r="4.5" />
+        <line x1="6" y1="3.5" x2="6" y2="6.5" />
+        <circle cx="6" cy="8.5" r="0.5" fill="currentColor" />
+      </svg>
+      {label}
+    </span>
+  )
+}
+
+function VerificationBadge({
+  verified, total,
+}: {
+  verified?: number
+  total?: number
+}) {
+  if (verified === undefined || total === undefined || total === 0) return null
+  const rate = verified / total
+  const tone =
+    rate >= 0.9
+      ? 'bg-emerald-950/70 text-emerald-400 border-emerald-800/50'
+      : rate >= 0.7
+        ? 'bg-teal-950/70 text-teal-400 border-teal-800/50'
+        : rate >= 0.5
+          ? 'bg-amber-950/70 text-amber-400 border-amber-800/50'
+          : 'bg-rose-950/70 text-rose-400 border-rose-800/50'
+  return (
+    <span
+      title="Share of citations whose base section was found in the regulations corpus"
+      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium
+        border leading-none align-baseline ${tone}`}
+    >
+      <svg className="w-2.5 h-2.5" viewBox="0 0 12 12" fill="none" stroke="currentColor"
+           strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <polyline points="2,6 5,9 10,3" />
+      </svg>
+      {verified}/{total} citations verified
     </span>
   )
 }

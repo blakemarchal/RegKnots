@@ -408,7 +408,15 @@ function WelcomeContent() {
     }
   }
 
-  function goToChat() { router.replace('/') }
+  // Sprint D6.83 Phase A5 — students and teachers land on /study after
+  // onboarding instead of /chat. Both personas registered for the exam-prep
+  // angle, so dropping them at the chat input wastes the first impression.
+  // Mariner / shore-side / legal personas keep the /chat default.
+  const isStudyPersona = persona === 'cadet_student' || persona === 'teacher_instructor'
+  const postOnboardingHref = isStudyPersona ? '/study' : '/'
+  const postOnboardingLabel = isStudyPersona ? 'Open Study Tools' : 'Open Chat'
+
+  function goToChat() { router.replace(postOnboardingHref) }
 
   // ── Step 0 actions (Sprint D6.31) ──────────────────────────────────
 
@@ -628,7 +636,7 @@ function WelcomeContent() {
                         onClick={() => { void finishOnboarding() }}
                         className="font-mono text-xs text-[#6b7594] hover:text-[#f0ece4] transition-colors py-2"
                       >
-                        Skip vessel setup &mdash; I&apos;ll go straight to chat
+                        Skip vessel setup &mdash; I&apos;ll go straight to {isStudyPersona ? 'Study Tools' : 'chat'}
                       </button>
                     </>
                   )}
@@ -906,7 +914,7 @@ function WelcomeContent() {
               <FeatureHighlightCards />
 
               <button onClick={goToChat} className={primaryBtn}>
-                Open Chat
+                {postOnboardingLabel}
               </button>
 
               <p className="font-mono text-[10px] text-[#6b7594]/60 text-center pb-6">
