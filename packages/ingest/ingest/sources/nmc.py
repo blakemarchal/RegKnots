@@ -83,6 +83,57 @@ _POLICY_FILES: frozenset[str] = frozenset({
     "nmc_med_cert_faq.pdf",                     # Medical cert FAQ (2026-04-07)
     "nmc_credential_faq.pdf",                   # Credential FAQ (2026-01-23)
     "nmc_govt_shutdown_update_031926.pdf",      # Govt shutdown extensions (2026-03-19)
+    # Sprint D6.76 — D6.75-cron discovered 402 PDFs we don't have. After
+    # triage (skipping 240+ exam-question banks, hurricane notices, REC
+    # closures, vacancy notices, admin process noise), the following ~30
+    # are mariner-relevant guidance worth ingesting. Filenames match the
+    # cron-downloaded files in /opt/RegKnots/data/raw/nmc/.
+    #
+    # Medical certificate guidance —
+    "3rd_party_authorization_med_cert.pdf",
+    "common_errors_719k.pdf",
+    "e-medical_certificate_guidance_040826.pdf",          # Apr 2026 — e-cert guidance
+    "fitness_for_certification.pdf",
+    "guidance_for_medical_providers_719k.pdf",
+    "guidance_for_medical_providers_719ke.pdf",
+    "top_10_medical_conditions.pdf",
+    "top_ai_reasons_for_med_certs_2021.pdf",
+    "declaration_in_lieu_of_affidavit_for_duplicate_document_request_061120.pdf",
+    "med_cert_error_090825.pdf",
+    "mmc_med_cert_harmonization_notice.pdf",
+    "revised_comment_date_medical_manual_notice.pdf",
+    # Application & submission process —
+    "mmc_and_mc_application_submittal_notice.pdf",
+    "mmc_app_submission_guidelines_092018.pdf",
+    "submission_med_cert_apps_nmc.pdf",
+    "submission_med_cert_apps_nmc_update_080822.pdf",
+    "request_duplicate_mmc_due_to_loss.pdf",
+    "logbook_request.pdf",
+    # 2025 MMC policy letters —
+    "mmc_policy_letter_01-25_091825.pdf",                 # CG-MMC PL 01-25
+    "mmc_policy_letter_02-25_091825.pdf",                 # CG-MMC PL 02-25
+    # STCW + AI/DE QA —
+    "010117_stcw_changes_notice.pdf",
+    "additional_guidance_ai_de_qa_02oct2020.pdf",
+    # Drug test / TWIC / hemp —
+    "msa_01-20_potential_for_positive_drug_test_result_from_use_of_hemp_plant_products.pdf",
+    "important_info_about_twic_enrollment_111318.pdf",
+    # Towing / tankerman (Subchapter M-adjacent) —
+    "tankerman_on_tow_application_notice.pdf",
+    "tankerman_on_tow_guidance_notice.pdf",
+    "towing_implementation_notice.pdf",
+    # Exam process —
+    "calculator_policy_for_credential_exams_120324.pdf",
+    "rules_of_exam_room.pdf",
+    "email_renewal_examinations_042220.pdf",
+    "radar_renewal_rule_and_policy_060719.pdf",
+    "retest_policy.pdf",
+    # Latest 2026 govt shutdown corrected update + ASAP outage notice —
+    "lapse_in_appropriations_and_government_shutdown_update_3_corrected_042226.pdf",
+    "asap_restored_032426.pdf",                            # ASAP portal restored after outage
+    # Recent admin guidance —
+    "administrative_actions_091625.pdf",
+    "new_app_status_credential_verification_tools_072425.pdf",
 })
 
 _CHECKLIST_FILES: frozenset[str] = frozenset({
@@ -197,6 +248,159 @@ _DOC_META: dict[str, dict[str, str]] = {
     "nmc_govt_shutdown_update_031926.pdf": {
         "section_number": "NMC Announcement 2026-03-19",
         "section_title": "Lapse in Appropriations / Government Shutdown Update — credential validity extensions and STCW dispensations through 2026",
+    },
+    # ── Sprint D6.76 — D6.75-cron triage additions (~30 files) ────────────
+    # Medical certificate guidance bundle:
+    "3rd_party_authorization_med_cert.pdf": {
+        "section_number": "NMC 3rd Party Med Cert Authorization",
+        "section_title": "Third-Party Authorization for Medical Certificate Information Release (CG-719* medical, MEDAIP, ASAP portal)",
+    },
+    "common_errors_719k.pdf": {
+        "section_number": "NMC Common Errors CG-719K",
+        "section_title": "Common Errors on the CG-719K Medical Certificate Application — checklist of frequent rejection reasons",
+    },
+    "e-medical_certificate_guidance_040826.pdf": {
+        "section_number": "NMC E-Medical Cert Guidance 2026-04-08",
+        "section_title": "Electronic Medical Certificate Guidance (April 2026) — email delivery, signing, retention, waiver exceptions",
+    },
+    "fitness_for_certification.pdf": {
+        "section_number": "NMC Fitness for Certification",
+        "section_title": "Fitness for Certification — medical fitness criteria, waivable conditions, examiner judgment",
+    },
+    "guidance_for_medical_providers_719k.pdf": {
+        "section_number": "NMC Provider Guidance CG-719K",
+        "section_title": "Guidance for Medical Providers — completing the CG-719K (medical certificate physical examination)",
+    },
+    "guidance_for_medical_providers_719ke.pdf": {
+        "section_number": "NMC Provider Guidance CG-719K/E",
+        "section_title": "Guidance for Medical Providers — completing the CG-719K/E (entry-level medical certificate)",
+    },
+    "top_10_medical_conditions.pdf": {
+        "section_number": "NMC Top 10 Medical Conditions",
+        "section_title": "Top 10 Medical Conditions Affecting Mariner Certification — common waiver triggers",
+    },
+    "top_ai_reasons_for_med_certs_2021.pdf": {
+        "section_number": "NMC Top AI Reasons Med Certs 2021",
+        "section_title": "Top Additional Information (AI) Reasons for Medical Certificate Applications (2021) — what NMC asks back",
+    },
+    "declaration_in_lieu_of_affidavit_for_duplicate_document_request_061120.pdf": {
+        "section_number": "NMC Duplicate Document Declaration",
+        "section_title": "Declaration in Lieu of Affidavit for Duplicate MMC / Medical Certificate Request",
+    },
+    "med_cert_error_090825.pdf": {
+        "section_number": "NMC Med Cert Error Notice 2025-09-08",
+        "section_title": "Medical Certificate Error Notice (September 2025) — issuance error and corrective action",
+    },
+    "mmc_med_cert_harmonization_notice.pdf": {
+        "section_number": "NMC MMC + Med Cert Harmonization",
+        "section_title": "MMC and Medical Certificate Harmonization — synchronized expiration dates",
+    },
+    "revised_comment_date_medical_manual_notice.pdf": {
+        "section_number": "NMC Medical Manual Comment Period Notice",
+        "section_title": "Revised Comment Date for Medical Manual (Merchant Mariner Medical Manual revision)",
+    },
+    # Application & submission:
+    "mmc_and_mc_application_submittal_notice.pdf": {
+        "section_number": "NMC MMC + Med Cert Submittal Notice",
+        "section_title": "MMC and Medical Certificate Application Submittal Notice — submission methods, ASAP portal preference",
+    },
+    "mmc_app_submission_guidelines_092018.pdf": {
+        "section_number": "NMC MMC App Submission Guidelines",
+        "section_title": "MMC Application Submission Guidelines (2018) — checklist and acceptance criteria",
+    },
+    "submission_med_cert_apps_nmc.pdf": {
+        "section_number": "NMC Direct Med Cert Submission",
+        "section_title": "Direct Submission of Medical Certificate Applications to NMC (MEDAIP@uscg.mil)",
+    },
+    "submission_med_cert_apps_nmc_update_080822.pdf": {
+        "section_number": "NMC Direct Med Cert Submission Update 2022",
+        "section_title": "Direct Med Cert Submission Update (August 2022) — process clarification",
+    },
+    "request_duplicate_mmc_due_to_loss.pdf": {
+        "section_number": "NMC Duplicate MMC Due to Loss",
+        "section_title": "Requesting a Duplicate MMC Due to Loss / Theft / Damage — procedure and required documentation",
+    },
+    "logbook_request.pdf": {
+        "section_number": "NMC Logbook Request",
+        "section_title": "Requesting Sea Service Logbook from the National Maritime Center — procedure",
+    },
+    # 2025 MMC Policy Letters:
+    "mmc_policy_letter_01-25_091825.pdf": {
+        "section_number": "CG-MMC PL 01-25",
+        "section_title": "CG-MMC Policy Letter 01-25 (2025) — current policy letter",
+    },
+    "mmc_policy_letter_02-25_091825.pdf": {
+        "section_number": "CG-MMC PL 02-25",
+        "section_title": "CG-MMC Policy Letter 02-25 (2025) — current policy letter",
+    },
+    # STCW changes:
+    "010117_stcw_changes_notice.pdf": {
+        "section_number": "NMC STCW Changes Notice 2017",
+        "section_title": "STCW Changes Notice (January 2017) — Manila Amendments implementation effects",
+    },
+    "additional_guidance_ai_de_qa_02oct2020.pdf": {
+        "section_number": "NMC AI/DE QA Guidance 2020",
+        "section_title": "Additional Guidance on Approved Education / Designated Examiner Qualified Assessor (October 2020)",
+    },
+    # Drug test / TWIC:
+    "msa_01-20_potential_for_positive_drug_test_result_from_use_of_hemp_plant_products.pdf": {
+        "section_number": "MSA 01-20 Hemp Drug Test",
+        "section_title": "MSA 01-20 — Potential for Positive Drug Test Result from Hemp Plant Products (CBD, THC, mariner drug screening)",
+    },
+    "important_info_about_twic_enrollment_111318.pdf": {
+        "section_number": "NMC TWIC Enrollment Info",
+        "section_title": "Important Information About TWIC Enrollment for Mariner Credentials",
+    },
+    # Towing / tankerman (Subchapter M-adjacent):
+    "tankerman_on_tow_application_notice.pdf": {
+        "section_number": "NMC Tankerman on Tow Application",
+        "section_title": "Tankerman-PIC on Towing Vessels — Application Notice (endorsement requirements)",
+    },
+    "tankerman_on_tow_guidance_notice.pdf": {
+        "section_number": "NMC Tankerman on Tow Guidance",
+        "section_title": "Tankerman-PIC on Towing Vessels — Guidance Notice (sea service, training)",
+    },
+    "towing_implementation_notice.pdf": {
+        "section_number": "NMC Towing Implementation Notice",
+        "section_title": "Subchapter M Towing Vessel Implementation Notice — credentialing implications",
+    },
+    # Exam process:
+    "calculator_policy_for_credential_exams_120324.pdf": {
+        "section_number": "NMC Calculator Policy 2024",
+        "section_title": "Calculator Policy for Credential Exams (December 2024) — allowed devices",
+    },
+    "rules_of_exam_room.pdf": {
+        "section_number": "NMC Exam Room Rules",
+        "section_title": "Rules of the Exam Room — credential examination procedures",
+    },
+    "email_renewal_examinations_042220.pdf": {
+        "section_number": "NMC Email Renewal Exams 2020",
+        "section_title": "Email Delivery of Renewal Examinations (April 2020) — COVID-era process",
+    },
+    "radar_renewal_rule_and_policy_060719.pdf": {
+        "section_number": "NMC Radar Renewal Policy",
+        "section_title": "Radar Renewal Rule and Policy — radar observer endorsement renewal",
+    },
+    "retest_policy.pdf": {
+        "section_number": "NMC Retest Policy",
+        "section_title": "NMC Retest Policy for Failed Credential Exams",
+    },
+    # Latest 2026 corrections + admin:
+    "lapse_in_appropriations_and_government_shutdown_update_3_corrected_042226.pdf": {
+        "section_number": "NMC Announcement 2026-04-22 (Corrected)",
+        "section_title": "Lapse in Appropriations / Govt Shutdown Update #3 Corrected (April 22, 2026) — credential extensions through June 30, STCW dispensations through August 31",
+    },
+    "asap_restored_032426.pdf": {
+        "section_number": "NMC Announcement 2026-03-24",
+        "section_title": "ASAP Portal Restored Notice (March 24, 2026) — service restoration after temporary outage",
+    },
+    "administrative_actions_091625.pdf": {
+        "section_number": "NMC Administrative Actions 2025-09-16",
+        "section_title": "Administrative Actions Notice (September 2025) — credential suspension / revocation procedures",
+    },
+    "new_app_status_credential_verification_tools_072425.pdf": {
+        "section_number": "NMC New App Status Tools 2025-07-24",
+        "section_title": "New Application Status and Credential Verification Tools (July 2025) — public lookup tools",
     },
     # ── Checklists & form guides ──────────────────────────────────────────
     "application_acceptance_checklist.pdf": {
