@@ -1,10 +1,13 @@
 """
-GET /conversations                       — list current user's conversations (newest first, limit 50)
-GET /conversations/search?q=<term>       — search across the user's message content
-GET /conversations/{id}                  — single-conversation metadata (vessel_id, workspace_id, title)
-GET /conversations/{id}/messages         — full message thread with citations resolved
-GET /conversations/{id}/export           — single conversation export (JSON, with citations)
-GET /conversations/export-all            — bulk export of last 100 conversations
+GET  /conversations                      — list current user's conversations (newest first, limit 50)
+                                           ?include_archived=true to include soft-archived rows
+GET  /conversations/search?q=<term>      — search across the user's message content
+GET  /conversations/{id}                 — single-conversation metadata (vessel_id, workspace_id, title)
+GET  /conversations/{id}/messages        — full message thread with citations resolved
+POST /conversations/{id}/archive         — soft-archive a conversation (D6.80)
+POST /conversations/{id}/unarchive       — restore a soft-archived conversation
+GET  /conversations/{id}/export          — single conversation export (JSON, with citations)
+GET  /conversations/export-all           — bulk export of last 100 conversations
 """
 
 import uuid
@@ -33,6 +36,11 @@ class ConversationSummary(BaseModel):
     # the user clicks a chat tied to "MV TENNESSEE" and the app keeps
     # whatever vessel was previously active — confusing context drift.
     vessel_id: str | None
+    # Sprint D6.80 — soft archive. ISO timestamp when the user archived
+    # this conversation, or null for active. Default list filters out
+    # archived; ?include_archived=true returns all and lets the UI
+    # render an "Archived" section for restore.
+    archived_at: str | None
 
 
 class ConversationMetadata(BaseModel):
@@ -82,26 +90,33 @@ async def list_conversations(
     user: Annotated[CurrentUser, Depends(get_current_user)],
     pool=Depends(get_pool),
     workspace_id: Annotated[uuid.UUID | None, Query(description="Filter to a workspace context. Omit for personal chat.")] = None,
+    include_archived: Annotated[bool, Query(description="Include archived conversations. Default false (active only).")] = False,
 ) -> list[ConversationSummary]:
     """List conversations for the current user.
 
-    Default (no workspace_id query param): returns the user's PERSONAL
-    conversations only. Behavior identical to pre-D6.49.
+    Default (no workspace_id query param, include_archived=false):
+    returns the user's PERSONAL active conversations only.
 
     With ?workspace_id=<id>: returns conversations bound to that
     workspace. Caller must be a member of the workspace, else 403.
-    All workspace members see all of the workspace's conversations.
+
+    With ?include_archived=true: also returns soft-archived conversations
+    (D6.80). The default false keeps the /history list quiet by hiding
+    threads the user has put away. Archived rows still match analytics,
+    hedge classifier, and citation oracle queries — the column is purely
+    a UI scope marker.
     """
     user_uuid = uuid.UUID(user.user_id)
+    archive_clause = "" if include_archived else " AND c.archived_at IS NULL"
 
     if workspace_id is None:
-        # PERSONAL CONTEXT — bit-identical to pre-D6.49 query path.
-        # Includes only conversations where workspace_id IS NULL so a
-        # workspace member's workspace conversations don't bleed into
-        # their personal list.
+        # PERSONAL CONTEXT — same query path as pre-D6.49 plus an
+        # archived_at filter (default-active). Includes only conversations
+        # where workspace_id IS NULL so a workspace member's workspace
+        # conversations don't bleed into their personal list.
         async with pool.acquire() as conn:
             rows = await conn.fetch(
-                """
+                f"""
                 SELECT
                     c.id,
                     COALESCE(
@@ -115,10 +130,11 @@ async def list_conversations(
                     ) AS title,
                     c.updated_at,
                     c.vessel_id,
+                    c.archived_at,
                     v.name AS vessel_name
                 FROM conversations c
                 LEFT JOIN vessels v ON v.id = c.vessel_id
-                WHERE c.user_id = $1 AND c.workspace_id IS NULL
+                WHERE c.user_id = $1 AND c.workspace_id IS NULL{archive_clause}
                 ORDER BY c.updated_at DESC
                 LIMIT 50
                 """,
@@ -139,7 +155,7 @@ async def list_conversations(
                     detail="You are not a member of that workspace.",
                 )
             rows = await conn.fetch(
-                """
+                f"""
                 SELECT
                     c.id,
                     COALESCE(
@@ -153,10 +169,11 @@ async def list_conversations(
                     ) AS title,
                     c.updated_at,
                     c.vessel_id,
+                    c.archived_at,
                     v.name AS vessel_name
                 FROM conversations c
                 LEFT JOIN vessels v ON v.id = c.vessel_id
-                WHERE c.workspace_id = $1
+                WHERE c.workspace_id = $1{archive_clause}
                 ORDER BY c.updated_at DESC
                 LIMIT 50
                 """,
@@ -170,6 +187,7 @@ async def list_conversations(
             updated_at=r["updated_at"].isoformat(),
             vessel_id=str(r["vessel_id"]) if r["vessel_id"] else None,
             vessel_name=r["vessel_name"],
+            archived_at=r["archived_at"].isoformat() if r["archived_at"] else None,
         )
         for r in rows
     ]
@@ -562,3 +580,82 @@ async def export_conversation(
         "updated_at": row["updated_at"].isoformat(),
         "messages": msgs_by_conv.get(row["id"], []),
     }
+
+
+
+@router.post('/{conversation_id}/archive', status_code=status.HTTP_204_NO_CONTENT)
+async def archive_conversation(
+    conversation_id: Annotated[uuid.UUID, Path()],
+    user: Annotated[CurrentUser, Depends(get_current_user)],
+    pool=Depends(get_pool),
+) -> None:
+    """Soft-archive a conversation. Sets archived_at = now(); the row stays
+    in the DB and continues feeding analytics, hedge classifier, citation
+    oracle, etc. The default /conversations list filters it out so the
+    user's /history view stays focused on active threads.
+
+    Sprint D6.80 — soft archive UX. No hard delete by design: we want all
+    data preserved for ongoing model + retrieval improvements, and
+    'archive' is a clearer contract with the user than 'delete' (which
+    creates an expectation of irrecoverable removal).
+
+    Idempotent: archiving an already-archived conversation is a no-op
+    (no error, no timestamp change). Same access checks as
+    /messages — owner-match for personal, member-match for workspace.
+    """
+    user_uuid = uuid.UUID(user.user_id)
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            'SELECT user_id, workspace_id, archived_at FROM conversations WHERE id = $1',
+            conversation_id,
+        )
+        if not row:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Conversation not found')
+        if row['workspace_id'] is None:
+            if row['user_id'] != user_uuid:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Conversation not found')
+        else:
+            role = await conn.fetchval(
+                'SELECT role FROM workspace_members WHERE workspace_id = $1 AND user_id = $2',
+                row['workspace_id'], user_uuid,
+            )
+            if role is None:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Conversation not found')
+        if row['archived_at'] is None:
+            await conn.execute(
+                'UPDATE conversations SET archived_at = NOW() WHERE id = $1',
+                conversation_id,
+            )
+
+
+@router.post('/{conversation_id}/unarchive', status_code=status.HTTP_204_NO_CONTENT)
+async def unarchive_conversation(
+    conversation_id: Annotated[uuid.UUID, Path()],
+    user: Annotated[CurrentUser, Depends(get_current_user)],
+    pool=Depends(get_pool),
+) -> None:
+    """Restore a soft-archived conversation back to active state.
+    Idempotent: unarchiving an already-active conversation is a no-op.
+    Same access checks as the archive endpoint."""
+    user_uuid = uuid.UUID(user.user_id)
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            'SELECT user_id, workspace_id FROM conversations WHERE id = $1',
+            conversation_id,
+        )
+        if not row:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Conversation not found')
+        if row['workspace_id'] is None:
+            if row['user_id'] != user_uuid:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Conversation not found')
+        else:
+            role = await conn.fetchval(
+                'SELECT role FROM workspace_members WHERE workspace_id = $1 AND user_id = $2',
+                row['workspace_id'], user_uuid,
+            )
+            if role is None:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Conversation not found')
+        await conn.execute(
+            'UPDATE conversations SET archived_at = NULL WHERE id = $1',
+            conversation_id,
+        )

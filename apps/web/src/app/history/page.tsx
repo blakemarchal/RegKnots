@@ -24,6 +24,9 @@ interface ConversationSummary {
   // a user clicks a chat tied to vessel A but the selector still shows
   // whatever was active before.
   vessel_id: string | null
+  // Sprint D6.80 — soft archive timestamp. Null = active. Default list
+  // filters archived rows out; "Show archived" toggle reveals them.
+  archived_at: string | null
 }
 
 // Sprint D6.3c — discreet history search. Returned by /conversations/search
@@ -69,7 +72,7 @@ function SkeletonCard() {
   )
 }
 
-// ── Download icon ──────────────────────────────────────────────────────────────
+// ── Icons ──────────────────────────────────────────────────────────────────────
 
 function DownloadIcon({ className = '' }: { className?: string }) {
   return (
@@ -91,6 +94,49 @@ function DownloadIcon({ className = '' }: { className?: string }) {
   )
 }
 
+// Sprint D6.80 — archive icon (filing-cabinet box). Used to soft-archive
+// a conversation (hide from default /history) without losing the data.
+function ArchiveIcon({ className = '' }: { className?: string }) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 20 20"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.75"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden="true"
+    >
+      <rect x="3" y="4" width="14" height="3" rx="0.5" />
+      <path d="M4 7v8a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V7" />
+      <path d="M8 11h4" />
+    </svg>
+  )
+}
+
+// Restore icon — counterpart to archive. Used in the archived list to
+// move a conversation back to active.
+function RestoreIcon({ className = '' }: { className?: string }) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 20 20"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.75"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden="true"
+    >
+      <path d="M3 10a7 7 0 1 1 2 4.95" />
+      <path d="M3 16v-4h4" />
+    </svg>
+  )
+}
+
 // ── Vessel group ───────────────────────────────────────────────────────────────
 
 interface VesselGroup {
@@ -105,6 +151,9 @@ function VesselGroupSection({
   onOpen,
   onExport,
   exportingId,
+  onArchive,
+  onUnarchive,
+  archivingId,
 }: {
   group: VesselGroup
   expanded: boolean
@@ -112,6 +161,11 @@ function VesselGroupSection({
   onOpen: (id: string) => void
   onExport: (id: string, title: string) => void
   exportingId: string | null
+  // Sprint D6.80 — archive/restore action handlers + in-flight tracker
+  // so we can dim the row and prevent double-clicks.
+  onArchive: (id: string) => void
+  onUnarchive: (id: string) => void
+  archivingId: string | null
 }) {
   return (
     <div>
@@ -134,40 +188,75 @@ function VesselGroupSection({
 
       {expanded && (
         <div className="flex flex-col gap-1.5 ml-1 mb-3">
-          {group.conversations.map(c => (
+          {group.conversations.map(c => {
+            const isArchived = c.archived_at !== null
+            const isPending = archivingId === c.id
+            return (
             <div
               key={c.id}
-              className="relative bg-[#111827] border-l-2 border-[#2dd4bf]/30
-                hover:border-[#2dd4bf] hover:bg-[#111827]/80
-                rounded-r-xl transition-all duration-150"
+              className={`relative bg-[#111827] border-l-2
+                hover:bg-[#111827]/80 rounded-r-xl transition-all duration-150
+                ${isArchived
+                  ? 'border-white/10 opacity-70 hover:opacity-100'
+                  : 'border-[#2dd4bf]/30 hover:border-[#2dd4bf]'}
+                ${isPending ? 'pointer-events-none opacity-50' : ''}`}
             >
               <button
                 onClick={() => onOpen(c.id)}
-                className="w-full text-left px-4 py-3 pr-11"
+                className="w-full text-left px-4 py-3 pr-20"
               >
                 <p className="font-mono text-sm text-[#f0ece4] truncate leading-snug">
                   {c.title}
                 </p>
                 <p className="font-mono text-xs text-[#6b7594] mt-1">
                   {formatDate(c.updated_at)}
+                  {isArchived && <span className="ml-2 text-[10px] text-amber-400/70 uppercase tracking-wider">Archived</span>}
                 </p>
               </button>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation()
-                  onExport(c.id, c.title)
-                }}
-                disabled={exportingId === c.id}
-                aria-label="Export conversation"
-                title="Export conversation"
-                className="absolute top-2 right-2 p-1.5 rounded-md
-                  text-[#6b7594] hover:text-[#2dd4bf] hover:bg-[#2dd4bf]/10
-                  disabled:opacity-40 transition-colors duration-150"
-              >
-                <DownloadIcon className="w-4 h-4" />
-              </button>
+              <div className="absolute top-2 right-2 flex items-center gap-0.5">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onExport(c.id, c.title)
+                  }}
+                  disabled={exportingId === c.id}
+                  aria-label="Export conversation"
+                  title="Export conversation"
+                  className="p-1.5 rounded-md
+                    text-[#6b7594] hover:text-[#2dd4bf] hover:bg-[#2dd4bf]/10
+                    disabled:opacity-40 transition-colors duration-150"
+                >
+                  <DownloadIcon className="w-4 h-4" />
+                </button>
+                {isArchived ? (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); onUnarchive(c.id) }}
+                    disabled={isPending}
+                    aria-label="Restore conversation"
+                    title="Restore conversation"
+                    className="p-1.5 rounded-md
+                      text-[#6b7594] hover:text-[#2dd4bf] hover:bg-[#2dd4bf]/10
+                      disabled:opacity-40 transition-colors duration-150"
+                  >
+                    <RestoreIcon className="w-4 h-4" />
+                  </button>
+                ) : (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); onArchive(c.id) }}
+                    disabled={isPending}
+                    aria-label="Archive conversation"
+                    title="Archive conversation"
+                    className="p-1.5 rounded-md
+                      text-[#6b7594] hover:text-amber-400 hover:bg-amber-400/10
+                      disabled:opacity-40 transition-colors duration-150"
+                  >
+                    <ArchiveIcon className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
             </div>
-          ))}
+            )
+          })}
         </div>
       )}
     </div>
@@ -193,6 +282,12 @@ function HistoryContent() {
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState<ConversationSearchResult[] | null>(null)
   const [searching, setSearching] = useState(false)
+  // Sprint D6.80 — soft archive UX state. Default hide; toggle reveals
+  // archived rows. archivingId tracks an in-flight archive/restore so
+  // we can dim the row while the API call is pending and keep the
+  // user from double-clicking.
+  const [showArchived, setShowArchived] = useState(false)
+  const [archivingId, setArchivingId] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -201,11 +296,13 @@ function HistoryContent() {
     // history page is opened with ?workspace=<uuid>, list workspace
     // conversations. Without the param, list personal conversations
     // (legacy behavior, identical for non-workspace users).
+    // Sprint D6.80 — also pass include_archived flag from the toggle.
     const params = new URLSearchParams(window.location.search)
     const wsId = params.get('workspace')
-    const url = wsId
-      ? `/conversations?workspace_id=${encodeURIComponent(wsId)}`
-      : '/conversations'
+    const qs = new URLSearchParams()
+    if (wsId) qs.set('workspace_id', wsId)
+    if (showArchived) qs.set('include_archived', 'true')
+    const url = qs.toString() ? `/conversations?${qs.toString()}` : '/conversations'
 
     apiRequest<ConversationSummary[]>(url)
       .then(data => {
@@ -223,7 +320,7 @@ function HistoryContent() {
       })
 
     return () => { cancelled = true }
-  }, [])
+  }, [showArchived])
 
   // Debounced search effect — fires 300ms after the user stops typing.
   // Trims and requires ≥2 chars to avoid pinging the API on every keystroke.
@@ -280,6 +377,42 @@ function HistoryContent() {
       ? `/?conversation_id=${id}&workspace=${wsId}`
       : `/?conversation_id=${id}`
     router.push(target)
+  }
+
+  // Sprint D6.80 — soft archive a conversation. Optimistic-local update
+  // so the row disappears immediately when not in show-archived mode;
+  // fallback re-fetch if the server call fails.
+  async function archiveConversation(id: string) {
+    if (archivingId) return
+    setArchivingId(id)
+    try {
+      await apiRequest(`/conversations/${id}/archive`, { method: 'POST' })
+      // Optimistic update — flip the row's archived_at locally.
+      setConversations(prev =>
+        prev.map(c =>
+          c.id === id ? { ...c, archived_at: new Date().toISOString() } : c,
+        ).filter(c => showArchived || c.archived_at === null),
+      )
+    } catch {
+      // Silent on failure — the next nav refetch will reconcile.
+    } finally {
+      setArchivingId(null)
+    }
+  }
+
+  async function unarchiveConversation(id: string) {
+    if (archivingId) return
+    setArchivingId(id)
+    try {
+      await apiRequest(`/conversations/${id}/unarchive`, { method: 'POST' })
+      setConversations(prev =>
+        prev.map(c => (c.id === id ? { ...c, archived_at: null } : c)),
+      )
+    } catch {
+      // Silent on failure — see archiveConversation.
+    } finally {
+      setArchivingId(null)
+    }
   }
 
   async function exportConversation(id: string, title: string) {
@@ -453,6 +586,24 @@ function HistoryContent() {
                   General
                 </button>
               )}
+              {/* Sprint D6.80 — show-archived toggle. Lives at the
+                  rightmost end of the filter bar so the default filter
+                  affordances stay where users expect them. Visually
+                  distinct (amber) from the vessel filter chips so it
+                  reads as a different axis of filtering, not another
+                  vessel. */}
+              <button
+                onClick={() => setShowArchived(s => !s)}
+                aria-pressed={showArchived}
+                className={`ml-auto flex-shrink-0 flex items-center gap-1.5 font-mono text-xs px-3 py-1.5 rounded-lg border transition-colors
+                  ${showArchived
+                    ? 'bg-amber-400/10 border-amber-400/40 text-amber-400'
+                    : 'border-white/10 text-[#6b7594] hover:text-[#f0ece4] hover:border-white/20'
+                  }`}
+              >
+                <ArchiveIcon className="w-3.5 h-3.5" />
+                {showArchived ? 'Hide archived' : 'Show archived'}
+              </button>
             </div>
           )}
 
@@ -544,23 +695,32 @@ function HistoryContent() {
                   onOpen={openConversation}
                   onExport={exportConversation}
                   exportingId={exportingId}
+                  onArchive={archiveConversation}
+                  onUnarchive={unarchiveConversation}
+                  archivingId={archivingId}
                 />
               ))}
             </div>
           )}
 
           {/* Flat list when filtering by vessel — hidden during search */}
-          {!loading && searchResults === null && filter !== 'all' && filtered.map(c => (
+          {!loading && searchResults === null && filter !== 'all' && filtered.map(c => {
+            const isArchived = c.archived_at !== null
+            const isPending = archivingId === c.id
+            return (
             <div
               key={c.id}
-              className="relative bg-[#111827] border-l-2 border-[#2dd4bf]/30
-                hover:border-[#2dd4bf] hover:bg-[#111827]/80
-                rounded-r-xl transition-all duration-150
-                animate-[fadeSlideIn_0.2s_ease-out]"
+              className={`relative bg-[#111827] border-l-2
+                hover:bg-[#111827]/80 rounded-r-xl transition-all duration-150
+                animate-[fadeSlideIn_0.2s_ease-out]
+                ${isArchived
+                  ? 'border-white/10 opacity-70 hover:opacity-100'
+                  : 'border-[#2dd4bf]/30 hover:border-[#2dd4bf]'}
+                ${isPending ? 'pointer-events-none opacity-50' : ''}`}
             >
               <button
                 onClick={() => openConversation(c.id)}
-                className="w-full text-left px-4 py-3.5 pr-11"
+                className="w-full text-left px-4 py-3.5 pr-20"
               >
                 <p className="font-mono text-sm text-[#f0ece4] truncate leading-snug">
                   {c.title}
@@ -570,24 +730,50 @@ function HistoryContent() {
                     ? <><span className="text-[#2dd4bf]">{c.vessel_name}</span> · {formatDate(c.updated_at)}</>
                     : formatDate(c.updated_at)
                   }
+                  {isArchived && <span className="ml-2 text-[10px] text-amber-400/70 uppercase tracking-wider">Archived</span>}
                 </p>
               </button>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation()
-                  exportConversation(c.id, c.title)
-                }}
-                disabled={exportingId === c.id}
-                aria-label="Export conversation"
-                title="Export conversation"
-                className="absolute top-2 right-2 p-1.5 rounded-md
-                  text-[#6b7594] hover:text-[#2dd4bf] hover:bg-[#2dd4bf]/10
-                  disabled:opacity-40 transition-colors duration-150"
-              >
-                <DownloadIcon className="w-4 h-4" />
-              </button>
+              <div className="absolute top-2 right-2 flex items-center gap-0.5">
+                <button
+                  onClick={(e) => { e.stopPropagation(); exportConversation(c.id, c.title) }}
+                  disabled={exportingId === c.id}
+                  aria-label="Export conversation"
+                  title="Export conversation"
+                  className="p-1.5 rounded-md
+                    text-[#6b7594] hover:text-[#2dd4bf] hover:bg-[#2dd4bf]/10
+                    disabled:opacity-40 transition-colors duration-150"
+                >
+                  <DownloadIcon className="w-4 h-4" />
+                </button>
+                {isArchived ? (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); unarchiveConversation(c.id) }}
+                    disabled={isPending}
+                    aria-label="Restore conversation"
+                    title="Restore conversation"
+                    className="p-1.5 rounded-md
+                      text-[#6b7594] hover:text-[#2dd4bf] hover:bg-[#2dd4bf]/10
+                      disabled:opacity-40 transition-colors duration-150"
+                  >
+                    <RestoreIcon className="w-4 h-4" />
+                  </button>
+                ) : (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); archiveConversation(c.id) }}
+                    disabled={isPending}
+                    aria-label="Archive conversation"
+                    title="Archive conversation"
+                    className="p-1.5 rounded-md
+                      text-[#6b7594] hover:text-amber-400 hover:bg-amber-400/10
+                      disabled:opacity-40 transition-colors duration-150"
+                  >
+                    <ArchiveIcon className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
             </div>
-          ))}
+            )
+          })}
 
         </div>
       </main>

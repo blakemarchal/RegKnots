@@ -87,26 +87,39 @@ export function EmptyState({ onPrompt, isNewConversation, vessel = null }: Props
     : (tailored && vessel ? `Tailored for ${vessel.name}` : null)
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-full px-6 py-12 text-center select-none">
-      {/* Compass rose */}
-      <div className="relative mb-8">
-        <CompassRose className="w-28 h-28 text-teal opacity-20" />
+    // Sprint D6.80 — mobile compaction. The header (compass + wordmark
+    // + tagline + description) was eating ~340px on mobile, leaving the
+    // tailored question cards squeezed at the fold. Trims the mobile
+    // version of every header element while keeping the desktop layout
+    // verbose (Karynn called out desktop has the room for the full
+    // flag-state list; mobile does not).
+    <div className="flex flex-col items-center justify-center min-h-full px-6 py-6 md:py-12 text-center select-none">
+      {/* Compass rose — smaller on mobile, full size on desktop */}
+      <div className="relative mb-4 md:mb-8">
+        <CompassRose className="w-20 h-20 md:w-28 md:h-28 text-teal opacity-20" />
         <div className="absolute inset-0 flex items-center justify-center">
-          <div className="w-6 h-6 rounded-full bg-teal/10 border border-teal/30" />
+          <div className="w-4 h-4 md:w-6 md:h-6 rounded-full bg-teal/10 border border-teal/30" />
         </div>
       </div>
 
-      {/* Logo wordmark */}
-      <h1 className="font-display text-5xl font-bold tracking-wide text-[#f0ece4] mb-1">
+      {/* Logo wordmark — text-4xl on mobile, text-5xl on desktop */}
+      <h1 className="font-display text-4xl md:text-5xl font-bold tracking-wide text-[#f0ece4] mb-1">
         RegKnot
       </h1>
       <p className="text-[11px] text-[#6b7594] tracking-[0.25em] uppercase mb-2 font-semibold">
         Maritime Compliance Co-Pilot
       </p>
-      <p className="text-sm text-[#6b7594] max-w-xs mb-10 leading-relaxed">
-        Ask anything about maritime regulations. Cited answers from the IMO conventions,
-        U.S. CFR, and flag-state regulators (UK, Australia, Singapore, Hong Kong,
-        Norway, Liberia, Marshall Islands, Bahamas).
+      {/* Description: brief on mobile (one line, ~10 words),
+          verbose on desktop (full flag-state list as before). */}
+      <p className="text-sm text-[#6b7594] max-w-xs md:max-w-md mb-6 md:mb-10 leading-relaxed">
+        <span className="md:hidden">
+          Ask anything about maritime regulations. Cited answers from the IMO conventions, U.S. CFR, and major flag states.
+        </span>
+        <span className="hidden md:inline">
+          Ask anything about maritime regulations. Cited answers from the IMO conventions,
+          U.S. CFR, and flag-state regulators (UK, Australia, Singapore, Hong Kong,
+          Norway, Liberia, Marshall Islands, Bahamas).
+        </span>
       </p>
 
       {/* Suggested prompts — only on a fresh new conversation */}
