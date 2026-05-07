@@ -31,7 +31,27 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 _COOKIE_NAME = "refresh_token"
 _COOKIE_PATH = "/"
-_VALID_ROLES = {"captain", "mate", "engineer", "chief_engineer", "other"}
+# Sprint D6.81 — role unification. The legacy values (captain / mate /
+# engineer / chief_engineer / other) were maritime job titles, which now
+# live per-vessel on `vessels.crew_role`. New signups submit persona
+# values (mariner_shipboard / cadet_student / etc.) — the same values
+# the Account page's "How we scope answers" dropdown was already using.
+# Both sets are accepted here so existing-user logins / profile updates
+# don't break, and new registrations get the correct persona-style value.
+# A future migration can map legacy maritime values to persona values
+# (captain → mariner_shipboard, etc.) and shrink this set; not urgent.
+_VALID_ROLES = {
+    # Legacy maritime job titles (kept for backward compat with existing rows)
+    "captain", "mate", "engineer", "chief_engineer", "other",
+    # Sprint D6.81 — unified persona values, the single source of truth
+    # going forward. Mirrors PERSONA_OPTIONS in
+    # apps/web/src/lib/personaOptions.ts.
+    "mariner_shipboard",
+    "cadet_student",
+    "teacher_instructor",
+    "shore_side_compliance",
+    "legal_consultant",
+}
 
 
 def _set_refresh_cookie(response: Response, raw_token: str) -> None:

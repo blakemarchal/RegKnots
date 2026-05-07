@@ -8,13 +8,12 @@ import { CompassRose } from '@/components/CompassRose'
 import { diagnoseNetworkError, type NetworkDiagnosis } from '@/lib/networkError'
 import { NetworkErrorCard } from '@/components/NetworkErrorCard'
 
-const ROLES = [
-  { value: 'captain', label: 'Captain / Master' },
-  { value: 'mate', label: 'Chief Mate / Officer' },
-  { value: 'engineer', label: 'Engineer' },
-  { value: 'chief_engineer', label: 'Chief Engineer' },
-  { value: 'other', label: 'Other / Shore-side' },
-]
+// Sprint D6.81 — registration now uses the unified persona list as the
+// single source of truth for "who you are" (was: a separate maritime
+// job-title list that didn't include teacher / cadet / lawyer). The
+// maritime job title moved to vessel.crew_role per vessel — see
+// PERSONA_OPTIONS doc for the full rationale.
+import { PERSONA_OPTIONS } from '@/lib/personaOptions'
 
 export default function RegisterPage() {
   // Wrap in Suspense so useSearchParams() doesn't fail during static
@@ -47,7 +46,12 @@ function RegisterForm() {
   // enforce min length via the input's minLength attr on both fields
   // so a stray short value can't sneak through one of them.
   const [passwordConfirm, setPasswordConfirm] = useState('')
-  const [role, setRole] = useState('other')
+  // Sprint D6.81 — default to mariner_shipboard (the most common signup
+  // bucket) instead of 'other'. Rendered values come from the unified
+  // PERSONA_OPTIONS list. The variable is still called `role` because
+  // that's the wire-level field name on /auth/register; the value is
+  // a persona-style string.
+  const [role, setRole] = useState('mariner_shipboard')
   const [error, setError] = useState('')
   const [networkDiag, setNetworkDiag] = useState<NetworkDiagnosis | null>(null)
   const [loading, setLoading] = useState(false)
@@ -240,7 +244,7 @@ function RegisterForm() {
 
           <div className="flex flex-col gap-1">
             <label htmlFor="role" className="text-xs text-[--color-muted] uppercase tracking-wider font-mono">
-              Role
+              Who you are
             </label>
             <select
               id="role"
@@ -249,12 +253,22 @@ function RegisterForm() {
               className="font-mono border border-white/10 rounded-lg px-3 py-2 text-sm outline-none focus:border-[--color-teal] transition-colors"
               style={{ backgroundColor: '#111827', color: '#f0ece4' }}
             >
-              {ROLES.map((r) => (
+              {PERSONA_OPTIONS.map((r) => (
                 <option key={r.value} value={r.value} style={{ backgroundColor: '#111827', color: '#f0ece4' }}>
                   {r.label}
                 </option>
               ))}
             </select>
+            {/* Hint text under the field — helps cadets / teachers find
+                the right bucket without having to dig into account. */}
+            {(() => {
+              const hint = PERSONA_OPTIONS.find((p) => p.value === role)?.hint
+              return hint ? (
+                <p className="font-mono text-[10px] text-[#6b7594] mt-0.5 leading-snug">
+                  {hint}
+                </p>
+              ) : null
+            })()}
           </div>
 
           {networkDiag && (

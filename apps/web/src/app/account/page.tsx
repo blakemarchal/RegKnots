@@ -13,18 +13,12 @@ import {
   triggerDownload,
   type ExportAllResponse,
 } from '@/lib/export'
-
-const ROLE_OPTIONS = [
-  { value: 'captain', label: 'Captain / Master' },
-  { value: 'mate', label: 'Chief Mate / Officer' },
-  { value: 'engineer', label: 'Engineer' },
-  { value: 'chief_engineer', label: 'Chief Engineer' },
-  { value: 'other', label: 'Other / Shore-side' },
-]
-
-const ROLE_LABELS: Record<string, string> = Object.fromEntries(
-  ROLE_OPTIONS.map((r) => [r.value, r.label]),
-)
+// Sprint D6.81 — unified persona options. The legacy ROLE_OPTIONS list
+// (captain/mate/engineer) was removed from this page; the maritime job
+// title now lives per-vessel as vessel.crew_role. The persona dropdown
+// in the "How we scope answers" section is the single source of truth
+// for "who you are" at the user level.
+import { PERSONA_OPTIONS } from '@/lib/personaOptions'
 
 // Sprint D6.27 — translate the database `subscription_tier` value into
 // the user-facing tier name. Legacy 'pro' subscribers (early users from
@@ -330,23 +324,13 @@ function AccountContent() {
               />
             </div>
 
-            {/* Role */}
-            <div className="flex flex-col gap-1">
-              <label className="font-mono text-xs text-[#6b7594]">Role</label>
-              <select
-                value={role}
-                onChange={(e) => setRole(e.target.value)}
-                className="font-mono w-full border border-white/10 rounded-lg px-3 py-2 text-sm
-                  outline-none focus:border-[#2dd4bf] transition-colors"
-                style={{ backgroundColor: '#0d1225', color: '#f0ece4' }}
-              >
-                {ROLE_OPTIONS.map((r) => (
-                  <option key={r.value} value={r.value} style={{ backgroundColor: '#111827', color: '#f0ece4' }}>
-                    {r.label}
-                  </option>
-                ))}
-              </select>
-            </div>
+            {/* Sprint D6.81 — the standalone maritime job-title "Role"
+                selector is removed here. The single source of truth for
+                "who you are" is now the unified persona dropdown in the
+                "How we scope answers" section below. Maritime job title
+                lives per-vessel via vessel.crew_role (right scope —
+                you can be Captain on one ship and Mate on another over
+                your career). */}
 
             <div className="flex items-center gap-3">
               <button
@@ -374,7 +358,12 @@ function AccountContent() {
             </div>
 
             <div className="flex flex-col gap-1">
-              <label className="font-mono text-xs text-[#6b7594]">What&apos;s your role?</label>
+              {/* Sprint D6.81 — relabeled "What's your role?" → "Who you are"
+                  to remove the ambiguity with the per-vessel maritime job
+                  title (which used to share the same "Role" label and
+                  lived in the Profile section above). Single source of
+                  truth for user-level identity now lives here. */}
+              <label className="font-mono text-xs text-[#6b7594]">Who you are</label>
               <select
                 value={persona}
                 onChange={(e) => setPersona(e.target.value)}
@@ -383,13 +372,26 @@ function AccountContent() {
                 style={{ backgroundColor: '#0d1225', color: '#f0ece4' }}
               >
                 <option value="" style={{ backgroundColor: '#111827', color: '#f0ece4' }}>Not set</option>
-                <option value="mariner_shipboard" style={{ backgroundColor: '#111827', color: '#f0ece4' }}>Mariner / shipboard</option>
-                <option value="teacher_instructor" style={{ backgroundColor: '#111827', color: '#f0ece4' }}>Teacher / instructor</option>
-                <option value="shore_side_compliance" style={{ backgroundColor: '#111827', color: '#f0ece4' }}>Shore-side compliance</option>
-                <option value="legal_consultant" style={{ backgroundColor: '#111827', color: '#f0ece4' }}>Maritime attorney / consultant</option>
-                <option value="cadet_student" style={{ backgroundColor: '#111827', color: '#f0ece4' }}>Cadet / student</option>
-                <option value="other" style={{ backgroundColor: '#111827', color: '#f0ece4' }}>Other</option>
+                {PERSONA_OPTIONS.map((p) => (
+                  <option
+                    key={p.value}
+                    value={p.value}
+                    style={{ backgroundColor: '#111827', color: '#f0ece4' }}
+                  >
+                    {p.label}
+                  </option>
+                ))}
               </select>
+              {/* Hint under the field for whichever option is selected,
+                  mirroring the registration affordance. */}
+              {(() => {
+                const hint = PERSONA_OPTIONS.find((p) => p.value === persona)?.hint
+                return hint ? (
+                  <p className="font-mono text-[10px] text-[#6b7594] mt-0.5 leading-snug">
+                    {hint}
+                  </p>
+                ) : null
+              })()}
             </div>
 
             <div className="flex flex-col gap-1">
