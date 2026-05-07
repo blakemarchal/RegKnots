@@ -68,6 +68,15 @@ const MENU_SECTIONS: MenuSection[] = [
     ],
   },
   {
+    label: 'Study Tools',
+    items: [
+      // Sprint D6.83 \u2014 Study Tools (quiz + study guide generators).
+      // Available to all logged-in users; tier gate happens server-side
+      // (free tier sees an upsell on the page itself).
+      { icon: '\u2261', label: 'Quizzes & Guides', action: 'study', path: '/study' },
+    ],
+  },
+  {
     label: 'Help & Account',
     items: [
       // D6.63 \u2014 Reference removed: it was an offline-content stub
