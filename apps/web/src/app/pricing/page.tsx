@@ -34,26 +34,27 @@ function resolvePlanKey(tier: Tier, interval: Interval, referral: boolean): Plan
 
 const TIER_FEATURES: Record<Tier, { headline: string; perks: string[] }> = {
   mate: {
-    headline: 'For mariners with occasional compliance questions.',
+    headline: 'For mariners building their record and asking compliance questions.',
     perks: [
       '100 messages per month',
       'Full reg corpus (see below)',
-      '46 USC + WHO IHR (port health & seamen’s law)',
       'Vessel profile + chat history',
       'Credential vault with auto-OCR',
       'Renewal alerts (90 / 30 / 7 days)',
+      'AI Renewal Co-Pilot + Career Path',
+      'Vessel Analysis + Compliance Changelog',
       'Cited regulation answers, not summaries',
     ],
   },
   captain: {
     headline: 'For working mariners using RegKnot daily.',
     perks: [
-      'Unlimited messages',
       'Everything in Mate, plus:',
-      'Priority regulation update notifications',
-      'Audit-ready chat logs',
+      'Unlimited messages',
+      'PSC Co-Pilot + Audit Readiness',
       'USCG sea-service letter generator',
-      'PSC checklist builder',
+      'Audit-ready chat logs',
+      'Priority regulation update notifications',
     ],
   },
 }

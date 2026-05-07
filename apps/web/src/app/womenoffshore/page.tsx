@@ -37,10 +37,11 @@ const PRICING = {
     features: [
       '100 messages per month',
       'Full reg corpus (see below)',
-      '46 USC + WHO IHR (port health & seamen\u2019s law)',
       'Vessel profile + chat history',
       'Credential vault with auto-OCR',
       'Renewal alerts (90 / 30 / 7 days)',
+      'AI Renewal Co-Pilot + Career Path',
+      'Vessel Analysis + Compliance Changelog',
     ],
   },
   captain_promo: {
@@ -49,11 +50,9 @@ const PRICING = {
     sub: 'per month · billed monthly',
     badge: '25% off',
     features: [
-      'Unlimited messages',
       'Everything in Mate',
-      'AI Renewal Co-Pilot + Career Path',
-      'PSC Co-Pilot + Vessel Analysis',
-      'Compliance Changelog + Audit Readiness',
+      'Unlimited messages',
+      'PSC Co-Pilot + Audit Readiness',
       'USCG sea-service letter generator',
       'Audit-ready chat logs',
     ],
