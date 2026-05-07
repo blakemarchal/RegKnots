@@ -148,6 +148,13 @@ _PDF_SOURCE_CONFIG: dict[str, dict] = {
         "raw_dir": _DATA_RAW / "nmc",
         "adapter": "ingest.sources.nmc",
     },
+    # Sprint D6.83 — USCG exam-pool questions (q### files). Distinct
+    # source so chat retrieval ignores them (SOURCE_GROUPS excludes this
+    # source); only the Study Tools retrieval path reads from it.
+    "nmc_exam_bank": {
+        "raw_dir": _DATA_RAW / "nmc",
+        "adapter": "ingest.sources.nmc_exam_bank",
+    },
     "nvic": {
         "raw_dir": _DATA_RAW / "nvic",
         "adapter": "ingest.sources.nvic",
