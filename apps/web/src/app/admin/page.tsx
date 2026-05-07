@@ -224,6 +224,78 @@ function StatCard({ label, value, wide }: { label: string; value: string | numbe
   )
 }
 
+// Sprint D6.77 — replaces the previous flex-wrap inline-text dump with a
+// sorted grid that surfaces the largest sources first and collapses the
+// long tail. Karynn's UX request: quick-glance insight, not a dense
+// slab of text. Top-12 by chunk count visible by default; remaining
+// sources behind a single "Show all" toggle.
+function RegulationChunksCard({
+  total, bySource,
+}: { total: number; bySource: Record<string, number> }) {
+  const [expanded, setExpanded] = useState(false)
+  const sorted = useMemo(
+    () =>
+      Object.entries(bySource)
+        .sort((a, b) => b[1] - a[1]),
+    [bySource],
+  )
+  const visible = expanded ? sorted : sorted.slice(0, 12)
+  const hiddenCount = sorted.length - 12
+  const maxCount = sorted.length > 0 ? sorted[0][1] : 1
+
+  return (
+    <div className="bg-[#111827] rounded-xl border border-white/8 px-4 py-3">
+      <div className="flex items-baseline justify-between gap-3">
+        <div>
+          <p className="font-mono text-[10px] text-[#6b7594] uppercase tracking-wider">
+            Regulation Chunks
+          </p>
+          <p className="font-mono text-2xl font-bold text-[#2dd4bf] mt-1">
+            {total.toLocaleString()}
+            <span className="font-mono text-xs font-normal text-[#6b7594] ml-2">
+              across {sorted.length} sources
+            </span>
+          </p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-x-3 gap-y-1.5 mt-3">
+        {visible.map(([src, cnt]) => {
+          const widthPct = Math.max(4, Math.round((cnt / maxCount) * 100))
+          return (
+            <div key={src} className="min-w-0">
+              <div className="flex items-baseline justify-between gap-2">
+                <span className="font-mono text-[11px] text-[#2dd4bf]/85 truncate" title={src}>
+                  {src}
+                </span>
+                <span className="font-mono text-[11px] text-[#f0ece4]/70 tabular-nums flex-shrink-0">
+                  {cnt.toLocaleString()}
+                </span>
+              </div>
+              {/* Quick visual proportion — bar tracks how dominant this source is. */}
+              <div className="h-0.5 bg-white/5 rounded-full overflow-hidden mt-0.5">
+                <div
+                  className="h-full bg-[#2dd4bf]/40 rounded-full"
+                  style={{ width: `${widthPct}%` }}
+                />
+              </div>
+            </div>
+          )
+        })}
+      </div>
+
+      {hiddenCount > 0 && (
+        <button
+          onClick={() => setExpanded(e => !e)}
+          className="mt-3 font-mono text-[11px] text-[#2dd4bf] hover:underline"
+        >
+          {expanded ? `Show top 12 only` : `Show all ${sorted.length} sources (+${hiddenCount} more)`}
+        </button>
+      )}
+    </div>
+  )
+}
+
 // ── Date formatting ─────────────────────────────────────────────────────────────
 
 function fmtDate(iso: string | null): string {
@@ -850,7 +922,10 @@ function AdminContent() {
       } />
 
       <main className="flex-1 overflow-y-auto">
-        <div className="max-w-5xl mx-auto px-4 py-6">
+        {/* Sprint D6.77 — Karynn UX: admin page goes full-width on desktop
+            so analytics charts + counters land above the fold instead of
+            forced into a 1024px column. Mobile keeps comfortable margins. */}
+        <div className="w-full mx-auto px-4 md:px-6 py-6">
 
           {/* ── Internal filter toggle ────────────────────────────────── */}
           <div className="flex items-center justify-between mb-4">
@@ -865,7 +940,7 @@ function AdminContent() {
               </button>
               <span className="font-mono text-xs text-[#f0ece4]/80">Hide internal data</span>
               {excludeInternal && (
-                <span className="font-mono text-[9px] text-[#6b7594] bg-[#6b7594]/10
+                <span className="hidden sm:inline-flex font-mono text-[9px] text-[#6b7594] bg-[#6b7594]/10
                   border border-[#6b7594]/20 rounded px-1.5 py-0.5">
                   Filtering: Blake, Karynn, test accounts
                 </span>
@@ -1063,22 +1138,17 @@ function AdminContent() {
                 </div>
               )}
 
-              {/* ─────────── Row 5 — Knowledge base (kept) ─────────── */}
-              <div className="bg-[#111827] rounded-xl border border-white/8 px-4 py-3">
-                <p className="font-mono text-[10px] text-[#6b7594] uppercase tracking-wider">
-                  Regulation Chunks
-                </p>
-                <p className="font-mono text-2xl font-bold text-[#2dd4bf] mt-1">
-                  {stats.total_chunks.toLocaleString()}
-                </p>
-                <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2">
-                  {Object.entries(stats.chunks_by_source).map(([src, cnt]) => (
-                    <span key={src} className="font-mono text-xs text-[#f0ece4]/60">
-                      <span className="text-[#2dd4bf]/70">{src}</span>: {cnt.toLocaleString()}
-                    </span>
-                  ))}
-                </div>
-              </div>
+              {/* ─────────── Row 5 — Knowledge base ───────────
+                  Sprint D6.77 — Karynn UX: replaced the wall-of-text
+                  "source: count" inline list with a sorted grid + a
+                  collapse-all-below-top-12 control. Quicker glance: the
+                  dominant sources are the first row, and the long tail
+                  collapses by default so the dashboard doesn't drown
+                  in 40+ flag-state corpora. */}
+              <RegulationChunksCard
+                total={stats.total_chunks}
+                bySource={stats.chunks_by_source}
+              />
             </div>
           )}
 
@@ -1638,13 +1708,13 @@ function AdminContent() {
             <h2 className="font-display text-lg font-bold text-[#f0ece4] tracking-wide mb-3">Analytics</h2>
 
             {analyticsLoading ? (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                 {[1, 2, 3, 4].map(i => (
                   <div key={i} className="bg-[#111827] rounded-xl border border-white/8 h-[280px] animate-pulse" />
                 ))}
               </div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                 {/* Chart 1: Messages per day */}
                 <div className="bg-[#111827] rounded-xl border border-white/8 p-4">
                   <p className="font-mono text-[10px] text-[#6b7594] uppercase tracking-wider mb-3">Messages per Day (30d)</p>

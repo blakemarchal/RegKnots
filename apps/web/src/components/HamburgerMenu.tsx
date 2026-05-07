@@ -49,7 +49,7 @@ const MENU_SECTIONS: MenuSection[] = [
       // D6.49 \u2014 Wheelhouse / crew tier. Visible to all users; the
       // /workspaces page itself shows a friendly "not yet available"
       // message to non-internal accounts during the staged rollout.
-      { icon: '\u2693', label: 'Wheelhouse (Beta)', action: 'wheelhouse', path: '/workspaces' },
+      { icon: '\u2693', label: 'Wheelhouse', action: 'wheelhouse', path: '/workspaces' },
     ],
   },
   {

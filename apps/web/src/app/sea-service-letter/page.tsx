@@ -363,7 +363,7 @@ function SeaServiceLetterContent() {
       <AppHeader title="Sea Service Letter" />
 
       <main className="flex-1 overflow-y-auto px-4 py-6">
-        <div className="max-w-lg mx-auto flex flex-col gap-5">
+        <div className="max-w-lg md:max-w-3xl mx-auto flex flex-col gap-5">
 
           {/* Intro */}
           <section className="bg-[#111827] border border-white/8 rounded-xl p-5 flex flex-col gap-3">

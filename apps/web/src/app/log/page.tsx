@@ -134,7 +134,7 @@ function LogContent() {
       <AppHeader title="Compliance Log" />
 
       <main className="flex-1 overflow-y-auto px-4 py-6">
-        <div className="max-w-sm mx-auto flex flex-col gap-5">
+        <div className="max-w-sm md:max-w-3xl mx-auto flex flex-col gap-5">
 
           {/* New entry button */}
           {!showForm && (

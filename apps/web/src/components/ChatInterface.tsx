@@ -10,6 +10,7 @@ import type { BillingStatus } from '@/lib/auth'
 import { ChatThread } from './ChatThread'
 import { InputBar } from './InputBar'
 import { VesselPill } from './VesselPill'
+import { VerbosityDropdown } from './VerbosityDropdown'
 import { HamburgerMenu } from './HamburgerMenu'
 import { CitationSheet } from './CitationSheet'
 import { VesselSheet } from './VesselSheet'
@@ -976,35 +977,43 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
           </div>
         )}
 
-        <div className="flex items-center justify-between">
-        <VesselPill
-          vesselName={activeVessel?.name ?? null}
-          hasVessels={vessels.length > 0}
-          onClick={openVesselSheet}
-        />
+        {/* Sprint D6.77 — VesselPill + VerbosityDropdown + Log pill on a
+            single row. Wraps on narrow widths so each control still gets
+            its full width on mobile (Karynn's UX request: save real
+            estate, but allow mobile to wrap). The verbosity selector
+            collapsed from three above-textarea chips into a single
+            compact pill that opens a small menu — same row, less noise. */}
+        <div className="flex flex-wrap items-center justify-between gap-2 px-3 pt-2 pb-1">
+          <VesselPill
+            vesselName={activeVessel?.name ?? null}
+            hasVessels={vessels.length > 0}
+            onClick={openVesselSheet}
+          />
 
-          {/* Quick Log — compact, right-aligned next to vessel pill */}
-          <button
-            onClick={() => router.push('/log?quick=true')}
-            className="flex items-center gap-1 px-2.5 py-1 mr-3 rounded-full text-xs
-              border border-white/10 bg-white/5 hover:bg-[#2dd4bf]/10 hover:border-[#2dd4bf]/30
-              transition-colors duration-150"
-            aria-label="Quick Log"
-          >
-            <svg className="w-3 h-3 text-[#2dd4bf]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="9" y="1" width="6" height="14" rx="3" />
-              <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-            </svg>
-            <span className="font-mono text-[10px] font-bold text-[#2dd4bf]">Log</span>
-          </button>
+          <div className="flex items-center gap-2 ml-auto">
+            <VerbosityDropdown value={verbosity} onChange={setVerbosity} />
+
+            {/* Quick Log — compact, right-aligned next to vessel pill */}
+            <button
+              onClick={() => router.push('/log?quick=true')}
+              className="flex items-center gap-1 px-2.5 py-1 rounded-full text-xs
+                border border-white/10 bg-white/5 hover:bg-[#2dd4bf]/10 hover:border-[#2dd4bf]/30
+                transition-colors duration-150"
+              aria-label="Quick Log"
+            >
+              <svg className="w-3 h-3 text-[#2dd4bf]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="9" y="1" width="6" height="14" rx="3" />
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+              </svg>
+              <span className="font-mono text-[10px] font-bold text-[#2dd4bf]">Log</span>
+            </button>
+          </div>
         </div>
         <InputBar
           value={input}
           onChange={setInput}
           onSend={handleSend}
           loading={loading || restoring}
-          verbosity={verbosity}
-          onVerbosityChange={setVerbosity}
         />
         {rateLimitMsg && (
           <p className="px-4 py-2 font-mono text-xs text-amber-400 bg-amber-950/30 border-t border-amber-800/20">

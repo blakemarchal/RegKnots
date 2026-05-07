@@ -306,7 +306,7 @@ function AccountContent() {
 
       {/* Content */}
       <main className="flex-1 overflow-y-auto px-4 py-6">
-        <div className="max-w-sm mx-auto flex flex-col gap-5">
+        <div className="max-w-sm md:max-w-2xl mx-auto flex flex-col gap-5">
 
           {/* ── Profile section ──────────────────────────────────── */}
           <section className="bg-[#111827] border border-white/8 rounded-xl p-5 flex flex-col gap-4">

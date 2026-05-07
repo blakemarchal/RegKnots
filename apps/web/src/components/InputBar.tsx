@@ -3,11 +3,14 @@
 import { useRef, useEffect, type KeyboardEvent, type ChangeEvent } from 'react'
 import { useVoiceInput } from '@/lib/useVoiceInput'
 
-// Sprint D6.34 / D6.52 — verbosity chip selection.
-// Always one of the three concrete values. ChatInterface initializes
-// from the user's account preference and snaps back to it after each
-// successful send. The legacy `undefined` state was dropped (no
-// chip highlighted = poor UX).
+// Sprint D6.34 / D6.52 — verbosity selection type. Always one of the
+// three concrete values. ChatInterface initializes from the user's
+// account preference and snaps back to it after each successful send.
+//
+// Sprint D6.77 — moved the verbosity UI out of InputBar to a compact
+// dropdown next to the VesselPill / Log pill (see VerbosityDropdown).
+// The type is still exported here so the dropdown component can import
+// it; InputBar itself no longer renders verbosity chrome.
 export type VerbosityOverride = 'brief' | 'standard' | 'detailed'
 
 interface Props {
@@ -15,16 +18,10 @@ interface Props {
   onChange: (v: string) => void
   onSend: () => void
   loading: boolean
-  /** Verbosity setting surfaced as 3 chips above the textarea. Always
-   *  has one chip active; per-turn override snaps back to saved
-   *  preference after send (handled by parent ChatInterface). */
-  verbosity?: VerbosityOverride
-  onVerbosityChange?: (v: VerbosityOverride) => void
 }
 
 export function InputBar({
   value, onChange, onSend, loading,
-  verbosity, onVerbosityChange,
 }: Props) {
   const ref = useRef<HTMLTextAreaElement>(null)
 
@@ -51,40 +48,8 @@ export function InputBar({
 
   const canSend = !loading && value.trim().length > 0
 
-  // Sprint D6.34 / D6.52 — chip click. There is always one chip
-  // highlighted (initialized from the user's saved account preference).
-  // Clicking the same chip is a no-op; clicking another chip switches
-  // the active chip for THIS turn only — ChatInterface snaps it back
-  // to the saved preference after the message sends.
-  function pickChip(next: VerbosityOverride) {
-    if (!onVerbosityChange || verbosity === next) return
-    onVerbosityChange(next)
-  }
-
   return (
     <div className="px-3 pb-3 pt-1">
-      {onVerbosityChange && (
-        <div className="flex items-center gap-1.5 mb-1.5 px-1">
-          <VerbosityChip
-            label="Brief"
-            active={verbosity === 'brief'}
-            onClick={() => pickChip('brief')}
-          />
-          <VerbosityChip
-            label="Standard"
-            active={verbosity === 'standard'}
-            onClick={() => pickChip('standard')}
-          />
-          <VerbosityChip
-            label="Deep dive"
-            active={verbosity === 'detailed'}
-            onClick={() => pickChip('detailed')}
-          />
-          {/* D6.52 — "clear" button removed. There's always one chip
-              active (the saved preference). To revert a per-turn
-              override, click the saved-preference chip directly. */}
-        </div>
-      )}
       <div className="flex items-end gap-2 px-3 py-2 rounded-2xl
         bg-[#0d1225] border border-white/10
         focus-within:border-teal/40 transition-colors duration-150">
@@ -154,23 +119,5 @@ export function InputBar({
         Navigation aid only — not legal advice
       </p>
     </div>
-  )
-}
-
-// Sprint D6.34 — small toggle chip for per-message verbosity override.
-function VerbosityChip({
-  label, active, onClick,
-}: { label: string; active: boolean; onClick: () => void }) {
-  return (
-    <button
-      onClick={onClick}
-      className={`font-mono text-[10px] px-2 py-0.5 rounded-full border transition-colors duration-150
-        ${active
-          ? 'border-teal/60 bg-teal/15 text-teal'
-          : 'border-white/10 text-[#6b7594] hover:text-[#f0ece4] hover:border-white/25'
-        }`}
-    >
-      {label}
-    </button>
   )
 }
