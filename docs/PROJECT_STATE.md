@@ -2,105 +2,24 @@
 
 **One-page operational snapshot for humans and fresh Claude Code sessions.**
 
-Last updated: 2026-04-20 (post-Sprint-C3)
+Last updated: 2026-05-07 (post D6.83 + Sprint B `/education`, post full-system audit 2026-05-08)
 
 ---
 
 ## TL;DR
 
-RegKnot is a maritime-compliance RAG at **https://regknots.com**. Production stack live and healthy. 15 ingested regulation sources, ~42K chunks. Retrieval passes a vessel-type × CFR-Subchapter filter after Sprint C2, hitting 100% A on an internal 28-question regression set. Awaiting real pilot-user data before further retrieval tuning.
+RegKnot is a maritime-compliance RAG at **https://regknots.com**. Production stack live and healthy. **77,111 chunks across 50 sources** with 100% embedding coverage. Retrieval pipeline now includes multi-query rewrite, Haiku reranker, citation oracle, source-diversified fetch, jurisdiction filter, vessel-profile boosts, synonym + intent expansion; hybrid BM25+dense built and dark-launched. **96.1% A-or-A−** on the latest 152-question regression eval. Marketing push imminent — see audit for the three pre-walk-away items.
 
 ## Live production
 
 - **App:** https://regknots.com
 - **API health:** https://regknots.com/api/health — `{"status":"healthy"}`
-- **VPS:** `root@68.183.130.3`
+- **VPS:** `root@68.183.130.3` (shared box, hostname `spiritflow-prod-01`)
 - **Repo paths:** local `C:\Users\Blake Marchal\Documents\RegKnots`, VPS `/opt/RegKnots` (NOT `/root/RegKnots`)
-- **Alembic head:** `0045`
+- **Alembic head:** `0092`
 - **Services:** `regknots-api`, `regknots-web`, `regknots-worker` — all systemd, all active
-- **DB:** `docker exec regknots-postgres psql -U regknots -d regknots`
-
-## Corpus — 17 sources (~42,700 chunks)
-
-| Source | Type | Chunks (approx.) | Freshness |
-|---|---|---|---|
-| `cfr_33` | CFR Title 33 — Navigation | 7,190 | Weekly via Celery |
-| `cfr_46` | CFR Title 46 — Shipping | 10,523 | Weekly |
-| `cfr_49` | CFR Title 49 — Transportation | 15,827 | Weekly |
-| `colregs` | International/Inland Rules | 102 | Manual |
-| `erg` | Emergency Response Guidebook 2024 | 762 | Monthly PHMSA watcher |
-| `ism` | ISM Code | 63 | Manual |
-| `ism_supplement` | MSC resolution amendments | 23 | Manual |
-| `nvic` | USCG NVICs | 3,453 | Weekly |
-| `solas` | SOLAS 2024 Consolidated | 1,034 | Manual |
-| `solas_supplement` | MSC amendments to SOLAS | 12 | Manual |
-| `stcw` | STCW Convention + Code | 532 | Manual |
-| `stcw_supplement` | MSC amendments to STCW | 4 | Manual |
-| `nmc_policy` | NMC policy letters + crediting guidance | 127 | Manual |
-| `nmc_checklist` | MMC application/renewal checklists | 33 | Manual |
-| `uscg_bulletin` | USCG GovDelivery (MSIBs, NMC announcements, ALCOASTs) | 2,232 | **Backfill only 2023-04 → 2026-04**; live feed pending |
-| **`usc_46`** | **46 USC Subtitle II — US Code, Vessels & Seamen (statute)** | **511** | **Quarterly GovInfo USLM release-point check (Sprint D5.1)** |
-| **`who_ihr`** | **WHO International Health Regulations (2005) + amendments** | **163** | **On WHO consolidated-edition republish (Sprint D5.4)** |
-
-## RAG pipeline — current architecture
-
-1. **Router** (Haiku classifier) → picks Haiku/Sonnet/Opus per query complexity
-2. **Retrieval** (pgvector HNSW + hybrid):
-   - Query embedding (`text-embedding-3-small`)
-   - Per-source-group diversified fetch
-   - Identifier regex (UN1219, NVIC 04-08, etc.)
-   - Broad keyword trigram
-   - Merge with identifier +0.05 / keyword +0.02 boosts
-3. **Vessel-type × CFR-Subchapter applicability filter** ⭐ (Sprint C2):
-   - Drops CFR chunks from Parts that don't apply to the user's vessel type
-   - Non-CFR sources (SOLAS/NVIC/NMC/bulletin/ERG) pass through
-   - Mapping at `packages/rag/rag/retriever.py:_VESSEL_TYPE_CFR_APPLICABILITY`
-4. **Rerank** — source-affinity boosts (+0.20/matched group) + vessel-profile text-match boost (+0.05/term)
-5. **Synthesis** — Claude Sonnet 4.6 default, Opus for high-complexity
-6. **Citation verification** — regex extracts cites, verifies each in DB; regenerates on unverified with feedback; strips any still-unverified
-
-## Regression eval — baseline + progression
-
-- Harness: `scripts/eval_rag_baseline.py` — 28 test queries × 5 vessel profiles
-- Graded per-vessel as of C3 (no cross-vessel regex leakage)
-
-| Sprint | A | A− | B | C | F | A-or-A− |
-|---|---|---|---|---|---|---|
-| Baseline | 23 | 3 | 0 | 0 | 2 | 92.9% |
-| C1 (prompt) | 21 | 4 | 1 | 0 | 2 | 89.3% |
-| C2 (filter) | 28 | 0 | 0 | 0 | 0 | 100% |
-| **C3 (tightened grader, per-vessel expected)** | **28** | **0** | **0** | **0** | **0** | **100%** |
-
-Grader tightened in C3 to use per-vessel expected regex (V1 expects `46 CFR 96.35-10`, V2 expects `35.30-20`, V5 expects `142.226`) + explicit `29 CFR 1910` in `wrong_sub` to catch OSHA hallucinations. Still 100% A — the filter + prompt changes are holding under stricter grading.
-
-Latest eval artifact path: `data/eval/<timestamp>/summary.md` + `summary.json` (C3 run: `2026-04-20_192453`)
-
-## Operational data (Sprint D2-LOG)
-
-- `retrieval_misses` (migration 0047) — every chat response whose final answer contains a hedge phrase (see `packages/rag/rag/hedge.py`) auto-logs: query, vessel_profile_set, full vessel_profile, top-8 retrieved chunks + similarity, cited regulations, model/tokens, 2KB answer preview.
-- Query the table to find real-world retrieval misses instead of hand-grepping messages. Example: `SELECT query, vessel_profile_set, hedge_phrase_matched FROM retrieval_misses ORDER BY created_at DESC LIMIT 20;`
-- Expected baseline: 5-10% of real-user chat responses hedge. Watch for spikes tied to specific source ingestions or vessel-type combinations.
-
-## Known issues & follow-ups
-
-- **V5/F5 retrieval gap** (towing vessel CO2 system): the Subchapter M applicability table (`46 CFR 144.240`) isn't being surfaced by vector search; answer is honest-limit rather than wrong. Needs a retrieval-side promotion tuning pass.
-- **Live GovDelivery feed not wired.** Bulletin corpus freshness stops at ~April 2026. Priority 1a on the roadmap: subscribe `alerts@regknots.com` + parse inbound emails.
-- **Retrieval-side freshness filtering** not implemented. Columns are captured (published_date, expires_date, superseded_by) but not used in WHERE clauses. Priority 1b.
-- **Notification system:** 3 issues documented (CFR weekly over-triggering, rollback-not-cascading, is_active-true default). Issues A/B fixed in previous sprint; Issue C still pending UI work.
-- **NVIC adapter section-numbering:** still over-splits on enclosures (1,277 unique section_numbers vs ~160 real NVICs). Cosmetic, not functional.
-- **CFR content-hash sensitivity:** threshold-gated (Sprint B3 fix), proper normalization deferred.
-
-## Key docs (read if relevant to your task)
-
-- `docs/roadmap.md` — full strategic roadmap with priorities & effort estimates
-- `docs/sprint-audits/rag-architecture-audit-april-2026.md` — RAG architecture decisions + reasoning
-- `docs/sprint-audits/nmc-ingest-and-forms-audit.md` — NMC ingest structural analysis
-- `docs/sprint-audits/federal-register-discovery-gap-report.md` — why FR isn't a viable discovery channel for NVIC/NMC/MSIB
-- `docs/sprint-audits/notification-system-issues.md` — notification UX follow-ups
-- `docs/testing/retrieval-regression-test-plan.md` — 10 vessel setups × ~60 test questions for Karynn + pilots
-- `docs/announcements/operator-update-april-2026.md` — Karynn-facing update on what changed
-- `docs/chat-bring-up-prompt.md` — copy/paste bring-up prompts for Claude.ai / Desktop / Cowork
-- `docs/cowork-task-prompts.md` — watertight prompts for the Cowork scheduled tasks (GovDelivery stager, weekly one-pager)
+- **DB:** `docker exec regknots-postgres psql -U regknots -d regknots` (PG 16.13 + pgvector, 1528 MB)
+- **Deploy:** `scripts/deploy.sh` + `scripts/smoke.sh` (shipped 2026-05-07; 3-stage smoke catches stale-build failure mode)
 
 ## Standing rules (non-negotiable)
 
@@ -112,48 +31,135 @@ Latest eval artifact path: `data/eval/<timestamp>/summary.md` + `summary.json` (
 - **Propose spec, wait for greenlight** before coding non-trivial work.
 - **Grep for Cassandra** before every commit.
 
-## Test-question bank for Karynn + pilots
+## Corpus snapshot — 77,111 chunks across 50 sources
 
-`docs/testing/retrieval-regression-test-plan.md` has:
-- 10 reference vessel setups (V1 containership, V2 tanker, V3 Subchapter-T passenger, V4 Subchapter-K, V5 Subchapter-M towing, V6 fishing, V7 OSV, V8 ferry, V9 research, V10 liftboat)
-- ~60 diagnostic questions bucketed by domain
-- Expected-source cheat sheet for grading
-- Feedback capture template
+100% embedding coverage. Vector dim 1536. ~108.9M chars / 27.2M tokens. Top sources by chunk count:
 
-**Current plan:** Karynn runs 2-3 days of exhaustive testing first → harden based on her findings → then re-engage lapsed pilots with a "we heard you, we upgraded" note.
+| Source | Chunks | Notes |
+|---|---|---|
+| `cfr_49` | 15,838 | Title 49 — Transportation; per-row 172.101 hazmat chunking (D6.16b) |
+| `cfr_46` | 10,523 | Title 46 — Shipping |
+| `cfr_33` | 7,192 | Title 33 — Navigation |
+| `nma_rsv` | 5,426 | Norway NMA RSR/RSV/SM circulars |
+| `nvic` | 3,453 | USCG NVICs |
+| `uscg_msm` | 3,048 | USCG Marine Safety Manual (last refresh 2021-09 — stale) |
+| `iacs_ur` | 2,981 | IACS Unified Requirements |
+| `nmc_exam_bank` | 2,938 | NMC exam-bank ingest (D6.83 Phase A1, 2026-05-07) |
+| `uscg_bulletin` | 2,232 | GovDelivery backfill 2023-04 → 2026-04; live feed pending |
+| `imdg` | 2,129 | IMDG Code Vol 1+2 (Amdt 42-24); per-row DGL chunking |
+
+Plus 40 additional sources: `cfr_*`, `solas`, `marpol`, `colregs`, `stcw`, `ism` (+ supplements), `usc_46`, `who_ihr`, `erg`, `nmc_policy` / `nmc_checklist`, foreign-flag (UK MCA, AMSA, MPA, MarDep, LISCR, IRI, BMA, NMA), IMO codes (HSC, IGC, IBC, CSS, Load Lines), and OCIMF public layer. See `docs/corpus-status.md` for the full table, tier classifications, and curated-vs-full coverage notes.
+
+**Embedding model:** `text-embedding-3-small` (April + May audits both agree the upgrade to `-large` is not the bottleneck).
+
+**Stale outliers:** STCW (2017-07), MARPOL (2022-11), USCG MSM (2021-09). MARPOL is the highest user-visible risk. Quarterly refresh sprint pending.
+
+## RAG pipeline — current architecture
+
+1. **Router** (Haiku classifier) → Haiku/Sonnet/Opus per query complexity (D6.75 tightened)
+2. **Pre-retrieval distillation** (D6.51) for verbose first turns
+3. **Multi-query rewrite** (D6.66) — Haiku produces 2-3 reformulations; default ON
+4. **Synonym + intent expansion** — `synonyms.py` (lifejacket/log/mob/stability/stencil), drill-frequency + equipment-marking intent expanders
+5. **Retrieval** (pgvector HNSW + per-source-group diversified fetch + identifier regex + broad keyword trigram, merged with boosts)
+6. **Hybrid BM25 + dense (RRF)** — built and **dark-launched** behind `HYBRID_RETRIEVAL_ENABLED=False` (D6.71)
+7. **Jurisdiction filter** — `jurisdictions text[]` array overlap (`&&`); 9-flag severance regression passes 9/9
+8. **Vessel-type × CFR-Subchapter applicability filter** (Sprint C2) + **Subchapter M / TSMS source affinity** (D6.69)
+9. **Haiku reranker** (D6.66) + source-affinity / vessel-profile / title boosts
+10. **Citation oracle** (D6.70 Layer-2 retrieval intervention)
+11. **Synthesis** — Claude Sonnet 4.6 default, Opus for high-complexity; `_MAX_TOKENS` 8192 (D6.75)
+12. **Hedge judging** (D6.60) → cascading ensemble web fallback (D6.59), Big-3 (Claude + GPT + Grok, D6.58)
+13. **Citation verification** — regex extracts cites, verifies in DB, regen on unverified, strips remainders
+14. **Token-by-token streaming** on the chat path (D6.68)
+
+## Recent shipped work (reverse chronological)
+
+168 commits since 2026-04-22 (last PROJECT_STATE refresh). Selected highlights:
+
+- **2026-05-07 (D6.83 + Sprint B):** `/education` landing page; Study Tools toggle propagates to nav without refresh; account toggle to hide Quizzes & Guides; Phase A5 + quiz bug fixes; A4 take-the-quiz interactive flow; A3 frontend `/study`; A2 backend (router + persistence); A1 curated `nmc_exam_bank` ingest adapter
+- **2026-05-07:** `scripts/deploy.sh` + `scripts/smoke.sh` (boring deploys; 3-stage smoke)
+- **D6.82:** marketing-copy move of 4 AI Co-Pilots from Captain to Mate
+- **D6.81:** unify role/persona to one source of truth
+- **D6.80:** soft archive for conversations + mobile-compact EmptyState
+- **D6.79:** auto-populate vessel selector when opening a chat from history
+- **D6.77 / D6.78:** morning UX polish from Karynn's testing list; short VesselPill labels
+- **D6.75 / D6.76:** weekly NMC corpus refresh via systemd timer; 35 triaged NMC PDFs declared; `_MAX_TOKENS` bump 2048→8192; classifier "tell me about X" → Sonnet not Opus
+- **D6.74:** chat "keeps stopping mid stream" UX gap fix
+- **D6.71:** hybrid BM25 + dense retrieval foundation (dark-launched)
+- **D6.70:** citation oracle (Layer-2 retrieval intervention)
+- **D6.68:** token-by-token streaming on chat path
+- **D6.67:** expand credential types + smarter scanner prompt
+- **D6.66:** multi-query rewrite + Haiku reranker + title-boost
+- **D6.64:** vessel/PSC/changelog/audit AI co-pilots; nautical loading filler
+- **D6.63:** personalized reasoning — chat + Co-Pilot cards + Career Path
+- **D6.62:** mariner vault sea-time logger + PDF credential package
+- **D6.60 / D6.59 / D6.58:** hedge judge; cascading ensemble; Big-3 web fallback (Claude + GPT + Grok); off-topic scope gate; hedge audit feedback loop; web fallback events admin page
+- **D6.55–D6.49:** Wheelhouse / crew-tier — billing wired end-to-end, workspace-scoped chat, pending invites, OnboardingGate skip, invite signup flow
+- **D6.51:** pre-retrieval query distillation for verbose first turns
+- **D6.50:** OCIMF public layer (SIRE 2.0 + Information Papers)
+- **C3 / Sprint D1 (pre-2026-04-22):** per-vessel grader (100% A); admin-only weekly NMC digest, retire `nmc_memo`
+
+Run `git log --oneline --since="2026-04-22"` for the complete list.
+
+## Known issues & open items (per 2026-05-08 audit)
+
+**Critical / pre-marketing-push (each <30 min):**
+- **JWT signing-key mismatch** — `.env` has `REGKNOTS_SECRET_KEY` but code reads `REGKNOTS_JWT_SECRET_KEY`; API is signing with hardcoded default. **Fix before traffic arrives.** See audit TL;DR #1.
+- **`.env` is mode 0644** — co-tenant `spiritflow` user can read every secret. `chmod 600`. Audit TL;DR #2.
+- **Zero Postgres backups.** RPO=∞. Cron'd `pg_dump` snippet in audit TL;DR #3.
+
+**High:**
+- `regknots-refresh-weekly.service` failed since 2026-05-03 (`code=203/EXEC`); weekly CFR + bulletin refresh hasn't run for 5 days
+- `next@15.5.14` has DoS CVE GHSA-q4gf-8mx6-v5v3 (fix in 15.5.15)
+- Service crashloop history: `regknots-api` 116 restarts + 1 OOM-kill / 14d. Add 2 GB swap + `MemoryMax` on systemd units
+- Shared tenancy with SpiritFlow on a 4 GB box; SpiritFlow OOMs can take API down
+- **Zero tests.** `apps/api/tests/` doesn't exist; `apps/web` has no test runner. 28+ fix commits in 14d, zero reverts — pace is high but no safety net
+- LLM-helper duplication: Sonnet boilerplate copy-pasted 6× in `me.py`; `_parse_json` exists in 6 files
+
+**Medium:**
+- Hybrid BM25 + dense is dark-launched; flip `HYBRID_RETRIEVAL_ENABLED=true` and re-eval
+- Synthesis still invents OSHA citations on ~21% of occupational-safety questions; verifier strips them and regen fires. Add explicit no-cite clause to `prompts.py`
+- No CI workflow; no external alerting (Sentry-only); no security headers (HSTS/CSP/etc.) on Caddy
+- Stripe webhook handler re-raises `str(exc)` to Stripe with no logging (`billing.py:68-71`)
+- `auth.py:184-199` swallows three sequential email-send failures on register with zero log signal
+
+**Resolved (memory was stale):**
+- Vocab mismatch (`lifejacket`/`log`/etc.) — `synonyms.py` + multi-query rewrite shipped
+- `ism_supplement` migration drift — canonical source list now in migration `0090`
+
+See `docs/sprint-audits/full-system-audit-2026-05-08.md` for the full Verdict matrix and 30-day priority order.
+
+## Operational data
+
+- `retrieval_misses` (migration 0047) — auto-logs hedged chat answers with query, vessel_profile, top-8 chunks, citations, model/tokens, 2KB answer preview. Query: `SELECT query, vessel_profile_set, hedge_phrase_matched FROM retrieval_misses ORDER BY created_at DESC LIMIT 20;`
+- `hedge_audits` (D6.60) — Haiku gate decisions on whether to fire fallback
+- `retrieval_misses` baseline: 5-10% of real chat responses hedge
+
+## Key docs (read if relevant to your task)
+
+- `docs/sprint-audits/full-system-audit-2026-05-08.md` — **canonical audit; supersedes the April version on every numeric**
+- `docs/roadmap.md` — full strategic roadmap (rewritten in the 2026-05-08 audit pass)
+- `docs/corpus-status.md` — engineering counterpart to `/coverage`; full source table, tiers, blocked/translation-deferred
+- `docs/sprint-audits/rag-architecture-audit-april-2026.md` — earlier RAG architecture decisions (predates hybrid, oracle, multi-query, Haiku reranker, web fallback cascade — read with the 2026-05-08 audit)
+- `docs/sprint-audits/notification-system-issues.md` — notification UX follow-ups
+- `docs/testing/retrieval-regression-test-plan.md` — 10 vessel setups × ~60 questions for Karynn + pilots
+- `docs/announcements/operator-update-april-2026.md` — Karynn-facing update on what changed
+- `docs/chat-bring-up-prompt.md` — copy/paste bring-up prompts for fresh sessions
+- `docs/cowork-task-prompts.md` — Cowork scheduled-task prompts (GovDelivery stager, weekly one-pager)
+- `docs/corpus-gap-analysis.md` — ranked corpus gaps with ingest-cost estimates
 
 ## Key scripts
 
+- `scripts/deploy.sh` + `scripts/smoke.sh` — canonical deploy + 3-stage smoke probe
 - `scripts/eval_rag_baseline.py` — autonomous RAG regression harness
 - `scripts/debug_retrieval.py` — replay any query against live retriever with vessel context
 - `scripts/verify_filter.py` — standalone unit test for the Subchapter applicability filter
 - `scripts/rollback_source.sh` — transactional corpus + notification rollback
 - `scripts/ocr_scanned_nmc.py` — Claude Vision OCR for image-only PDFs
-- `scripts/ingest_nvic_04-08.py` — one-off ingest for NVIC 04-08 Ch-2 (template for future Wayback-sourced gap fills)
-- `scripts/seed_nmc_monitor.py` — one-time seed for `nmc_monitor_seen_urls` after migration 0046 (Sprint D1)
-- `packages/rag/rag/hedge.py` — shared hedge-phrase patterns (Sprint D2.1b); auto-applied by the engine (logs to `retrieval_misses`) and by the eval grader (demotes hedged answers)
-- `packages/rag/rag/authority.py` — source → authority tier mapping (Sprint D3); every context chunk prefixed with tier label so the synthesizer can reason about conflicts and applicability
-- `docs/corpus-gap-analysis.md` — ranked list of every known corpus gap with ingest-cost estimates (Sprint D4)
-- `scripts/generate_sailor_queries.py` + `data/eval/sailor_queries.json` — 90 synthetic mariner-voice eval questions (Sprint D4)
-
-## Recent shipped work (reverse chronological, last 10 commits)
-
-```
-1ba69db fix(seed_nmc_monitor): use REGKNOTS_DATABASE_URL env var name
-666633f feat(nmc-monitor): Sprint D1 — admin-only weekly digest, retire nmc_memo
-7ca7a82 docs(cowork): tighten §5 + ship scheduled-task prompts
-8ff2986 docs(roadmap): add §5 Cowork integration + V1 path on GovDelivery
-e80e509 docs: post-C3 refresh — roadmap, chat bring-up prompt, state pointers
-92d2d89 merge: Sprint C3 — per-vessel grader + PROJECT_STATE snapshot
-1741a53 feat(eval+docs): Sprint C3 — per-vessel grader + PROJECT_STATE snapshot
-a906051 feat(rag): Sprint C2 — vessel-type × CFR-Subchapter applicability filter
-ee5cd72 feat(rag): Sprint C1 — prompt refresh cuts OSHA hallucinations 83%
-abb37c7 docs: full RAG architecture audit with baseline-driven recommendations
-```
+- `scripts/generate_sailor_queries.py` + `data/eval/sailor_queries.json` — 90 synthetic mariner-voice eval questions
+- `packages/rag/rag/hedge.py` — shared hedge-phrase patterns
+- `packages/rag/rag/authority.py` — source → authority tier mapping
 
 ## How to resume in a fresh Claude Code session
-
-Use the resumption prompt at the bottom of the last message in the prior thread, or this minimal version:
 
 ```
 Context resumption — RegKnot. Read docs/PROJECT_STATE.md first, then
