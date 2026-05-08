@@ -72,7 +72,13 @@ fi
 # Sanity check 2: dump contains expected schema. The 'regulations' table
 # has been around since the very first migration; if it's absent, the dump
 # is wrong (empty DB? wrong DB?).
-if ! gunzip -c "$OUT_FILE" | grep -q 'TABLE.*regulations'; then
+#
+# NOTE: do NOT pipe `gunzip -c | grep -q` here. With `set -o pipefail`,
+# grep -q exits 0 on first match and SIGPIPEs gunzip, gunzip exits
+# non-zero, pipefail catches that as a pipeline failure → false negative,
+# valid backup gets deleted. zgrep handles SIGPIPE internally and is
+# the clean tool for this.
+if ! zgrep -qm1 'TABLE.*regulations' "$OUT_FILE"; then
     echo "ERROR: dump does not contain expected 'regulations' table — bad dump?" >&2
     rm -f "$OUT_FILE"
     exit 3
