@@ -41,10 +41,22 @@ chmod 750 "$BACKUP_DIR"
 
 echo "[$(date -u +%FT%TZ)] backing up ${PG_DB} from ${PG_CONTAINER} → ${OUT_FILE}"
 
-# Stream pg_dump output through gzip directly into the destination file.
-# Pipefail catches a pg_dump or gzip non-zero in the pipeline.
+# Compressor: prefer pigz (parallel gzip) when available, fall back to gzip.
+# Use level 3 (was 9). gzip -9 was single-threaded + CPU-bound on the
+# embeddings column and ran past the 15-min systemd timeout (~14m+ CPU).
+# pigz -3 on 2 cores cuts wall time ~5x at the cost of ~5-10% larger files.
+# That's a great trade for nightly backups.
+if command -v pigz >/dev/null 2>&1; then
+    COMPRESSOR=(pigz -3)
+else
+    COMPRESSOR=(gzip -3)
+fi
+
+# Stream pg_dump output through the compressor directly into the
+# destination file. Pipefail catches a pg_dump or compressor non-zero
+# anywhere in the pipeline.
 docker exec "$PG_CONTAINER" pg_dump -U "$PG_USER" -d "$PG_DB" \
-    | gzip -9 > "$OUT_FILE"
+    | "${COMPRESSOR[@]}" > "$OUT_FILE"
 
 # Lock down the file: only root can read this — it contains every secret-
 # adjacent value in the DB (refresh_tokens hashes, hashed passwords).

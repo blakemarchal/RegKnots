@@ -11,8 +11,11 @@ WorkingDirectory=/opt/RegKnots
 ExecStart=/opt/RegKnots/scripts/backup_postgres.sh
 StandardOutput=journal
 StandardError=journal
-# Plenty of headroom for a ~1.5GB pg_dump pipe; expected runtime ~30-90s.
-TimeoutStartSec=900
+# Headroom for the pg_dump → pigz -3 pipe. Empirically the dump is ~1.5GB
+# uncompressed → ~400MB compressed; pigz -3 on 2 cores runs in ~3-5min on
+# this VPS. 30min cap is comfortable; if a backup ever runs past it,
+# something else is wrong (CPU contention, disk full, DB locked).
+TimeoutStartSec=1800
 
 [Install]
 WantedBy=multi-user.target
