@@ -73,12 +73,16 @@ fi
 # has been around since the very first migration; if it's absent, the dump
 # is wrong (empty DB? wrong DB?).
 #
-# NOTE: do NOT pipe `gunzip -c | grep -q` here. With `set -o pipefail`,
-# grep -q exits 0 on first match and SIGPIPEs gunzip, gunzip exits
-# non-zero, pipefail catches that as a pipeline failure → false negative,
-# valid backup gets deleted. zgrep handles SIGPIPE internally and is
-# the clean tool for this.
-if ! zgrep -qm1 'TABLE.*regulations' "$OUT_FILE"; then
+# This check is fiddly because of pipefail: any decompress-then-match
+# pipeline (gunzip | grep, zgrep, zcat | grep) makes grep short-circuit
+# on first match, SIGPIPE the decompressor, the decompressor exits
+# non-zero, pipefail catches it as a pipeline failure, valid backup
+# gets deleted. We sidestep by:
+#   1. Running the check in a subshell with pipefail OFF.
+#   2. Capping decompression to the first 5MB via head — pg_dump emits
+#      all CREATE TABLE statements at the very top of the file, well
+#      before any data rows.
+if ! ( set +o pipefail; gunzip -c "$OUT_FILE" 2>/dev/null | head -c 5000000 | grep -qm1 'TABLE.*regulations' ); then
     echo "ERROR: dump does not contain expected 'regulations' table — bad dump?" >&2
     rm -f "$OUT_FILE"
     exit 3
