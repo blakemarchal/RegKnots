@@ -1,32 +1,43 @@
 # RegKnots systemd units
 
-Sprint D6.75 — scheduled corpus refresh. After Karynn caught us 4+ months
-behind on the NMC ASAP portal launch, we needed a baseline cron-style job
-to keep static-ingest sources current.
+Production schedules: corpus refresh + daily Postgres backup.
 
 ## What's here
 
-- `regknots-nmc-refresh.service` — one-shot job that runs
-  `scripts/refresh_nmc_corpus.py`. Discovers new NMC PDFs at the canonical
-  landing pages, downloads any we don't have, and re-ingests if anything
-  changed.
-- `regknots-nmc-refresh.timer` — schedules the service weekly (Mon 06:00 UTC).
+- `regknots-nmc-refresh.service` / `.timer` — Sprint D6.75. One-shot job
+  that runs `scripts/refresh_nmc_corpus.py`. Discovers new NMC PDFs at
+  the canonical landing pages, downloads any we don't have, and
+  re-ingests if anything changed. Schedules weekly (Mon 06:00 UTC).
+- `regknots-backup.service` / `.timer` — Sprint post-D6.83 audit (2026-05-08).
+  Daily Postgres backup via `scripts/backup_postgres.sh`. pg_dump from
+  the regknots-postgres container, gzipped, written to
+  `/var/backups/regknots/`, 14-day retention. Schedules daily (03:00 UTC).
 
 ## Install on the VPS
 
 ```bash
-# As root on the VPS:
+# As root on the VPS — install the unit you want.
+
+# NMC corpus refresh:
 cp /opt/RegKnots/deploy/systemd/regknots-nmc-refresh.service /etc/systemd/system/
 cp /opt/RegKnots/deploy/systemd/regknots-nmc-refresh.timer /etc/systemd/system/
 systemctl daemon-reload
 systemctl enable --now regknots-nmc-refresh.timer
 
-# Verify schedule:
-systemctl list-timers regknots-nmc-refresh.timer
+# Daily Postgres backup:
+cp /opt/RegKnots/deploy/systemd/regknots-backup.service /etc/systemd/system/
+cp /opt/RegKnots/deploy/systemd/regknots-backup.timer /etc/systemd/system/
+chmod +x /opt/RegKnots/scripts/backup_postgres.sh
+systemctl daemon-reload
+systemctl enable --now regknots-backup.timer
 
-# One-shot dry run to verify everything works (won't ingest if nothing new):
-systemctl start regknots-nmc-refresh.service
-journalctl -u regknots-nmc-refresh.service -n 50 --no-pager
+# Verify schedule:
+systemctl list-timers --all --no-pager | grep regknots
+
+# One-shot dry run to verify everything works:
+systemctl start regknots-backup.service
+journalctl -u regknots-backup.service -n 50 --no-pager
+ls -la /var/backups/regknots/
 ```
 
 ## Operations

@@ -1,0 +1,20 @@
+[Unit]
+Description=Daily RegKnots Postgres backup
+Documentation=https://github.com/blakemarchal/RegKnots
+Requires=regknots-backup.service
+
+[Timer]
+# Daily at 03:00 UTC. Low-traffic window for both the API and the
+# Anthropic / OpenAI sides; Karynn (US Central) is asleep, US East coast
+# users are also asleep, EU users are early morning.
+OnCalendar=*-*-* 03:00:00
+# If the box was off at 03:00 UTC, run on next boot. Bulletproof against
+# emergency reboots.
+Persistent=true
+# Tiny jitter (0-300s) — irrelevant on a single-VPS deployment but good
+# hygiene if we ever have a fleet.
+RandomizedDelaySec=300
+Unit=regknots-backup.service
+
+[Install]
+WantedBy=timers.target

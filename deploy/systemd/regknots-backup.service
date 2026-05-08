@@ -1,0 +1,18 @@
+[Unit]
+Description=RegKnots daily Postgres backup — pg_dump from regknots-postgres container, gzipped, 14-day retention
+Documentation=https://github.com/blakemarchal/RegKnots
+# Don't try to back up if the database isn't running.
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/RegKnots
+ExecStart=/opt/RegKnots/scripts/backup_postgres.sh
+StandardOutput=journal
+StandardError=journal
+# Plenty of headroom for a ~1.5GB pg_dump pipe; expected runtime ~30-90s.
+TimeoutStartSec=900
+
+[Install]
+WantedBy=multi-user.target
