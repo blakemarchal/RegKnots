@@ -357,9 +357,20 @@ def _extract_all_text_citations(answer: str) -> list[_TextCitation]:
         section = m.group(2)
         display = f"{title} CFR {section}"
         if display not in found:
+            # Parent-range matching: when the citation is just a Part
+            # ("46 CFR 142") with no `.`-delimited subsection, accept
+            # ANY direct subsection ("46 CFR 142.227", "46 CFR 142.300",
+            # etc.) as a valid match. The 2026-05-08 audit found 3 of
+            # 12 eval F's were citations of this shape — model wrote
+            # the parent, corpus indexes only the leaves, exact match
+            # rejected the row even though retrieval surfaced it.
+            if "." in section:
+                pattern = display       # subsection given → exact match
+            else:
+                pattern = f"{display}.%"  # parent only → any subsection
             found[display] = _TextCitation(
                 display=display,
-                candidates=[(f"cfr_{title}", display)],
+                candidates=[(f"cfr_{title}", pattern)],
             )
 
     # ── SOLAS chapter/part (regulation number is informational) ─────────────
@@ -389,16 +400,34 @@ def _extract_all_text_citations(answer: str) -> list[_TextCitation]:
                 candidates=[("solas", f"SOLAS Annex {annex}%")],
             )
 
-    # ── MSC resolutions (ambiguous between SOLAS and STCW supplements) ─────
+    # ── MSC resolutions (ambiguous across all IMO code sources) ────────────
+    # IMO Maritime Safety Committee resolutions appear as section_number
+    # suffixes across many sources, not just SOLAS / STCW supplements.
+    # The 2026-05-08 audit found 6 of 12 eval F's were citations like
+    # "MSC.370(93)" rejected because the verifier only checked
+    # solas_supplement + stcw_supplement, while the corpus indexes the
+    # resolution under "IMO IGC Code MSC.370(93)" (source: imo_igc),
+    # "IMO HSC Code MSC.97(73)" (source: imo_hsc), etc. Listing every
+    # IMO-family source explicitly keeps the per-source verification
+    # path (the query plan stays cheap — each candidate becomes its
+    # own EXISTS check).
+    _MSC_SOURCE_FAMILY = (
+        "solas_supplement",
+        "stcw_supplement",
+        "marpol_supplement",
+        "ism_supplement",
+        "imo_igc",
+        "imo_hsc",
+        "imo_ibc",
+        "fss",
+        "lsa",
+    )
     for m in _MSC_RE.finditer(answer):
         msc_key = f"MSC.{m.group(1)}({m.group(2)})"
         if msc_key not in found:
             found[msc_key] = _TextCitation(
                 display=msc_key,
-                candidates=[
-                    ("solas_supplement", f"%{msc_key}"),
-                    ("stcw_supplement", f"%{msc_key}"),
-                ],
+                candidates=[(src, f"%{msc_key}") for src in _MSC_SOURCE_FAMILY],
             )
 
     # ── COLREGs (rules + merged-range verification) ────────────────────────
