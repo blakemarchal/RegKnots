@@ -57,8 +57,8 @@ exec systemd-run \
     --wait \
     --pty \
     --collect \
-    --working-directory="${REPO}" \
+    --working-directory="${REPO}/packages/ingest" \
     --property=MemoryHigh=1G \
     --property=MemoryMax=1.5G \
     --property=CPUQuota=150% \
-    /root/.local/bin/uv run --project "${REPO}/apps/api" python -m ingest.cli "$@"
+    /root/.local/bin/uv run --project "${REPO}/packages/ingest" python -m ingest.cli "$@"
