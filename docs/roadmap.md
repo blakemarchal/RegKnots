@@ -1,6 +1,6 @@
 # RegKnots Roadmap
 
-**Last updated:** 2026-05-08 (post-D6.83)
+**Last updated:** 2026-05-09 (post-D6.83 audit + remediation sprint)
 
 This is the strategic shipped/in-flight/upcoming view of the product. It's separate from `docs/PROJECT_STATE.md` (operational one-pager — alembic head, current corpus, hot-button bugs) and `docs/scaling-roadmap.md` (capacity thresholds and what each one triggers). Findings, calibration, and the prioritized 30-day list lift directly from `docs/sprint-audits/full-system-audit-2026-05-08.md`. The previous version is archived at `docs/archive/roadmap-2026-04.md`.
 
@@ -10,6 +10,7 @@ This is the strategic shipped/in-flight/upcoming view of the product. It's separ
 
 Working backwards through `git log --since="2026-04-22"`. Sprint numbers are the ones in commits, not invented.
 
+- **Post-D6.83 audit remediation** (2026-05-08 → 2026-05-09, commits `b2efe1f` → `5d2c567`). End-to-end execution of the 2026-05-08 full-system audit's critical-and-high items in one sitting. JWT secret rotated (env var name fix); `.env` mode 600; daily Postgres backup via `regknots-backup.timer` with `pigz -3` + corruption checks (`scripts/backup_postgres.sh`); systemd `MemoryHigh`/`MemoryMax` cgroup drop-ins on api/web/worker (no more global-OOM blast radius); 2 GB swap; `scripts/run_ingest.sh` wrapper for transient-cgroup-isolated ingest; exec bit fixed in git for all 4 shell scripts (refresh-weekly came back to life as a side effect); `HYBRID_RETRIEVAL_ENABLED=true`; new `packages/rag/rag/maritime_glossary.py` with 52 confidence-tagged slang→formal entries (fire wire → emergency towing-off pennant, etc.); query rewriter prompt now opens with maritime-slang priming + 9 worked examples + 25-entry quick-reference table; citation verifier handles CFR parent-range references and IMO-family MSC.X(Y) sources (closes 6+ false-negative F's from the regression eval); UptimeRobot setup runbook at `docs/runbook-uptimerobot.md`. README.md and CLAUDE.md created at repo root (both were missing). PROJECT_STATE.md and roadmap.md refreshed against verified live numbers.
 - **D6.83 Study Tools — Sprint A1-A5 + Sprint B `/education`** (2026-05-04 → 2026-05-07). Curated `nmc_exam_bank` ingest adapter, backend router with monthly cap accounting, `/study` page with quiz + guide flows, take-the-quiz interactive surface, content_md rendered as actual markdown, then bug fixes and the `/education` landing page. Account toggle to hide Quizzes & Guides from nav (e66a731), with toggle propagation fixed without refresh (519bdce).
 - **`scripts/deploy.sh` + `scripts/smoke.sh`** (2026-05-07, 107ee6a). Boring deploys: `git fetch && git reset --hard origin/main && systemctl restart …`, three-stage smoke (HTTP 200, route bundle in HTML, canary string in JS chunk). Closes the ssh-and-edit drift the old roadmap §1f had as open.
 - **D6.82 Sprint C** — moved 4 AI Co-Pilots from Captain to Mate in marketing copy.
@@ -64,14 +65,10 @@ Corpus today: ~77,111 chunks across 50 sources (vs. ~42K / 15 sources at the pre
 
 ## Now / this week
 
-The audit's "before you walk away" list. All small.
+The audit's small-but-real items still open after the 2026-05-09 sprint.
 
-1. **Rotate JWT signing key.** 5 min. `/opt/RegKnots/.env` has `REGKNOTS_SECRET_KEY` but the code reads `REGKNOTS_JWT_SECRET_KEY` (config.py:17), so JWTs are signed with the hardcoded default. Rename the var and restart `regknots-api`. Critical — full account-takeover risk if untouched.
-2. **Tighten `.env` perms.** 30 sec. `chmod 600 /opt/RegKnots/.env`. Co-tenant `spiritflow` user can `cat` it today.
-3. **Daily Postgres backups.** 10 min. `/etc/cron.daily/regknots-pgdump`, 14-day local retention, `/var/backups/regknots/`. RPO=∞ today.
-4. **Bump `next` 15.5.14 → 15.5.15+.** 10 min. DoS CVE GHSA-q4gf-8mx6-v5v3. `pnpm up next` in apps/web, then `scripts/deploy.sh`.
-5. **Fix the failed `regknots-refresh-weekly.service`.** ~15 min. In `failed (code=203/EXEC)` since 2026-05-03 — weekly CFR + USCG bulletin refresh hasn't run for 5 days. Likely a path issue post-deploy.
-6. **Update memory files.** Done in this audit pass. Vocab-mismatch is fixed (D6.8 → synonyms.py + query_rewrite.py); `ism_supplement` is in migration 0090.
+1. **Bump `next` 15.5.14 → 15.5.15+.** 10 min. DoS CVE GHSA-q4gf-8mx6-v5v3. `pnpm up next` in apps/web, then `scripts/deploy.sh`. (Was item #4 — only one of the original "Now / this week" set still open.)
+2. **Click through the UptimeRobot setup.** 15 min. Runbook at `docs/runbook-uptimerobot.md`. 7 monitors with body-keyword assertions covering `/api/health` + 5 frontend routes + a backup-heartbeat. Free tier, optional Discord webhook for phone push. The runbook is shipped; only the click-through and Discord wiring are pending.
 
 ---
 
@@ -79,15 +76,16 @@ The audit's "before you walk away" list. All small.
 
 Real iterations, prioritized.
 
-7. **Flip on hybrid BM25 + dense retrieval.** ~30 min. Set `HYBRID_RETRIEVAL_ENABLED=true`, restart API, re-run eval, compare to 96.1% baseline. Already built (D6.71); just needs the flag flipped after eval comparison. Highest leverage RAG change available.
-8. **OSHA no-cite clause** in chat system prompt. ~30 min. ~21% of chats currently regen because synthesis invents 29 CFR Part 1910 citations that the verifier strips. Add the redirect to 46 CFR Subchapter V to `prompts.py`.
-9. **External alerting on `/api/health`.** ~1 hr. Better Uptime / healthchecks.io free tier, SMS path. Closes the May 1 OOM-crashloop scenario where the API was down 9+ hours and the only signal would have been a customer.
-10. **2 GB swap + per-service `MemoryHigh`/`MemoryMax`.** ~15 min. Prevents the May 1 incident class on the 4 GB shared box.
-11. **CI workflow.** ~2 hr. `.github/workflows/ci.yml` running `pnpm lint`, `tsc --noEmit`, `pytest` on PRs. Locks deploy hygiene now that `scripts/deploy.sh` exists.
-12. **First three tests.** ~3 hr total. Stripe webhook handler against a recorded fixture; `study._shuffle_question_options` / `_citation_base` / `_parse_json_response`; `rag.retriever._extract_identifiers` / `_extract_keywords`. All three are pure functions today — no DB fixtures required.
-13. **Extract `app/llm_helpers.py`.** ~3 hr. The Sonnet-call boilerplate is copy-pasted 6 times in `me.py`; `_parse_json` exists in 6 places (me.py, study.py, documents.py, citation_oracle.py, query_rewrite.py, reranker.py). Largest source of accidental drift in the codebase.
-14. **Caddy security headers + rate-limit `/api/domain-check`.** ~30 min. Add `header { ... }` block (HSTS, X-Frame-Options, X-Content-Type-Options, Referrer-Policy, CSP). 50 cert directories in Caddy with scanner-injected hostnames suggests `/api/domain-check` is returning 200 on garbage subdomains.
-15. **Sentry frontend `environment` tag.** 5 min. `apps/web/src/instrumentation-client.ts` and `instrumentation.ts` omit it; every event currently shows up untagged.
+3. **Layer C — UX inversion when retrieval miss is hard.** ~3 hr code + 1 hr eval. Today's flow on a hard retrieval miss: confused main answer + a correct web-fallback panel below or beside it. Two surfaces, two messages, the user has to notice the secondary panel. New behavior: when `hedge_judge` classifies the response as `complete_miss` AND a `web_fallback_responses` row exists with `confidence ≥ 3`, lead with the web-fallback content as the primary answer (with explicit "I couldn't find this in the formal corpus; here's what trusted maritime sources say" framing). Big expected win for the 35.7%/7d bad-answer rate — the John Collins fire-wire query specifically would have flipped from a confused electric-cable explanation to the correct ETOP answer that web fallback already produced. Eval delta needs measurement before flipping on for everyone; could ship behind a feature flag with a 10% rollout first.
+4. **Phase 2 — multi-model maritime glossary brainstorm.** ~6-8 hr. New `scripts/build_maritime_glossary.py` calling Sonnet 4.6, GPT-5, Grok-4, Gemini-2.5-Pro in parallel via API with structured prompts (roles primed as senior maritime auditor, asked for entries across 9 categories: tanker, deck, engineering, mooring/towing, cargo, navigation, safety, fishing-specific, port-state). Each model returns ~80-150 entries; total ~400-500 before dedup. Then programmatic verification: corpus presence of formal terms, citation-existence checks against the regulations table, cross-model agreement, optional Brave/Bing corroboration. Output bucketed `verified` / `likely` / `review` / `reject` for Karynn's curation gate (1-2 hr of her time). Final glossary lands at `packages/rag/rag/maritime_glossary.py` upgrading current confidence=1 entries to confidence=2/3. The 52 entries seeded in the post-audit sprint are the foundation; this systematizes ongoing curation. Cost: ~$2-5 in API calls, one-time. Reusable: re-run quarterly to refresh.
+5. **OSHA no-cite clause** in chat system prompt. ~30 min. ~21% of chats currently regen because synthesis invents 29 CFR Part 1910 citations that the verifier strips. Add the redirect to 46 CFR Subchapter V to `prompts.py`.
+6. **`46 CFR 95.25` family ingest gap.** ~1-2 hr. The 2026-05-09 eval's V1/S-033 failure cited `46 CFR 95.25-1` which doesn't exist in the corpus (zero rows). The whole 95.25 subpart (fire-protection equipment specs under Subchapter F) is missing from `cfr_46`. Quick re-ingest of the 95.25-* sections via the existing CFR pipeline. Discovered during the post-audit sprint diagnosis; gateway to a broader corpus-completeness audit.
+7. **CI workflow.** ~2 hr. `.github/workflows/ci.yml` running `pnpm lint`, `tsc --noEmit`, `pytest` on PRs. Locks deploy hygiene now that `scripts/deploy.sh` exists.
+8. **First three tests.** ~3 hr total. Stripe webhook handler against a recorded fixture; `study._shuffle_question_options` / `_citation_base` / `_parse_json_response`; `rag.retriever._extract_identifiers` / `_extract_keywords`. All three are pure functions today — no DB fixtures required.
+9. **Extract `app/llm_helpers.py`.** ~3 hr. The Sonnet-call boilerplate is copy-pasted 6 times in `me.py`; `_parse_json` exists in 6 places (me.py, study.py, documents.py, citation_oracle.py, query_rewrite.py, reranker.py). Largest source of accidental drift in the codebase.
+10. **Caddy security headers + rate-limit `/api/domain-check`.** ~30 min. Add `header { ... }` block (HSTS, X-Frame-Options, X-Content-Type-Options, Referrer-Policy, CSP). 50 cert directories in Caddy with scanner-injected hostnames suggests `/api/domain-check` is returning 200 on garbage subdomains.
+11. **Sentry frontend `environment` tag.** 5 min. `apps/web/src/instrumentation-client.ts` and `instrumentation.ts` omit it; every event currently shows up untagged.
+12. **UN-number citation grounding fix** (eval V1/S-046 isocyanate spill). ~1 hr. Different verification path than the CFR/MSC fix shipped 2026-05-09 — UN numbers go through `_collect_unverified_un_numbers` in engine.py which checks if the UN ID was *retrieved* (grounded) before being cited. The IMDG / ERG ingest may not be tagging UN numbers in a queryable way. Investigate the grounding logic before deciding.
 
 ---
 
@@ -95,10 +93,11 @@ Real iterations, prioritized.
 
 Architectural items that take a session or two each.
 
-16. **Move SpiritFlow off the box.** ~6 hr + $24/mo. Provision a dedicated droplet for SpiritFlow (or the reverse — give RegKnots its own box). The shared 4 GB tenancy is the largest coupling risk before traffic ramps; several of the May 1-2 OOMs targeted the cohabitant tenant's user sessions.
-17. **Test-coverage sprint.** ~2 days. Auth flow, billing webhook, message-cap gate, the six Sonnet endpoints in `me.py`, Study Tools router. The gap isn't a bug today, but at the current ship cadence (28+ fix commits in 14 days, zero reverts) the lack of any safety net is the largest source of latent regression risk.
-18. **Documentation completion.** ~6 hr. `docs/architecture.md` (services + data flow), `docs/runbook.md` (deploy / restart / restore / rotate / rollback), `docs/glossary.md` (CFR, COLREGs, MMC, STCW, MSIB, etc.), per-package READMEs (`apps/api`, `apps/web`, `packages/rag`, `packages/ingest`), `SECURITY.md`, `CONTRIBUTING.md`. The repo-root README and CLAUDE.md were created in the audit pass; everything else is the gap.
-19. **Off-host backup destination.** ~1 hr. B2 or S3 nightly upload of the local pg_dump. Local backups (item #3) survive every failure mode except disk loss; this closes that hole.
+13. **Move SpiritFlow off the box.** ~6 hr + $24/mo. Provision a dedicated droplet for SpiritFlow (or the reverse — give RegKnots its own box). Layer 1 cgroup caps (shipped 2026-05-09) close most of the practical exposure but the shared tenancy is still the largest architectural coupling risk before traffic ramps.
+14. **Test-coverage sprint.** ~2 days. Auth flow, billing webhook, message-cap gate, the six Sonnet endpoints in `me.py`, Study Tools router. The gap isn't a bug today, but at the current ship cadence (35+ fix commits in 14 days, zero reverts) the lack of any safety net is the largest source of latent regression risk.
+15. **Corpus-completeness audit.** ~4 hr. The 2026-05-09 eval found `46 CFR 95.25-*` entirely missing from the corpus (item #6 patches it). Generalize: which CFR subparts have zero rows where they should have many? Which IMO Code chapters are partial? Which flag-state corpora claim a section that doesn't actually exist? Output: a CSV of identified gaps + a per-source priority order for re-ingest. Pre-stage for the corpus-refresh sprint below.
+16. **Documentation completion.** ~6 hr. `docs/architecture.md` (services + data flow), `docs/runbook.md` (deploy / restart / restore / rotate / rollback), `docs/glossary.md` (CFR, COLREGs, MMC, STCW, MSIB, etc.), per-package READMEs (`apps/api`, `apps/web`, `packages/rag`, `packages/ingest`), `SECURITY.md`, `CONTRIBUTING.md`. The repo-root README and CLAUDE.md were created in the audit pass; everything else is the gap.
+17. **Off-host backup destination.** ~1 hr. B2 or S3 nightly upload of the daily local pg_dump (already shipped in the post-audit sprint, see Done section). Local backups survive every failure mode except disk loss; this closes that hole.
 
 ---
 
@@ -114,6 +113,25 @@ Architectural items that take a session or two each.
 ## Done — items closed since 2026-04-20
 
 Lifting from the previous roadmap so the open list stays calibrated.
+
+### Closed in the post-D6.83 audit remediation sprint (2026-05-08 → 2026-05-09)
+
+- **JWT signing key rotation.** `.env` env var renamed `REGKNOTS_SECRET_KEY` → `REGKNOTS_JWT_SECRET_KEY`. API now signs JWTs with a real 64-char secret instead of the hardcoded default `dev-secret-key-...`. All active sessions invalidated once on restart (expected and one-time).
+- **`.env` permissions tightened to mode 0600.** Co-tenant `spiritflow` user can no longer read RegKnots secrets.
+- **Daily Postgres backup operational.** `regknots-backup.timer` fires daily at 03:00 UTC, runs `scripts/backup_postgres.sh` (pg_dump from container | pigz -3 | gzip-integrity-check + zgrep schema-shape check), 14-day retention, mode 0600 on output. First backup confirmed 549 MB on disk. Took 4 iterations of script tuning to handle pipefail/SIGPIPE quirks (gzip -9 timeout → pigz -3, gunzip-pipe-grep false negative → subshell + head + grep). Closes the RPO=∞ exposure.
+- **Failed `regknots-refresh-weekly.service` revived.** Root cause was that all `scripts/*.sh` were committed as mode 100644 (no exec bit) because the worktree is on Windows. `git reset --hard` on the VPS landed `corpus_refresh.sh` as 0644, systemd's exit 203 (EXEC) means "couldn't exec the binary." Same trap was waiting on `deploy.sh`, `smoke.sh`, `backup_postgres.sh`. Fix: `git update-index --chmod=+x` on all four. After re-pull on VPS, refresh-weekly started running clean. ~30-second fix, made possible by accidentally noticing the mode mismatch during diagnosis.
+- **Layer 1 OOM defense.** Systemd cgroup caps via drop-ins at `deploy/systemd/regknots-{api,web,worker}.service.d/memory.conf`: api 1.5G/2G, web + worker 512M/1G. When a service grows past `MemoryMax` the cgroup OOM-kills it; `Restart=always` brings it back; the rest of the box stays green. **Structurally closes the May 1 incident class** — global OOM that took the box for 9 hours can no longer happen without a kernel bug.
+- **2 GB swap on `/swapfile`** with `vm.swappiness=10` and `/etc/fstab` entry. Kernel can bleed cold pages instead of OOM-killing under transient pressure. Persisted across reboots.
+- **`scripts/run_ingest.sh` wrapper.** Wraps ad-hoc ingest in `systemd-run --slice=regknots-ingest.slice --property=MemoryMax=1.5G --property=CPUQuota=150% ...` so a runaway ingest dies in its own cgroup, not the whole box. CLAUDE.md flagged the wrapper as the required path; bare `uv run python -m ingest.cli` is now an anti-pattern.
+- **Maritime glossary v1 (`packages/rag/rag/maritime_glossary.py`).** 52 confidence-tagged slang→formal entries seeded from Sonnet's domain knowledge: towing (`fire wire` → emergency towing-off pennant), mooring, cargo (`ullage`, `dunnage`, `tally`), deck (`scupper`, `lazarette`, `monkey island`), engineering (`donkeyman`, `oiler`), safety (`mob`, `epirb`, `sart`), navigation (`dr`, `ais`, `ecdis`), certificates (`mmc`, `coi`, `iopp`), PSC, drills. All confidence=1; multi-model verification pass tracked under "Phase 2" above.
+- **Maritime-slang few-shot in query_rewrite prompt.** `_REWRITE_SYSTEM_PROMPT` now opens with explicit slang-recognition guidance + 9 worked examples (fire wire → ETOP, etc.) + 25-entry quick-reference table. Attacks the root cause of the John Collins fire-wire miss: not Haiku capability but prompt shape boxing it into bottom-up corpus-vocab translation.
+- **HYBRID_RETRIEVAL_ENABLED flag flipped on.** D6.71's dark-launched BM25+RRF retrieval is now the default for general queries (sources=None). Eval re-run showed expected behavior — more diverse retrieval surfaces (specifically more IMO IGC / IMO HSC content for gas-carrier and CO2 questions) which exposed the citation-verifier format-mismatch bug separately addressed below.
+- **Citation verifier handles CFR parent-range and IMO-family MSC.X(Y) sources** (commit 5d2c567). When the model writes `46 CFR 142` (no subsection), verifier now LIKE-matches against `46 CFR 142.%` instead of failing exact match. When the model writes `MSC.370(93)`, verifier checks `imo_igc`, `imo_hsc`, `imo_ibc`, `fss`, `lsa`, `marpol_supplement`, `ism_supplement` in addition to the original `solas_supplement` / `stcw_supplement`. Targeted DB queries confirmed 6 of 7 specific eval failure cases now resolve. Expected eval delta: 6-8 of 12 F's flip to A on re-run.
+- **UptimeRobot setup runbook** at `docs/runbook-uptimerobot.md`. 7 monitors with body-keyword assertions covering `/api/health` + 5 frontend routes + a backup heartbeat. Free tier ($0/mo), optional Discord webhook for phone push notifications. The runbook is shipped; the click-through is item #2 above.
+- **Memory files refreshed.** `MEMORY.md` index, `project_db_constraint.md`, `project_retrieval_vocab_mismatch.md`, `project_deployment_procedure.md` all updated to reflect resolved status.
+- **Repo-root README.md and CLAUDE.md created** (both were missing). PROJECT_STATE.md and roadmap.md (this file) refreshed against verified live numbers.
+
+### Closed earlier in this cycle
 
 - **§1f — `scripts/deploy.sh`.** Shipped 2026-05-07 (107ee6a). Smoke script ships alongside.
 - **Vocab-mismatch failure mode** (was a memory-flagged "no fix yet"). Closed by D6.8 — `synonyms.py` ships 6 user-vocab entries (lifejacket, log, mob, stability, stencil/stenciled/stenciling) with curated CFR-vocab expansions; `query_rewrite.py` produces 2-3 reformulations every chat (default ON); two intent expanders (drill-frequency, equipment-marking) gate on dual signals.
