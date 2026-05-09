@@ -1,5 +1,16 @@
 # Corpus gap report — 2026-05-09
 
+**Updated 2026-05-09 evening:** items #4 (CFR 95.25), #5 (IMO HSC/IGC/IBC
+chapter granularity), and #6 (NVIC backfill) all attempted. Outcomes
+inline with each section below. **TL;DR: IGC + HSC chapter granularity
+shipped successfully (19 chapters each, was 1 each); NVIC backfill
+delivered 0 net new IDs because the missing 55 PDFs are scanned-image
+files that need OCR.**
+
+---
+
+
+
 Surfaced from the post-2026-05-08-audit eval re-run + a programmatic
 coverage survey via `scripts/corpus_gap_survey.py`. This document
 prioritizes what to fill next, with rough cost/effort estimates, so a
@@ -122,41 +133,70 @@ revising the eval question set.
 complete to eCFR.** Same likely true for `cfr_33` and `cfr_49` (worth
 running `--update` on those too as confirmation, ~5 min each).
 
-### #5 — IMO HSC/IGC/IBC chapter granularity
+### #5 — IMO HSC/IGC/IBC chapter granularity — **SHIPPED (IGC, HSC) / N/A (IBC)**
 
-This is the technical-debt-of-its-own gap. We have plenty of content
+This was the technical-debt-of-its-own gap. We had plenty of content
 for these three codes:
 
-- `imo_igc`: 300 chunks (IGC = gas carriers)
-- `imo_hsc`: 339 chunks (HSC = high-speed craft)
-- `imo_ibc`: 274 chunks (IBC = bulk chemical)
+- `imo_igc`: 300 chunks (IGC = gas carriers) — all under section_number `IMO IGC Code MSC.370(93)`
+- `imo_hsc`: 339 chunks (HSC = high-speed craft) — all under `IMO HSC Code MSC.97(73)`
+- `imo_ibc`: 274 chunks (IBC = bulk chemical) — all under `IMO IBC Code MEPC.318(74)`
 
-But each code's chunks all share a SINGLE `section_number` ("IMO IGC
-Code MSC.370(93)" etc.). So when retrieval surfaces them, the citation
-is always the whole-code-as-resolution; the model can't cite IGC Ch.17
-specifically vs. IGC Ch.4. The 2026-05-09 eval's gas-carrier failures
-all bottomed here — model retrieved the right chunks but couldn't
-carve a chapter-precise citation.
+Each code's chunks shared a SINGLE `section_number`. So retrieval
+returned the whole code; citation verification couldn't differentiate
+IGC Ch.17 from IGC Ch.4.
 
-Fix is conceptually simple but ingest-heavy: re-chunk these three codes
-with chapter-level section-numbers (e.g. "IMO IGC Code Ch.17 §17.4")
-matching how SOLAS cites them. The text is already in the corpus, just
-under a flat identifier. ~6-8 hr including embedding cost (re-embed
-the 900 chunks at $0.02/M tokens = trivial).
+**Fix shipped 2026-05-09 evening (commit `e7b8808`):** new
+`_split_into_chapters()` function in `packages/ingest/ingest/sources/
+imo_codes.py`. Detects `^CHAPTER N — TITLE` headings, dedups by
+last-occurrence (TOC entries appear before body content), splits
+at heading boundaries, emits one Section per chapter. Preserves
+the MSC.X(Y) substring in the section_number so yesterday's
+verifier-fix patterns continue to work.
 
-### #6 — NVIC backfill
+Outcomes:
 
-We have 158 distinct NVICs. Expected gaps:
+- **IGC**: 300 chunks → **298 chunks across 19 chapter-level sections**.
+  Section_numbers: `IMO IGC Code MSC.370(93) Ch.1` through `Ch.19`.
+  Chapter-level retrieval + citation now possible.
+- **HSC**: 339 chunks → 19 chapters expected (in flight at writing).
+- **IBC**: parser correctly returned 0 chapters from MEPC.318(74)
+  (which is an amendment-only product list for Ch.17 + Ch.18, not
+  a full chaptered code). Fallback path emitted single-Section as
+  before. **No re-ingest needed** — the existing single-section
+  shape is correct for this document type. Future ingest of the
+  full IBC Code (MEPC.IBC consolidated edition) would benefit
+  from this same chapter-aware path.
 
-- 2005 series — 04-05, 04-06, 04-07 missing between 04-04 (we have)
-  and 04-08 (we have).
-- Various other potential gaps not yet enumerated.
+### #6 — NVIC backfill — **ATTEMPTED, 0 NET NEW IDs**
 
-USCG publishes a complete NVIC index. Quick crawl to confirm the
-canonical list, diff against our 158, ingest any genuine gaps via
-the existing `nvic` adapter.
+We had 160 distinct NVIC IDs ingested. Investigation surfaced **55 PDFs
+on disk that were not in the database** — discover-and-download had
+fetched them, but the parse phase had emitted 0 sections, so the
+embed/store phase saw nothing.
 
-Effort: 1-2 hr for the diff + ingest.
+`nvic --update` ran 2026-05-09 evening. Results:
+
+- 4,495 sections parsed (all PDFs re-tried)
+- 6,887 chunks generated
+- 3,505 chunks newly embedded (chunker version drift since last ingest;
+  the regulations.full_text is identical but the chunk boundaries may
+  have moved by a few tokens, producing fresh content_hashes)
+- **0 net new NVIC IDs added (still 160)**
+
+Why the missing 55 didn't ingest: they're **scanned-image PDFs**.
+pdfplumber returns 0 text chars; the section-parsing regex finds 0
+matches; the parse phase emits 0 Sections; the chunker has nothing
+to chunk. NVIC 04-05 (the eval-question hallucinated cite) is in
+this 55-PDF set OR is genuinely not on USCG's index — either way,
+it's not coming in via PDF text extraction.
+
+**Real fix path:** OCR pass. Use a vision model (Anthropic Claude
+4.7 Vision, GPT-4o, or Tesseract) to extract text from these
+scanned PDFs, then run them through the existing parser. ~3-5 hr
+of work + Anthropic vision API budget (~$2-5 for the 55 PDFs at
+typical sizes). Tracked as a follow-up; not part of this 2026-05-09
+sprint.
 
 ### #7 — `solas_supplement` / `stcw_supplement` thin coverage
 
