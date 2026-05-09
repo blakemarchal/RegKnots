@@ -425,9 +425,13 @@ def _extract_all_text_citations(answer: str) -> list[_TextCitation]:
     for m in _MSC_RE.finditer(answer):
         msc_key = f"MSC.{m.group(1)}({m.group(2)})"
         if msc_key not in found:
+            # Substring match (`%key%`) not end-anchored (`%key`). The
+            # 2026-05-09 chapter-granularity work for IMO IGC/HSC made
+            # section_numbers like "IMO IGC Code MSC.370(93) Ch.4", so
+            # an end-anchored pattern stops matching after re-ingest.
             found[msc_key] = _TextCitation(
                 display=msc_key,
-                candidates=[(src, f"%{msc_key}") for src in _MSC_SOURCE_FAMILY],
+                candidates=[(src, f"%{msc_key}%") for src in _MSC_SOURCE_FAMILY],
             )
 
     # ── COLREGs (rules + merged-range verification) ────────────────────────
@@ -443,6 +447,10 @@ def _extract_all_text_citations(answer: str) -> list[_TextCitation]:
             )
 
     # ── NVIC ───────────────────────────────────────────────────────────────
+    # Models sometimes write NVIC numbers with a single-digit month
+    # ("NVIC 1-86") while the corpus stores them zero-padded ("NVIC 01-86").
+    # The 2026-05-09 eval V1/S-012 hit this. We try both forms in the
+    # candidates list — the verifier succeeds if either matches.
     for m in _NVIC_RE.finditer(answer):
         num = m.group(1)
         sec = m.group(2)
@@ -450,9 +458,15 @@ def _extract_all_text_citations(answer: str) -> list[_TextCitation]:
         if sec:
             display += f" §{sec}"
         if display not in found:
+            # Build canonical zero-padded variant if the model used 1-digit month
+            month, year = num.split("-", 1)
+            padded = f"{int(month):02d}-{year}" if len(month) == 1 else num
+            cands = [("nvic", f"NVIC {num}%")]
+            if padded != num:
+                cands.append(("nvic", f"NVIC {padded}%"))
             found[display] = _TextCitation(
                 display=display,
-                candidates=[("nvic", f"NVIC {num}%")],
+                candidates=cands,
             )
 
     # ── STCW Regulation ────────────────────────────────────────────────────
@@ -502,13 +516,19 @@ def _extract_all_text_citations(answer: str) -> list[_TextCitation]:
             )
 
     # ── ISM Code ───────────────────────────────────────────────────────────
+    # Same parent-range matching as STCW — when the model writes a
+    # sub-paragraph ("ISM 8.7"), the corpus indexes only the parent
+    # clause ("ISM 8"). Strip dotted sub-paragraphs before LIKE-match.
+    # The 2026-05-09 eval V1/S-020 (CO2 lockout) hit this.
     for m in _ISM_RE.finditer(answer):
         num = m.group(1)
         display = f"ISM {num}"
         if display not in found:
+            parent = num.split(".", 1)[0]
+            pattern = f"ISM {parent}%" if parent != num else f"ISM {num}%"
             found[display] = _TextCitation(
                 display=display,
-                candidates=[("ism", f"ISM {num}%")],
+                candidates=[("ism", pattern)],
             )
 
     # ── UK MCA notices (MGN / MSN) — Sprint D6.18 ─────────────────────────
