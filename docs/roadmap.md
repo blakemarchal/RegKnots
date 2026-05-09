@@ -1,6 +1,8 @@
 # RegKnots Roadmap
 
-**Last updated:** 2026-05-09 (post-D6.83 audit + remediation sprint)
+**Last updated:** 2026-05-09 21:00 UTC (post-D6.83 audit + corpus + Layer C sprint)
+
+**Eval headline at this writing: 97.4% A-or-A− on 149 questions (4 F's)** — beats the April baseline of 96.1% (152 questions, 6 F's) by +1.3pt. All 4 remaining F's are real corpus gaps (1 retrieval whiff on fixed-CO2 carriage, 1 NVIC hallucination, 1 UN-number ungrounded, 1 SCBA-towing retrieval gap), none are verifier bugs. Hedge rate at 15.7%, down from 20.4% baseline.
 
 This is the strategic shipped/in-flight/upcoming view of the product. It's separate from `docs/PROJECT_STATE.md` (operational one-pager — alembic head, current corpus, hot-button bugs) and `docs/scaling-roadmap.md` (capacity thresholds and what each one triggers). Findings, calibration, and the prioritized 30-day list lift directly from `docs/sprint-audits/full-system-audit-2026-05-08.md`. The previous version is archived at `docs/archive/roadmap-2026-04.md`.
 
@@ -91,7 +93,11 @@ Real iterations, prioritized.
 9. **Extract `app/llm_helpers.py`.** ~3 hr. The Sonnet-call boilerplate is copy-pasted 6 times in `me.py`; `_parse_json` exists in 6 places (me.py, study.py, documents.py, citation_oracle.py, query_rewrite.py, reranker.py). Largest source of accidental drift in the codebase.
 10. **Caddy security headers + rate-limit `/api/domain-check`.** ~30 min. Add `header { ... }` block (HSTS, X-Frame-Options, X-Content-Type-Options, Referrer-Policy, CSP). 50 cert directories in Caddy with scanner-injected hostnames suggests `/api/domain-check` is returning 200 on garbage subdomains.
 11. **Sentry frontend `environment` tag.** 5 min. `apps/web/src/instrumentation-client.ts` and `instrumentation.ts` omit it; every event currently shows up untagged.
-12. **UN-number citation grounding fix** (eval V1/S-046 isocyanate spill). ~1 hr. Different verification path than the CFR/MSC fix shipped 2026-05-09 — UN numbers go through `_collect_unverified_un_numbers` in engine.py which checks if the UN ID was *retrieved* (grounded) before being cited. The IMDG / ERG ingest may not be tagging UN numbers in a queryable way. Investigate the grounding logic before deciding.
+12. **UN-number citation grounding fix** (eval V1/S-046 isocyanate spill). ~1-2 hr. UN-grounding path is separate from the CFR/MSC verifier fixes shipped 2026-05-09. Symptom: model cites `UN 2478` / `UN 3080` / `UN 2206` for isocyanate scenarios; verifier flags them as "ungrounded" because the ERG/IMDG retrieval didn't surface them. Either (a) re-chunk IMDG/ERG with explicit UN-number indexing, or (b) tweak the UN-grounding logic to be less strict when retrieval has at least the right *substance class*. Notes: investigate before deciding which path; one occurrence in 151-q eval, lowest priority of the open items.
+
+13. **Transient `list index out of range` crash on UN-grounded retries** (eval V1/S-046, V1/S-047). State-dependent — couldn't reproduce locally even with identical query. Likely a multi-query rewrite race or anomalous Anthropic API response shape. ~1 hr to add defensive guards + traceback logging in the regen path so the next occurrence at least leaves a stack trace. Not blocking; happened ~0.7% of eval queries.
+
+14. **2 unresolved scanned NVIC PDFs** (`10-02`, `03-75`). Within Anthropic's size+page limits but still 400-error. Likely a PDF-format issue (encrypted streams, JPEG2000 imagery, or non-standard PDF structure). ~1 hr fallback path: use `pdf2image` to rasterize pages locally, send PNGs to vision API. Adds ~1 KB of code.
 
 ---
 
