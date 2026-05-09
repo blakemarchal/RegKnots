@@ -168,35 +168,53 @@ Outcomes:
   full IBC Code (MEPC.IBC consolidated edition) would benefit
   from this same chapter-aware path.
 
-### #6 — NVIC backfill — **ATTEMPTED, 0 NET NEW IDs**
+### #6 — NVIC backfill — **OCR PASS COMPLETE: +49 NVICs, +672 CHUNKS**
 
-We had 160 distinct NVIC IDs ingested. Investigation surfaced **55 PDFs
+We had 160 distinct NVIC IDs ingested. Investigation surfaced **54 PDFs
 on disk that were not in the database** — discover-and-download had
-fetched them, but the parse phase had emitted 0 sections, so the
-embed/store phase saw nothing.
+fetched them, but the parse phase had emitted 0 sections because they
+were scanned image PDFs. pdfplumber returned 0 chars.
 
-`nvic --update` ran 2026-05-09 evening. Results:
+The first attempt (`nvic --update` evening 2026-05-09) re-tried the
+parser path with no change — confirming the issue was image-vs-text,
+not parser logic.
 
-- 4,495 sections parsed (all PDFs re-tried)
-- 6,887 chunks generated
-- 3,505 chunks newly embedded (chunker version drift since last ingest;
-  the regulations.full_text is identical but the chunk boundaries may
-  have moved by a few tokens, producing fresh content_hashes)
-- **0 net new NVIC IDs added (still 160)**
+**OCR pass shipped 2026-05-09 evening** (`scripts/ocr_scanned_nvics.py`
++ `scripts/ingest_ocr_nvics.py`):
 
-Why the missing 55 didn't ingest: they're **scanned-image PDFs**.
-pdfplumber returns 0 text chars; the section-parsing regex finds 0
-matches; the parse phase emits 0 Sections; the chunker has nothing
-to chunk. NVIC 04-05 (the eval-question hallucinated cite) is in
-this 55-PDF set OR is genuinely not on USCG's index — either way,
-it's not coming in via PDF text extraction.
+- Anthropic Claude Haiku 4.5 Vision extracted text from scanned PDFs
+  with excellent quality (preserves section numbering, IMO resolution
+  references, formal headings).
+- Threshold: pdfplumber returns <300 chars → flag for OCR.
+- 54 PDFs identified; **49 OCR'd successfully**, 5 failed due to
+  Anthropic's PDF size limit (>5 MB scanned files).
+- The 49 .txt outputs run through the same section-parsing regex
+  the canonical NVIC adapter uses, producing 667 Section objects.
+- Embedded via `EmbedderClient` + upserted via `store.upsert_chunks`;
+  ~331 chunks deduplicated against existing content_hashes from
+  partial-extraction overlap.
 
-**Real fix path:** OCR pass. Use a vision model (Anthropic Claude
-4.7 Vision, GPT-4o, or Tesseract) to extract text from these
-scanned PDFs, then run them through the existing parser. ~3-5 hr
-of work + Anthropic vision API budget (~$2-5 for the 55 PDFs at
-typical sizes). Tracked as a follow-up; not part of this 2026-05-09
-sprint.
+Final delta:
+
+| | Before | After | Δ |
+|---|---|---|---|
+| Distinct NVIC IDs | 160 | **209** | **+49** |
+| Section rows | 1,276 | 1,616 | +340 |
+| Chunks | 3,453 | 4,125 | +672 |
+
+Every previously-failed NVIC PDF is now searchable by section. NVIC 03-10
+(the SOLAS lifejacket amendments) for example is now indexed at
+"NVIC 03-10 §1" Purpose, "§2" Action, "§4" Background, "§5" Discussion,
+"§10" Forms — searchable per section instead of one opaque blob.
+
+NVIC 04-05 (the eval-question hallucinated cite) is **still not in the
+corpus** — it isn't on USCG's NVIC index page, confirming it as a model
+hallucination rather than an ingest gap.
+
+**Remaining 5 oversized scanned PDFs** would need either (a) chunked-
+page upload (split the PDF into ≤5MB pieces before vision call) or
+(b) `pdf2image` + per-page image OCR. ~2-3 hr work; tracked as a
+small follow-up.
 
 ### #7 — `solas_supplement` / `stcw_supplement` thin coverage
 
