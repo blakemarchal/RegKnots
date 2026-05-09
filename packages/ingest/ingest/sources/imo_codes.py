@@ -439,6 +439,27 @@ def parse_source(raw_dir: Path, imo_code: str) -> list[Section]:
         if not text.strip() or len(text) < 200:
             logger.warning("IMO %s: text too short (%d), skipping", meta.section_number, len(text))
             continue
+
+        # Sprint post-D6.83 audit (2026-05-09) — chapter-aware splitting for
+        # codes that ARE structured into numbered chapters. The 2026-05-09
+        # corpus survey found imo_igc, imo_hsc, imo_ibc each had ~300 chunks
+        # but only ONE distinct section_number — entire code under the parent
+        # MSC resolution string. Citation verification couldn't differentiate
+        # "IGC Code Ch.17" from "IGC Code Ch.4". Splitting at chapter
+        # boundaries preserves the same total chunk count after re-chunking
+        # downstream but makes each chapter independently citable.
+        chapter_sections = _split_into_chapters(text, meta, source_code)
+        if chapter_sections:
+            sections.extend(chapter_sections)
+            logger.info(
+                "IMO %s: split %s into %d chapter sections",
+                imo_code, meta.section_number, len(chapter_sections),
+            )
+            continue
+
+        # Fallback: no chapter structure detected (e.g. amendment-only docs
+        # like MEPC.318(74) for IBC which are a partial product list, not
+        # a chaptered code). Emit the document as a single Section.
         sections.append(Section(
             source=source_code, title_number=TITLE_NUMBER,
             section_number=meta.section_number,
@@ -449,6 +470,88 @@ def parse_source(raw_dir: Path, imo_code: str) -> list[Section]:
             published_date=meta.effective_date,
         ))
     logger.info("IMO %s: parsed %d sections from %d doc(s)", imo_code, len(sections), len(entries))
+    return sections
+
+
+# ── Chapter-aware splitting (Sprint post-D6.83) ────────────────────────────
+
+# Match a "CHAPTER N — TITLE" heading on its own line. The heading uses
+# all-caps for the title (consistent across the IMO IGC, HSC, IBC PDFs we
+# tested 2026-05-09). Captures (chapter_number, chapter_title).
+_CHAPTER_RE = re.compile(
+    r"^\s*CHAPTER\s+(\d+|[IVX]+)\s*[—\-:]?\s*([A-Z][A-Z 0-9—\-(),/]{3,80})\s*$",
+    re.MULTILINE,
+)
+
+
+def _split_into_chapters(
+    text: str,
+    meta: "CodeDocMeta",
+    source_code: str,
+) -> list[Section]:
+    """Split a chaptered IMO code PDF text into one Section per chapter.
+
+    Returns [] when the document does NOT contain detectable chapter
+    headings (e.g. amendment-only docs that lack a CHAPTER N structure).
+    Caller falls back to a single Section in that case.
+
+    Algorithm:
+      1. Find all `CHAPTER N — TITLE` matches with their line offsets.
+      2. The same chapter heading typically appears TWICE: once in the
+         table of contents (early in the doc) and once at the actual
+         chapter start. We collapse to the LAST occurrence per chapter
+         number — that's the real chapter content (TOC entries are at
+         the top, body content follows).
+      3. Slice text between consecutive (last-occurrence) heading
+         offsets to produce per-chapter body text.
+      4. Skip chapters whose body is too short (<300 chars) — those are
+         likely TOC entries that got mis-classified as last-occurrence.
+
+    Section numbers follow `{parent_label} Ch.{N}` so retrieval can
+    distinguish chapters and the citation verifier can substring-match.
+    """
+    matches = list(_CHAPTER_RE.finditer(text))
+    if len(matches) < 2:
+        return []
+
+    # Deduplicate by chapter number, keeping the LAST (= body) occurrence.
+    by_number: dict[str, re.Match[str]] = {}
+    for m in matches:
+        ch_num = m.group(1)
+        by_number[ch_num] = m   # later matches overwrite earlier (TOC entries)
+
+    # Sort by file position so we can slice ranges between them.
+    ordered = sorted(by_number.items(), key=lambda kv: kv[1].start())
+
+    sections: list[Section] = []
+    for i, (ch_num, m) in enumerate(ordered):
+        start = m.start()
+        end = ordered[i + 1][1].start() if i + 1 < len(ordered) else len(text)
+        body = text[start:end].strip()
+        # Skip too-short bodies (likely a TOC entry that survived the
+        # last-occurrence dedup, e.g. when the chapter appears 3+ times
+        # in the doc).
+        if len(body) < 300:
+            continue
+        ch_title = m.group(2).strip().rstrip("—-:").strip()
+        # Keep BOTH the resolution code AND the chapter in the section_number
+        # so the citation verifier's existing LIKE-match patterns continue
+        # to work for both shapes:
+        #   - LIKE '%MSC.370(93)%'  (yesterday's IMO-family fix in engine.py)
+        #   - LIKE '%Ch.4%'         (chapter-precise queries)
+        # Format: "IMO IGC Code MSC.370(93) Ch.4"
+        section_number = f"{meta.section_number} Ch.{ch_num}"
+        section_title = f"{meta.parent_label} Chapter {ch_num} — {ch_title}"
+        sections.append(Section(
+            source=source_code, title_number=TITLE_NUMBER,
+            section_number=section_number,
+            section_title=section_title,
+            full_text=body,
+            up_to_date_as_of=SOURCE_DATE,
+            parent_section_number=meta.section_number,  # parent is the resolution
+            published_date=meta.effective_date,
+        ))
+
     return sections
 
 
