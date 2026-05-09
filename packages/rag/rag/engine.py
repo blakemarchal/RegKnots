@@ -676,6 +676,120 @@ def _strip_unverified_citations(answer: str, unverified: list[str]) -> str:
     return answer.strip()
 
 
+# ── Sprint post-D6.83 audit (2026-05-09) — Layer C UX inversion ──────────
+#
+# Inverts the surfaces when retrieval confidently failed AND web fallback
+# confidently succeeded. Today's flow on a hard miss is:
+#
+#   - Main answer (synthesizer's confused attempt with hedge phrases like
+#     "the retrieved context does not specify…")
+#   - Side panel: "External reference — please verify" with the actually-
+#     correct content the web fallback found
+#
+# That UX puts the wrong answer in the primary slot. The user has to
+# notice the side panel and read it to get the right information.
+# Inverted flow when conditions are met:
+#
+#   - Lead with the web fallback's content as a brief, framed answer
+#   - Original synthesizer hedge moves to a "What I tried in our corpus"
+#     disclosure footer
+#   - web_fallback_card stays attached to the response — frontend can
+#     render thumbs feedback + source link as before
+#
+# Eligibility: judge said complete_miss AND web_fallback returned with
+# confidence ≥ 3. (Confidence 1-5 scale; ≥3 = decent enough that the
+# inversion is more honest than the confused main answer.)
+#
+# Tracked in roadmap as "Layer C — UX inversion when retrieval miss is
+# hard." Closes a chunk of the 35.7%/7d bad-answer rate by converting
+# "user gets two contradicting answers" into "user gets one accurate
+# answer with explicit honesty about the corpus gap."
+
+
+# Layer C minimum eligibility threshold. confidence is on the 1-5 scale
+# the synthesis LLM emits in citation_oracle / web fallback. 3 = decent.
+_LAYER_C_MIN_CONFIDENCE = 3
+
+# Verdicts that qualify as "retrieval failed hard enough that we should
+# lead with the web answer." complete_miss is the unambiguous case.
+# partial_miss is borderline — the corpus had SOME relevant content but
+# the model still hedged hard. We include partial_miss when the web
+# answer's confidence is ≥4 (very strong); otherwise the partial corpus
+# context might be more useful than the web fallback.
+_LAYER_C_TRIGGER_VERDICTS = {"complete_miss"}
+
+
+def _should_apply_layer_c(
+    judge_verdict: str | None,
+    web_fallback_card: "WebFallbackCard | None",
+) -> bool:
+    """True when the eligibility conditions for Layer C inversion are met."""
+    if web_fallback_card is None:
+        return False
+    if web_fallback_card.confidence < _LAYER_C_MIN_CONFIDENCE:
+        return False
+    if judge_verdict in _LAYER_C_TRIGGER_VERDICTS:
+        return True
+    # partial_miss with very strong web fallback (4-5) also qualifies.
+    if judge_verdict == "partial_miss" and web_fallback_card.confidence >= 4:
+        return True
+    return False
+
+
+def _apply_layer_c_inversion(
+    original_answer: str,
+    web_fallback_card: "WebFallbackCard",
+) -> str:
+    """Rewrite the answer to lead with the web fallback's content.
+
+    The original synthesizer hedge is preserved as a small "What I tried
+    in our corpus" footer so the user still sees the audit trail. The
+    web answer becomes the primary content with explicit framing about
+    the source.
+
+    Format:
+
+        I couldn't find this in our regulations corpus directly, but
+        {domain} addresses it as follows:
+
+        {summary}
+
+        {quote_if_present}
+
+        Source: {source_url}
+
+        ---
+        Note: the regulations corpus didn't contain a complete answer to
+        this question. The above is from a trusted maritime source —
+        verify against the linked source before relying on it for
+        compliance-critical decisions.
+    """
+    parts: list[str] = []
+    parts.append(
+        f"I couldn't find this in our regulations corpus directly, but "
+        f"**{web_fallback_card.source_domain}** addresses it as follows:"
+    )
+    parts.append("")
+    parts.append(web_fallback_card.summary.strip())
+
+    quote = (web_fallback_card.quote or "").strip()
+    if quote:
+        parts.append("")
+        parts.append(f"> {quote}")
+
+    parts.append("")
+    parts.append(f"Source: {web_fallback_card.source_url}")
+    parts.append("")
+    parts.append("---")
+    parts.append(
+        "*Note: the regulations corpus didn't contain a complete answer to "
+        "this question. The above is from a trusted maritime source — "
+        "verify against the linked source before relying on it for "
+        "compliance-critical decisions.*"
+    )
+    return "\n".join(parts)
+
+
 def _verify_un_claims(answer: str, chunks: list[dict]) -> list[str]:
     """Sprint D6.16 — return UN numbers mentioned in `answer` that are not
     grounded in any retrieved chunk and are not hedged via the prompt-defined
@@ -1665,6 +1779,17 @@ async def chat(
                 "hedge audit failed (non-fatal): %s: %s",
                 type(exc).__name__, str(exc)[:200],
             )
+
+    # Layer C — UX inversion when retrieval failed hard and web fallback
+    # got a confident answer. Rewrites cleaned_answer to lead with the
+    # web content rather than the synthesizer's hedged miss + side panel.
+    # See _apply_layer_c_inversion for the framing format and rationale.
+    if _should_apply_layer_c(judge_verdict, web_fallback_card):
+        logger.info(
+            "Layer C: inverting answer surface (verdict=%s web_confidence=%d)",
+            judge_verdict, web_fallback_card.confidence,
+        )
+        cleaned_answer = _apply_layer_c_inversion(cleaned_answer, web_fallback_card)
 
     return ChatResponse(
         answer=cleaned_answer,
@@ -2968,6 +3093,18 @@ async def chat_with_progress(
                 "hedge audit failed (non-fatal): %s: %s",
                 type(exc).__name__, str(exc)[:200],
             )
+
+    # Layer C — UX inversion (streaming-path twin of the chat() inversion
+    # above). The user already saw the original answer streamed; the
+    # final done event carries the inverted answer text, which the
+    # frontend uses to replace the streamed content. Same pattern as
+    # citation stripping (which already rewrites cleaned_answer in-flight).
+    if _should_apply_layer_c(judge_verdict, web_fallback_card):
+        logger.info(
+            "Layer C (stream): inverting answer surface (verdict=%s web_confidence=%d)",
+            judge_verdict, web_fallback_card.confidence,
+        )
+        cleaned_answer = _apply_layer_c_inversion(cleaned_answer, web_fallback_card)
 
     # Stage 6: Final event with the complete response
     done_payload = {
