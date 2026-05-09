@@ -357,20 +357,34 @@ def _extract_all_text_citations(answer: str) -> list[_TextCitation]:
         section = m.group(2)
         display = f"{title} CFR {section}"
         if display not in found:
-            # Parent-range matching: when the citation is just a Part
-            # ("46 CFR 142") with no `.`-delimited subsection, accept
-            # ANY direct subsection ("46 CFR 142.227", "46 CFR 142.300",
-            # etc.) as a valid match. The 2026-05-08 audit found 3 of
-            # 12 eval F's were citations of this shape — model wrote
-            # the parent, corpus indexes only the leaves, exact match
-            # rejected the row even though retrieval surfaced it.
-            if "." in section:
-                pattern = display       # subsection given → exact match
+            # CFR sections come in three shapes:
+            #   1. Part only: "46 CFR 142"          — corpus has "46 CFR 142.X" rows
+            #   2. Section with dot-subsection:
+            #      "46 CFR 142.227"                 — corpus has the exact row
+            #      OR sometimes parent of dot-sub-paragraphs ".227.X"
+            #   3. Subpart with hyphen-subsection:
+            #      "46 CFR 14.05"                   — corpus has "46 CFR 14.05-X" rows
+            #      "46 CFR 14.05-1"                 — corpus has the exact row
+            #
+            # The 2026-05-09 audit shipped (1) and (2 exact). The 2026-05-09
+            # PM eval surfaced (3) — model wrote "46 CFR 14.05" / "33 CFR 1.07"
+            # but corpus indexes only "46 CFR 14.05-1" / "33 CFR 1.07-10" leaves.
+            # Multiple candidate patterns now cover all three shapes — verifier
+            # succeeds if ANY matches. False-positive risk is bounded because
+            # each pattern is a strict prefix + boundary character.
+            cands: list[tuple[str, str]] = []
+            if "." not in section:
+                # Part-only: "46 CFR 142" → match any "46 CFR 142.X" row
+                cands.append((f"cfr_{title}", f"{display}.%"))
             else:
-                pattern = f"{display}.%"  # parent only → any subsection
+                # Section / subpart with dot. Try exact, dot-subparagraph,
+                # AND hyphen-subsection (covers Subpart-style "14.05" → "14.05-1").
+                cands.append((f"cfr_{title}", display))
+                cands.append((f"cfr_{title}", f"{display}.%"))
+                cands.append((f"cfr_{title}", f"{display}-%"))
             found[display] = _TextCitation(
                 display=display,
-                candidates=[(f"cfr_{title}", pattern)],
+                candidates=cands,
             )
 
     # ── SOLAS chapter/part (regulation number is informational) ─────────────
