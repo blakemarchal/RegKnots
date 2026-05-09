@@ -461,9 +461,22 @@ def _extract_all_text_citations(answer: str) -> list[_TextCitation]:
         n = m.group(2)
         display = f"STCW Reg.{ch}/{n}"
         if display not in found:
+            # Parent-range matching for sub-paragraph cites: "STCW Reg.I/9.5"
+            # in the corpus is stored at "STCW Ch.I Reg.I/9" (sub-paragraph
+            # 9.5 is content INSIDE that section, not a row of its own).
+            # Same shape as the CFR parent-range fix (2026-05-09 sprint).
+            # When n has a `.<digit>` suffix, strip it and match the parent.
+            parent = n.split(".", 1)[0]
+            if parent != n:
+                # Try parent first; if no match the original LIKE will be tried below.
+                candidates = [
+                    ("stcw", f"STCW Ch.{ch} Reg.{ch}/{parent}%"),
+                ]
+            else:
+                candidates = [("stcw", f"STCW Ch.{ch} Reg.{ch}/{n}%")]
             found[display] = _TextCitation(
                 display=display,
-                candidates=[("stcw", f"STCW Ch.{ch} Reg.{ch}/{n}%")],
+                candidates=candidates,
             )
 
     # ── STCW Code (part A or B) ─────────────────────────────────────────────
