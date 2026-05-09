@@ -14,14 +14,18 @@ import {
 import { apiRequest } from '@/lib/api'
 import { useAuthStore } from '@/lib/auth'
 
-// Sprint D6.3 — Women Offshore charity-partner landing page.
+// Sprint D6.3 — Women Offshore donor-recipient landing page.
 //
 // Routes the visitor to one of two PROMO Stripe prices (25% off the
 // standard monthly rate). Annual is shown as a secondary option for
 // users who want to commit further. 10% of every subscription that
-// originates from this page is owed to Women Offshore — captured via
-// the `referral_source` field on the user record (set in localStorage
-// here, persisted at checkout, written to DB by the billing router).
+// originates from this page is donated to Women Offshore — captured
+// via the `referral_source` field on the user record (set in
+// localStorage here, persisted at checkout, written to DB by the
+// billing router). Note: we describe Women Offshore as a non-profit
+// we donate to, not as a "partner" — there is no formal partnership
+// agreement; we are donors. Same convention applies to all charity-
+// linked landing pages (/captainkarynn, /ass, etc.).
 
 type PromoPlan = 'mate_promo' | 'captain_promo' | 'mate_annual' | 'captain_annual'
 
@@ -167,7 +171,7 @@ export default function WomenOffshorePage() {
               <path d="M8 0a8 8 0 100 16A8 8 0 008 0zM4.5 8.5l2.5 2.5 4.5-5L12 7l-5 5.5-3-3 .5-1z"/>
             </svg>
             <span className="font-mono text-xs uppercase tracking-wider text-[#2dd4bf]">
-              Women Offshore Partner
+              Supporting Women Offshore
             </span>
           </div>
 
@@ -387,7 +391,7 @@ export default function WomenOffshorePage() {
             Offshore. No middleman, no marketing budget shell game.
           </p>
           <p className="font-mono text-sm text-[#6b7594] leading-relaxed mb-5">
-            RegKnot is building expanding partnerships with maritime-focused charities. Read the
+            RegKnot makes recurring donations to maritime-focused non-profits. Read the
             full giving model on our{' '}
             <Link href="/giving" className="text-[#2dd4bf] hover:underline">Giving Back page</Link>.
           </p>

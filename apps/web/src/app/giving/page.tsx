@@ -76,7 +76,7 @@ function CharitySuggestionSection() {
           Know a Cause That Belongs Here?
         </h2>
         <p className="font-mono text-sm text-[#6b7594] mb-6 leading-relaxed">
-          We review charity partner suggestions annually. If you know an organization making
+          We review charity recommendations annually. If you know an organization making
           a difference in maritime communities, we&apos;d love to hear about it.
         </p>
 
@@ -91,7 +91,7 @@ function CharitySuggestionSection() {
               Sign In to Suggest a Charity
             </Link>
             <p className="font-mono text-xs text-[#6b7594] mt-4">
-              We review all suggestions and announce new partners annually.
+              We review all suggestions and announce new recipients annually.
             </p>
           </>
         ) : !suggestionOpen ? (
@@ -105,7 +105,7 @@ function CharitySuggestionSection() {
               Suggest a Charity
             </button>
             <p className="font-mono text-xs text-[#6b7594] mt-4">
-              We review all suggestions and announce new partners annually.
+              We review all suggestions and announce new recipients annually.
             </p>
           </>
         ) : (
@@ -124,7 +124,7 @@ function CharitySuggestionSection() {
             </div>
             <div>
               <label className="block font-mono text-xs text-[#6b7594] mb-1.5">
-                Why should RegKnot partner with this organization? *
+                Why should RegKnot donate to this organization? *
               </label>
               <textarea
                 value={reason}
@@ -133,7 +133,7 @@ function CharitySuggestionSection() {
                 className="w-full bg-[#0d1225] border border-white/10 rounded-lg px-3 py-2
                   font-mono text-sm text-[#f0ece4] placeholder:text-[#6b7594]/50
                   focus:outline-none focus:border-[#2dd4bf]/50 transition-colors resize-none"
-                placeholder="Tell us why this charity should be a RegKnot partner..."
+                placeholder="Tell us why this non-profit should receive RegKnot donations..."
               />
             </div>
             {submitResult && (
@@ -225,7 +225,7 @@ export default function GivingPage() {
       <section className="px-5 md:px-10 pb-20">
         <div className="max-w-4xl mx-auto">
           <h2 className="font-display font-black text-[#f0ece4] text-2xl md:text-3xl mb-8 text-center">
-            Our Partners
+            Non-profits We Support
           </h2>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-5">

@@ -86,9 +86,14 @@ export default function PricingPage() {
 
   // Referral-aware pricing. Any non-null referral_source grants lifetime
   // monthly promo pricing (Sprint D6.3b). Annual prices don't change.
+  // Note: we describe these as donor-recipient relationships, not
+  // partnerships — there is no formal partnership agreement; RegKnots
+  // simply donates 10% of revenue from these signups to the named
+  // non-profit. Pre-2026-05-09 copy used "Partner pricing" which
+  // implied a formal partnership and was retired for legal clarity.
   const hasReferral = !!billing?.referral_source
   const referralNote = hasReferral
-    ? `Partner pricing — supporting ${billing!.referral_source!.replace(/_/g, ' ')}`
+    ? `Supporter pricing — your subscription donates to ${billing!.referral_source!.replace(/_/g, ' ')}`
     : null
 
   async function handleSubscribeTier(tier: Tier) {

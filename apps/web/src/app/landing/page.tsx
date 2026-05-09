@@ -450,7 +450,7 @@ export default function LandingPage() {
             href="/giving"
             className="font-mono text-sm text-[#2dd4bf] hover:underline"
           >
-            Learn more about our partners &rarr;
+            Learn more about our giving &rarr;
           </Link>
         </div>
       </section>
