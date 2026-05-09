@@ -128,9 +128,14 @@ Rules:
 Output the full transcribed text only. Begin extraction now."""
 
 
-async def ocr_pdf(pdf_path: Path, api_key: str, http: httpx.AsyncClient) -> str:
-    """Send the PDF to Anthropic's vision API and return extracted text."""
-    pdf_bytes = pdf_path.read_bytes()
+async def _vision_call(
+    pdf_bytes: bytes, label: str, api_key: str, http: httpx.AsyncClient,
+) -> str:
+    """One Anthropic vision call against a PDF (full or chunk).
+
+    label is purely cosmetic — embedded in the prompt so the model knows
+    which document/page-range it's looking at.
+    """
     pdf_b64 = base64.b64encode(pdf_bytes).decode()
     payload = {
         "model": ANTHROPIC_MODEL,
@@ -151,7 +156,7 @@ async def ocr_pdf(pdf_path: Path, api_key: str, http: httpx.AsyncClient) -> str:
                     {
                         "type": "text",
                         "text": (
-                            f"This is NVIC {pdf_path.stem}. Transcribe its text content "
+                            f"This is {label}. Transcribe its text content "
                             f"following the rules in the system prompt. Output the text only."
                         ),
                     },
@@ -175,8 +180,69 @@ async def ocr_pdf(pdf_path: Path, api_key: str, http: httpx.AsyncClient) -> str:
     parts = [b.get("text", "") for b in data.get("content", []) if b.get("type") == "text"]
     text = "".join(parts).strip()
     if not text:
-        raise RuntimeError(f"empty response from Anthropic for {pdf_path.name}")
+        raise RuntimeError(f"empty response from Anthropic for {label}")
     return text
+
+
+# Anthropic vision API caps PDFs at 100 pages per call. We chunk to 80
+# to leave headroom for any internal expansion / per-page splitting.
+_MAX_PAGES_PER_CALL = 80
+
+
+def _split_pdf_into_chunks(pdf_path: Path, max_pages: int = _MAX_PAGES_PER_CALL) -> list[tuple[str, bytes]]:
+    """Split a PDF into ≤max_pages-page chunks.
+
+    Returns [(label, pdf_bytes), ...] where label describes the page
+    range (e.g. "pages 1-80"). For PDFs already at-or-below the limit,
+    returns a single (label, bytes) pair.
+    """
+    from pypdf import PdfReader, PdfWriter
+    import io
+    reader = PdfReader(str(pdf_path))
+    n = len(reader.pages)
+    if n <= max_pages:
+        return [(f"pages 1-{n}", pdf_path.read_bytes())]
+    chunks: list[tuple[str, bytes]] = []
+    for start in range(0, n, max_pages):
+        end = min(start + max_pages, n)
+        writer = PdfWriter()
+        for i in range(start, end):
+            writer.add_page(reader.pages[i])
+        buf = io.BytesIO()
+        writer.write(buf)
+        chunks.append((f"pages {start + 1}-{end}", buf.getvalue()))
+    return chunks
+
+
+async def ocr_pdf(pdf_path: Path, api_key: str, http: httpx.AsyncClient) -> str:
+    """Send the PDF to Anthropic's vision API and return extracted text.
+
+    Auto-handles oversized PDFs (>80 pages) by splitting into chunks,
+    OCRing each chunk in sequence, and concatenating the text with
+    page-range markers.
+    """
+    chunks = _split_pdf_into_chunks(pdf_path)
+    if len(chunks) == 1:
+        # Common case: small enough for single call.
+        label = f"NVIC {pdf_path.stem}"
+        return await _vision_call(chunks[0][1], label, api_key, http)
+
+    # Oversized — chunked path.
+    logger.info("%s: splitting into %d page-chunks (oversized)", pdf_path.name, len(chunks))
+    parts: list[str] = []
+    for page_range, chunk_bytes in chunks:
+        label = f"NVIC {pdf_path.stem}, {page_range}"
+        try:
+            chunk_text = await _vision_call(chunk_bytes, label, api_key, http)
+            parts.append(f"\n\n[--- {page_range} ---]\n\n{chunk_text}")
+        except Exception as exc:
+            logger.warning("%s %s: chunk OCR failed — %s", pdf_path.name, page_range, exc)
+            # Continue with other chunks; partial text is better than none.
+            parts.append(f"\n\n[--- {page_range} (OCR FAILED: {exc}) ---]\n\n")
+    combined = "".join(parts).strip()
+    if not combined:
+        raise RuntimeError(f"all chunks failed for {pdf_path.name}")
+    return combined
 
 
 # ── Pipeline ──────────────────────────────────────────────────────────────

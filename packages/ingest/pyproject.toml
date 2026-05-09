@@ -20,6 +20,10 @@ dependencies = [
     "rich>=13.0.0",
     # PDF parsing (COLREGs, SOLAS, MARPOL, STCW)
     "pdfplumber>=0.11.0",
+    # PDF page splitting — oversized scanned-NVIC OCR retry path
+    # (Anthropic vision API has a 100-page-per-call limit; we split
+    # documents into ≤80-page chunks before vision OCR.)
+    "pypdf>=5.1.0",
     # Vision extraction (STCW image-based ingestion)
     "anthropic>=0.40.0",
     # HTML parsing (NVIC index scraper)
