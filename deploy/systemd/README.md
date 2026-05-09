@@ -12,6 +12,13 @@ Production schedules: corpus refresh + daily Postgres backup.
   Daily Postgres backup via `scripts/backup_postgres.sh`. pg_dump from
   the regknots-postgres container, gzipped, written to
   `/var/backups/regknots/`, 14-day retention. Schedules daily (03:00 UTC).
+- `regknots-{api,web,worker}.service.d/memory.conf` — Sprint post-D6.83
+  audit (2026-05-08). Cgroup `MemoryHigh`/`MemoryMax` caps as a
+  drop-in overlay on the master unit files (which live only on the
+  VPS, not in this repo). When a service grows past `MemoryMax` it's
+  killed by its own cgroup and `Restart=always` brings it back —
+  global OOM (the May 1 incident class) doesn't fire and the rest of
+  the box stays up. Install via the steps below.
 
 ## Install on the VPS
 
@@ -30,6 +37,23 @@ cp /opt/RegKnots/deploy/systemd/regknots-backup.timer /etc/systemd/system/
 chmod +x /opt/RegKnots/scripts/backup_postgres.sh
 systemctl daemon-reload
 systemctl enable --now regknots-backup.timer
+
+# Memory cgroup caps for api/web/worker (drop-in overlays — does NOT
+# replace the master unit files):
+mkdir -p /etc/systemd/system/regknots-api.service.d
+mkdir -p /etc/systemd/system/regknots-web.service.d
+mkdir -p /etc/systemd/system/regknots-worker.service.d
+cp /opt/RegKnots/deploy/systemd/regknots-api.service.d/memory.conf \
+   /etc/systemd/system/regknots-api.service.d/memory.conf
+cp /opt/RegKnots/deploy/systemd/regknots-web.service.d/memory.conf \
+   /etc/systemd/system/regknots-web.service.d/memory.conf
+cp /opt/RegKnots/deploy/systemd/regknots-worker.service.d/memory.conf \
+   /etc/systemd/system/regknots-worker.service.d/memory.conf
+systemctl daemon-reload
+systemctl restart regknots-api regknots-web regknots-worker
+# Confirm caps are active:
+systemctl show regknots-api regknots-web regknots-worker \
+   --property=MemoryHigh --property=MemoryMax
 
 # Verify schedule:
 systemctl list-timers --all --no-pager | grep regknots

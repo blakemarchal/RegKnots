@@ -103,6 +103,43 @@ SYNONYM_DICT: dict[str, tuple[str, ...]] = {
 }
 
 
+# ── Maritime industry-jargon glossary (post-2026-05-08 audit) ────────────
+#
+# The curated SYNONYM_DICT above is conservative — entries land only on
+# documented retrieval misses. That works but trails real-world demand
+# by one painful incident per term ("user asks X → bad answer ships →
+# we add the synonym → next user with the same vocabulary is fine").
+#
+# 2026-05-08: John Collins asked "what size fire wire is required" on
+# his containership profile. The corpus has 33 CFR 155.235 +
+# IACS UR W18 + IACS UR A2 — none of which retrieved because the user
+# said "fire wire" (tanker industry slang) and the formal term is
+# "emergency towing-off pennant." The Haiku rewriter doesn't know this
+# slang at the depth a senior captain does; the hedge classifier saw
+# the miss and proposed wrong synonyms.
+#
+# Fix: a separate `maritime_glossary.py` module curated from a wider
+# brainstorm. Confidence-tagged so we know which entries are still
+# Sonnet-only (1) vs. multi-model + corpus-verified (2/3) vs. Karynn-
+# verified (4). This SYNONYM_DICT continues to hold the most-tightly-
+# evidence-grounded entries; the glossary holds the broader curated set.
+#
+# Both feed the same retrieval-time keyword-expansion path. Glossary
+# entries override SYNONYM_DICT only if a key collides (which today it
+# doesn't — different domains).
+
+from rag.maritime_glossary import synonym_pairs as _glossary_synonym_pairs
+
+_GLOSSARY_DICT: dict[str, tuple[str, ...]] = _glossary_synonym_pairs()
+
+
+# Merge the curated SYNONYM_DICT (precedence) on top of the glossary.
+# Glossary entries fill the long tail; SYNONYM_DICT entries — which
+# carry per-entry frequency-checked rationale — stay authoritative
+# wherever there's overlap.
+SYNONYM_DICT = {**_GLOSSARY_DICT, **SYNONYM_DICT}
+
+
 def expand_keywords(
     keywords: list[str],
 ) -> tuple[list[str], dict[str, list[str]]]:
