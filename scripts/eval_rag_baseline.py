@@ -355,17 +355,15 @@ QUESTIONS: list[TestQuestion] = [
     ),
 
     # ── Sanity / honest-limit checks ────────────────────────────────────
-    TestQuestion(
-        qid="X1",
-        query="What is today's date and the most recent bulletin you've seen?",
-        vessels=["V1"],
-        expected=[
-            # We expect the answer to mention either a recent bulletin's date
-            # OR an explicit acknowledgment of the ~April 2026 cutoff.
-            r"2025|2026",
-        ],
-        wrong_sub=[],
-    ),
+    # Sprint post-D6.83 audit (2026-05-09): removed qid X1 ("What is
+    # today's date and the most recent bulletin you've seen?"). The model
+    # has no real-time clock; this question always fails as a "retrieval
+    # whiff" F. It tested an honest-limit scenario but inflated the F
+    # count without measuring real retrieval quality. If we want to test
+    # corpus-cutoff disclosure behavior in the future, formulate it as a
+    # question the corpus CAN answer, with the cutoff date as the success
+    # criterion in the answer text rather than the citation.
+
     # ── Sprint D5.1 regression — 46 USC (Subtitle II) ingest canaries
     TestQuestion(
         qid="U-1",
@@ -766,20 +764,13 @@ QUESTIONS: list[TestQuestion] = [
     ),
 
     # ── Scenario / ops ─────────────────────────────────────────────────
-    TestQuestion(
-        qid="N-P1",
-        query="Can we make a river run today or is the Mississippi too high?",
-        vessels=["V5"],
-        expected=[
-            r"MSIB Vol",
-            r"Carrollton",
-            r"Port Condition",
-            r"High Water",
-            r"Low Water",
-        ],
-        wrong_sub=[],
-        naturalistic=True,
-    ),
+    # Sprint post-D6.83 audit (2026-05-09): removed qid N-P1 ("Can we
+    # make a river run today or is the Mississippi too high?"). This
+    # query needs real-time port-condition / river-stage data which is
+    # not in the corpus by design (we ingest regulations, not live ops
+    # bulletins at the river-stage level). It always fails as a retrieval
+    # whiff. Real-time data integration is a separate sprint; until then,
+    # this question pollutes the eval signal.
     TestQuestion(
         qid="N-O1",
         query="I need to log something in my Oil Record Book — what's required?",
