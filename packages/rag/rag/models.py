@@ -57,6 +57,44 @@ class WebFallbackCard(BaseModel):
     surface_tier: str = "verified"  # 'verified' | 'reference'
 
 
+class TierMetadata(BaseModel):
+    """Sprint D6.84 — confidence tier provenance.
+
+    Surfaced to the frontend so the chip / footnote / disclaimer can
+    render with full context, and persisted in tier_router_shadow_log
+    for admin forensics.
+
+    tier: 1-4 integer.
+       1 = ✓ Verified           — corpus citation, judge match
+       2 = ⚓ Industry Standard  — settled maritime knowledge, no citation claimed
+       3 = 🌐 Relaxed Web       — web fallback with disclaimer + confidence score
+       4 = ⚠ Best-effort        — explicit hedge / "needs a Captain"
+
+    label: short human-readable tier name (matches the chip text)
+
+    reason: 1-2 sentence explanation of WHY this tier was chosen.
+            Surfaced in admin debugging only, not directly to user.
+
+    classifier_verdict: yes/no/uncertain from the industry-standard
+            classifier. None if the classifier didn't fire (e.g.,
+            tier 1 short-circuited). 'skipped' if the gate was
+            bypassed.
+
+    self_consistency_pass: True if regen + Haiku comparator agreed.
+            None if the gate didn't run (tier 1, or tier 2 wasn't
+            reached). False = downgrade triggered.
+
+    web_confidence: 1-5 confidence from web fallback when tier 3 fired,
+            else None.
+    """
+    tier: int                             # 1 | 2 | 3 | 4
+    label: str                            # "verified" | "industry_standard" | "relaxed_web" | "best_effort"
+    reason: str = ""
+    classifier_verdict: str | None = None  # "yes" | "no" | "uncertain" | "skipped" | None
+    self_consistency_pass: bool | None = None
+    web_confidence: int | None = None
+
+
 class ChatResponse(BaseModel):
     answer: str
     conversation_id: UUID
@@ -71,3 +109,7 @@ class ChatResponse(BaseModel):
     # the hedge classifier matched AND web fallback found a verified
     # quote on a trusted domain. Frontend renders as a yellow card.
     web_fallback: WebFallbackCard | None = None
+    # Sprint D6.84 — confidence tier router metadata. Surfaced to the
+    # frontend ONLY when CONFIDENCE_TIERS_MODE=live. In 'off' / 'shadow'
+    # this is None and the frontend renders today's behavior unchanged.
+    tier_metadata: TierMetadata | None = None

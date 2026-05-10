@@ -208,6 +208,26 @@ class Settings(BaseSettings):
         default=60, validation_alias="HYBRID_RRF_K",
     )
 
+    # ── D6.84 Sprint A — Confidence tier router ──────────────────────────
+    # Three-mode flag controlling the additive tier_router layer.
+    #
+    #   off    — tier_router code is skipped entirely. Zero cost,
+    #            zero behavior change. Default.
+    #   shadow — tier_router runs in PARALLEL with today's pipeline.
+    #            ChatResponse renders today's behavior unchanged. The
+    #            shadow tier decision + classifier + self-consistency
+    #            outcome is written to tier_router_shadow_log so
+    #            admin can compare side-by-side.
+    #   live   — tier_router runs and its decision drives the rendered
+    #            answer. Today's pre-tier answer is still computed and
+    #            logged to tier_router_shadow_log for forensics.
+    #
+    # See packages/rag/rag/tier_router.py and migration 0093 for the
+    # full design. Phase E flip from shadow → live is operator-driven.
+    confidence_tiers_mode: str = Field(
+        default="off", validation_alias="CONFIDENCE_TIERS_MODE",
+    )
+
     # Monitoring
     sentry_dsn: str = Field(default="", validation_alias="SENTRY_DSN")
     sentry_auth_token: str = Field(default="", validation_alias="SENTRY_AUTH_TOKEN")

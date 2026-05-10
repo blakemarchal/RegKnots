@@ -1,0 +1,46 @@
+{
+  "description": "Sprint D6.84 — confidence tier router gold-set. Each entry has the user query and the EXPECTED tier label. Used by scripts/eval_tier_router.py to grade the shadow-log decisions before flipping CONFIDENCE_TIERS_MODE=live. Designed for Karynn + Blake to review every Tier 2 row by hand.",
+  "tiers": {
+    "1": "verified — answer cited to corpus + judge match",
+    "2": "industry_standard — settled maritime knowledge, no claimed citation",
+    "3": "relaxed_web — web fallback with disclaimer + confidence score",
+    "4": "best_effort — explicit hedge / decline"
+  },
+  "queries": [
+    {"qid": "JORDAN-1", "expected_tier": 2, "query": "Should a watertight door gasket be open or closed cell material?", "rationale": "Closed-cell elastomer is universal marine engineering knowledge."},
+    {"qid": "JORDAN-2", "expected_tier": 2, "query": "What's the difference between a green and white signaling column?", "rationale": "Settled visual signal convention."},
+    {"qid": "JORDAN-3", "expected_tier": 2, "query": "Why are ring buoys stenciled with the vessel's name and hailing port?", "rationale": "Universal SAR identification practice."},
+    {"qid": "JORDAN-4", "expected_tier": 1, "query": "Should engine room watchstanders use a strobe light during emergencies?", "rationale": "Regulatory + SMS-specific; expect corpus answer if covered."},
+
+    {"qid": "T2-001", "expected_tier": 2, "query": "Should a fire main be kept charged or dry while in port?", "rationale": "Settled practice."},
+    {"qid": "T2-002", "expected_tier": 2, "query": "What is the proper technique for heaving a line?", "rationale": "Seamanship fundamental."},
+    {"qid": "T2-003", "expected_tier": 2, "query": "Why does a fishing vessel show red over white at night?", "rationale": "COLREGS Rule 26 visual signal — basic deck-officer knowledge."},
+    {"qid": "T2-004", "expected_tier": 2, "query": "What is the purpose of a sea chest strainer?", "rationale": "Universal engineering function."},
+    {"qid": "T2-005", "expected_tier": 2, "query": "Why is dunnage used in a cargo hold?", "rationale": "Settled cargo-securing practice."},
+    {"qid": "T2-006", "expected_tier": 2, "query": "What does ullage mean in a cargo tank context?", "rationale": "Universal terminology."},
+    {"qid": "T2-007", "expected_tier": 2, "query": "Why do mariners say port and starboard instead of left and right?", "rationale": "Universal seamanship convention."},
+    {"qid": "T2-008", "expected_tier": 2, "query": "What is the function of a fid in marlinspike seamanship?", "rationale": "Universal marlinspike knowledge."},
+    {"qid": "T2-009", "expected_tier": 2, "query": "Why is a bowline considered the king of knots?", "rationale": "Universal seamanship reasoning."},
+    {"qid": "T2-010", "expected_tier": 2, "query": "What is the typical reason an engine room is kept under positive pressure?", "rationale": "Settled engineering practice."},
+
+    {"qid": "T1-001", "expected_tier": 1, "query": "What are the lifeboat inspection intervals for a Class III SOLAS vessel?", "rationale": "Specific regulatory citation expected."},
+    {"qid": "T1-002", "expected_tier": 1, "query": "How many fire extinguishers does a small passenger vessel under 46 CFR Subchapter T require?", "rationale": "Direct CFR question."},
+    {"qid": "T1-003", "expected_tier": 1, "query": "What is the maximum allowable bilge water oil content under MARPOL Annex I?", "rationale": "Regulatory threshold."},
+    {"qid": "T1-004", "expected_tier": 1, "query": "How long must I retain my Oil Record Book entries?", "rationale": "Specific regulatory retention requirement."},
+    {"qid": "T1-005", "expected_tier": 1, "query": "What are the placement requirements for type IV throwable PFDs on uninspected fishing vessels?", "rationale": "Specific CFR requirement."},
+
+    {"qid": "T1-or-3-001", "expected_tier": "1_or_3", "query": "What does the latest NVIC say about cybersecurity reporting for U.S.-flag vessels?", "rationale": "Borderline — NVIC is in corpus, but recent NVICs may not be. Tier 1 if covered, Tier 3 if not."},
+    {"qid": "T1-or-3-002", "expected_tier": "1_or_3", "query": "What is the current MARSEC level for the Port of Houston today?", "rationale": "Real-time data — tier 3 from web."},
+
+    {"qid": "T3-001", "expected_tier": 3, "query": "What is the latest IMO MSC circular on autonomous vessel trials?", "rationale": "Recent IMO content unlikely in corpus; expect web fallback."},
+    {"qid": "T3-002", "expected_tier": 3, "query": "Has the USCG issued new guidance on lithium battery fires this quarter?", "rationale": "Time-sensitive — expect web fallback."},
+
+    {"qid": "T4-001", "expected_tier": 4, "query": "What's the best vendor for marine navigation software in the Gulf of Mexico?", "rationale": "Off-domain — should decline or hedge."},
+    {"qid": "T4-002", "expected_tier": 4, "query": "Should I take this job at Crowley or Maersk?", "rationale": "Personal/career — explicit decline."},
+
+    {"qid": "T1-006", "expected_tier": 1, "query": "What are the STCW rest hour requirements for OICEW?", "rationale": "Direct STCW regulatory question, in corpus."},
+    {"qid": "T1-007", "expected_tier": 1, "query": "What are the testing intervals for a fixed CO2 firefighting system?", "rationale": "Specific regulatory interval."},
+    {"qid": "T2-011", "expected_tier": 2, "query": "Why are sounding pipes typically painted white with red caps?", "rationale": "Universal marking convention."},
+    {"qid": "T2-012", "expected_tier": 2, "query": "What is the purpose of a sacrificial anode on a steel hull?", "rationale": "Settled corrosion-prevention principle."}
+  ]
+}

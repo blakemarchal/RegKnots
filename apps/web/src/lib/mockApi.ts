@@ -33,6 +33,9 @@ export interface ChatStreamDone {
   // missed AND web fallback found a verified verbatim quote on a
   // trusted regulator domain.
   web_fallback?: import('@/types/chat').WebFallbackCard | null
+  // Sprint D6.84 — confidence tier router metadata. Surfaced ONLY when
+  // CONFIDENCE_TIERS_MODE=live on the backend; null in shadow / off.
+  tier_metadata?: import('@/types/chat').TierMetadata | null
 }
 
 /**

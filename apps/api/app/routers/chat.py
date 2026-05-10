@@ -520,9 +520,16 @@ async def _persist_chat_outcome(
     vessel_id: uuid.UUID | None,
     vessel_update: dict | None,
     is_new_conversation: bool,
+    tier_metadata_json: str | None = None,
 ) -> None:
     """Persist a completed chat turn: insert messages, apply vessel update,
-    increment message count, fire background title generation for new conversations."""
+    increment message count, fire background title generation for new conversations.
+
+    Sprint D6.84 — when CONFIDENCE_TIERS_MODE=live and the chat()
+    response carries TierMetadata, the JSON-encoded payload is stored
+    on the assistant message so a conversation reload reproduces the
+    chip. None for shadow / off modes.
+    """
     # Resolve cited regulation UUIDs for FK storage
     cited_ids: list[uuid.UUID] = []
     if cited_section_numbers:
@@ -550,14 +557,16 @@ async def _persist_chat_outcome(
     await pool.execute(
         """
         INSERT INTO messages
-            (conversation_id, role, content, model_used, tokens_used, cited_regulation_ids)
-        VALUES ($1, 'assistant', $2, $3, $4, $5)
+            (conversation_id, role, content, model_used, tokens_used, cited_regulation_ids,
+             tier_metadata)
+        VALUES ($1, 'assistant', $2, $3, $4, $5, $6::jsonb)
         """,
         conversation_id,
         answer,
         model_alias,
         total_tokens,
         cited_ids,
+        tier_metadata_json,
     )
 
     # Apply vessel profile updates from chat response
@@ -663,8 +672,15 @@ async def chat_endpoint(
         # D6.71 Sprint 7 — Hybrid BM25 + dense retrieval (default OFF).
         hybrid_retrieval_enabled=settings.hybrid_retrieval_enabled,
         hybrid_rrf_k=settings.hybrid_rrf_k,
+        # D6.84 Sprint A — confidence tier router. off / shadow / live.
+        confidence_tiers_mode=settings.confidence_tiers_mode,
     )
 
+    # D6.84 — encode the TierMetadata Pydantic to JSON for the JSONB
+    # column. None when CONFIDENCE_TIERS_MODE != live.
+    tier_metadata_json = (
+        response.tier_metadata.model_dump_json() if response.tier_metadata else None
+    )
     await _persist_chat_outcome(
         pool=pool,
         anthropic_client=anthropic_client,
@@ -679,6 +695,7 @@ async def chat_endpoint(
         vessel_id=body.vessel_id,
         vessel_update=response.vessel_update,
         is_new_conversation=is_new_conversation,
+        tier_metadata_json=tier_metadata_json,
     )
 
     return response
@@ -756,6 +773,8 @@ async def chat_stream_endpoint(
                 # D6.71 Sprint 7 — Hybrid BM25 + dense retrieval (default OFF).
                 hybrid_retrieval_enabled=settings.hybrid_retrieval_enabled,
                 hybrid_rrf_k=settings.hybrid_rrf_k,
+                # D6.84 Sprint A — confidence tier router. off / shadow / live.
+                confidence_tiers_mode=settings.confidence_tiers_mode,
             ):
                 event_type = event["event"]
                 payload = event["data"]
@@ -777,6 +796,10 @@ async def chat_stream_endpoint(
         # finish — keeps everything sequential and error-loggable.
         if final_data is not None:
             try:
+                # D6.84 — re-serialize tier_metadata from the SSE payload
+                # for the JSONB column (the SSE event already carried it).
+                tier_md = final_data.get("tier_metadata")
+                tier_metadata_json = json.dumps(tier_md) if tier_md else None
                 await _persist_chat_outcome(
                     pool=pool,
                     anthropic_client=anthropic_client,
@@ -793,6 +816,7 @@ async def chat_stream_endpoint(
                     vessel_id=body.vessel_id,
                     vessel_update=final_data.get("vessel_update"),
                     is_new_conversation=is_new_conversation,
+                    tier_metadata_json=tier_metadata_json,
                 )
             except Exception:
                 logger.exception("Failed to persist streaming chat outcome")

@@ -6,6 +6,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { Message, CitedRegulation } from '@/types/chat'
 import { CitationChip } from './CitationChip'
+import { TierChip, TierWebDisclaimer } from './TierChip'
 
 // ── Copy-to-clipboard helpers ──────────────────────────────────────────────────
 
@@ -345,6 +346,15 @@ export function ChatMessage({ message, onCitationTap }: Props) {
       <div className="w-0.5 self-stretch bg-teal/40 rounded-full flex-shrink-0 mt-0.5" />
 
       <div className="flex-1 min-w-0 text-sm text-[#f0ece4] leading-relaxed">
+        {/* Sprint D6.84 — confidence tier chip. Renders ABOVE the
+            answer so the epistemic status is the first signal the
+            user sees. Only present when CONFIDENCE_TIERS_MODE=live
+            on the backend; null in shadow / off modes. */}
+        {message.tier_metadata && <TierChip metadata={message.tier_metadata} />}
+        {message.tier_metadata?.label === 'relaxed_web' && (
+          <TierWebDisclaimer confidence={message.tier_metadata.web_confidence} />
+        )}
+
         <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
           {message.content}
         </ReactMarkdown>

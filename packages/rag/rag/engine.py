@@ -14,6 +14,7 @@ Steps:
 
 import logging
 import re
+import time
 from collections.abc import AsyncIterator
 from uuid import UUID
 
@@ -1485,6 +1486,12 @@ async def chat(
     # Behavior with the flag OFF is bit-for-bit identical to today.
     hybrid_retrieval_enabled: bool = False,
     hybrid_rrf_k: int = 60,
+    # Sprint D6.84 — confidence tier router. "off" | "shadow" | "live".
+    # 'off' skips the router entirely (zero cost). 'shadow' computes the
+    # decision and writes to tier_router_shadow_log without changing the
+    # rendered answer. 'live' renders the router's decision and surfaces
+    # tier_metadata to the frontend. See packages/rag/rag/tier_router.py.
+    confidence_tiers_mode: str = "off",
 ) -> ChatResponse:
     """Run the full RAG pipeline and return a ChatResponse.
 
@@ -1818,12 +1825,33 @@ async def chat(
     # got a confident answer. Rewrites cleaned_answer to lead with the
     # web content rather than the synthesizer's hedged miss + side panel.
     # See _apply_layer_c_inversion for the framing format and rationale.
+    layer_c_fired = False
     if _should_apply_layer_c(judge_verdict, web_fallback_card):
         logger.info(
             "Layer C: inverting answer surface (verdict=%s web_confidence=%d)",
             judge_verdict, web_fallback_card.confidence,
         )
         cleaned_answer = _apply_layer_c_inversion(cleaned_answer, web_fallback_card)
+        layer_c_fired = True
+
+    # Sprint D6.84 — confidence tier router. Wraps everything in
+    # try/except internally; on any failure, returns the original answer
+    # and None metadata so today's behavior is preserved exactly.
+    tier_metadata = None
+    if confidence_tiers_mode in ("shadow", "live"):
+        cleaned_answer, tier_metadata = await _run_tier_router_and_log(
+            pool=pool,
+            conversation_id=conversation_id,
+            user_id=user_id,
+            query=query,
+            mode=confidence_tiers_mode,
+            cleaned_answer_pre_tier=cleaned_answer,
+            layer_c_fired=layer_c_fired,
+            judge_verdict=judge_verdict,
+            web_fallback_card=web_fallback_card,
+            verified_citations_count=len(verified_cited),
+            anthropic_client=anthropic_client,
+        )
 
     return ChatResponse(
         answer=cleaned_answer,
@@ -1836,6 +1864,7 @@ async def chat(
         vessel_update=vessel_update,
         regenerated=regenerated,
         web_fallback=web_fallback_card,
+        tier_metadata=tier_metadata,
     )
 
 
@@ -2721,6 +2750,127 @@ async def _log_retrieval_miss(
     )
 
 
+async def _run_tier_router_and_log(
+    *,
+    pool: asyncpg.Pool,
+    conversation_id: UUID,
+    user_id: "UUID | None",
+    query: str,
+    mode: str,
+    cleaned_answer_pre_tier: str,
+    layer_c_fired: bool,
+    judge_verdict: str | None,
+    web_fallback_card: "WebFallbackCard | None",
+    verified_citations_count: int,
+    anthropic_client: AsyncAnthropic,
+) -> tuple[str, "TierMetadata | None"]:
+    """Sprint D6.84 — run the confidence tier router and log to
+    tier_router_shadow_log. Returns (final_answer, tier_metadata).
+
+      mode='shadow' — render today's behavior; metadata is None;
+                      shadow log captures what tier router would have done.
+      mode='live'   — render the tier router's decision; metadata is
+                      populated for the frontend; shadow log captures
+                      both.
+
+    Wraps every external call (LLM, DB) in try/except. On any internal
+    failure, returns (cleaned_answer_pre_tier, None) so the caller falls
+    through to today's behavior.
+    """
+    from rag.tier_router import route_tier
+    from rag.models import TierMetadata
+
+    started = time.monotonic()
+    try:
+        decision = await route_tier(
+            query=query,
+            cleaned_answer=cleaned_answer_pre_tier,
+            verified_citations_count=verified_citations_count,
+            judge_verdict=judge_verdict,
+            web_fallback_card=web_fallback_card,
+            anthropic_client=anthropic_client,
+        )
+    except Exception as exc:
+        logger.warning(
+            "tier_router unexpected failure (falling through): %s: %s",
+            type(exc).__name__, str(exc)[:200],
+        )
+        return (cleaned_answer_pre_tier, None)
+
+    total_latency_ms = int((time.monotonic() - started) * 1000)
+
+    final_answer = cleaned_answer_pre_tier
+    if mode == "live" and decision.rendered_answer is not None:
+        final_answer = decision.rendered_answer
+
+    tier_metadata = None
+    if mode == "live":
+        tier_metadata = TierMetadata(
+            tier=decision.tier,
+            label=decision.label,
+            reason=decision.reason or "",
+            classifier_verdict=decision.classifier_verdict,
+            self_consistency_pass=decision.self_consistency_pass,
+            web_confidence=decision.web_confidence,
+        )
+
+    # The "would the surface differ" signal admin filters on. True when
+    # the router computed an answer override that differs from current.
+    shadow_would_differ = (
+        decision.rendered_answer is not None
+        and decision.rendered_answer != cleaned_answer_pre_tier
+    )
+
+    try:
+        await pool.execute(
+            """
+            INSERT INTO tier_router_shadow_log (
+                conversation_id, user_id, query, mode,
+                current_answer, current_judge_verdict, current_layer_c_fired,
+                current_verified_citations_count, current_web_confidence,
+                shadow_tier, shadow_label, shadow_answer, shadow_reason,
+                shadow_classifier_verdict, shadow_classifier_reasoning,
+                shadow_self_consistency_pass,
+                shadow_classifier_latency_ms, shadow_self_consistency_latency_ms,
+                shadow_total_latency_ms, shadow_error, differs
+            )
+            VALUES ($1, $2, $3, $4,
+                    $5, $6, $7, $8, $9,
+                    $10, $11, $12, $13,
+                    $14, $15, $16,
+                    $17, $18, $19, $20, $21)
+            """,
+            conversation_id,
+            user_id,
+            query[:2000],
+            mode,
+            cleaned_answer_pre_tier[:8000],
+            judge_verdict,
+            layer_c_fired,
+            verified_citations_count,
+            web_fallback_card.confidence if web_fallback_card else None,
+            decision.tier,
+            decision.label,
+            (decision.rendered_answer or cleaned_answer_pre_tier)[:8000],
+            (decision.reason or "")[:2000],
+            decision.classifier_verdict,
+            (decision.classifier_reasoning or "")[:1000] if decision.classifier_reasoning else None,
+            decision.self_consistency_pass,
+            decision.classifier_latency_ms,
+            decision.self_consistency_latency_ms,
+            total_latency_ms,
+            decision.error,
+            shadow_would_differ,
+        )
+    except Exception as exc:
+        logger.warning(
+            "tier_router shadow log insert failed (non-fatal): %s: %s",
+            type(exc).__name__, str(exc)[:200],
+        )
+
+    return (final_answer, tier_metadata)
+
+
 async def chat_with_progress(
     query: str,
     conversation_history: list[ChatMessage],
@@ -2753,6 +2903,8 @@ async def chat_with_progress(
     # See chat() docstring.
     hybrid_retrieval_enabled: bool = False,
     hybrid_rrf_k: int = 60,
+    # Sprint D6.84 — confidence tier router mode. See chat() docstring.
+    confidence_tiers_mode: str = "off",
 ) -> AsyncIterator[dict]:
     """Same RAG pipeline as chat() but yields lightweight progress events.
 
@@ -3133,12 +3285,33 @@ async def chat_with_progress(
     # final done event carries the inverted answer text, which the
     # frontend uses to replace the streamed content. Same pattern as
     # citation stripping (which already rewrites cleaned_answer in-flight).
+    layer_c_fired = False
     if _should_apply_layer_c(judge_verdict, web_fallback_card):
         logger.info(
             "Layer C (stream): inverting answer surface (verdict=%s web_confidence=%d)",
             judge_verdict, web_fallback_card.confidence,
         )
         cleaned_answer = _apply_layer_c_inversion(cleaned_answer, web_fallback_card)
+        layer_c_fired = True
+
+    # Sprint D6.84 — confidence tier router (streaming-path twin of the
+    # chat() integration above). Same fail-safe contract: any failure
+    # falls through to today's rendered answer + None metadata.
+    tier_metadata = None
+    if confidence_tiers_mode in ("shadow", "live"):
+        cleaned_answer, tier_metadata = await _run_tier_router_and_log(
+            pool=pool,
+            conversation_id=conversation_id,
+            user_id=user_id,
+            query=query,
+            mode=confidence_tiers_mode,
+            cleaned_answer_pre_tier=cleaned_answer,
+            layer_c_fired=layer_c_fired,
+            judge_verdict=judge_verdict,
+            web_fallback_card=web_fallback_card,
+            verified_citations_count=len(verified_cited),
+            anthropic_client=anthropic_client,
+        )
 
     # Stage 6: Final event with the complete response
     done_payload = {
@@ -3170,5 +3343,14 @@ async def chat_with_progress(
             # D6.58 Slice 1 — propagate surface tier so the frontend
             # renders the right badge (verified vs reference).
             "surface_tier": web_fallback_card.surface_tier,
+        }
+    if tier_metadata is not None:
+        done_payload["tier_metadata"] = {
+            "tier": tier_metadata.tier,
+            "label": tier_metadata.label,
+            "reason": tier_metadata.reason,
+            "classifier_verdict": tier_metadata.classifier_verdict,
+            "self_consistency_pass": tier_metadata.self_consistency_pass,
+            "web_confidence": tier_metadata.web_confidence,
         }
     yield {"event": "done", "data": done_payload}

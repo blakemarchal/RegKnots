@@ -4260,6 +4260,292 @@ async def get_chat(
     )
 
 
+# ── Confidence tier router shadow log (Sprint D6.84 admin tooling) ────────
+#
+# Backs the admin "Chats" tab side-by-side comparison view. Endpoints are
+# read-only and surface forensic data for evaluating the tier router
+# before flipping CONFIDENCE_TIERS_MODE=live.
+
+
+class TierRouterShadowRow(BaseModel):
+    id: int
+    conversation_id: str
+    user_id: str | None
+    user_email: str | None
+    query: str
+    mode: str                            # 'shadow' | 'live'
+    current_answer: str
+    current_judge_verdict: str | None
+    current_layer_c_fired: bool
+    current_verified_citations_count: int
+    current_web_confidence: int | None
+    shadow_tier: int
+    shadow_label: str
+    shadow_answer: str | None
+    shadow_reason: str | None
+    shadow_classifier_verdict: str | None
+    shadow_classifier_reasoning: str | None
+    shadow_self_consistency_pass: bool | None
+    shadow_classifier_latency_ms: int | None
+    shadow_self_consistency_latency_ms: int | None
+    shadow_total_latency_ms: int | None
+    shadow_error: str | None
+    differs: bool
+    created_at: str
+
+
+class TierRouterShadowList(BaseModel):
+    items: list[TierRouterShadowRow]
+    total: int
+    limit: int
+    offset: int
+
+
+class TierRouterSummary(BaseModel):
+    """Headline rollup for the admin tier-router dashboard.
+
+    counts_by_tier: e.g. {"1": 412, "2": 38, "3": 27, "4": 14}
+    differs_count: rows where the tier router would have rendered a
+                   different answer than today's pipeline. This is the
+                   "blast radius if we flipped to live" number.
+    classifier_yes_rate: % of rows where the industry-standard classifier
+                         said "yes". A signal for whether we're being
+                         too generous or too conservative on Tier 2.
+    self_consistency_pass_rate: % of "yes" classifier rows that passed
+                                the self-consistency gate. Low values
+                                here mean Tier 2 is being downgraded
+                                a lot.
+    """
+    window_days: int
+    total_rows: int
+    counts_by_tier: dict[str, int]
+    counts_by_label: dict[str, int]
+    differs_count: int
+    differs_pct: float
+    classifier_yes_count: int
+    classifier_yes_rate: float
+    self_consistency_pass_count: int
+    self_consistency_pass_rate: float
+    avg_total_latency_ms: float | None
+
+
+@router.get("/tier-router/summary", response_model=TierRouterSummary)
+async def tier_router_summary(
+    _admin: Annotated[CurrentUser, Depends(require_admin)],
+    pool: Annotated[asyncpg.Pool, Depends(get_pool)],
+    window_days: int = Query(default=7, ge=1, le=90),
+) -> TierRouterSummary:
+    """Headline rollup for the admin tier-router dashboard.
+
+    Cheap aggregate query — single SQL roundtrip via CTEs. Returns
+    zero/empty values if the table is empty (i.e., shadow mode hasn't
+    started persisting rows yet).
+    """
+    row = await pool.fetchrow(
+        """
+        WITH win AS (
+            SELECT *
+            FROM tier_router_shadow_log
+            WHERE created_at > NOW() - ($1::int || ' days')::interval
+        )
+        SELECT
+            (SELECT COUNT(*) FROM win) AS total_rows,
+            (SELECT COUNT(*) FROM win WHERE differs) AS differs_count,
+            (SELECT COUNT(*) FROM win WHERE shadow_classifier_verdict = 'yes') AS classifier_yes_count,
+            (SELECT COUNT(*) FROM win
+                WHERE shadow_classifier_verdict = 'yes'
+                  AND shadow_self_consistency_pass = TRUE) AS sc_pass_count,
+            (SELECT AVG(shadow_total_latency_ms)::float FROM win
+                WHERE shadow_total_latency_ms IS NOT NULL) AS avg_latency
+        """,
+        window_days,
+    )
+    total_rows = int(row["total_rows"] or 0)
+    differs_count = int(row["differs_count"] or 0)
+    classifier_yes_count = int(row["classifier_yes_count"] or 0)
+    sc_pass_count = int(row["sc_pass_count"] or 0)
+
+    tier_rows = await pool.fetch(
+        """
+        SELECT shadow_tier, shadow_label, COUNT(*) AS n
+        FROM tier_router_shadow_log
+        WHERE created_at > NOW() - ($1::int || ' days')::interval
+        GROUP BY 1, 2
+        """,
+        window_days,
+    )
+    counts_by_tier: dict[str, int] = {}
+    counts_by_label: dict[str, int] = {}
+    for r in tier_rows:
+        counts_by_tier[str(r["shadow_tier"])] = (
+            counts_by_tier.get(str(r["shadow_tier"]), 0) + int(r["n"])
+        )
+        counts_by_label[r["shadow_label"]] = (
+            counts_by_label.get(r["shadow_label"], 0) + int(r["n"])
+        )
+
+    return TierRouterSummary(
+        window_days=window_days,
+        total_rows=total_rows,
+        counts_by_tier=counts_by_tier,
+        counts_by_label=counts_by_label,
+        differs_count=differs_count,
+        differs_pct=(100.0 * differs_count / total_rows) if total_rows else 0.0,
+        classifier_yes_count=classifier_yes_count,
+        classifier_yes_rate=(100.0 * classifier_yes_count / total_rows) if total_rows else 0.0,
+        self_consistency_pass_count=sc_pass_count,
+        self_consistency_pass_rate=(
+            (100.0 * sc_pass_count / classifier_yes_count) if classifier_yes_count else 0.0
+        ),
+        avg_total_latency_ms=float(row["avg_latency"]) if row["avg_latency"] is not None else None,
+    )
+
+
+@router.get("/tier-router/log", response_model=TierRouterShadowList)
+async def tier_router_log(
+    _admin: Annotated[CurrentUser, Depends(require_admin)],
+    pool: Annotated[asyncpg.Pool, Depends(get_pool)],
+    limit: int = Query(default=50, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    differs_only: bool = Query(default=False),
+    tier: int | None = Query(default=None, ge=1, le=4),
+    label: str | None = Query(default=None, description="verified | industry_standard | relaxed_web | best_effort"),
+    user_email: str | None = Query(default=None),
+) -> TierRouterShadowList:
+    """Paginated list of shadow log rows. Powers the admin Chats-tab
+    side-by-side compare view.
+    """
+    where: list[str] = []
+    params: list[Any] = []
+    idx = 1
+
+    def _add(clause: str, value: Any) -> None:
+        nonlocal idx
+        where.append(clause.replace("%P", f"${idx}"))
+        params.append(value)
+        idx += 1
+
+    if differs_only:
+        where.append("s.differs IS TRUE")
+    if tier is not None:
+        _add("s.shadow_tier = %P", tier)
+    if label is not None:
+        _add("s.shadow_label = %P", label)
+    if user_email:
+        _add("u.email ILIKE '%' || %P || '%'", user_email)
+
+    where_clause = ("WHERE " + " AND ".join(where)) if where else ""
+
+    total = int(await pool.fetchval(
+        f"""
+        SELECT COUNT(*)
+        FROM tier_router_shadow_log s
+        LEFT JOIN users u ON u.id = s.user_id
+        {where_clause}
+        """,
+        *params,
+    ) or 0)
+
+    rows = await pool.fetch(
+        f"""
+        SELECT s.*, u.email AS user_email
+        FROM tier_router_shadow_log s
+        LEFT JOIN users u ON u.id = s.user_id
+        {where_clause}
+        ORDER BY s.created_at DESC
+        LIMIT ${idx} OFFSET ${idx + 1}
+        """,
+        *params, limit, offset,
+    )
+
+    items = [
+        TierRouterShadowRow(
+            id=int(r["id"]),
+            conversation_id=str(r["conversation_id"]),
+            user_id=str(r["user_id"]) if r["user_id"] else None,
+            user_email=r["user_email"],
+            query=r["query"],
+            mode=r["mode"],
+            current_answer=r["current_answer"],
+            current_judge_verdict=r["current_judge_verdict"],
+            current_layer_c_fired=bool(r["current_layer_c_fired"]),
+            current_verified_citations_count=int(r["current_verified_citations_count"] or 0),
+            current_web_confidence=int(r["current_web_confidence"]) if r["current_web_confidence"] is not None else None,
+            shadow_tier=int(r["shadow_tier"]),
+            shadow_label=r["shadow_label"],
+            shadow_answer=r["shadow_answer"],
+            shadow_reason=r["shadow_reason"],
+            shadow_classifier_verdict=r["shadow_classifier_verdict"],
+            shadow_classifier_reasoning=r["shadow_classifier_reasoning"],
+            shadow_self_consistency_pass=r["shadow_self_consistency_pass"],
+            shadow_classifier_latency_ms=int(r["shadow_classifier_latency_ms"]) if r["shadow_classifier_latency_ms"] is not None else None,
+            shadow_self_consistency_latency_ms=int(r["shadow_self_consistency_latency_ms"]) if r["shadow_self_consistency_latency_ms"] is not None else None,
+            shadow_total_latency_ms=int(r["shadow_total_latency_ms"]) if r["shadow_total_latency_ms"] is not None else None,
+            shadow_error=r["shadow_error"],
+            differs=bool(r["differs"]),
+            created_at=r["created_at"].isoformat() if r["created_at"] else "",
+        )
+        for r in rows
+    ]
+    return TierRouterShadowList(items=items, total=total, limit=limit, offset=offset)
+
+
+@router.get("/chats/{conversation_id}/shadow-comparison", response_model=TierRouterShadowList)
+async def chat_shadow_comparison(
+    conversation_id: str,
+    _admin: Annotated[CurrentUser, Depends(require_admin)],
+    pool: Annotated[asyncpg.Pool, Depends(get_pool)],
+) -> TierRouterShadowList:
+    """All shadow log rows for a single conversation, oldest-first so
+    the admin UI can render the per-message side-by-side directly.
+    """
+    try:
+        conv_uuid = uuid.UUID(conversation_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"invalid uuid: {exc}")
+
+    rows = await pool.fetch(
+        """
+        SELECT s.*, u.email AS user_email
+        FROM tier_router_shadow_log s
+        LEFT JOIN users u ON u.id = s.user_id
+        WHERE s.conversation_id = $1
+        ORDER BY s.created_at ASC
+        """,
+        conv_uuid,
+    )
+    items = [
+        TierRouterShadowRow(
+            id=int(r["id"]),
+            conversation_id=str(r["conversation_id"]),
+            user_id=str(r["user_id"]) if r["user_id"] else None,
+            user_email=r["user_email"],
+            query=r["query"],
+            mode=r["mode"],
+            current_answer=r["current_answer"],
+            current_judge_verdict=r["current_judge_verdict"],
+            current_layer_c_fired=bool(r["current_layer_c_fired"]),
+            current_verified_citations_count=int(r["current_verified_citations_count"] or 0),
+            current_web_confidence=int(r["current_web_confidence"]) if r["current_web_confidence"] is not None else None,
+            shadow_tier=int(r["shadow_tier"]),
+            shadow_label=r["shadow_label"],
+            shadow_answer=r["shadow_answer"],
+            shadow_reason=r["shadow_reason"],
+            shadow_classifier_verdict=r["shadow_classifier_verdict"],
+            shadow_classifier_reasoning=r["shadow_classifier_reasoning"],
+            shadow_self_consistency_pass=r["shadow_self_consistency_pass"],
+            shadow_classifier_latency_ms=int(r["shadow_classifier_latency_ms"]) if r["shadow_classifier_latency_ms"] is not None else None,
+            shadow_self_consistency_latency_ms=int(r["shadow_self_consistency_latency_ms"]) if r["shadow_self_consistency_latency_ms"] is not None else None,
+            shadow_total_latency_ms=int(r["shadow_total_latency_ms"]) if r["shadow_total_latency_ms"] is not None else None,
+            shadow_error=r["shadow_error"],
+            differs=bool(r["differs"]),
+            created_at=r["created_at"].isoformat() if r["created_at"] else "",
+        )
+        for r in rows
+    ]
+    return TierRouterShadowList(items=items, total=len(items), limit=len(items), offset=0)
+
+
 # ── Web fallback events (Sprint D6.58 Slice 3 audit tooling) ──────────────
 
 

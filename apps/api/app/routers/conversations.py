@@ -81,6 +81,10 @@ class ConversationMessage(BaseModel):
     content: str
     cited_regulations: list[CitedReg]
     created_at: str
+    # Sprint D6.84 — confidence tier metadata (live mode only).
+    # Stored as a JSON dict; frontend casts to TierMetadata. None for
+    # messages persisted before D6.84 or while in shadow / off mode.
+    tier_metadata: dict | None = None
 
 
 # ── Endpoints ──────────────────────────────────────────────────────────────────
@@ -363,7 +367,7 @@ async def get_conversation_messages(
 
         rows = await conn.fetch(
             """
-            SELECT role, content, cited_regulation_ids, created_at
+            SELECT role, content, cited_regulation_ids, created_at, tier_metadata
             FROM messages
             WHERE conversation_id = $1
             ORDER BY created_at ASC
@@ -396,12 +400,28 @@ async def get_conversation_messages(
                 for r in reg_rows
             ]
 
+        # asyncpg returns JSONB as a string; parse defensively to a dict
+        # so the Pydantic model serializes it back as JSON (not as a
+        # quoted string).
+        raw_tier = row["tier_metadata"]
+        tier_md: dict | None = None
+        if raw_tier is not None:
+            if isinstance(raw_tier, dict):
+                tier_md = raw_tier
+            else:
+                try:
+                    import json as _json
+                    tier_md = _json.loads(raw_tier)
+                except Exception:
+                    tier_md = None
+
         result.append(
             ConversationMessage(
                 role=row["role"],
                 content=row["content"],
                 cited_regulations=cited_regs,
                 created_at=row["created_at"].isoformat(),
+                tier_metadata=tier_md,
             )
         )
 

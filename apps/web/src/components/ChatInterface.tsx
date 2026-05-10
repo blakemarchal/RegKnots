@@ -29,6 +29,8 @@ interface ConversationMessage {
   content: string
   cited_regulations: { source: string; section_number: string; section_title: string }[]
   created_at: string
+  // Sprint D6.84 — confidence tier metadata (live mode only).
+  tier_metadata?: import('@/types/chat').TierMetadata | null
 }
 
 interface Props {
@@ -283,6 +285,8 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
           role: r.role as 'user' | 'assistant',
           content: r.content,
           citations: r.cited_regulations,
+          // D6.84 — restore tier chip on reload when present (live mode).
+          tier_metadata: r.tier_metadata ?? null,
         }))
         setMessages(restored)
         // Sync vessel selector if the conversation has one. Skip when
@@ -516,6 +520,7 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
                     content: data.answer,
                     citations: data.cited_regulations,
                     web_fallback: data.web_fallback ?? null,
+                    tier_metadata: data.tier_metadata ?? null,
                   }
                 : m
             ))
@@ -527,6 +532,7 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
               content: data.answer,
               citations: data.cited_regulations,
               web_fallback: data.web_fallback ?? null,
+              tier_metadata: data.tier_metadata ?? null,
             }
             setMessages(prev => [...prev, assistantMsg])
           }
@@ -676,6 +682,7 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
                     content: data.answer,
                     citations: data.cited_regulations,
                     web_fallback: data.web_fallback ?? null,
+                    tier_metadata: data.tier_metadata ?? null,
                   }
                 : m
             ))
@@ -687,6 +694,7 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
               content: data.answer,
               citations: data.cited_regulations,
               web_fallback: data.web_fallback ?? null,
+              tier_metadata: data.tier_metadata ?? null,
             }
             setMessages(prev => [...prev, assistantMsg])
           }

@@ -34,12 +34,33 @@ export interface WebFallbackCard {
   surface_tier?: 'verified' | 'consensus' | 'reference'
 }
 
+// Sprint D6.84 — confidence tier router metadata.
+// Surfaced to the frontend ONLY when CONFIDENCE_TIERS_MODE=live on
+// the backend. In 'off' / 'shadow' modes, this stays null and the
+// chat UI renders today's behavior unchanged.
+//
+//   tier 1 = ✓ RegKnot Verified         (corpus citation)
+//   tier 2 = ⚓ Industry Standard       (settled maritime knowledge,
+//                                        anchor footnote, no claimed citation)
+//   tier 3 = 🌐 Relaxed Web             (web fallback with disclaimer +
+//                                        confidence score)
+//   tier 4 = ⚠ Best-effort              (explicit hedge / "needs a Captain")
+export interface TierMetadata {
+  tier: 1 | 2 | 3 | 4
+  label: 'verified' | 'industry_standard' | 'relaxed_web' | 'best_effort'
+  reason: string
+  classifier_verdict?: 'yes' | 'no' | 'uncertain' | null
+  self_consistency_pass?: boolean | null
+  web_confidence?: number | null
+}
+
 export interface Message {
   id: string
   role: 'user' | 'assistant'
   content: string
   citations: CitedRegulation[]
   web_fallback?: WebFallbackCard | null
+  tier_metadata?: TierMetadata | null
 }
 
 export interface ApiResponse {
@@ -50,4 +71,5 @@ export interface ApiResponse {
   input_tokens: number
   output_tokens: number
   web_fallback?: WebFallbackCard | null
+  tier_metadata?: TierMetadata | null
 }

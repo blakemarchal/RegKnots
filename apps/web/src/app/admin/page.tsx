@@ -962,6 +962,13 @@ function AdminContent() {
                 Web Fallback →
               </a>
               <a
+                href="/admin/tier-router"
+                className="font-mono text-xs text-[#2dd4bf] hover:underline"
+                title="Confidence tier router shadow log — side-by-side comparison of current vs proposed answers"
+              >
+                Tier Router →
+              </a>
+              <a
                 href="/admin/traffic"
                 className="font-mono text-xs text-[#2dd4bf] hover:underline"
               >
