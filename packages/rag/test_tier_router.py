@@ -119,7 +119,7 @@ async def test_tier1_verified_with_judge_match():
         query="What are the lifeboat inspection intervals for class III vessels?",
         cleaned_answer="Per 46 CFR 199.180, lifeboats are inspected weekly.",
         verified_citations_count=2,
-        judge_verdict=None,  # no hedge → strong verified signal
+        judge_verdict=None,  # no hedge --> strong verified signal
         web_fallback_card=None,
         anthropic_client=client,
     )
@@ -127,6 +127,64 @@ async def test_tier1_verified_with_judge_match():
     _check(decision.label == TIER_VERIFIED)
     _check(decision.rendered_answer is None, "tier 1 should not rewrite the answer")
     _check(len(client.calls) == 0, "tier 1 must not call the classifier (cost saver)")
+    _ok()
+
+
+async def test_defensive_demotion_full_form_did_not_surface():
+    """Regression test for 2026-05-10 prod bug: Sonnet wrote 'I did not
+    surface a specific requirement...' with 7 verified citations attached
+    and the upstream regex missed the full-form negation. Tier 1 must
+    NOT fire when the answer contains hedge-shaped prose, even if
+    judge_verdict is None and citations exist."""
+    print("test_defensive_demotion_full_form_did_not_surface")
+    client = FakeAnthropicClient([
+        '{"verdict":"yes","reasoning":"closed-cell is settled engineering"}',
+        "Closed-cell elastomer for watertight integrity.",
+        '{"verdict":"agree","reasoning":"both say closed-cell"}',
+    ])
+    decision = await route_tier(
+        query="Should a watertight door gasket be open or closed cell material?",
+        cleaned_answer=(
+            "Based on the retrieved regulation context, I did not surface a "
+            "specific requirement stating whether watertight door gaskets must "
+            "be open-cell or closed-cell. The regulations cover door integrity "
+            "but not gasket material composition."
+        ),
+        verified_citations_count=7,
+        judge_verdict=None,  # the bug: regex missed it, judge wasn't called
+        web_fallback_card=None,
+        anthropic_client=client,
+    )
+    _check(decision.tier != 1, f"defensive demotion failed, got tier {decision.tier}")
+    _check(decision.tier == 2, f"with classifier=yes + sc=pass, expected tier 2, got {decision.tier}")
+    _check(decision.classifier_verdict == "yes")
+    _check(decision.self_consistency_pass is True)
+    _ok()
+
+
+async def test_defensive_demotion_other_full_form_negations():
+    """Sanity-check the other full-form patterns the defensive scan catches."""
+    print("test_defensive_demotion_other_full_form_negations")
+    cases = [
+        "I did not find a specific requirement for this.",
+        "I cannot locate the controlling regulation in my retrieved context.",
+        "Based on the retrieved regulation context, I do not see a direct citation.",
+        "The regulations do not address gasket cell composition.",
+        "There is no specific requirement in the corpus for this.",
+    ]
+    for case in cases:
+        client = FakeAnthropicClient([
+            '{"verdict":"no","reasoning":"specific regulatory question"}',
+        ])
+        decision = await route_tier(
+            query="some maritime question",
+            cleaned_answer=case,
+            verified_citations_count=5,  # high cite count to exercise the false-Tier-1 path
+            judge_verdict=None,
+            web_fallback_card=None,
+            anthropic_client=client,
+        )
+        _check(decision.tier != 1, f"defensive scan missed: {case[:80]!r} --> tier {decision.tier}")
     _ok()
 
 
@@ -196,7 +254,7 @@ async def test_tier2_industry_standard_classifier_yes_self_consistency_pass():
 
 
 async def test_tier4_when_classifier_yes_but_self_consistency_fails():
-    """Classifier said yes but the regen disagreed → downgrade to tier 4
+    """Classifier said yes but the regen disagreed --> downgrade to tier 4
     rather than promoting an unstable answer."""
     print("test_tier4_when_classifier_yes_but_self_consistency_fails")
     client = FakeAnthropicClient([
@@ -279,7 +337,7 @@ async def test_classifier_uncertain_treated_as_no():
 
 
 async def test_classifier_api_failure_falls_through_to_tier3_or_tier4():
-    """Anthropic API error during classifier → uncertain → fall through."""
+    """Anthropic API error during classifier --> uncertain --> fall through."""
     print("test_classifier_api_failure_falls_through_to_tier3_or_tier4")
 
     class BoomClient:
@@ -296,7 +354,7 @@ async def test_classifier_api_failure_falls_through_to_tier3_or_tier4():
         web_fallback_card=FakeWebFallback(confidence=3),
         anthropic_client=BoomClient(),
     )
-    # Classifier failed → uncertain → tier 3 (web available) or tier 4 (no web)
+    # Classifier failed --> uncertain --> tier 3 (web available) or tier 4 (no web)
     _check(decision.tier in (3, 4))
     _check(decision.classifier_verdict == "uncertain")
     _ok()
@@ -327,6 +385,8 @@ async def _run_all():
     test_render_industry_standard_appends_footnote()
     test_render_industry_standard_idempotent()
     await test_tier1_verified_with_judge_match()
+    await test_defensive_demotion_full_form_did_not_surface()
+    await test_defensive_demotion_other_full_form_negations()
     await test_tier1_verified_with_precision_callout()
     await test_tier3_high_confidence_web_outranks_tier2()
     await test_tier2_industry_standard_classifier_yes_self_consistency_pass()

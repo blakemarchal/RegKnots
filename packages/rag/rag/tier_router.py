@@ -381,6 +381,40 @@ def render_industry_standard_answer(answer: str) -> str:
 # Tier router — the actual decision engine
 # ════════════════════════════════════════════════════════════════════
 
+_TIER1_DEFENSIVE_HEDGE_PATTERNS = [
+    # Backup hedge scan inside the tier router. We re-scan cleaned_answer
+    # for hedge-shaped phrasing even when hedge_judge returned None,
+    # because a single missing pattern in hedge.py would otherwise let
+    # a hedged-but-cited answer through as Tier 1 ✓ Verified. (Karynn's
+    # gasket query, 2026-05-10: model wrote "I did not surface a specific
+    # requirement..." with 7 attached citations; full-form 'did not
+    # surface' wasn't in the regex so judge_verdict came back None and
+    # the router falsely promoted to Tier 1.)
+    #
+    # These patterns are deliberately broad — a false demotion only
+    # costs us one extra classifier call (~$0.0005) and routes through
+    # the proper Tier 2/3/4 path. A false promotion costs us user trust.
+    r"\bi\s+(?:did not|didn'?t|do not|don'?t|cannot|can'?t)\s+(?:surface|find|locate|see|identify|retrieve)\b",
+    r"\b(?:did not|didn'?t|does not|doesn'?t|do not|don'?t)\s+(?:surface|appear|address|cover)\b",
+    r"\bnot\s+(?:explicitly\s+|directly\s+|specifically\s+)?(?:addressed|covered|stated|specified|surfaced)\s+(?:in|by)\b",
+    r"\b(?:no|without)\s+(?:specific|explicit|direct)\s+(?:requirement|guidance|citation|rule|provision)\b",
+    r"\bbased on\s+the\s+retrieved\s+(?:regulation\s+)?(?:context|content)\b[^.]{0,80}\b(?:did not|do not|cannot|does not)\b",
+]
+_TIER1_DEFENSIVE_HEDGE_RE = re.compile(
+    "|".join(_TIER1_DEFENSIVE_HEDGE_PATTERNS), re.IGNORECASE
+)
+
+
+def _answer_smells_hedged(answer: str) -> Optional[str]:
+    """Return the matched substring if the answer contains hedge-shaped
+    phrasing the upstream regex might have missed. Used as a defensive
+    Tier 1 demotion check. None = answer looks confident."""
+    if not answer:
+        return None
+    m = _TIER1_DEFENSIVE_HEDGE_RE.search(answer)
+    return m.group(0) if m else None
+
+
 async def route_tier(
     *,
     query: str,
@@ -396,9 +430,11 @@ async def route_tier(
     Decision tree (order matters):
 
       1. Tier 1 if verified_citations_count ≥ 1 AND judge_verdict in
-         {None, complete_match, partial_match, false_hedge, precision_callout}.
-         (judge_verdict is None when no hedge phrase was detected — a
-         strong positive signal that the answer is solid.)
+         {None, false_hedge, precision_callout} AND the answer doesn't
+         contain hedge-shaped phrasing the upstream regex missed.
+         (judge_verdict is None when no hedge phrase was detected —
+         normally a strong positive signal, but the upstream regex has
+         had gaps in the past so we defensively re-scan here too.)
 
       2. Tier 3 if web_fallback_card.confidence ≥ _WEB_HIGH_CONFIDENCE.
          A high-confidence verifiable web source outranks unsourced
@@ -418,7 +454,8 @@ async def route_tier(
     """
     # ── Tier 1: verified citation path ─────────────────────────────
     judge_ok = judge_verdict in (None, "false_hedge", "precision_callout")
-    if verified_citations_count >= 1 and judge_ok:
+    defensive_hedge = _answer_smells_hedged(cleaned_answer) if judge_ok else None
+    if verified_citations_count >= 1 and judge_ok and defensive_hedge is None:
         return TierDecision(
             tier=1,
             label=TIER_VERIFIED,
@@ -426,6 +463,12 @@ async def route_tier(
                 f"verified_citations={verified_citations_count}, "
                 f"judge_verdict={judge_verdict or 'no_hedge'}"
             ),
+        )
+    if defensive_hedge is not None:
+        logger.info(
+            "tier_router: defensive Tier 1 demotion — answer contains hedge-shaped "
+            "phrasing the upstream regex missed: %r",
+            defensive_hedge[:120],
         )
 
     # ── Tier 3 (high-confidence web) — outranks Tier 2 ────────────

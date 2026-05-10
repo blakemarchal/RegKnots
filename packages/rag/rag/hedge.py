@@ -83,14 +83,19 @@ HEDGE_PATTERNS: list[str] = [
     # Sprint D6.48 Phase 2 audit — patterns observed in production hedges
     # that the original set didn't catch. Found by Blake's STRETCH DUCK 07
     # manning query review.
-    r"can'?t fully answer",
+    r"(?:cannot|can'?t) fully answer",
     r"could not fully answer",
     r"unable to fully answer",
     # "weren't surfaced in this query's context" — the model has admitted
     # the verified context is missing the controlling regulation.
-    r"weren'?t surfaced",
-    r"wasn'?t surfaced",
-    r"didn'?t surface",
+    # D6.84 hotfix 2026-05-10: include full-form negations. The original
+    # contracted-only patterns missed Sonnet's full-form output ("I did
+    # not surface a specific requirement..." on Karynn's gasket query),
+    # which made hedge_judge return None and silently promoted the
+    # answer through the tier router as Tier 1 verified.
+    r"(?:were not|weren'?t) surfaced",
+    r"(?:was not|wasn'?t) surfaced",
+    r"(?:did not|didn'?t) surface",
     # "won't cite from memory" / "I won't guess" — explicit refusal to
     # answer beyond the corpus, which is a hedge by definition.
     r"won'?t (?:cite|guess|speculate)\s+(?:them )?(?:from memory|without)",
