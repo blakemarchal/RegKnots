@@ -66,6 +66,7 @@ If a doc says "alembic head is 0045" but `alembic current` says `0092`, the doc 
 - D6.83 Account toggle: `users.study_tools_enabled`, hidden from nav when off.
 - 2026-05-07: `scripts/deploy.sh` + `scripts/smoke.sh` shipped — closes the "no auto-deploy" gap; smoke probes are content-asserting (HTTP 200 + JS-chunk canary string), not status-only.
 - 2026-05-08: full-system audit at `docs/sprint-audits/full-system-audit-2026-05-08.md`. Two critical-but-fixable findings (JWT secret env-var mismatch, no DB backups) flagged for pre-marketing-push fix.
+- 2026-05-09 D6.84 Sprint A: confidence tier router shipped in **shadow mode** on prod. Adds 4-tier provenance (✓ Verified / ⚓ Industry Standard / 🌐 Relaxed Web / ⚠ Best-effort) on top of today's pipeline. Closes the partial_miss-low-web dead zone where Jordan Dusek's gasket-class questions hedged. Flag: `CONFIDENCE_TIERS_MODE=off|shadow|live`. Migration 0093 adds `tier_router_shadow_log` table + `messages.tier_metadata` JSONB. Admin compare view at `/admin/tier-router`. 12/12 unit tests pass. Gold set at `data/eval/tier_router_gold.json`. **Phase E flip to `live` is operator-driven.**
 
 See `docs/PROJECT_STATE.md` for a fuller operational snapshot and `docs/roadmap.md` for the prioritized backlog.
 
@@ -97,4 +98,4 @@ Real open items (see audit + roadmap for the full list):
 
 ---
 
-*Last updated 2026-05-08 (post-D6.83 + audit). When this drifts from reality, fix it — that's the rule.*
+*Last updated 2026-05-09 (post-D6.84 Sprint A — tier router shadow). When this drifts from reality, fix it — that's the rule.*
