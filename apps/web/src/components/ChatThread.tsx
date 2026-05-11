@@ -15,6 +15,11 @@ interface Props {
   onCitationTap: (source: string, sectionNumber: string, sectionTitle: string) => void
   isNewConversation: boolean
   vessel?: VesselProfileForPrompts | null
+  // Sprint D6.88 Phase 3 — when the model's streamed answer is done
+  // and the engine has fired (or is firing) a web fallback ensemble,
+  // render an inline indicator below the latest message so the user
+  // knows more content is incoming rather than the chat being hung.
+  webFallbackInFlight?: boolean
 }
 
 // Sprint D6.87 — how close to the bottom of the scrollable container
@@ -23,7 +28,10 @@ interface Props {
 // are and surface a "Jump to latest" button instead.
 const AT_BOTTOM_THRESHOLD_PX = 100
 
-export function ChatThread({ messages, loading, progressMsg = null, onPrompt, onCitationTap, isNewConversation, vessel = null }: Props) {
+export function ChatThread({
+  messages, loading, progressMsg = null, onPrompt, onCitationTap,
+  isNewConversation, vessel = null, webFallbackInFlight = false,
+}: Props) {
   const bottomRef = useRef<HTMLDivElement>(null)
   // Sprint D6.88 Phase 1.5 — `followLatest` lives in a ref, not state,
   // so the intersection observer can update it without re-running the
@@ -136,6 +144,31 @@ export function ChatThread({ messages, loading, progressMsg = null, onPrompt, on
           {messages.map(msg => (
             <ChatMessage key={msg.id} message={msg} onCitationTap={onCitationTap} />
           ))}
+          {/* Sprint D6.88 Phase 3 — inline web-fallback indicator.
+              Renders below the streamed answer (above the
+              TypingIndicator) so it sits in the user's reading flow
+              rather than at the bottom-of-page where they may not
+              notice it. Visually distinct (amber) from the teal
+              typing indicator so it reads as a separate, more
+              substantive activity ("we're searching external
+              sources" rather than "we're processing"). */}
+          {loading && webFallbackInFlight && (
+            <div className="flex items-start gap-3 px-4 py-2 animate-[fadeSlideIn_0.2s_ease-out]">
+              <div className="w-0.5 self-stretch bg-amber-400/40 rounded-full flex-shrink-0 mt-0.5" />
+              <div className="flex-1 flex items-center gap-2 py-1">
+                <svg
+                  className="w-3.5 h-3.5 text-amber-400 animate-spin flex-shrink-0"
+                  viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
+                  strokeLinecap="round" strokeLinejoin="round"
+                >
+                  <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+                </svg>
+                <span className="font-mono text-xs text-amber-300/90 leading-snug">
+                  Looking for additional authoritative sources on the web…
+                </span>
+              </div>
+            </div>
+          )}
           {loading && <TypingIndicator message={progressMsg} />}
         </div>
       )}

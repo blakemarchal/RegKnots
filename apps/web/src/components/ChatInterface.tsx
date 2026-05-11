@@ -51,6 +51,15 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [progressMsg, setProgressMsg] = useState<string | null>(null)
+  // Sprint D6.88 Phase 3 — inline indicator for the post-stream web
+  // fallback dispatch phase. The model's streamed answer renders
+  // first; if the hedge judge decides to fire a web search, the
+  // engine emits "Locating the relevant regulation…" /
+  // "Searching authoritative sources…" status events. We surface
+  // those AS A VISIBLE ELEMENT BELOW the streamed answer (not just
+  // at the bottom-of-page typing indicator) so the user can tell
+  // that more content is incoming rather than the chat being hung.
+  const [webFallbackInFlight, setWebFallbackInFlight] = useState(false)
   const [conversationId, setConversationId] = useState<string | null>(initialConversationId)
   // D6.68 — id of the currently-streaming assistant message. Used to
   // route incoming `delta` events into the right message bubble. Set
@@ -544,7 +553,21 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
         query,
         conversationId,
         currentVesselId,
-        (status) => setProgressMsg(status),
+        (status) => {
+          setProgressMsg(status)
+          // Sprint D6.88 Phase 3 — detect web-fallback dispatch from
+          // the status text. These specific strings are emitted by
+          // engine.chat_with_progress() during citation_oracle and
+          // _dispatch_web_fallback. When we see either, render the
+          // inline placeholder below the streamed answer so the user
+          // can tell more content is coming.
+          if (
+            status.includes('Searching authoritative sources') ||
+            status.includes('Locating the relevant regulation')
+          ) {
+            setWebFallbackInFlight(true)
+          }
+        },
         (data) => {
           resolvedConvId = data.conversation_id
           setConversationId(data.conversation_id)
@@ -714,6 +737,9 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
     } finally {
       setProgressMsg(null)
       setLoading(false)
+      // D6.88 Phase 3 — clear the inline web-fallback indicator now
+      // that the turn is done (whether by done event, error, or abort).
+      setWebFallbackInFlight(false)
       // D6.85 Fix C — clear abort/accumulator state for the next turn.
       streamingAbortRef.current = null
       streamingAccumRef.current = ''
@@ -758,7 +784,21 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
         text,
         null,
         useAuthStore.getState().activeVesselId,
-        (status) => setProgressMsg(status),
+        (status) => {
+          setProgressMsg(status)
+          // Sprint D6.88 Phase 3 — detect web-fallback dispatch from
+          // the status text. These specific strings are emitted by
+          // engine.chat_with_progress() during citation_oracle and
+          // _dispatch_web_fallback. When we see either, render the
+          // inline placeholder below the streamed answer so the user
+          // can tell more content is coming.
+          if (
+            status.includes('Searching authoritative sources') ||
+            status.includes('Locating the relevant regulation')
+          ) {
+            setWebFallbackInFlight(true)
+          }
+        },
         (data) => {
           resolvedConvId = data.conversation_id
           setConversationId(data.conversation_id)
@@ -856,6 +896,7 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
         .finally(() => {
           setProgressMsg(null)
           setLoading(false)
+          setWebFallbackInFlight(false)
         })
     }, 50)
   }
@@ -1060,6 +1101,7 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
               onCitationTap={handleCitationTap}
               isNewConversation={initialConversationId === null}
               vessel={activeVesselProfile}
+              webFallbackInFlight={webFallbackInFlight}
             />
           </>
         )}
