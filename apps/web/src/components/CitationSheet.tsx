@@ -1,7 +1,90 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
+import ReactMarkdown from 'react-markdown'
+import type { Components } from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { apiRequest } from '@/lib/api'
+
+
+// Sprint D6.88 Phase 1.5 — render the regulation body as Markdown.
+// Corpus chunks store pipe-tables, **bold** for callouts, and
+// `* bullet` lists; rendering as plain whitespace-pre-wrap turned
+// these into a wall of raw syntax (Blake's IMDG 7.4 screenshot).
+// Components are sized for the citation sheet (smaller than chat
+// body; monospace to match the regulatory text aesthetic).
+const citationMdComponents: Components = {
+  p: ({ children }) => (
+    <p className="font-mono text-xs text-[--color-off-white]/80 leading-relaxed mb-2 last:mb-0 whitespace-pre-wrap">
+      {children}
+    </p>
+  ),
+  h1: ({ children }) => (
+    <h1 className="font-display text-sm font-bold text-[--color-off-white] mt-3 mb-1.5 first:mt-0">
+      {children}
+    </h1>
+  ),
+  h2: ({ children }) => (
+    <h2 className="font-display text-xs font-bold text-[--color-off-white] mt-2.5 mb-1 first:mt-0 uppercase tracking-wider">
+      {children}
+    </h2>
+  ),
+  h3: ({ children }) => (
+    <h3 className="font-display text-xs font-semibold text-[--color-off-white]/90 mt-2 mb-1 first:mt-0">
+      {children}
+    </h3>
+  ),
+  strong: ({ children }) => <strong className="text-[--color-off-white] font-semibold">{children}</strong>,
+  em: ({ children }) => <em className="italic text-[--color-off-white]/85">{children}</em>,
+  ul: ({ children }) => <ul className="list-disc list-outside pl-4 mb-2 space-y-0.5">{children}</ul>,
+  ol: ({ children }) => <ol className="list-decimal list-outside pl-4 mb-2 space-y-0.5">{children}</ol>,
+  li: ({ children }) => (
+    <li className="font-mono text-xs text-[--color-off-white]/80 leading-relaxed">{children}</li>
+  ),
+  // Tables — the canonical reason this Markdown pipeline exists.
+  // IMDG segregation tables, SOLAS applicability tables, etc.
+  // Wrap in an overflow-x container so wide tables can scroll
+  // horizontally rather than blowing out the sheet.
+  table: ({ children }) => (
+    <div className="my-2 overflow-x-auto rounded border border-white/10">
+      <table className="min-w-full text-[10px] font-mono border-collapse">{children}</table>
+    </div>
+  ),
+  thead: ({ children }) => <thead className="bg-white/5">{children}</thead>,
+  tbody: ({ children }) => <tbody>{children}</tbody>,
+  tr: ({ children }) => <tr className="border-b border-white/5 last:border-b-0">{children}</tr>,
+  th: ({ children }) => (
+    <th className="px-2 py-1 text-left font-semibold text-[--color-off-white]/90 border-r border-white/5 last:border-r-0 align-top">
+      {children}
+    </th>
+  ),
+  td: ({ children }) => (
+    <td className="px-2 py-1 text-[--color-off-white]/80 border-r border-white/5 last:border-r-0 align-top whitespace-pre-wrap">
+      {children}
+    </td>
+  ),
+  hr: () => <hr className="border-white/10 my-2" />,
+  blockquote: ({ children }) => (
+    <blockquote className="border-l-2 border-[--color-teal]/40 pl-2 italic text-[--color-off-white]/70 my-2">
+      {children}
+    </blockquote>
+  ),
+  code: ({ children, className }) => {
+    if (className?.startsWith('language-')) {
+      return (
+        <pre className="block bg-black/30 border border-white/10 rounded px-2 py-1.5 text-[10px] font-mono text-[--color-off-white]/80 overflow-x-auto my-2 whitespace-pre">
+          {children}
+        </pre>
+      )
+    }
+    return <code className="bg-black/30 border border-white/10 rounded px-1 py-0.5 text-[10px] font-mono">{children}</code>
+  },
+  a: ({ href, children }) => (
+    <a href={href} target="_blank" rel="noopener noreferrer" className="text-[--color-teal] underline">
+      {children}
+    </a>
+  ),
+}
 
 interface RegulationDetail {
   source: string
@@ -184,15 +267,16 @@ export function CitationSheet({ source, sectionNumber, sectionTitle, onClose }: 
               <p className="font-display text-sm font-semibold text-[--color-teal] mb-2">
                 IMO Copyrighted Content
               </p>
-              {/* D6.88 Phase 1 — full corpus text is now rendered here
-                  for IMO instruments (previously a placeholder pointing
-                  users to imo.org). The teal box + label retains the
-                  attribution signal; the body shows the actual
-                  regulation. whitespace-pre-wrap preserves paragraph
-                  formatting that the corpus stores with newlines. */}
-              <p className="font-mono text-xs text-[--color-off-white]/80 leading-relaxed whitespace-pre-wrap">
-                {detail.full_text}
-              </p>
+              {/* D6.88 Phase 1.5 — Markdown renders regulation tables,
+                  bold callouts, bullet lists, etc. The corpus stores
+                  these in Markdown (pipe-tables, *bullets, **bold**);
+                  rendering as plain text turned IMDG segregation
+                  tables into a wall of pipes. */}
+              <div className="text-[--color-off-white]/80">
+                <ReactMarkdown remarkPlugins={[remarkGfm]} components={citationMdComponents}>
+                  {detail.full_text}
+                </ReactMarkdown>
+              </div>
               <p className="font-mono text-[10px] text-[--color-off-white]/50 mt-3 italic">
                 Excerpt shown to support compliance verification. Official text and the
                 latest amendments are available from your flag state, classification
@@ -202,9 +286,11 @@ export function CitationSheet({ source, sectionNumber, sectionTitle, onClose }: 
           )}
 
           {detail && !loading && !detail.copyrighted && (
-            <p className="font-mono text-xs text-[--color-off-white]/80 leading-relaxed whitespace-pre-wrap">
-              {detail.full_text}
-            </p>
+            <div className="text-[--color-off-white]/80">
+              <ReactMarkdown remarkPlugins={[remarkGfm]} components={citationMdComponents}>
+                {detail.full_text}
+              </ReactMarkdown>
+            </div>
           )}
         </div>
 

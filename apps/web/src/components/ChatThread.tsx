@@ -25,21 +25,28 @@ const AT_BOTTOM_THRESHOLD_PX = 100
 
 export function ChatThread({ messages, loading, progressMsg = null, onPrompt, onCitationTap, isNewConversation, vessel = null }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null)
-  // Tracks the user's intent: are they following the latest content
-  // (true) or have they scrolled up to read something earlier (false)?
-  // Defaults to true so a fresh chat or first message scrolls naturally.
-  const [followLatest, setFollowLatest] = useState(true)
+  // Sprint D6.88 Phase 1.5 — `followLatest` lives in a ref, not state,
+  // so the intersection observer can update it without re-running the
+  // auto-scroll useEffect. Previously this was state, and the previous
+  // smooth-scroll behavior produced a jitter loop:
+  //   observer fires "in view" → state changes → useEffect re-runs →
+  //   scrollIntoView({behavior:'smooth'}) → animation moves bottomRef
+  //   through viewport → observer fires "out of view" → state changes
+  //   → re-runs again → restart smooth scroll → repeat.
+  // Storing as a ref breaks the feedback path. The button visibility
+  // is a separate piece of state that the observer can flip freely
+  // without affecting the scroll logic.
+  const followLatestRef = useRef(true)
+  const [showJumpButton, setShowJumpButton] = useState(false)
 
-  // Sprint D6.87 — Detect at-bottom state via IntersectionObserver on
-  // the bottomRef sentinel. When the sentinel is in viewport, the user
-  // is reading the latest content; when it leaves viewport (because
-  // they scrolled up), we stop pinning. This is more reliable than
-  // scroll-event math against an unknown scrollable parent.
   useEffect(() => {
     const el = bottomRef.current
     if (!el) return
     const obs = new IntersectionObserver(
-      ([entry]) => setFollowLatest(entry.isIntersecting),
+      ([entry]) => {
+        followLatestRef.current = entry.isIntersecting
+        setShowJumpButton(!entry.isIntersecting)
+      },
       // rootMargin lets the sentinel "see" itself slightly above the
       // viewport bottom, so small content additions during streaming
       // (typing indicator height shifts) don't toggle the state.
@@ -49,27 +56,39 @@ export function ChatThread({ messages, loading, progressMsg = null, onPrompt, on
     return () => obs.disconnect()
   }, [])
 
-  // Auto-scroll only when the user is following the latest. If they've
-  // scrolled up to read mid-stream (Blake's pain point — first-paragraph
-  // skim during a long response), we leave the viewport alone.
+  // Sprint D6.88 — auto-scroll uses `behavior: 'auto'` (instant)
+  // rather than `'smooth'`. Streaming deltas arrive every ~50ms; a
+  // smooth animation never gets to complete before the next delta
+  // fires another. Worse, the in-flight animation moves the
+  // bottomRef through the viewport visually, which toggled the
+  // observer state and produced the wheel-scroll jitter Blake
+  // reported. Instant scroll = no animation, no observer toggling,
+  // no jitter. The aggregate visual effect during streaming is a
+  // smooth follow because instant snaps are happening continuously.
   useEffect(() => {
     if (messages.length === 0 && !loading) return
-    if (!followLatest) return  // user scrolled up; don't yank the page
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages, loading, progressMsg, followLatest])
+    if (!followLatestRef.current) return
+    bottomRef.current?.scrollIntoView({ behavior: 'auto' })
+  }, [messages, loading, progressMsg])
 
-  // Manual jump-to-bottom — when the user clicks the "Jump to latest"
-  // button, scroll AND re-engage follow-latest mode.
+  // Manual jump-to-bottom — the explicit user-initiated path. Keep
+  // 'smooth' here because (a) it's a single one-shot action, not a
+  // streaming barrage, and (b) the user pressed a button so they
+  // expect a deliberate animation. Re-arm follow-latest manually
+  // because the smooth-scroll animation may take a moment to land,
+  // and we want the NEXT incoming token to follow immediately rather
+  // than waiting for the observer to catch up.
   function jumpToLatest() {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-    setFollowLatest(true)
+    followLatestRef.current = true
+    setShowJumpButton(false)
   }
 
   // The jump-to-latest button appears when the user is scrolled up.
   // Only render it when there's something worth jumping to (either
   // a stream is in flight, or there's at least one message). On an
   // empty chat with no in-flight generation, the button is noise.
-  const showJumpButton = !followLatest && (loading || messages.length > 0)
+  const showJumpPill = showJumpButton && (loading || messages.length > 0)
 
   return (
     <div className="flex flex-col min-h-full">
@@ -91,7 +110,7 @@ export function ChatThread({ messages, loading, progressMsg = null, onPrompt, on
           Position uses `sticky` rather than `fixed` so it scrolls
           out of the way naturally if the user reaches the bottom on
           their own. */}
-      {showJumpButton && (
+      {showJumpPill && (
         <button
           type="button"
           onClick={jumpToLatest}
