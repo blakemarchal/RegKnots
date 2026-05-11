@@ -388,6 +388,41 @@ function SupportContent() {
             />
           </div>
 
+          {/* User Guide download — requested by Karynn's mentor for the
+              print-and-read-at-the-chart-table cohort. Linked here at
+              the top of the support page so it's hard to miss. */}
+          <a
+            href="/user-guide.pdf"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center justify-between gap-3 bg-[#111827] border border-[#2dd4bf]/30
+              rounded-xl px-4 py-3 hover:border-[#2dd4bf]/60 hover:bg-[#111827]/80
+              transition-colors duration-150 group"
+          >
+            <div className="flex items-center gap-3 min-w-0">
+              <span className="flex-shrink-0 w-9 h-9 rounded-lg bg-[#2dd4bf]/15 border border-[#2dd4bf]/30
+                flex items-center justify-center text-[#2dd4bf]" aria-hidden>
+                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                  <polyline points="14 2 14 8 20 8" />
+                  <line x1="16" y1="13" x2="8" y2="13" />
+                  <line x1="16" y1="17" x2="8" y2="17" />
+                  <polyline points="10 9 9 9 8 9" />
+                </svg>
+              </span>
+              <div className="min-w-0">
+                <p className="font-display text-sm font-bold text-[#f0ece4]">RegKnots User Guide</p>
+                <p className="font-mono text-[11px] text-[#6b7594] leading-snug">
+                  PDF · 12 pages · everything from sign-up to advanced features
+                </p>
+              </div>
+            </div>
+            <span className="flex-shrink-0 font-mono text-[10px] font-bold text-[#2dd4bf]
+              uppercase tracking-wider group-hover:underline">
+              Download
+            </span>
+          </a>
+
           {/* FAQ */}
           {categories.map((cat) => (
             <div key={cat}>
