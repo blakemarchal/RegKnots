@@ -11,6 +11,7 @@ import {
   HowItWorksSection,
   MarinerVaultSection,
 } from '@/components/marketing/MarketingSections'
+import { LandingFooter } from '@/components/marketing/LandingFooter'
 import { apiRequest } from '@/lib/api'
 import { useAuthStore } from '@/lib/auth'
 
@@ -402,6 +403,9 @@ export default function WomenOffshorePage() {
           </blockquote>
         </div>
       </section>
+
+      {/* ── Footer — Sprint D6.90 shared LandingFooter ──────────────── */}
+      <LandingFooter />
     </div>
   )
 }

@@ -4,6 +4,7 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { CompassRose } from '@/components/CompassRose'
 import { AppHeader } from '@/components/AppHeader'
+import { LandingFooter } from '@/components/marketing/LandingFooter'
 import { useAuthStore } from '@/lib/auth'
 import { apiRequest } from '@/lib/api'
 
@@ -260,35 +261,8 @@ export default function GivingPage() {
       {/* ── Suggest a charity ─────────────────────────────────────────── */}
       <CharitySuggestionSection />
 
-      {/* ── Footer ────────────────────────────────────────────────────── */}
-      <footer className="border-t border-white/8 px-5 md:px-10 py-8 mt-auto">
-        <div className="max-w-4xl mx-auto flex flex-col md:flex-row items-center
-          justify-between gap-4 text-center md:text-left">
-          <div className="flex items-center gap-2">
-            <CompassRose className="w-4 h-4 text-[#2dd4bf]/60" />
-            <span className="font-display text-base font-bold text-[#f0ece4]/60 tracking-widest uppercase">
-              RegKnot
-            </span>
-          </div>
-          <p className="font-mono text-xs text-[#6b7594]">
-            Navigation aid only &mdash; not legal advice
-          </p>
-          <div className="flex items-center gap-4">
-            <Link href="/terms" className="font-mono text-xs text-[#6b7594] hover:text-[#f0ece4]/80 transition-colors">
-              Terms
-            </Link>
-            <Link href="/privacy" className="font-mono text-xs text-[#6b7594] hover:text-[#f0ece4]/80 transition-colors">
-              Privacy
-            </Link>
-            <Link href={isAuthenticated ? '/' : '/landing'} className="font-mono text-xs text-[#6b7594] hover:text-[#f0ece4]/80 transition-colors">
-              Home
-            </Link>
-            <p className="font-mono text-xs text-[#6b7594]">
-              &copy; 2026 RegKnot
-            </p>
-          </div>
-        </div>
-      </footer>
+      {/* ── Footer — Sprint D6.90 shared LandingFooter ──────────────── */}
+      <LandingFooter homeHref={isAuthenticated ? '/' : '/landing'} />
     </div>
   )
 }

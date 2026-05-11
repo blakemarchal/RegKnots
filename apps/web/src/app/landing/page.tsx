@@ -14,6 +14,7 @@ import {
   HowItWorksSection,
   MarinerVaultSection,
 } from '@/components/marketing/MarketingSections'
+import { LandingFooter } from '@/components/marketing/LandingFooter'
 
 // Sprint D6.76 — DemoCarousel + DEMOS data + the four wow-factor section
 // components (BuiltByMariners, WhyNotChatGPT, HallucinationProof,
@@ -456,49 +457,17 @@ export default function LandingPage() {
       </section>
 
       {/* ══════════════════════════════════════════════════════════════════════
-          FOOTER
+          FOOTER — Sprint D6.90: shared LandingFooter with social row.
+          Page-specific extras (Coverage, Ship network issues?) ride in
+          via the extraLinks slot.
       ══════════════════════════════════════════════════════════════════════ */}
-      <footer className="border-t border-white/8 px-5 md:px-10 py-8">
-        <div className="max-w-4xl mx-auto flex flex-col md:flex-row items-center
-          justify-between gap-4 text-center md:text-left">
-          <div className="flex items-center gap-2">
-            <CompassRose className="w-4 h-4 text-[#2dd4bf]/60" />
-            <span className="font-display text-base font-bold text-[#f0ece4]/60 tracking-widest uppercase">
-              RegKnot
-            </span>
-          </div>
-          <p className="font-mono text-xs text-[#6b7594]">
-            Navigation aid only — not legal advice
-          </p>
-          <div className="flex items-center gap-4 flex-wrap justify-center">
-            <button
-              type="button"
-              onClick={() => setContactOpen(true)}
-              className="font-mono text-xs text-[#6b7594] hover:text-[#f0ece4]/80 transition-colors"
-            >
-              Contact Us
-            </button>
-            <a href="/coverage" className="font-mono text-xs text-[#6b7594] hover:text-[#f0ece4]/80 transition-colors">
-              Coverage
-            </a>
-            <a href="/terms" className="font-mono text-xs text-[#6b7594] hover:text-[#f0ece4]/80 transition-colors">
-              Terms
-            </a>
-            <a href="/privacy" className="font-mono text-xs text-[#6b7594] hover:text-[#f0ece4]/80 transition-colors">
-              Privacy
-            </a>
-            <a href="/giving" className="font-mono text-xs text-[#6b7594] hover:text-[#f0ece4]/80 transition-colors">
-              Giving Back
-            </a>
-            <a href="/whitelisting" className="font-mono text-xs text-[#6b7594] hover:text-[#f0ece4]/80 transition-colors">
-              Ship network issues?
-            </a>
-            <p className="font-mono text-xs text-[#6b7594]">
-              © 2026 RegKnot
-            </p>
-          </div>
-        </div>
-      </footer>
+      <LandingFooter
+        onContactClick={() => setContactOpen(true)}
+        extraLinks={[
+          { href: '/coverage', label: 'Coverage' },
+          { href: '/whitelisting', label: 'Ship network issues?' },
+        ]}
+      />
 
       <ContactModal open={contactOpen} onClose={() => setContactOpen(false)} />
     </div>

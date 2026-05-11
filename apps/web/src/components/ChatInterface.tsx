@@ -1099,7 +1099,16 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
               progressMsg={progressMsg}
               onPrompt={handlePrompt}
               onCitationTap={handleCitationTap}
-              isNewConversation={initialConversationId === null}
+              // Sprint D6.90 — was `initialConversationId === null`, which
+              // froze the flag at mount time. If a user arrived via
+              // /?conversation_id=X (so initialConversationId=X) and then
+              // clicked "New chat", handleNewChat would null out
+              // conversationId and clear messages — EmptyState would
+              // render — but isNewConversation stayed false, so the
+              // suggested-prompt block was hidden. Reported by Karynn
+              // ("auto-generated suggested questions aren't reliably
+              // popping up in a new chat"). Read the live state instead.
+              isNewConversation={conversationId === null}
               vessel={activeVesselProfile}
               webFallbackInFlight={webFallbackInFlight}
             />

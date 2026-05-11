@@ -31,6 +31,7 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { CompassRose } from '@/components/CompassRose'
 import { CorpusBadges } from '@/components/CorpusBadges'
+import { LandingFooter } from '@/components/marketing/LandingFooter'
 import { apiRequest } from '@/lib/api'
 import { useAuthStore } from '@/lib/auth'
 
@@ -487,6 +488,9 @@ export default function EducationLanding() {
           </p>
         </div>
       </section>
+
+      {/* ── Footer — Sprint D6.90 shared LandingFooter ──────────────── */}
+      <LandingFooter />
     </div>
   )
 }
