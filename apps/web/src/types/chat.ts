@@ -61,6 +61,10 @@ export interface Message {
   citations: CitedRegulation[]
   web_fallback?: WebFallbackCard | null
   tier_metadata?: TierMetadata | null
+  // Sprint D6.85 Fix C — user-cancelled assistant message marker.
+  // Renders distinctly (italic + "Stopped" hint) and the content
+  // includes the partial text that was streamed before the abort.
+  cancelled?: boolean
 }
 
 export interface ApiResponse {

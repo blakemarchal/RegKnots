@@ -3,7 +3,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import type { Message } from '@/types/chat'
-import { sendMessageStream } from '@/lib/mockApi'
+import { sendMessageStream, cancelChat } from '@/lib/mockApi'
 import { apiRequest } from '@/lib/api'
 import { useAuthStore } from '@/lib/auth'
 import type { BillingStatus } from '@/lib/auth'
@@ -57,6 +57,19 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
   // on first delta, cleared on done. Ref (not state) because mutating
   // it shouldn't trigger a re-render — the underlying setMessages does.
   const streamingMsgIdRef = useRef<string | null>(null)
+  // Sprint D6.85 Fix C — Stop button infrastructure.
+  // - streamingAbortRef: the active SSE fetch's AbortController. Set
+  //   on send, cleared on done/error. The Stop button calls .abort()
+  //   on whatever's here.
+  // - streamingAccumRef: the running concatenation of delta chunks.
+  //   When we abort, we send this to /chat/cancel so the server
+  //   persists what the user actually saw, marked cancelled=true.
+  // - streamingConvIdRef: the conversation_id resolved from the
+  //   `started` event, so the Stop handler can call /chat/cancel
+  //   even before the done event arrives.
+  const streamingAbortRef = useRef<AbortController | null>(null)
+  const streamingAccumRef = useRef<string>('')
+  const streamingConvIdRef = useRef<string | null>(null)
   const [menuOpen, setMenuOpen] = useState(false)
   const [surveyOpen, setSurveyOpen] = useState(false)
   const [restoring, setRestoring] = useState(!!initialConversationId)
@@ -75,6 +88,10 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
   // recovery survives a full page reload (user kills app → reopens later).
   const [recovering, setRecovering] = useState(false)
   const [recoveryFailed, setRecoveryFailed] = useState(false)
+  // Sprint D6.85 Fix D — original query text when recovery timed out,
+  // so the failure banner can render a one-click Resend button. null
+  // = no failed-recovery context; populated by recoveryLoop on timeout.
+  const [failedQuery, setFailedQuery] = useState<string | null>(null)
   const recoveryAbortRef = useRef<AbortController | null>(null)
 
   // Sprint D6.34 / D6.52 — verbosity chip state.
@@ -356,15 +373,25 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
   /**
    * Poll the server for an assistant message that arrived after `sentAt`.
    * Returns true on success (state has been updated), false on timeout.
+   *
+   * Sprint D6.85 Fix D — timeout dropped from 90s to 30s. The old window
+   * was wishful thinking from a pre-background-task era; with Fix A,
+   * any successful generation is persisted within seconds of completion.
+   * If 30s passes with no assistant message, the request is dead.
+   *
+   * When recovery fails, we surface the original query (passed via
+   * `failedQueryText`) so the user can one-click resend instead of
+   * retyping. localStorage was already storing the query alongside
+   * sentAt; we just pipe it through.
    */
   const recoveryLoop = useCallback(
-    async (convId: string, sentAt: number): Promise<boolean> => {
+    async (convId: string, sentAt: number, failedQueryText?: string): Promise<boolean> => {
       setRecovering(true)
       setRecoveryFailed(false)
       const abort = new AbortController()
       recoveryAbortRef.current = abort
       const startedAt = Date.now()
-      const deadline = 90_000  // 90s window
+      const deadline = 30_000  // D6.85 Fix D — was 90s
 
       try {
         while (Date.now() - startedAt < deadline) {
@@ -387,12 +414,14 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
                 role: r.role as 'user' | 'assistant',
                 content: r.content,
                 citations: r.cited_regulations,
+                tier_metadata: r.tier_metadata ?? null,
               }))
               setMessages(restored)
               setConversationId(convId)
               clearPending(convId)
               setRecovering(false)
               setRecoveryFailed(false)
+              setFailedQuery(null)
               return true
             }
           } catch {
@@ -411,9 +440,15 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
         recoveryAbortRef.current = null
       }
 
-      // Timed out
+      // Timed out. Surface the original query (if we have it) so the
+      // banner can offer one-click resend.
       setRecovering(false)
       setRecoveryFailed(true)
+      if (failedQueryText) setFailedQuery(failedQueryText)
+      // Also clear the localStorage pending marker — there's no point
+      // re-entering recovery on the next mount; the server isn't going
+      // to fulfill this request.
+      clearPending(convId)
       return false
     },
     [clearPending],
@@ -438,7 +473,7 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
         clearPending(initialConversationId)
         return
       }
-      void recoveryLoop(initialConversationId, parsed.sentAt)
+      void recoveryLoop(initialConversationId, parsed.sentAt, parsed.query)
     } catch {
       try { localStorage.removeItem(pendingKey(initialConversationId)) } catch { /* ignore */ }
     }
@@ -456,12 +491,12 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
       if (!raw) return
       if (recovering) return  // already polling
       try {
-        const parsed = JSON.parse(raw) as { sentAt: number }
+        const parsed = JSON.parse(raw) as { sentAt: number; query?: string }
         if (Date.now() - parsed.sentAt > 5 * 60 * 1000) {
           clearPending(conversationId)
           return
         }
-        void recoveryLoop(conversationId, parsed.sentAt)
+        void recoveryLoop(conversationId, parsed.sentAt, parsed.query)
       } catch {
         // ignore
       }
@@ -490,6 +525,13 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
     // exact send (vs. a leftover from a prior turn).
     const sentAt = Date.now()
     let resolvedConvId: string | null = conversationId
+
+    // Sprint D6.85 Fix C — fresh AbortController for this send. Reset
+    // the accumulator so partial-text on Stop reflects only this turn.
+    const abortController = new AbortController()
+    streamingAbortRef.current = abortController
+    streamingAccumRef.current = ''
+    streamingConvIdRef.current = conversationId
 
     try {
       const currentVesselId = useAuthStore.getState().activeVesselId
@@ -547,12 +589,16 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
           resolvedConvId = startedConvId
           setConversationId(startedConvId)
           writePending(startedConvId, query)
+          // D6.85 Fix C — track the resolved conv id so Stop can target it.
+          streamingConvIdRef.current = startedConvId
         },
         turnVerbosity,
         activeWorkspaceId,
         // D6.68 onDelta — stream-append text into the placeholder
         // assistant message, creating it on the first chunk.
         (chunk) => {
+          // D6.85 Fix C — accumulate for /chat/cancel partial submission.
+          streamingAccumRef.current += chunk
           if (!streamingMsgIdRef.current) {
             const newId = crypto.randomUUID()
             streamingMsgIdRef.current = newId
@@ -577,6 +623,9 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
         // Claude streaming failed mid-flight and OpenAI fallback is
         // about to replace. Clear the placeholder content.
         () => {
+          // D6.85 Fix C — reset the accumulator alongside the visible
+          // content. The new stream starts from zero.
+          streamingAccumRef.current = ''
           const sid = streamingMsgIdRef.current
           if (sid) {
             setMessages(prev => prev.map(m =>
@@ -584,8 +633,29 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
             ))
           }
         },
+        abortController.signal,
       )
     } catch (err) {
+      // D6.85 Fix C — distinguish user-initiated abort from real errors.
+      // An AbortError means the user clicked Stop; handleStop already
+      // posted /chat/cancel, so we just clean up React state.
+      const isAbort = err instanceof DOMException && err.name === 'AbortError'
+      if (isAbort) {
+        // Mark the streaming bubble as cancelled and stop. Do NOT
+        // remove it — the user's partial content stays on screen.
+        const streamingId = streamingMsgIdRef.current
+        if (streamingId) {
+          setMessages(prev => prev.map(m =>
+            m.id === streamingId
+              ? { ...m, cancelled: true, content: m.content + '\n\n_[Stopped by user]_' }
+              : m
+          ))
+          streamingMsgIdRef.current = null
+        }
+        clearPending(resolvedConvId ?? conversationId ?? '')
+        return
+      }
+
       // D6.68 — if we'd started streaming but errored out mid-flight,
       // remove the partial assistant message before any error-specific
       // cleanup. Sets streamingMsgIdRef back to null so subsequent
@@ -629,7 +699,7 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
         // input bar surfaces the in-flight state instead.
         setProgressMsg(null)
         setLoading(false)
-        void recoveryLoop(resolvedConvId, sentAt)
+        void recoveryLoop(resolvedConvId, sentAt, query)
         return
       }
       setMessages(prev => [
@@ -644,8 +714,30 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
     } finally {
       setProgressMsg(null)
       setLoading(false)
+      // D6.85 Fix C — clear abort/accumulator state for the next turn.
+      streamingAbortRef.current = null
+      streamingAccumRef.current = ''
+      streamingConvIdRef.current = null
     }
-  }, [input, loading, conversationId, router, setBilling, writePending, clearPending, recoveryLoop, verbosity, savedVerbosity])
+  }, [input, loading, conversationId, router, setBilling, writePending, clearPending, recoveryLoop, verbosity, savedVerbosity, activeWorkspaceId])
+
+  // Sprint D6.85 Fix C — Stop button handler.
+  //
+  // Aborts the active SSE fetch, then posts the accumulated partial
+  // content to /chat/cancel so the server persists what the user
+  // actually read (marked cancelled=true). The handleSend catch block
+  // then handles the AbortError and updates the UI.
+  const handleStop = useCallback(() => {
+    const controller = streamingAbortRef.current
+    const convId = streamingConvIdRef.current
+    const partial = streamingAccumRef.current
+    if (!controller) return  // nothing to stop
+    controller.abort()
+    if (convId) {
+      // Fire-and-forget; cancelChat swallows its own errors.
+      void cancelChat(convId, partial)
+    }
+  }, [])
 
   function handlePrompt(text: string) {
     setInput(text)
@@ -748,7 +840,7 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
           if (resolvedConvId) {
             setProgressMsg(null)
             setLoading(false)
-            void recoveryLoop(resolvedConvId, sentAt)
+            void recoveryLoop(resolvedConvId, sentAt, text)
             return
           }
           setMessages(prev => [
@@ -1042,6 +1134,7 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
           onChange={setInput}
           onSend={handleSend}
           loading={loading || restoring}
+          onStop={handleStop}
         />
         {rateLimitMsg && (
           <p className="px-4 py-2 font-mono text-xs text-amber-400 bg-amber-950/30 border-t border-amber-800/20">
@@ -1060,19 +1153,51 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
           </p>
         )}
         {recoveryFailed && (
-          <p className="px-4 py-2 font-mono text-xs text-amber-400 bg-amber-950/30 border-t border-amber-800/20 flex items-center justify-between gap-2">
-            <span>Couldn&apos;t recover the answer automatically. Pull-to-refresh to check, or send again.</span>
-            <button
-              onClick={() => setRecoveryFailed(false)}
-              aria-label="Dismiss"
-              className="flex-shrink-0 text-[#6b7594] hover:text-[#f0ece4]"
-            >
-              <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <line x1="18" y1="6" x2="6" y2="18" />
-                <line x1="6" y1="6" x2="18" y2="18" />
-              </svg>
-            </button>
-          </p>
+          <div className="px-4 py-2 font-mono text-xs text-amber-300 bg-amber-950/30 border-t border-amber-800/20 flex items-start justify-between gap-2">
+            <div className="min-w-0 flex-1">
+              <p className="leading-snug">
+                We couldn&apos;t finish that one. The server may have given up — please try again.
+              </p>
+              {failedQuery && (
+                <p className="mt-1 text-[#6b7594] truncate">
+                  &ldquo;{failedQuery}&rdquo;
+                </p>
+              )}
+            </div>
+            <div className="flex items-center gap-2 flex-shrink-0">
+              {failedQuery && (
+                <button
+                  onClick={() => {
+                    const q = failedQuery
+                    setInput(q)
+                    setRecoveryFailed(false)
+                    setFailedQuery(null)
+                    // Microtask deferral so the new input value is in
+                    // place before handleSend reads it.
+                    setTimeout(() => handleSend(), 0)
+                  }}
+                  className="px-2 py-0.5 rounded-md text-[11px] font-medium
+                    bg-amber-500/15 text-amber-300 border border-amber-500/40
+                    hover:bg-amber-500/25 transition-colors"
+                >
+                  Resend
+                </button>
+              )}
+              <button
+                onClick={() => {
+                  setRecoveryFailed(false)
+                  setFailedQuery(null)
+                }}
+                aria-label="Dismiss"
+                className="text-[#6b7594] hover:text-[#f0ece4]"
+              >
+                <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+            </div>
+          </div>
         )}
         {verifyRequiredMsg && (
           <div className="px-4 py-3 bg-teal-950/30 border-t border-[#2dd4bf]/20 flex items-start justify-between gap-3">

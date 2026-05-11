@@ -18,10 +18,14 @@ interface Props {
   onChange: (v: string) => void
   onSend: () => void
   loading: boolean
+  // Sprint D6.85 Fix C — when loading, the send button transforms into
+  // a Stop button. onStop is fired when clicked. Optional for callers
+  // that don't need cancellation (e.g., one-shot prefill flows).
+  onStop?: () => void
 }
 
 export function InputBar({
-  value, onChange, onSend, loading,
+  value, onChange, onSend, loading, onStop,
 }: Props) {
   const ref = useRef<HTMLTextAreaElement>(null)
 
@@ -91,28 +95,48 @@ export function InputBar({
           style={{ minHeight: '28px' }}
         />
 
-        {/* Send button */}
-        <button
-          onClick={onSend}
-          disabled={!canSend}
-          aria-label="Send message"
-          className="flex-shrink-0 w-8 h-8 mb-0.5 rounded-xl flex items-center justify-center
-            bg-teal text-[#0a0e1a] font-bold
-            disabled:opacity-30 disabled:cursor-not-allowed
-            hover:enabled:bg-teal/90 active:enabled:scale-95
-            transition-all duration-150"
-        >
-          {loading ? (
-            <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+        {/* Send / Stop button.
+            D6.85 Fix C — while loading, this button transforms into
+            a Stop control so users can cancel long-running generations
+            without navigating away (which used to silently drop the
+            answer + tokens). Click while loading → onStop(); otherwise
+            click → onSend(). */}
+        {loading && onStop ? (
+          <button
+            onClick={onStop}
+            aria-label="Stop generation"
+            className="flex-shrink-0 w-8 h-8 mb-0.5 rounded-xl flex items-center justify-center
+              bg-red-500/15 text-red-400 border border-red-500/40 font-bold
+              hover:bg-red-500/25 active:scale-95
+              transition-all duration-150"
+          >
+            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+              <rect x="6" y="6" width="12" height="12" rx="1.5" />
             </svg>
-          ) : (
-            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
-            </svg>
-          )}
-        </button>
+          </button>
+        ) : (
+          <button
+            onClick={onSend}
+            disabled={!canSend}
+            aria-label="Send message"
+            className="flex-shrink-0 w-8 h-8 mb-0.5 rounded-xl flex items-center justify-center
+              bg-teal text-[#0a0e1a] font-bold
+              disabled:opacity-30 disabled:cursor-not-allowed
+              hover:enabled:bg-teal/90 active:enabled:scale-95
+              transition-all duration-150"
+          >
+            {loading ? (
+              <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+              </svg>
+            ) : (
+              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
+              </svg>
+            )}
+          </button>
+        )}
       </div>
 
       <p className="text-center text-[10px] text-[#6b7594]/50 mt-1.5 leading-none">

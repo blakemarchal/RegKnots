@@ -85,6 +85,10 @@ class ConversationMessage(BaseModel):
     # Stored as a JSON dict; frontend casts to TierMetadata. None for
     # messages persisted before D6.84 or while in shadow / off mode.
     tier_metadata: dict | None = None
+    # Sprint D6.85 Fix C — user-cancelled assistant message marker.
+    # True when the user hit Stop mid-generation; frontend renders
+    # the message distinctly (italic, "Stopped" badge, etc.).
+    cancelled: bool = False
 
 
 # ── Endpoints ──────────────────────────────────────────────────────────────────
@@ -367,7 +371,7 @@ async def get_conversation_messages(
 
         rows = await conn.fetch(
             """
-            SELECT role, content, cited_regulation_ids, created_at, tier_metadata
+            SELECT role, content, cited_regulation_ids, created_at, tier_metadata, cancelled
             FROM messages
             WHERE conversation_id = $1
             ORDER BY created_at ASC
@@ -422,6 +426,7 @@ async def get_conversation_messages(
                 cited_regulations=cited_regs,
                 created_at=row["created_at"].isoformat(),
                 tier_metadata=tier_md,
+                cancelled=bool(row["cancelled"]) if row["cancelled"] is not None else False,
             )
         )
 

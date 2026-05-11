@@ -73,6 +73,11 @@ export async function sendMessageStream(
   // as before, since onDone always carries the full cleaned answer.
   onDelta?: (chunkText: string) => void,
   onDeltaReset?: () => void,
+  // Sprint D6.85 Fix C — AbortSignal for the Stop button. When the
+  // user aborts a generation, the SSE fetch is cancelled. The caller
+  // is responsible for POSTing /chat/cancel with the accumulated
+  // partial content so the server can persist what was rendered.
+  signal?: AbortSignal,
 ): Promise<void> {
   const body = JSON.stringify({
     query,
@@ -91,6 +96,7 @@ export async function sendMessageStream(
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
       body,
+      signal,
     })
 
   const store = useAuthStore.getState()
@@ -191,5 +197,30 @@ export async function sendMessageStream(
     } catch {
       // ignore
     }
+  }
+}
+
+
+// Sprint D6.85 Fix C — record a user-initiated cancellation. Posts
+// the partial content the client had rendered so the server can persist
+// an assistant message marked cancelled=true. Best-effort; failures are
+// swallowed silently because the user already aborted and any error
+// here is purely cleanup.
+export async function cancelChat(
+  conversationId: string,
+  partialContent: string,
+): Promise<void> {
+  try {
+    await apiRequest('/chat/cancel', {
+      method: 'POST',
+      body: JSON.stringify({
+        conversation_id: conversationId,
+        partial_content: partialContent,
+      }),
+    })
+  } catch {
+    // Cancellation is best-effort. If the post fails, the assistant
+    // message just won't be persisted — the user message is already
+    // in the DB so they can see what they asked. No user-facing error.
   }
 }

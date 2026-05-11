@@ -355,6 +355,19 @@ export function ChatMessage({ message, onCitationTap }: Props) {
           <TierWebDisclaimer confidence={message.tier_metadata.web_confidence} />
         )}
 
+        {/* Sprint D6.85 Fix C — cancelled badge for user-stopped
+            generations. Sits above the partial content so the user
+            knows at a glance that this answer is incomplete. */}
+        {message.cancelled && (
+          <div className="mb-2">
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium
+              bg-amber-950/50 text-amber-300 border border-amber-700/50">
+              <svg className="w-3 h-3" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="1.5" /></svg>
+              Stopped — incomplete
+            </span>
+          </div>
+        )}
+
         <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
           {message.content}
         </ReactMarkdown>

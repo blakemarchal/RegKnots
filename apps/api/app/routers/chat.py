@@ -499,11 +499,95 @@ async def _run_chat_preflight(
     else:
         user_verbosity = profile_row["verbosity_preference"] if profile_row else None
 
+    # Sprint D6.85 Fix B — persist the user message NOW, before chat()
+    # runs. The historic flow inserted both user + assistant in
+    # _persist_chat_outcome, which only runs after chat() completes —
+    # any SSE cancellation or pipeline crash silently discarded both.
+    # Karynn lost two follow-up questions to this on 2026-05-10.
+    #
+    # Inserting here (after history load, before the chat call)
+    # guarantees that the user's question is preserved regardless of
+    # what happens next. If chat() succeeds, _persist_chat_outcome
+    # only inserts the assistant message; if chat() fails or the
+    # client disconnects, the user message still exists and the user
+    # can retry. Failure to insert is non-fatal — we'd rather degrade
+    # to today's behavior than block the chat.
+    try:
+        await pool.execute(
+            """
+            INSERT INTO messages (conversation_id, role, content, cited_regulation_ids)
+            VALUES ($1, 'user', $2, '{}')
+            """,
+            conversation_id,
+            body.query,
+        )
+    except Exception as exc:
+        logger.warning(
+            "Failed to persist user message upfront (chat continues, may lose this message on cancellation): %s: %s",
+            type(exc).__name__, str(exc)[:200],
+        )
+
     return (
         vessel_profile, conversation_id, history, is_new_conversation,
         credential_context, conversation_title, fingerprint,
         user_persona, user_jurisdiction_focus, user_verbosity,
     )
+
+
+# Sprint D6.85 — persist tasks scheduled here are tracked in this set so
+# they don't get garbage-collected mid-flight. asyncio.create_task only
+# holds a weak reference to the task; if no other strong ref exists, the
+# task can be GC'd before it completes. We add to this set on schedule
+# and remove on completion via a done callback.
+_PENDING_PERSIST_TASKS: "set[asyncio.Task]" = set()
+
+# Hard upper bound on how long the background persist is allowed to run.
+# Past this, we log + drop the task. 30s is generous for two INSERTs +
+# a few small UPDATEs; if persistence is taking longer than that, the
+# DB is in trouble and a stuck task is worse than a dropped one.
+_PERSIST_TIMEOUT_SECONDS = 30.0
+
+
+def _schedule_persist(
+    persist_coro,
+    *,
+    description: str,
+) -> None:
+    """Fire-and-forget the persist coro on the event loop with a 30s
+    hard cap. Failures are logged, never raised.
+
+    Why this exists (Sprint D6.85 Fix A): historically, persist was
+    awaited inline inside the SSE generator. When the client
+    disconnected (iOS backgrounding, navigation), Starlette cancelled
+    the generator before the await completed and the row was lost.
+    Karynn lost two follow-up questions to this on 2026-05-10.
+
+    Running the persist as a top-level task on the loop decouples it
+    from the request handler's lifecycle. The task continues even
+    after the SSE has closed.
+
+    Tasks are tracked in _PENDING_PERSIST_TASKS so they aren't GC'd
+    mid-flight and so we have an observable handle for shutdown
+    hygiene (not exposed yet — placeholder).
+    """
+    async def _wrapped():
+        try:
+            await asyncio.wait_for(persist_coro, timeout=_PERSIST_TIMEOUT_SECONDS)
+        except asyncio.TimeoutError:
+            logger.error(
+                "background persist timed out after %.0fs (%s) — data may be lost",
+                _PERSIST_TIMEOUT_SECONDS, description,
+            )
+        except asyncio.CancelledError:
+            # Loop is shutting down — let the cancellation propagate.
+            logger.warning("background persist cancelled (%s)", description)
+            raise
+        except Exception:
+            logger.exception("background persist failed (%s)", description)
+
+    task = asyncio.create_task(_wrapped())
+    _PENDING_PERSIST_TASKS.add(task)
+    task.add_done_callback(_PENDING_PERSIST_TASKS.discard)
 
 
 async def _persist_chat_outcome(
@@ -522,8 +606,13 @@ async def _persist_chat_outcome(
     is_new_conversation: bool,
     tier_metadata_json: str | None = None,
 ) -> None:
-    """Persist a completed chat turn: insert messages, apply vessel update,
-    increment message count, fire background title generation for new conversations.
+    """Persist the assistant side of a completed chat turn.
+
+    Sprint D6.85 — the user message is now persisted UPFRONT by
+    _run_chat_preflight. This function only inserts the assistant
+    message + vessel update + billing increment. The `user_query`
+    argument is retained for log context (title generation, missing-
+    regulation detection) but is NOT re-inserted to avoid duplicates.
 
     Sprint D6.84 — when CONFIDENCE_TIERS_MODE=live and the chat()
     response carries TierMetadata, the JSON-encoded payload is stored
@@ -546,14 +635,6 @@ async def _persist_chat_outcome(
     model_alias = _MODEL_ALIAS.get(model_used)
     total_tokens = input_tokens + output_tokens
 
-    await pool.execute(
-        """
-        INSERT INTO messages (conversation_id, role, content, cited_regulation_ids)
-        VALUES ($1, 'user', $2, '{}')
-        """,
-        conversation_id,
-        user_query,
-    )
     await pool.execute(
         """
         INSERT INTO messages
@@ -681,21 +762,28 @@ async def chat_endpoint(
     tier_metadata_json = (
         response.tier_metadata.model_dump_json() if response.tier_metadata else None
     )
-    await _persist_chat_outcome(
-        pool=pool,
-        anthropic_client=anthropic_client,
-        conversation_id=conversation_id,
-        user_id=uuid.UUID(current_user.user_id),
-        user_query=body.query,
-        answer=response.answer,
-        model_used=response.model_used,
-        input_tokens=response.input_tokens,
-        output_tokens=response.output_tokens,
-        cited_section_numbers=[c.section_number for c in response.cited_regulations],
-        vessel_id=body.vessel_id,
-        vessel_update=response.vessel_update,
-        is_new_conversation=is_new_conversation,
-        tier_metadata_json=tier_metadata_json,
+    # D6.85 Fix A — schedule persist as a background task. Survives
+    # request cancellation; 30s hard cap. Failures are logged, never
+    # raised. User message is already persisted by preflight (Fix B),
+    # so a persist failure here only loses the assistant reply.
+    _schedule_persist(
+        _persist_chat_outcome(
+            pool=pool,
+            anthropic_client=anthropic_client,
+            conversation_id=conversation_id,
+            user_id=uuid.UUID(current_user.user_id),
+            user_query=body.query,
+            answer=response.answer,
+            model_used=response.model_used,
+            input_tokens=response.input_tokens,
+            output_tokens=response.output_tokens,
+            cited_section_numbers=[c.section_number for c in response.cited_regulations],
+            vessel_id=body.vessel_id,
+            vessel_update=response.vessel_update,
+            is_new_conversation=is_new_conversation,
+            tier_metadata_json=tier_metadata_json,
+        ),
+        description=f"chat_endpoint conv={conversation_id}",
     )
 
     return response
@@ -782,7 +870,47 @@ async def chat_stream_endpoint(
                     # Enrich answer if a missing regulation source was detected
                     payload = _enrich_missing_source_note(body.query, payload)
                     final_data = payload
+                    # D6.85 Fix A — schedule persist BEFORE the final yield.
+                    # If the client disconnected between the engine
+                    # finishing and this yield, the yield will raise
+                    # CancelledError — but the persist task is already
+                    # running on the event loop and will complete.
+                    # Survives the SSE generator dying.
+                    tier_md = final_data.get("tier_metadata")
+                    tier_metadata_json = json.dumps(tier_md) if tier_md else None
+                    _schedule_persist(
+                        _persist_chat_outcome(
+                            pool=pool,
+                            anthropic_client=anthropic_client,
+                            conversation_id=conversation_id,
+                            user_id=user_uuid,
+                            user_query=body.query,
+                            answer=final_data["answer"],
+                            model_used=final_data["model_used"],
+                            input_tokens=final_data["input_tokens"],
+                            output_tokens=final_data["output_tokens"],
+                            cited_section_numbers=[
+                                c["section_number"] for c in final_data["cited_regulations"]
+                            ],
+                            vessel_id=body.vessel_id,
+                            vessel_update=final_data.get("vessel_update"),
+                            is_new_conversation=is_new_conversation,
+                            tier_metadata_json=tier_metadata_json,
+                        ),
+                        description=f"chat_stream conv={conversation_id}",
+                    )
                 yield f"event: {event_type}\ndata: {json.dumps(payload)}\n\n"
+        except asyncio.CancelledError:
+            # Client disconnected mid-stream. The persist task (if any)
+            # is already running on the loop and will complete. No
+            # error event to emit — the connection is gone. Re-raise
+            # to let the generator wind down cleanly.
+            logger.info(
+                "SSE generator cancelled by client disconnect (conv=%s); "
+                "persist task continues in background",
+                conversation_id,
+            )
+            raise
         except Exception:
             logger.exception("Streaming chat error during generation")
             yield (
@@ -790,36 +918,6 @@ async def chat_stream_endpoint(
                 f"data: {json.dumps({'message': 'An error occurred processing your request.'})}\n\n"
             )
             return
-
-        # Persist after the final event has been sent. Stays inside the
-        # generator so the SSE connection remains open until the DB writes
-        # finish — keeps everything sequential and error-loggable.
-        if final_data is not None:
-            try:
-                # D6.84 — re-serialize tier_metadata from the SSE payload
-                # for the JSONB column (the SSE event already carried it).
-                tier_md = final_data.get("tier_metadata")
-                tier_metadata_json = json.dumps(tier_md) if tier_md else None
-                await _persist_chat_outcome(
-                    pool=pool,
-                    anthropic_client=anthropic_client,
-                    conversation_id=conversation_id,
-                    user_id=user_uuid,
-                    user_query=body.query,
-                    answer=final_data["answer"],
-                    model_used=final_data["model_used"],
-                    input_tokens=final_data["input_tokens"],
-                    output_tokens=final_data["output_tokens"],
-                    cited_section_numbers=[
-                        c["section_number"] for c in final_data["cited_regulations"]
-                    ],
-                    vessel_id=body.vessel_id,
-                    vessel_update=final_data.get("vessel_update"),
-                    is_new_conversation=is_new_conversation,
-                    tier_metadata_json=tier_metadata_json,
-                )
-            except Exception:
-                logger.exception("Failed to persist streaming chat outcome")
 
     return StreamingResponse(
         event_generator(),
@@ -980,6 +1078,86 @@ async def _check_missing_regulation_request(
         })
     except Exception:
         logger.debug("Could not send regulation request email", exc_info=True)
+
+
+class ChatCancelBody(BaseModel):
+    """Sprint D6.85 Fix C — Stop button payload.
+
+    Submitted from the client when the user aborts a generation
+    mid-stream. We persist whatever partial content was rendered to
+    the user (so they don't lose what they saw) and mark the assistant
+    message as cancelled so the UI can render it distinctly.
+    """
+    conversation_id: uuid.UUID
+    partial_content: str = ""  # client-side accumulated delta text
+
+
+@router.post("/cancel", status_code=status.HTTP_200_OK)
+async def chat_cancel_endpoint(
+    body: "ChatCancelBody",
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    pool: Annotated[asyncpg.Pool, Depends(get_pool)],
+) -> dict:
+    """Sprint D6.85 Fix C — record a user-initiated cancellation.
+
+    Inserts an assistant message containing whatever partial content
+    the client had rendered, marked with cancelled=true. The user's
+    question is already in the DB (persisted upfront by preflight),
+    so the conversation reads cleanly:
+
+        user:      "what are CFR fire extinguisher inspection rules?"
+        assistant: "[partial content...]  [user stopped generation]"
+
+    Fail-safe: if the conversation isn't owned by the caller, returns
+    404 (matches conversation-not-found behavior elsewhere). On any
+    persist failure, returns 500 — but the user already aborted their
+    SSE, so the client should treat 500 as informational.
+    """
+    conv_row = await pool.fetchrow(
+        "SELECT user_id, workspace_id FROM conversations WHERE id = $1",
+        body.conversation_id,
+    )
+    if not conv_row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
+
+    # Personal conv: only the owner can cancel. Workspace conv: any member.
+    if conv_row["workspace_id"] is None:
+        if str(conv_row["user_id"]) != current_user.user_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
+    else:
+        member_role = await pool.fetchval(
+            "SELECT role FROM workspace_members "
+            "WHERE workspace_id = $1 AND user_id = $2",
+            conv_row["workspace_id"], uuid.UUID(current_user.user_id),
+        )
+        if member_role is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
+
+    partial = (body.partial_content or "").strip()
+    # Always append a stopped marker so the UI can render it visually
+    # even if the partial text was empty (e.g., user clicked Stop
+    # before any text streamed).
+    stopped_marker = "\n\n_[Stopped by user]_" if partial else "_[Stopped by user before generation produced text]_"
+    final_content = partial + stopped_marker
+
+    try:
+        await pool.execute(
+            """
+            INSERT INTO messages
+                (conversation_id, role, content, cited_regulation_ids, cancelled)
+            VALUES ($1, 'assistant', $2, '{}', TRUE)
+            """,
+            body.conversation_id,
+            final_content[:8000],  # safety cap
+        )
+    except Exception:
+        logger.exception("Failed to persist cancelled chat outcome")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to record cancellation",
+        )
+
+    return {"ok": True}
 
 
 async def _generate_title(
