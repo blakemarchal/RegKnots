@@ -200,10 +200,20 @@ const CITATION_PATTERNS: CitationPattern[] = [
     toSection: m => m[2] ? `NVIC ${m[1]} §${m[2]}` : `NVIC ${m[1]}`,
   },
   // STCW Code A-II/3 / STCW Code B-I/2 / STCW Reg.II/1
+  // The STCW corpus stores Convention regulations under the canonical
+  // form 'STCW Ch.<chapter> Reg.<chapter>/<number>' (e.g.,
+  // 'STCW Ch.II Reg.II/1'). The model commonly writes the abbreviated
+  // 'STCW Reg.II/1'; we expand the abbreviation into the canonical
+  // section_number here so chip clicks resolve. The chapter is the
+  // Roman-numeral portion before the '/'.
   {
     re: /\bSTCW\s+(?:(Code\s+[AB])-([IVX]+\/\d+)|Reg\.?\s*([IVX]+\/\d+))/g,
     sourceHint: 'stcw',
-    toSection: m => m[1] ? `STCW ${m[1]}-${m[2]}` : `STCW Reg.${m[3]}`,
+    toSection: m => {
+      if (m[1]) return `STCW ${m[1]}-${m[2]}`  // STCW Code A-II/3
+      const chapter = m[3].split('/')[0]      // 'II/1' -> 'II'
+      return `STCW Ch.${chapter} Reg.${m[3]}` // -> STCW Ch.II Reg.II/1
+    },
   },
   // ISM Code 1.2.3 / ISM 1.2 / ISM Code 5
   {
