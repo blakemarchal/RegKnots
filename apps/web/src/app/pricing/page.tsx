@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { CompassRose } from '@/components/CompassRose'
 import { CorpusBadges } from '@/components/CorpusBadges'
+import { LandingFooter } from '@/components/marketing/LandingFooter'
 import { apiRequest } from '@/lib/api'
 import { useAuthStore } from '@/lib/auth'
 import type { BillingStatus } from '@/lib/auth'
@@ -504,6 +505,9 @@ export default function PricingPage() {
           />
         </div>
       </main>
+
+      {/* ── Footer — Sprint D6.90 shared LandingFooter ──────────────── */}
+      <LandingFooter />
     </div>
   )
 }
