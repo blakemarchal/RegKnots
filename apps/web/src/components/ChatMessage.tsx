@@ -141,9 +141,110 @@ interface Props {
 }
 
 // ── Inline citation injection ──────────────────────────────────────────────────
-// Walks React string children and replaces CFR patterns with CitationChip nodes.
+//
+// Sprint D6.87 — expanded from CFR-only to all maritime citation
+// patterns the model actually writes. Before D6.87, only `\d+ CFR ...`
+// strings rendered as inline chips; everything else (SOLAS Ch.VI Reg.2,
+// IMDG Ch.7.4, MSC.1/Circ.1440, NVIC 10-97, STCW Code A-II/3, ISM 1.2.3,
+// 46 USC 7101) stayed as plain text. Blake's 2026-05-11 VGM screenshot
+// made the problem visible: the answer cited SOLAS Reg.2, para.6 ten
+// times and rendered zero chips for it.
+//
+// Each pattern is paired with a `sourceHint` so a click on a chip the
+// DB doesn't know about still produces a sensible source attribution.
+// The DB citation_map (passed via `citations`) still wins on exact
+// section_number match — sourceHint is only the fallback.
 
-const CFR_RE = /\(?(\d+)\s+CFR\s+([\d]+(?:\.[\d]+(?:-[\d]+)?)?)\)?/g
+interface CitationPattern {
+  re: RegExp
+  sourceHint: string
+  /** Extract the canonical section_number from the regex match. */
+  toSection: (m: RegExpExecArray) => string
+}
+
+const CITATION_PATTERNS: CitationPattern[] = [
+  // 46 CFR 91.60-10 / (33 CFR 153) / 49 CFR 172.101
+  {
+    re: /\(?(\d+)\s+CFR\s+(\d+(?:\.\d+(?:-\d+)?)?)\)?/g,
+    sourceHint: 'cfr',
+    toSection: m => `${m[1]} CFR ${m[2]}`,
+  },
+  // 46 USC 7101 / 46 USC 11102
+  {
+    re: /\b(\d+)\s+USC\s+(\d+)\b/g,
+    sourceHint: 'usc',
+    toSection: m => `${m[1]} USC ${m[2]}`,
+  },
+  // SOLAS Ch.VI Reg.2, para.6 / SOLAS Ch.II-2 Reg.10 / SOLAS Ch.VI Part A
+  {
+    re: /\bSOLAS\s+Ch\.?\s*([IVX]+(?:-\d+)?)\s+(Reg\.?\s*\d+(?:[,.]\s*para\.?\s*\d+(?:\.\d+)?)?|Part\s+[A-Z])/g,
+    sourceHint: 'solas',
+    toSection: m => `SOLAS Ch.${m[1]} ${m[2].replace(/\s+/g, ' ')}`,
+  },
+  // IMDG Ch.7.4 / IMDG Chapter 7.4 / IMDG 7.3 / IMDG 7.3.1
+  {
+    re: /\bIMDG\s+(?:Ch\.?|Chapter)?\s*(\d+(?:\.\d+)*)\b/g,
+    sourceHint: 'imdg',
+    toSection: m => `IMDG ${m[1]}`,
+  },
+  // MSC.1/Circ.1440 / MSC.520(106) / MSC.97(73)
+  {
+    re: /\bMSC\.(\d+(?:\(\d+\)|\/Circ\.\d+)?)/g,
+    sourceHint: 'imo_supplement',
+    toSection: m => `MSC.${m[1]}`,
+  },
+  // NVIC 10-97 / NVIC 10-97 §5 / NVIC 01-20
+  {
+    re: /\bNVIC\s+(\d{2}-\d{2})(?:\s+§\s*(\d+))?\b/g,
+    sourceHint: 'nvic',
+    toSection: m => m[2] ? `NVIC ${m[1]} §${m[2]}` : `NVIC ${m[1]}`,
+  },
+  // STCW Code A-II/3 / STCW Code B-I/2 / STCW Reg.II/1
+  {
+    re: /\bSTCW\s+(?:(Code\s+[AB])-([IVX]+\/\d+)|Reg\.?\s*([IVX]+\/\d+))/g,
+    sourceHint: 'stcw',
+    toSection: m => m[1] ? `STCW ${m[1]}-${m[2]}` : `STCW Reg.${m[3]}`,
+  },
+  // ISM Code 1.2.3 / ISM 1.2 / ISM Code 5
+  {
+    re: /\bISM(?:\s+Code)?\s+(\d+(?:\.\d+)*)/g,
+    sourceHint: 'ism',
+    toSection: m => `ISM ${m[1]}`,
+  },
+]
+
+/** Scan a string for all maritime citations across every pattern.
+ *  Returns matches in document order, deduplicated by span. */
+function scanCitations(text: string): Array<{
+  index: number
+  length: number
+  sectionNumber: string
+  sourceHint: string
+}> {
+  const found: Array<{ index: number; length: number; sectionNumber: string; sourceHint: string }> = []
+  for (const p of CITATION_PATTERNS) {
+    p.re.lastIndex = 0
+    let m: RegExpExecArray | null
+    while ((m = p.re.exec(text)) !== null) {
+      found.push({
+        index: m.index,
+        length: m[0].length,
+        sectionNumber: p.toSection(m),
+        sourceHint: p.sourceHint,
+      })
+    }
+  }
+  // Sort by position; collapse overlapping spans (keep earliest).
+  found.sort((a, b) => a.index - b.index || b.length - a.length)
+  const merged: typeof found = []
+  let cursor = 0
+  for (const hit of found) {
+    if (hit.index < cursor) continue
+    merged.push(hit)
+    cursor = hit.index + hit.length
+  }
+  return merged
+}
 
 function injectChips(
   children: ReactNode,
@@ -152,27 +253,26 @@ function injectChips(
   prefix: string,
 ): ReactNode {
   const processString = (text: string, pfx: string): ReactNode => {
-    CFR_RE.lastIndex = 0
+    const hits = scanCitations(text)
+    if (hits.length === 0) return text
     const nodes: ReactNode[] = []
     let last = 0
-    let m: RegExpExecArray | null
-    while ((m = CFR_RE.exec(text)) !== null) {
-      if (m.index > last) nodes.push(text.slice(last, m.index))
-      const sectionNumber = `${m[1]} CFR ${m[2]}`
-      const info = citationMap.get(sectionNumber)
+    for (const hit of hits) {
+      if (hit.index > last) nodes.push(text.slice(last, hit.index))
+      const info = citationMap.get(hit.sectionNumber)
       nodes.push(
         <CitationChip
-          key={`${pfx}-${m.index}`}
-          sectionNumber={sectionNumber}
+          key={`${pfx}-${hit.index}`}
+          sectionNumber={hit.sectionNumber}
           sectionTitle={info?.title ?? ''}
-          source={info?.source ?? `cfr_${m[1]}`}
+          source={info?.source ?? hit.sourceHint}
           onTap={onTap}
         />,
       )
-      last = m.index + m[0].length
+      last = hit.index + hit.length
     }
     if (last < text.length) nodes.push(text.slice(last))
-    return nodes.length === 0 ? text : nodes
+    return nodes
   }
 
   if (typeof children === 'string') return processString(children, prefix)
@@ -185,6 +285,31 @@ function injectChips(
   }
 
   return children
+}
+
+/** Extract a deduplicated, ordered list of citations from the full
+ *  rendered message text. Used by the footer to mirror what's inline.
+ *  Sprint D6.87 — previously the footer rendered message.citations
+ *  directly (the DB-verified parent corpus entries), which often
+ *  didn't match what the model actually wrote inline. Now both
+ *  surfaces share the same source of truth: the answer text itself. */
+export function extractFooterCitations(
+  text: string,
+  citationMap: Map<string, { source: string; title: string }>,
+): Array<{ sectionNumber: string; source: string; title: string }> {
+  const seen = new Set<string>()
+  const result: Array<{ sectionNumber: string; source: string; title: string }> = []
+  for (const hit of scanCitations(text)) {
+    if (seen.has(hit.sectionNumber)) continue
+    seen.add(hit.sectionNumber)
+    const info = citationMap.get(hit.sectionNumber)
+    result.push({
+      sectionNumber: hit.sectionNumber,
+      source: info?.source ?? hit.sourceHint,
+      title: info?.title ?? '',
+    })
+  }
+  return result
 }
 
 // ── Markdown component map ─────────────────────────────────────────────────────
@@ -340,6 +465,18 @@ export function ChatMessage({ message, onCitationTap }: Props) {
 
   const components = makeComponents(message.citations, onCitationTap)
 
+  // Sprint D6.87 — footer chips are derived from the actual answer
+  // text (post-render) so they mirror what's visually highlighted
+  // inline. The DB-verified message.citations list is used as a
+  // lookup for source/title attribution but does NOT drive what gets
+  // rendered. This eliminates the prior mismatch where the footer
+  // would show "SOLAS Ch.VI Part A" (DB parent) while the body cited
+  // "SOLAS Ch.VI Reg.2, para.6" (granular subsection).
+  const citationMapForFooter = new Map(
+    message.citations.map(c => [c.section_number, { source: c.source, title: c.section_title }]),
+  )
+  const footerCitations = extractFooterCitations(message.content, citationMapForFooter)
+
   return (
     <div className="flex items-start gap-3 px-4 py-3 animate-[fadeSlideIn_0.2s_ease-out]">
       {/* Teal accent bar */}
@@ -372,14 +509,18 @@ export function ChatMessage({ message, onCitationTap }: Props) {
           {message.content}
         </ReactMarkdown>
 
-        {/* Citation footer */}
-        {message.citations.length > 0 && (
+        {/* Citation footer — D6.87 sources chips from the rendered
+            answer text so the list mirrors what's visually highlighted
+            inline. message.citations remains the lookup hint for
+            source/title; the rendered set is the union of all
+            inline-cited regulations, deduplicated. */}
+        {footerCitations.length > 0 && (
           <div className="mt-3 pt-3 border-t border-white/5 flex flex-wrap gap-1.5">
-            {message.citations.map(c => (
+            {footerCitations.map(c => (
               <CitationChip
-                key={c.section_number}
-                sectionNumber={c.section_number}
-                sectionTitle={c.section_title}
+                key={c.sectionNumber}
+                sectionNumber={c.sectionNumber}
+                sectionTitle={c.title}
                 source={c.source}
                 onTap={onCitationTap}
               />
