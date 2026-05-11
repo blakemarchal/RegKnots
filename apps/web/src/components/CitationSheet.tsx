@@ -86,6 +86,18 @@ const citationMdComponents: Components = {
   ),
 }
 
+// Sprint D6.90 — references fallback. When the cited identifier
+// doesn't exist as its own row (e.g. MSC.1/Circ.1432, MARPOL Annex I,
+// NVIC 10-97 bare), the backend returns full_text='' plus up to 8
+// `references` — corpus rows whose body mentions the identifier.
+// The sheet renders these as clickable cards so the user can pivot
+// to the surrounding context.
+interface RegulationReference {
+  source: string
+  section_number: string
+  section_title: string | null
+}
+
 interface RegulationDetail {
   source: string
   section_number: string
@@ -94,6 +106,7 @@ interface RegulationDetail {
   effective_date: string | null
   up_to_date_as_of: string | null
   copyrighted: boolean
+  references?: RegulationReference[]
 }
 
 interface Props {
@@ -139,6 +152,16 @@ function getSourceLink(source: string, sectionNumber: string): { url: string; la
 }
 
 export function CitationSheet({ source, sectionNumber, sectionTitle, onClose }: Props) {
+  // Sprint D6.90 — references-fallback navigation.
+  //
+  // The sheet now tracks "currently viewed" state internally. When the
+  // initial lookup returns references mode (no row for the cited
+  // identifier, but corpus rows that mention it), the user can click
+  // a reference card to swap the sheet contents in-place. The props
+  // serve as the initial view; subsequent navigation lives in state.
+  // Back button restores the previous entry from the stack.
+  const [viewing, setViewing] = useState({ source, sectionNumber, sectionTitle })
+  const [navStack, setNavStack] = useState<typeof viewing[]>([])
   const [detail, setDetail] = useState<RegulationDetail | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(false)
@@ -154,11 +177,37 @@ export function CitationSheet({ source, sectionNumber, sectionTitle, onClose }: 
     // Use the query-param lookup endpoint so section_numbers containing
     // forward slashes (e.g. "STCW Ch.II Reg.II/2") aren't mangled by the
     // reverse proxy into extra path segments.
-    const qs = new URLSearchParams({ source, section_number: sectionNumber })
+    setLoading(true)
+    setError(false)
+    const qs = new URLSearchParams({
+      source: viewing.source,
+      section_number: viewing.sectionNumber,
+    })
     apiRequest<RegulationDetail>(`/regulations/lookup?${qs.toString()}`)
       .then((d) => { setDetail(d); setLoading(false) })
       .catch(() => { setError(true); setLoading(false) })
-  }, [source, sectionNumber])
+  }, [viewing.source, viewing.sectionNumber])
+
+  /** Navigate to a referenced regulation. Pushes current view onto
+   *  the back stack so the user can return. */
+  function openReference(ref: RegulationReference) {
+    setNavStack((prev) => [...prev, viewing])
+    setViewing({
+      source: ref.source,
+      sectionNumber: ref.section_number,
+      sectionTitle: ref.section_title ?? '',
+    })
+  }
+
+  function navigateBack() {
+    setNavStack((prev) => {
+      if (prev.length === 0) return prev
+      const next = [...prev]
+      const last = next.pop()!
+      setViewing(last)
+      return next
+    })
+  }
 
   // Lock body scroll
   useEffect(() => {
@@ -194,7 +243,10 @@ export function CitationSheet({ source, sectionNumber, sectionTitle, onClose }: 
     dragStartY.current = null
   }
 
-  const sourceLink = getSourceLink(source, sectionNumber)
+  // D6.90 — use viewing.* not the original props so the source link
+  // updates when the user navigates to a reference.
+  const sourceLink = getSourceLink(viewing.source, viewing.sectionNumber)
+  const isReferencesMode = !!detail?.references && detail.references.length > 0 && !detail.full_text
   const sheetTransform = dismissing
     ? 'translateY(100%)'
     : dragOffset > 0
@@ -231,13 +283,28 @@ export function CitationSheet({ source, sectionNumber, sectionTitle, onClose }: 
           <div className="w-9 h-1 rounded-full bg-white/20" />
         </div>
 
-        {/* Header */}
+        {/* Header — D6.90 shows back button + viewing.* state so the
+            header updates as user navigates through references. */}
         <div className="flex-shrink-0 px-5 pb-4">
+          {navStack.length > 0 && (
+            <button
+              type="button"
+              onClick={navigateBack}
+              className="font-mono text-[11px] text-[--color-teal]/80 hover:text-[--color-teal]
+                         transition-colors mb-2 flex items-center gap-1.5"
+              aria-label="Back to previous citation"
+            >
+              <svg className="w-3 h-3" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.8">
+                <path d="M7.5 2L3.5 6l4 4" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+              Back
+            </button>
+          )}
           <p className="font-display text-xl font-bold text-[--color-teal] tracking-wide leading-tight">
-            {sectionNumber}
+            {viewing.sectionNumber}
           </p>
           <p className="font-mono text-sm text-[--color-off-white] mt-1 leading-snug">
-            {detail?.section_title ?? sectionTitle}
+            {detail?.section_title ?? viewing.sectionTitle}
           </p>
         </div>
 
@@ -262,7 +329,54 @@ export function CitationSheet({ source, sectionNumber, sectionTitle, onClose }: 
             </p>
           )}
 
-          {detail && !loading && detail.copyrighted && (
+          {/* D6.90 — references mode: cited identifier isn't a row in
+              our corpus, but is referenced by other regulations. Render
+              clickable cards for each. Sorted server-side by authority
+              tier (CFR/IMO first, flag-state last). */}
+          {detail && !loading && isReferencesMode && (
+            <div className="flex flex-col gap-3">
+              <div className="rounded-lg border border-amber-400/20 bg-amber-400/5 px-4 py-3">
+                <p className="font-mono text-xs text-amber-300/90 leading-snug">
+                  Full text of <span className="font-bold">{viewing.sectionNumber}</span> isn&apos;t
+                  in our corpus directly.
+                </p>
+                <p className="font-mono text-[11px] text-[--color-off-white]/60 leading-snug mt-1.5">
+                  Found {detail.references!.length} document{detail.references!.length === 1 ? '' : 's'} in our index
+                  that cite it — open one to read the surrounding context.
+                </p>
+              </div>
+              <ul className="flex flex-col gap-2">
+                {detail.references!.map((ref) => (
+                  <li key={`${ref.source}::${ref.section_number}`}>
+                    <button
+                      type="button"
+                      onClick={() => openReference(ref)}
+                      className="w-full text-left px-3 py-2.5 rounded-lg
+                                 bg-white/5 border border-white/8
+                                 hover:bg-white/10 hover:border-[--color-teal]/30
+                                 transition-colors"
+                    >
+                      <div className="flex items-baseline justify-between gap-3">
+                        <span className="font-display text-sm font-semibold text-[--color-teal]">
+                          {ref.section_number}
+                        </span>
+                        <span className="font-mono text-[10px] text-[--color-off-white]/40 uppercase tracking-wider">
+                          {ref.source}
+                        </span>
+                      </div>
+                      {ref.section_title && (
+                        <p className="font-mono text-xs text-[--color-off-white]/70 leading-snug mt-1 line-clamp-2">
+                          {ref.section_title}
+                        </p>
+                      )}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {detail && !loading && !isReferencesMode && detail.copyrighted && (
             <div className="rounded-lg border border-[--color-teal]/20 bg-[--color-teal]/5 px-4 py-4 mt-1">
               <p className="font-display text-sm font-semibold text-[--color-teal] mb-2">
                 IMO Copyrighted Content
@@ -285,7 +399,7 @@ export function CitationSheet({ source, sectionNumber, sectionTitle, onClose }: 
             </div>
           )}
 
-          {detail && !loading && !detail.copyrighted && (
+          {detail && !loading && !isReferencesMode && !detail.copyrighted && (
             <div className="text-[--color-off-white]/80">
               <ReactMarkdown remarkPlugins={[remarkGfm]} components={citationMdComponents}>
                 {detail.full_text}
@@ -307,7 +421,7 @@ export function CitationSheet({ source, sectionNumber, sectionTitle, onClose }: 
             </p>
           </div>
 
-          {sourceLink && (
+          {sourceLink && !isReferencesMode && (
             <button
               onClick={() => window.open(sourceLink.url, '_blank', 'noopener')}
               className="font-mono text-xs text-[--color-teal] hover:underline whitespace-nowrap"

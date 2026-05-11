@@ -157,16 +157,28 @@ interface Props {
 
 interface CitationPattern {
   re: RegExp
-  sourceHint: string
+  /** Source for the chip lookup. String for static sources; function
+   *  for dynamic sources where the captured groups determine which DB
+   *  source contains the row (e.g. CFR Title number selects
+   *  cfr_33/cfr_46/cfr_49). */
+  sourceHint: string | ((m: RegExpExecArray) => string)
   /** Extract the canonical section_number from the regex match. */
   toSection: (m: RegExpExecArray) => string
 }
 
 const CITATION_PATTERNS: CitationPattern[] = [
   // 46 CFR 91.60-10 / (33 CFR 153) / 49 CFR 172.101
+  //
+  // Sprint D6.90 — sourceHint is now Title-aware. The regulations.cfr_*
+  // sources are split by Title (cfr_33 / cfr_46 / cfr_49); the regex
+  // captures the Title in group 1, and the lookup must route to the
+  // matching source. Pre-D6.90 this emitted the literal string `cfr`,
+  // which doesn't exist as a source, so every CFR chip click 404'd
+  // (4 misses for "46 CFR 91.60-10" in the last 6 hours of citation_lookups
+  // telemetry — same row resolves cleanly when source=cfr_46).
   {
     re: /\(?(\d+)\s+CFR\s+(\d+(?:\.\d+(?:-\d+)?)?)\)?/g,
-    sourceHint: 'cfr',
+    sourceHint: m => `cfr_${m[1]}`,
     toSection: m => `${m[1]} CFR ${m[2]}`,
   },
   // 46 USC 7101 / 46 USC 11102
@@ -354,11 +366,15 @@ function scanCitations(text: string): Array<{
     p.re.lastIndex = 0
     let m: RegExpExecArray | null
     while ((m = p.re.exec(text)) !== null) {
+      // Sprint D6.90 — sourceHint can be a function (CFR Title-aware
+      // routing) or a static string. Resolve at match time.
+      const resolvedSource =
+        typeof p.sourceHint === 'function' ? p.sourceHint(m) : p.sourceHint
       found.push({
         index: m.index,
         length: m[0].length,
         sectionNumber: p.toSection(m),
-        sourceHint: p.sourceHint,
+        sourceHint: resolvedSource,
       })
     }
   }

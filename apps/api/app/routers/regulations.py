@@ -131,6 +131,14 @@ _IMO_COPYRIGHTED_SOURCES = {
 }
 
 
+class RegulationReference(BaseModel):
+    """A single corpus row that mentions a cited identifier we don't
+    have a standalone row for. Used by the references fallback below."""
+    source: str
+    section_number: str
+    section_title: str | None
+
+
 class RegulationDetail(BaseModel):
     source: str
     section_number: str
@@ -139,6 +147,115 @@ class RegulationDetail(BaseModel):
     effective_date: str | None
     up_to_date_as_of: str | None
     copyrighted: bool = False
+    # Sprint D6.90 — references fallback.
+    #
+    # When the cited (source, section_number) doesn't resolve directly
+    # (the row simply isn't in the corpus — e.g. MSC.1/Circ.1432 which
+    # is cited inside 7+ other regulations but not ingested standalone),
+    # `full_text` is empty and `references` is populated with up to 8
+    # corpus rows whose body mentions the identifier. Frontend renders
+    # this as "Full text not in our corpus. Referenced in N documents:"
+    # with each entry clickable.
+    #
+    # Backward-compatible: when `full_text` resolves normally,
+    # `references` stays empty. Frontend ignores empty references.
+    references: list[RegulationReference] = []
+
+
+# Sprint D6.90 — references fallback authority ranking.
+#
+# When the citation 404s, we surface up to 8 corpus rows that mention
+# the identifier. Order matters: authoritative IMO/CFR/etc. rows first,
+# flag-state and supplements after, so the user sees the strongest
+# context match at the top of the list. Sources not listed fall to the
+# trailing bucket.
+_REFERENCES_AUTHORITY_ORDER = [
+    # Tier 1 — primary IMO conventions + U.S. CFR
+    "solas", "marpol", "stcw", "ism", "colregs", "imdg",
+    "cfr_33", "cfr_46", "cfr_49", "usc_46",
+    # Tier 2 — USCG guidance + IMO supplements/codes
+    "nvic", "uscg_msm", "uscg_bulletin",
+    "solas_supplement", "marpol_supplement", "marpol_amend",
+    "stcw_supplement", "stcw_amend", "ism_supplement", "imdg_supplement",
+    "imo_hsc", "imo_igc", "imo_ibc", "imo_bwm", "imo_polar",
+    "imo_igf", "imo_css", "imo_iamsar", "imo_loadlines",
+    # Tier 3 — NMC / IACS / WHO
+    "nmc_policy", "nmc_checklist", "iacs_ur", "iacs_pr", "who_ihr",
+    # Tier 4 — flag-state circulars (alphabetical by flag)
+    "amsa_mo", "bg_verkehr", "bma_mn",
+    "iri_mn", "liscr_mn", "mardep_msin", "mca_mgn", "mca_msn",
+    "mpa_sc", "nma_rsv", "tc_ssb", "ocimf",
+    # (other sources fall through to LIMIT-driven trim)
+]
+
+
+async def _find_references(
+    pool, section_number: str, limit: int = 8
+) -> list[RegulationReference]:
+    """Find corpus rows whose body text mentions `section_number`.
+
+    Used as a fallback when the direct lookup misses. The identifier
+    must appear bounded by non-word characters so e.g. searching for
+    'MARPOL Annex I' doesn't also match 'MARPOL Annex II' (where the
+    second I is the next letter of II). We escape regex metachars in
+    the input and bracket with Postgres word-boundary anchors `\\m`
+    and `\\M`.
+
+    Results are GROUPed by (source, section_number) so multi-chunk
+    rows count once. Sorted by authority tier (primary IMO/CFR
+    first, flag-state last) so the most useful context is at the top.
+    """
+    # Escape the regex metachars Postgres POSIX regex treats specially.
+    # The result is a literal-substring regex bracketed by word
+    # boundaries. The list mirrors `re.escape`'s coverage for the
+    # characters we actually see in maritime identifiers
+    # (dots in MSC.1, slashes in /Circ., dashes in 10-97, parens in
+    # (a), etc.).
+    escaped = re.sub(r"([.+*?()\[\]{}|\\^$])", r"\\\1", section_number)
+    pattern = r"\m" + escaped + r"\M"
+
+    # Build a SQL CASE expression for authority ordering. Sources not
+    # listed get a high (worse) rank value so they sort last.
+    authority_cases = "\n".join(
+        f"WHEN '{src}' THEN {idx}"
+        for idx, src in enumerate(_REFERENCES_AUTHORITY_ORDER)
+    )
+    query = f"""
+        SELECT
+            source,
+            section_number,
+            MIN(section_title) AS section_title,
+            CASE source
+                {authority_cases}
+                ELSE {len(_REFERENCES_AUTHORITY_ORDER)}
+            END AS authority_rank
+        FROM regulations
+        WHERE full_text ~* $1
+        GROUP BY source, section_number
+        ORDER BY authority_rank, source, section_number
+        LIMIT $2
+    """
+    try:
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(query, pattern, limit)
+    except Exception as exc:
+        # The regex search can throw on pathological input. Don't
+        # surface — just return an empty references list and let the
+        # endpoint raise its normal 404.
+        logger.warning(
+            "references fallback regex failed: %s: %s",
+            type(exc).__name__, str(exc)[:200],
+        )
+        return []
+
+    return [
+        RegulationReference(
+            source=r["source"],
+            section_number=r["section_number"],
+            section_title=r["section_title"],
+        )
+        for r in rows
+    ]
 
 
 async def _load_regulation(pool, source: str, section_number: str) -> RegulationDetail:
@@ -221,6 +338,33 @@ async def _load_regulation(pool, source: str, section_number: str) -> Regulation
                             "%s/%s -> %s/%s",
                             source, section_number, source, stripped,
                         )
+
+    # Sprint D6.90 — references fallback. If the direct fetch + all
+    # suffix/normalize fallbacks miss, the cited identifier doesn't
+    # exist as a standalone row in our corpus. Common cases (verified
+    # against citation_lookups telemetry 2026-05-11):
+    #   - imo_supplement/MSC.1/Circ.1432 — circular not ingested
+    #     standalone; cited inside LISCR FIR-001, BMA MN079, SOLAS
+    #     Ch.II-2 etc.
+    #   - marpol/MARPOL Annex I — annexes are stored subdivided
+    #     (MARPOL Annex I Ch.1, App.I, ...); bare annex has no row.
+    #   - nvic/NVIC 10-97 — NVICs stored per §; bare ID has no row.
+    # Search the corpus for any row whose body mentions the identifier
+    # and return up to 8 as `references`. Frontend renders them as
+    # clickable cards so the user can pivot to the surrounding context.
+    if not rows:
+        refs = await _find_references(pool, section_number)
+        if refs:
+            return RegulationDetail(
+                source=source,
+                section_number=section_number,
+                section_title=None,
+                full_text="",
+                effective_date=None,
+                up_to_date_as_of=None,
+                copyrighted=False,
+                references=refs,
+            )
 
     if not rows:
         raise HTTPException(
