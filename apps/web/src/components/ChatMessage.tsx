@@ -237,14 +237,20 @@ const CITATION_PATTERNS: CitationPattern[] = [
   // patterns don't swallow more specific ones; scanCitations
   // dedups overlapping spans by document position.
 
-  // MARPOL Annex I/II/III/IV/V/VI with optional Reg./Ch./App. suffix.
-  // Captures:
-  //   "MARPOL Annex I Reg.20"
-  //   "MARPOL Annex I Ch.2"
-  //   "MARPOL Annex II App.III"
-  //   "MARPOL Annex I" (bare annex reference)
+  // MARPOL Annex I/II/III/IV/V/VI with optional Reg/Ch/App suffix.
+  // The model writes a mix of full-word and abbreviated forms:
+  //   "MARPOL Annex VI Regulation 14.1"
+  //   "MARPOL Annex VI Reg.14.1"
+  //   "MARPOL Annex II Appendix VII"  /  "App.VII"
+  //   "MARPOL Annex I Chapter 1"  /  "Ch.1"
+  //   "MARPOL Annex VI Appendix III Part II"  (sub-appendix part)
+  // Captures the full citation including the optional "Part N"
+  // trailing reference, so the chip text matches what the model
+  // wrote. Backend lookup normalizes full-word -> abbreviated form
+  // (Appendix -> App., Chapter -> Ch., Regulation -> Reg.) when the
+  // exact-match lookup misses.
   {
-    re: /\bMARPOL\s+Annex\s+([IVX]+)(?:\s+(Reg\.?\s*\d+(?:\.\d+)*|Ch\.?\s*\d+|App\.?\s*[IVX]+))?/g,
+    re: /\bMARPOL\s+Annex\s+([IVX]+)(?:\s+(Reg(?:ulation|\.?)\s*\d+(?:\.\d+)*|Ch(?:apter|\.?)\s*\d+|App(?:endix|\.?)\s*[IVX]+(?:\s+Part\s+[IVX]+)?))?/g,
     sourceHint: 'marpol',
     toSection: m =>
       m[2]

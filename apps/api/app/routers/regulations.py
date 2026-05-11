@@ -57,6 +57,9 @@ _LOOKUP_SUFFIX_PATTERNS = [
     re.compile(r"\s*\([a-z0-9]+\)(?:\([a-z0-9]+\))*\s*$", re.IGNORECASE),
     # Trailing ".N.N" sub-numbering, e.g. "Reg.20.1.3" → "Reg.20"
     re.compile(r"(?<=\d)\.\d+(?:\.\d+)+\s*$"),
+    # Trailing " Part II" / " Part III" sub-section (common on MARPOL
+    # appendix references — "Appendix III Part II" → "Appendix III").
+    re.compile(r"\s+Part\s+[IVX]+\s*$"),
 ]
 
 
@@ -68,6 +71,46 @@ def _strip_lookup_suffix(section_number: str) -> str | None:
         stripped = pat.sub("", section_number).strip()
         if stripped and stripped != section_number:
             return stripped
+    return None
+
+
+# Sprint D6.88 Phase 3 — full-word ↔ abbreviated normalizations for
+# DB lookup. The model commonly writes full-word forms ("MARPOL Annex
+# VI Appendix VII", "MARPOL Annex I Regulation 20.1") while the
+# corpus stores DB-canonical abbreviations ("App.VII", "Reg.20.1").
+# These substitutions are applied as a SECOND fallback when the
+# initial lookup and suffix-strip both miss — so DB rows with the
+# canonical form get matched without requiring the user / chip to
+# know the abbreviation convention.
+#
+# Substitutions are applied left-to-right, all-at-once; the order
+# doesn't matter because the patterns don't overlap. Each pattern
+# consumes the trailing whitespace as well so the result is the
+# DB-canonical no-space-after-abbreviation form ("App.VII" not
+# "App. VII", which is how MARPOL rows are actually stored).
+_NORMALIZATION_PATTERNS = [
+    # "Appendix " → "App."  (collapse space between abbrev and identifier)
+    (re.compile(r"\bAppendix\b\.?\s*", re.IGNORECASE), "App."),
+    # "Chapter " → "Ch."
+    (re.compile(r"\bChapter\b\.?\s*", re.IGNORECASE), "Ch."),
+    # "Regulation " → "Reg." (word boundary protects "Regulations"/"Regulator")
+    (re.compile(r"\bRegulation\b\.?\s*", re.IGNORECASE), "Reg."),
+    # Collapse double-space artifacts.
+    (re.compile(r"\s{2,}"), " "),
+]
+
+
+def _normalize_for_lookup(section_number: str) -> str | None:
+    """Convert full-word forms to DB-canonical abbreviations. Returns
+    the normalized string if it differs from the input, else None.
+    Used as a fallback when the initial exact-match and the
+    suffix-strip both miss."""
+    normalized = section_number
+    for pat, repl in _NORMALIZATION_PATTERNS:
+        normalized = pat.sub(repl, normalized)
+    normalized = normalized.strip()
+    if normalized and normalized != section_number:
+        return normalized
     return None
 
 router = APIRouter(prefix="/regulations", tags=["regulations"])
@@ -144,10 +187,40 @@ async def _load_regulation(pool, source: str, section_number: str) -> Regulation
             if rows:
                 resolved_sn = candidate
                 logger.info(
-                    "regulations lookup fallback: %s/%s -> %s/%s",
+                    "regulations lookup fallback (suffix): %s/%s -> %s/%s",
                     source, section_number, source, candidate,
                 )
                 break
+
+    # Phase 3 fallback: full-word → DB-canonical abbreviation
+    # ("Appendix" → "App.", "Chapter" → "Ch.", "Regulation" → "Reg.").
+    # The model writes the full-word form in answers; the corpus
+    # stores the abbreviated form. Try the normalized lookup, and if
+    # that misses too, ALSO try the normalized form with suffixes
+    # stripped (handles "Appendix III Part II" → "App.III").
+    if not rows:
+        candidate = section_number
+        normalized = _normalize_for_lookup(candidate)
+        if normalized:
+            rows = await _fetch(normalized)
+            if rows:
+                resolved_sn = normalized
+                logger.info(
+                    "regulations lookup fallback (normalize): %s/%s -> %s/%s",
+                    source, section_number, source, normalized,
+                )
+            else:
+                # Normalize + strip combined
+                stripped = _strip_lookup_suffix(normalized)
+                if stripped:
+                    rows = await _fetch(stripped)
+                    if rows:
+                        resolved_sn = stripped
+                        logger.info(
+                            "regulations lookup fallback (normalize+strip): "
+                            "%s/%s -> %s/%s",
+                            source, section_number, source, stripped,
+                        )
 
     if not rows:
         raise HTTPException(

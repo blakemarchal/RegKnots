@@ -26,7 +26,15 @@ interface Props {
   message?: string | null
 }
 
-const FILLER_AFTER_MS = 3500   // hold the server status this long, then start cycling
+// Sprint D6.88 Phase 3 — bumped FILLER_AFTER_MS 3500 -> 7000.
+// Blake reported the UX feeling hung during web fallback dispatch:
+// the server's "Searching authoritative sources…" status would be
+// replaced by generic nautical filler ("Steady as she goes…") after
+// just 3.5s, while the actual web ensemble takes 5-10s. The filler
+// was masking what the system was actively doing. Holding the real
+// server status for 7s gives the user time to actually read what's
+// happening before falling back to filler.
+const FILLER_AFTER_MS = 7000
 const FILLER_INTERVAL_MS = 2500
 const NAUTICAL_FILLER = [
   'All hands on deck — finalizing your answer…',
