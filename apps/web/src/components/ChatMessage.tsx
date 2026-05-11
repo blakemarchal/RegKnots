@@ -187,12 +187,20 @@ const CITATION_PATTERNS: CitationPattern[] = [
     sourceHint: 'imdg',
     toSection: m => `IMDG ${m[1]}`,
   },
-  // MSC.1/Circ.1440 / MSC.520(106) / MSC.97(73)
-  {
-    re: /\bMSC\.(\d+(?:\(\d+\)|\/Circ\.\d+)?)/g,
-    sourceHint: 'imo_supplement',
-    toSection: m => `MSC.${m[1]}`,
-  },
+  // Sprint D6.90 — MSC.1/Circ.NNNN / MSC.NNN(YY) chips REMOVED.
+  //
+  // The previous pattern emitted chips with sourceHint `imo_supplement`,
+  // a source that has never existed in the regulations table. Every
+  // click 404'd to "Regulation text unavailable" (Blake's 2026-05-11
+  // screenshot showed the empty body for MSC.1/Circ.1432). The few
+  // MSC.1/Circ.* documents we DO have are German-flag interpretations
+  // stored in `bg_verkehr` under titles like "BG SOLAS MSC.1/Circ.1572"
+  // — not lookup-compatible with the raw IMO reference the model writes.
+  //
+  // Until we ingest a real `imo_circulars` source, MSC.1/Circ.* and
+  // MSC.NNN(YY) references stay as plain text in the answer body. Plain
+  // text is the honest UX — a chip that leads to a 404 is a worse
+  // experience than no chip.
   // NVIC 10-97 / NVIC 10-97 §5 / NVIC 01-20
   {
     re: /\bNVIC\s+(\d{2}-\d{2})(?:\s+§\s*(\d+))?\b/g,
