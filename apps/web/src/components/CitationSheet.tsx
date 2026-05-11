@@ -184,8 +184,19 @@ export function CitationSheet({ source, sectionNumber, sectionTitle, onClose }: 
               <p className="font-display text-sm font-semibold text-[--color-teal] mb-2">
                 IMO Copyrighted Content
               </p>
-              <p className="font-mono text-xs text-[--color-off-white]/80 leading-relaxed">
+              {/* D6.88 Phase 1 — full corpus text is now rendered here
+                  for IMO instruments (previously a placeholder pointing
+                  users to imo.org). The teal box + label retains the
+                  attribution signal; the body shows the actual
+                  regulation. whitespace-pre-wrap preserves paragraph
+                  formatting that the corpus stores with newlines. */}
+              <p className="font-mono text-xs text-[--color-off-white]/80 leading-relaxed whitespace-pre-wrap">
                 {detail.full_text}
+              </p>
+              <p className="font-mono text-[10px] text-[--color-off-white]/50 mt-3 italic">
+                Excerpt shown to support compliance verification. Official text and the
+                latest amendments are available from your flag state, classification
+                society, or IMO Publishing.
               </p>
             </div>
           )}

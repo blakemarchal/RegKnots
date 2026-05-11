@@ -47,7 +47,7 @@ const FAQ_ITEMS: FaqItem[] = [
   {
     category: 'Using RegKnot',
     q: 'How do citations work?',
-    a: 'When RegKnot answers a question, it cites the specific regulation sections inline \u2014 like (46 CFR 133.45), (SOLAS Ch. II-2, Reg. 10), (STCW Reg. II/1), or (ISM 1.2.3). Tap any teal citation chip to see more details about that regulation. For CFR regulations, you can view the full text. For SOLAS, STCW, COLREGs, and the ISM Code, we show a summary due to IMO copyright \u2014 you can access official text through IMO publications.',
+    a: 'When RegKnot answers a question, it cites the specific regulation sections inline \u2014 like (46 CFR 133.45), (SOLAS Ch. II-2, Reg. 10), (STCW Reg. II/1), or (ISM 1.2.3). Tap any teal citation chip to view the regulation text. We show the corpus text for every source we cover \u2014 CFR, USC, NVIC, SOLAS, STCW, COLREGs, ISM, IMDG, and the IMO Codes \u2014 so you can verify your compliance reading without leaving the app. IMO instruments are displayed with attribution to the official publisher; always check the controlling text from your flag state, class society, or IMO Publishing before relying on it for a compliance-critical decision.',
   },
   {
     category: 'Using RegKnot',
