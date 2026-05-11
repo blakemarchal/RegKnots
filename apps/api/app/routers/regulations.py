@@ -23,6 +23,7 @@ content service" posture if IMO Publishing ever reaches out.
 
 import asyncio
 import logging
+import re
 import uuid
 from typing import Annotated
 
@@ -34,6 +35,40 @@ from app.auth.schemas import CurrentUser
 from app.db import get_pool
 
 logger = logging.getLogger(__name__)
+
+
+# Sprint D6.88 Phase 2 — paragraph-suffix fallback. The model commonly
+# cites granular sub-references the corpus is not ingested at:
+#   "SOLAS Ch.VI Reg.2, para. 5"   — actual row: "SOLAS Ch.VI Reg.2"
+#   "33 CFR 151.25(d)"             — actual row: "33 CFR 151.25"
+#   "MARPOL Annex I Reg.20.1"      — actual row: "MARPOL Annex I Reg.20"
+# When the exact section_number 404s, we strip these suffixes and
+# retry against the parent. Result: the chip click lands on the
+# parent regulation, which contains the cited sub-reference in its
+# body text. UX: header shows the citation as the model wrote it
+# (with the para/sub suffix), body shows the parent text. Acceptable
+# tradeoff vs. always 404'ing.
+#
+# Patterns are applied in order, each stripping ONE suffix layer.
+_LOOKUP_SUFFIX_PATTERNS = [
+    # ", para. 5"  /  ", para.5"  /  ", paragraph 5"  /  ", para. 5.2"
+    re.compile(r",\s*para(?:graph)?\.?\s*\d+(?:\.\d+)*\s*$", re.IGNORECASE),
+    # Trailing parenthesized sub: "(a)", "(b)(2)", "(1)" — CFR style
+    re.compile(r"\s*\([a-z0-9]+\)(?:\([a-z0-9]+\))*\s*$", re.IGNORECASE),
+    # Trailing ".N.N" sub-numbering, e.g. "Reg.20.1.3" → "Reg.20"
+    re.compile(r"(?<=\d)\.\d+(?:\.\d+)+\s*$"),
+]
+
+
+def _strip_lookup_suffix(section_number: str) -> str | None:
+    """Try each suffix pattern; return the cleaned section_number if
+    any one stripped a suffix, else None. Lets us distinguish "we
+    fell back to parent" from "no fallback applicable.\""""
+    for pat in _LOOKUP_SUFFIX_PATTERNS:
+        stripped = pat.sub("", section_number).strip()
+        if stripped and stripped != section_number:
+            return stripped
+    return None
 
 router = APIRouter(prefix="/regulations", tags=["regulations"])
 
@@ -70,18 +105,49 @@ async def _load_regulation(pool, source: str, section_number: str) -> Regulation
     source. The IMO copyright filter that previously replaced the text
     with a placeholder was removed in D6.88 Phase 1 — see module
     docstring for rationale.
+
+    Sprint D6.88 Phase 2 — paragraph-suffix fallback. If the exact
+    section_number 404s and the citation has a known sub-reference
+    suffix ("..., para. 5", "(a)", ".1.3"), strip it and look up the
+    parent. The body text contains the cited sub-reference; the
+    header preserves what the model wrote. Without this fallback,
+    every paragraph-level chip click would 404 because the corpus
+    is ingested at regulation level, not paragraph level.
     """
-    async with pool.acquire() as conn:
-        rows = await conn.fetch(
-            """
-            SELECT section_title, full_text, effective_date, up_to_date_as_of
-            FROM regulations
-            WHERE source = $1 AND section_number = $2
-            ORDER BY chunk_index
-            """,
-            source,
-            section_number,
-        )
+    async def _fetch(sn: str):
+        async with pool.acquire() as conn:
+            return await conn.fetch(
+                """
+                SELECT section_title, full_text, effective_date, up_to_date_as_of
+                FROM regulations
+                WHERE source = $1 AND section_number = $2
+                ORDER BY chunk_index
+                """,
+                source,
+                sn,
+            )
+
+    rows = await _fetch(section_number)
+    resolved_sn = section_number
+
+    # Phase 2 fallback: strip granular suffix(es) and retry once.
+    # Apply up to two strip passes (e.g., "Reg.2, para.5.1" → "Reg.2,
+    # para.5" → "Reg.2") so multi-layer suffixes still land somewhere.
+    if not rows:
+        candidate = section_number
+        for _ in range(2):
+            stripped = _strip_lookup_suffix(candidate)
+            if not stripped:
+                break
+            candidate = stripped
+            rows = await _fetch(candidate)
+            if rows:
+                resolved_sn = candidate
+                logger.info(
+                    "regulations lookup fallback: %s/%s -> %s/%s",
+                    source, section_number, source, candidate,
+                )
+                break
 
     if not rows:
         raise HTTPException(
@@ -94,9 +160,23 @@ async def _load_regulation(pool, source: str, section_number: str) -> Regulation
     up_to_date_as_of = rows[0]["up_to_date_as_of"]
     full_text = "\n\n".join(r["full_text"] for r in rows if r["full_text"])
 
+    # Phase 2 — if we resolved via fallback, prefix a small italic note
+    # so the user knows the body is the parent regulation and they
+    # need to scan for the specific paragraph the citation referenced.
+    # Use ascii-only chars for safe rendering in copy-paste contexts.
+    if resolved_sn != section_number:
+        # Extract the granular reference for the note (e.g., "paragraph 5")
+        note = (
+            f"_Note: showing parent regulation **{resolved_sn}**. "
+            f"The citation **{section_number}** references a specific "
+            f"paragraph or sub-paragraph within this regulation — scan "
+            f"the text below to find it._\n\n---\n\n"
+        )
+        full_text = note + full_text
+
     return RegulationDetail(
         source=source,
-        section_number=section_number,
+        section_number=section_number,  # preserve what the chip said
         section_title=section_title,
         full_text=full_text,
         effective_date=str(effective_date) if effective_date else None,
