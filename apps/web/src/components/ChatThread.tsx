@@ -38,6 +38,17 @@ export function ChatThread({ messages, loading, progressMsg = null, onPrompt, on
   // without affecting the scroll logic.
   const followLatestRef = useRef(true)
   const [showJumpButton, setShowJumpButton] = useState(false)
+  // Sprint D6.88 Phase 2 follow-up — timestamp of the last user-
+  // initiated scroll input (wheel, touch, keyboard). The auto-scroll
+  // effect skips when this is recent so the user's wheel doesn't
+  // fight the auto-scroll during streaming. Was: jitter while
+  // streaming, even after the ref refactor + 'auto' behavior. Root
+  // cause: every delta (~50ms) fired scrollIntoView, which on some
+  // browsers/contexts still produced a subtle animation that
+  // conflicted with concurrent wheel input. Suppress for 800ms
+  // post user-input gives wheels and touches breathing room.
+  const lastUserScrollAtRef = useRef(0)
+  const USER_SCROLL_GRACE_MS = 800
 
   useEffect(() => {
     const el = bottomRef.current
@@ -56,19 +67,45 @@ export function ChatThread({ messages, loading, progressMsg = null, onPrompt, on
     return () => obs.disconnect()
   }, [])
 
-  // Sprint D6.88 — auto-scroll uses `behavior: 'auto'` (instant)
-  // rather than `'smooth'`. Streaming deltas arrive every ~50ms; a
-  // smooth animation never gets to complete before the next delta
-  // fires another. Worse, the in-flight animation moves the
-  // bottomRef through the viewport visually, which toggled the
-  // observer state and produced the wheel-scroll jitter Blake
-  // reported. Instant scroll = no animation, no observer toggling,
-  // no jitter. The aggregate visual effect during streaming is a
-  // smooth follow because instant snaps are happening continuously.
+  // Sprint D6.88 Phase 2 follow-up — track user-initiated scroll
+  // input so the auto-scroll effect can defer when the user is
+  // actively wheeling or touching. Attach listeners to the nearest
+  // scrollable parent (the chat-thread main element) so the events
+  // fire during real scroll interaction.
+  useEffect(() => {
+    const sentinel = bottomRef.current
+    if (!sentinel) return
+    // Walk up to find the scrollable ancestor — Tailwind class
+    // 'chat-thread' marks it in ChatInterface.
+    let container: HTMLElement | null = sentinel.parentElement
+    while (container && !container.classList.contains('chat-thread')) {
+      container = container.parentElement
+    }
+    if (!container) return
+
+    function markUserScroll() {
+      lastUserScrollAtRef.current = Date.now()
+    }
+    container.addEventListener('wheel', markUserScroll, { passive: true })
+    container.addEventListener('touchmove', markUserScroll, { passive: true })
+    container.addEventListener('touchstart', markUserScroll, { passive: true })
+    return () => {
+      container?.removeEventListener('wheel', markUserScroll)
+      container?.removeEventListener('touchmove', markUserScroll)
+      container?.removeEventListener('touchstart', markUserScroll)
+    }
+  }, [])
+
+  // Auto-scroll only when (a) the user is following the latest AND
+  // (b) they haven't actively scrolled in the last 800ms. The grace
+  // window prevents the wheel-vs-auto-scroll fight Blake reported
+  // mid-stream. Uses 'instant' explicitly (not 'auto') so no browser
+  // interprets the call as a smooth animation.
   useEffect(() => {
     if (messages.length === 0 && !loading) return
     if (!followLatestRef.current) return
-    bottomRef.current?.scrollIntoView({ behavior: 'auto' })
+    if (Date.now() - lastUserScrollAtRef.current < USER_SCROLL_GRACE_MS) return
+    bottomRef.current?.scrollIntoView({ behavior: 'instant' as ScrollBehavior })
   }, [messages, loading, progressMsg])
 
   // Manual jump-to-bottom — the explicit user-initiated path. Keep

@@ -221,6 +221,118 @@ const CITATION_PATTERNS: CitationPattern[] = [
     sourceHint: 'ism',
     toSection: m => `ISM ${m[1]}`,
   },
+
+  // Sprint D6.88 Phase 2 follow-up — patterns Blake reported missing
+  // from the 2026-05-11 evening QA pass. Adds coverage for the
+  // sources that have the largest chunk counts behind no patterns:
+  //
+  //   marpol         571 chunks  | uscg_msm   3048 chunks
+  //   marpol_amend   316 chunks  | erg         762 chunks
+  //   colregs        102 chunks  | mca_msn     649 chunks
+  //   amsa_mo        680 chunks  | mca_mgn     228 chunks
+  //   who_ihr        163 chunks  | nmc_policy  209 chunks
+  //   iacs_ur       2981 chunks  | imo_*        ~1300 chunks total
+  //
+  // Ordered by specificity (most specific first) so general
+  // patterns don't swallow more specific ones; scanCitations
+  // dedups overlapping spans by document position.
+
+  // MARPOL Annex I/II/III/IV/V/VI with optional Reg./Ch./App. suffix.
+  // Captures:
+  //   "MARPOL Annex I Reg.20"
+  //   "MARPOL Annex I Ch.2"
+  //   "MARPOL Annex II App.III"
+  //   "MARPOL Annex I" (bare annex reference)
+  {
+    re: /\bMARPOL\s+Annex\s+([IVX]+)(?:\s+(Reg\.?\s*\d+(?:\.\d+)*|Ch\.?\s*\d+|App\.?\s*[IVX]+))?/g,
+    sourceHint: 'marpol',
+    toSection: m =>
+      m[2]
+        ? `MARPOL Annex ${m[1]} ${m[2].replace(/\s+/g, ' ')}`
+        : `MARPOL Annex ${m[1]}`,
+  },
+  // MARPOL Amendments MEPC.NNN(MM)
+  {
+    re: /\bMARPOL\s+Amendments\s+MEPC\.\d+\(\d+\)/g,
+    sourceHint: 'marpol_amend',
+    toSection: m => m[0].replace(/\s+/g, ' '),
+  },
+
+  // USCG Marine Safety Manual — "USCG MSM 16000.71 Ch.6", "USCG MSM 16000.74 Ch.1"
+  {
+    re: /\bUSCG\s+MSM\s+\d{5}(?:\.\d+[A-Z]?)?\s+Ch\.\d+(?:\(\w+\))?/g,
+    sourceHint: 'uscg_msm',
+    toSection: m => m[0].replace(/\s+/g, ' '),
+  },
+
+  // COLREGS Rule N — also accepts the lowercase 'COLREGs' spelling.
+  // Standalone "Rule 5" is intentionally NOT matched — too ambiguous
+  // without surrounding COLREGS context. Mariners or the model use
+  // the explicit prefix for citation-grade references.
+  {
+    re: /\bCOLREGS?\s+Rule\s+(\d+)/gi,
+    sourceHint: 'colregs',
+    toSection: m => `COLREGS Rule ${m[1]}`,
+  },
+
+  // ERG — "ERG Guide 128", "ERG ID 1203", "ERG Yellow 3253-3267"
+  {
+    re: /\bERG\s+(?:Guide|ID|Yellow|Green|Blue|Orange|Table|CBRN)\s+[\w-]+/g,
+    sourceHint: 'erg',
+    toSection: m => m[0].replace(/\s+/g, ' '),
+  },
+
+  // WHO IHR — "WHO IHR Article 20", "WHO IHR Annex 3"
+  {
+    re: /\bWHO\s+IHR\s+(?:Article|Annex)\s+(?:\d+|[IVX]+)/g,
+    sourceHint: 'who_ihr',
+    toSection: m => m[0].replace(/\s+/g, ' '),
+  },
+
+  // UK MCA MGN — "MGN 71 (M+F)", "MGN 50 (M)", "MGN 71"
+  {
+    re: /\bMGN\s+\d+(?:\s+\([MF+]+\))?/g,
+    sourceHint: 'mca_mgn',
+    toSection: m => m[0].replace(/\s+/g, ' '),
+  },
+
+  // UK MCA MSN — "MSN 1676 Amendment 4", "MSN 1747"
+  {
+    re: /\bMSN\s+\d+(?:\s+Amendment\s+\d+)?/g,
+    sourceHint: 'mca_msn',
+    toSection: m => m[0].replace(/\s+/g, ' '),
+  },
+
+  // AMSA Marine Order — "Marine Order 25", "Marine Order 11"
+  {
+    re: /\bMarine\s+Order\s+\d+/g,
+    sourceHint: 'amsa_mo',
+    toSection: m => m[0].replace(/\s+/g, ' '),
+  },
+
+  // NMC Policy Letters — "CG-MMC PL 01-18", "CG-OES PL 01-16", "NMC PL 04-03"
+  {
+    re: /\b(?:CG-(?:MMC|CVC|OES)|NMC)\s+PL\s+\d{2}-\d{2}/g,
+    sourceHint: 'nmc_policy',
+    toSection: m => m[0].replace(/\s+/g, ' '),
+  },
+
+  // IMO Specialty Codes — HSC, IGC, IBC, BWM, Polar, IGF, CSS, IAMSAR
+  // The Codes use MSC.XXX(YY) resolution refs or Ch.X.Y sections.
+  // Capture the full identifier the model writes; rely on the
+  // suffix-stripping backend fallback for sub-paragraph lookups.
+  {
+    re: /\bIMO\s+(HSC|IGC|IBC|BWM|Polar|IGF|CSS|IAMSAR)\s+Code\s+(?:MSC\.\d+\(\d+\)|MEPC\.\d+\(\d+\)|[A-Z]\.\d+\(\d+\))?\s*(?:Ch\.\d+(?:\.\d+)*)?/g,
+    sourceHint: 'imo_codes',
+    toSection: m => m[0].trim().replace(/\s+/g, ' '),
+  },
+
+  // IACS Unified Requirements — "IACS UR M74", "IACS UR S25"
+  {
+    re: /\bIACS\s+UR\s+[A-Z]\d+(?:\.\d+)?/g,
+    sourceHint: 'iacs_ur',
+    toSection: m => m[0].replace(/\s+/g, ' '),
+  },
 ]
 
 /** Scan a string for all maritime citations across every pattern.
