@@ -1080,6 +1080,62 @@ async def _check_missing_regulation_request(
         logger.debug("Could not send regulation request email", exc_info=True)
 
 
+async def _generate_title(
+    conversation_id: uuid.UUID,
+    query: str,
+    anthropic_client: AsyncAnthropic,
+    pool: asyncpg.Pool,
+) -> None:
+    """Generate a 4-6 word title for a new conversation using Haiku. Non-blocking."""
+    try:
+        msg = await anthropic_client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=24,
+            messages=[
+                {
+                    "role": "user",
+                    "content": (
+                        f"Generate a 4-6 word title for a maritime compliance conversation "
+                        f"that starts with this question: {query!r}\n"
+                        "Respond with only the title, no punctuation, no quotes."
+                    ),
+                }
+            ],
+        )
+        title = msg.content[0].text.strip()[:120] if msg.content else None
+        if title:
+            await pool.execute(
+                "UPDATE conversations SET title = $1 WHERE id = $2 AND title IS NULL",
+                title,
+                conversation_id,
+            )
+    except Exception:
+        pass  # Never affect the chat response
+
+
+# ── Request body defined here to avoid circular import with rag.models ───────
+
+from pydantic import BaseModel  # noqa: E402
+
+
+class ChatRequestBody(BaseModel):
+    query: str
+    conversation_id: uuid.UUID | None = None
+    vessel_id: uuid.UUID | None = None
+    # Sprint D6.34 — per-message verbosity override. One of:
+    #   "brief"     — concise; lead citation + offer to expand
+    #   "standard"  — current behavior (no special instruction)
+    #   "detailed"  — sectioned, thorough, applicability tables
+    # Overrides users.verbosity_preference for this turn only.
+    verbosity: str | None = None
+    # Sprint D6.49 — workspace-scoped chat. NULL/absent = personal chat
+    # (legacy behavior, untouched). When set, the conversation is
+    # bound to the workspace and visible to all workspace members. The
+    # user must already be a member of the workspace; the preflight
+    # validates this and raises 403 if not.
+    workspace_id: uuid.UUID | None = None
+
+
 class ChatCancelBody(BaseModel):
     """Sprint D6.85 Fix C — Stop button payload.
 
@@ -1087,6 +1143,10 @@ class ChatCancelBody(BaseModel):
     mid-stream. We persist whatever partial content was rendered to
     the user (so they don't lose what they saw) and mark the assistant
     message as cancelled so the UI can render it distinctly.
+
+    Defined here (post-BaseModel-import) for the same circular-import
+    reason ChatRequestBody is — the rag.models module imports symbols
+    that would otherwise create a cycle through pydantic.
     """
     conversation_id: uuid.UUID
     partial_content: str = ""  # client-side accumulated delta text
@@ -1158,59 +1218,3 @@ async def chat_cancel_endpoint(
         )
 
     return {"ok": True}
-
-
-async def _generate_title(
-    conversation_id: uuid.UUID,
-    query: str,
-    anthropic_client: AsyncAnthropic,
-    pool: asyncpg.Pool,
-) -> None:
-    """Generate a 4-6 word title for a new conversation using Haiku. Non-blocking."""
-    try:
-        msg = await anthropic_client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=24,
-            messages=[
-                {
-                    "role": "user",
-                    "content": (
-                        f"Generate a 4-6 word title for a maritime compliance conversation "
-                        f"that starts with this question: {query!r}\n"
-                        "Respond with only the title, no punctuation, no quotes."
-                    ),
-                }
-            ],
-        )
-        title = msg.content[0].text.strip()[:120] if msg.content else None
-        if title:
-            await pool.execute(
-                "UPDATE conversations SET title = $1 WHERE id = $2 AND title IS NULL",
-                title,
-                conversation_id,
-            )
-    except Exception:
-        pass  # Never affect the chat response
-
-
-# ── Request body defined here to avoid circular import with rag.models ───────
-
-from pydantic import BaseModel  # noqa: E402
-
-
-class ChatRequestBody(BaseModel):
-    query: str
-    conversation_id: uuid.UUID | None = None
-    vessel_id: uuid.UUID | None = None
-    # Sprint D6.34 — per-message verbosity override. One of:
-    #   "brief"     — concise; lead citation + offer to expand
-    #   "standard"  — current behavior (no special instruction)
-    #   "detailed"  — sectioned, thorough, applicability tables
-    # Overrides users.verbosity_preference for this turn only.
-    verbosity: str | None = None
-    # Sprint D6.49 — workspace-scoped chat. NULL/absent = personal chat
-    # (legacy behavior, untouched). When set, the conversation is
-    # bound to the workspace and visible to all workspace members. The
-    # user must already be a member of the workspace; the preflight
-    # validates this and raises 403 if not.
-    workspace_id: uuid.UUID | None = None
