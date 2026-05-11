@@ -67,9 +67,17 @@ class HedgeVerdict:
     latency_ms: int = 0
 
 
-_JUDGE_SYSTEM_PROMPT = """You are an internal RegKnots auditor. The application's regex-based hedge detector matched a phrase in the assistant's response (e.g. "not in my context", "I don't have specific..."), so the system is asking you to decide whether this is a true corpus miss or a false positive.
+_JUDGE_SYSTEM_PROMPT = """You are an internal RegKnots auditor. You are being invoked for one of two reasons:
 
-Your output drives a real-time decision about whether to fire an expensive Big-3 web search ensemble. Be precise.
+(a) The application's regex-based hedge detector matched a phrase in the assistant's response (e.g. "not in my context", "I don't have specific...") and the system needs you to decide whether this is a true corpus miss or a false positive.
+
+(b) Sprint D6.86 — the assistant produced a CITED answer (at least one verified regulatory citation), and the system wants a precautionary classification to catch any partial-misses the regex missed. In this case there may be NO obvious hedge phrasing at all; your job is to detect whether the answer fully addresses the user's question or admits a specific named sub-aspect is unspecified.
+
+Your output drives downstream decisions:
+  - Whether to fire an expensive web-search fallback (only when the regex matched, today)
+  - Which confidence tier the answer routes to (the new tier router uses your verdict directly)
+
+Be precise either way. The same four verdicts apply in both modes.
 
 You will receive:
   - The user's question

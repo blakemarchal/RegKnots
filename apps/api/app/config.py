@@ -208,6 +208,31 @@ class Settings(BaseSettings):
         default=60, validation_alias="HYBRID_RRF_K",
     )
 
+    # ── D6.86 — Hedge judge fires on every cited answer ────────────────
+    # When true, hedge_judge runs whenever the assistant produces an
+    # answer with ≥1 verified citation, even if the regex hedge
+    # detector didn't match anything. Captures the partial-miss
+    # signal on answers like the 2026-05-11 gasket question where the
+    # model used clinical "does not specify" prose the regex missed.
+    # Cost: ~$0.004/cited answer; current traffic adds <$1/day.
+    # The judge verdict feeds the tier router; web fallback firing is
+    # NOT changed by this flag (web fallback still requires the regex
+    # to have matched, preserving legacy behavior until Phase 2).
+    judge_on_cited_enabled: bool = Field(
+        default=True, validation_alias="JUDGE_ON_CITED_ENABLED",
+    )
+
+    # ── D6.86 — Lead-with-answer synthesis prompt ──────────────────────
+    # When true, the system prompt instructs the model to lead every
+    # answer with the practical conclusion, then expand. Mariners
+    # skim first paragraphs; burying the answer at the end of a long
+    # response is read as "no answer." Default on; toggle off via env
+    # if this produces worse answers in some category we haven't seen.
+    # See packages/rag/rag/prompts.py::LEAD_WITH_ANSWER_BLOCK.
+    lead_with_answer_enabled: bool = Field(
+        default=True, validation_alias="LEAD_WITH_ANSWER_ENABLED",
+    )
+
     # ── D6.84 Sprint A — Confidence tier router ──────────────────────────
     # Three-mode flag controlling the additive tier_router layer.
     #

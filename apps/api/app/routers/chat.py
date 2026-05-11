@@ -755,6 +755,11 @@ async def chat_endpoint(
         hybrid_rrf_k=settings.hybrid_rrf_k,
         # D6.84 Sprint A — confidence tier router. off / shadow / live.
         confidence_tiers_mode=settings.confidence_tiers_mode,
+        # D6.86 Phase 1 — judge fires on every cited answer + lead-
+        # with-answer synthesis prompt. Both flags default on; toggle
+        # via env if regressions appear.
+        judge_on_cited_enabled=settings.judge_on_cited_enabled,
+        lead_with_answer_enabled=settings.lead_with_answer_enabled,
     )
 
     # D6.84 — encode the TierMetadata Pydantic to JSON for the JSONB
@@ -863,6 +868,10 @@ async def chat_stream_endpoint(
                 hybrid_rrf_k=settings.hybrid_rrf_k,
                 # D6.84 Sprint A — confidence tier router. off / shadow / live.
                 confidence_tiers_mode=settings.confidence_tiers_mode,
+                # D6.86 Phase 1 — judge fires on every cited answer +
+                # lead-with-answer synthesis prompt.
+                judge_on_cited_enabled=settings.judge_on_cited_enabled,
+                lead_with_answer_enabled=settings.lead_with_answer_enabled,
             ):
                 event_type = event["event"]
                 payload = event["data"]

@@ -137,6 +137,26 @@ HEDGE_PATTERNS: list[str] = [
     # — model dating the corpus and admitting newer content is missing.
     r"(?:my|the)\s+(?:retrieved|verified|knowledge)[^.]{0,40}(?:is\s+limited|only\s+covers|extends only)",
     r"limited to\s+(?:the\s+)?\d{4}",
+
+    # Sprint D6.86 — softer regulatory-silence phrasing. Sonnet started
+    # using clinical "does not specify"/"focus on performance rather
+    # than X" prose after D6.84 hardening instead of the older "I did
+    # not surface" style. None of the patterns above caught the
+    # 2026-05-11 gasket answer, which read as a hedge to a skimming
+    # mariner. These patterns close that lexicon gap so the hedge
+    # judge fires and the tier router can route partial-miss cases
+    # properly.
+    #
+    # All anchored to phrases the model uses when admitting the corpus
+    # didn't have a specific aspect — not phrases that appear in
+    # legitimate regulatory factual statements.
+    r"(?:retrieved\s+)?regulation\s+context\s+(?:does\s+not|doesn'?t|do\s+not|don'?t)\s+(?:specify|prescribe|mandate|address|contain|include|cover)",
+    r"\b(?:does not|doesn'?t|do not|don'?t)\s+(?:specify|prescribe|mandate|dictate)\s+(?:whether|the\b|a\b|an\b|any|cell|material|type|structure|composition)",
+    r"\bno\s+regulatory\s+(?:specification|mandate|requirement|prescription)\b",
+    r"\bis\s+not\s+(?:a\s+)?regulatory\s+(?:specification|requirement|prescription|mandate)\b",
+    r"\bfocus(?:es|ed)?\s+on\s+performance\s+rather\s+than\b",
+    r"\b(?:performance-based|performance based),?\s+not\s+[\w\-]+(?:\s|-)based\b",
+    r"\bno\s+(?:cell-structure|structure|specific|explicit|particular|material|composition|cell)\s+(?:mandate|specification|prescription|requirement)\b",
 ]
 
 _HEDGE_RE = re.compile("|".join(HEDGE_PATTERNS), re.IGNORECASE)

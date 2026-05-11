@@ -382,6 +382,67 @@ NAVIGATION_AID_REMINDER = (
     "Note: This tool is a navigation aid only and does not constitute legal advice."
 )
 
+
+# Sprint D6.86 — lead-with-answer instruction. Conditionally appended
+# to SYSTEM_PROMPT via assemble_system_prompt(lead_with_answer=True).
+# Mariners read the first paragraph and decide whether to keep reading;
+# burying the conclusion at the bottom of a long response is read as
+# "no answer," even when the answer is right there four paragraphs
+# down. The gasket failure mode of 2026-05-11 (Blake's report) is the
+# canonical example.
+LEAD_WITH_ANSWER_BLOCK = """
+ANSWER STRUCTURE — LEAD WITH THE CONCLUSION (Sprint D6.86):
+Mariners read the first sentence and decide whether to keep reading. \
+Compliance officers do the same. Structure every answer so the \
+practical conclusion comes FIRST, then the regulatory framing, then \
+citations and applicability. Specifically:
+
+1. Lead sentence(s): The direct, practical answer in 1-2 sentences. \
+For a factual rule, state the rule. ("Quarterly. Per 46 CFR 199.180.") \
+For a partial-coverage case (the retrieved regulations don't fully \
+answer the specific question but you have settled industry knowledge \
+or a strong inference from related regulations), lead with the \
+practical answer first — e.g. "Closed-cell elastomer is the standard \
+material for watertight door gaskets." — then explain what the \
+regulations DO and DO NOT specify.
+
+2. Vessel-context framing (if vessel profile is set): one short \
+sentence AFTER the lead acknowledging the vessel context. Not before. \
+Vessel context is supporting detail, not the headline.
+
+3. Regulatory body: what the controlling regulations say, with inline \
+citations. If the regulations leave a specific aspect unspecified, \
+name what they DO cover and what they DON'T — so the reader sees the \
+precise shape of the gap rather than an unstructured absence.
+
+4. Practical guidance / caveats / applicability tests.
+
+NEVER bury the conclusion under "the retrieved context does not \
+specify..." or similar regulatory-silence phrasing. If your response \
+will admit a regulatory gap, the FIRST sentence must be your best \
+practical answer to the user's question (or, if you genuinely don't \
+have one, an explicit "I don't know this from the retrieved context" \
+in that first sentence — not buried in paragraph two).
+
+This rule applies regardless of verbosity setting:
+  - Brief: lead sentence + one supporting paragraph.
+  - Standard: lead sentence + 3-4 supporting paragraphs.
+  - Detailed: lead sentence + full sectioned breakdown.
+
+The lead never goes away.
+"""
+
+
+def assemble_system_prompt(*, lead_with_answer: bool = True) -> str:
+    """Return the system prompt with optional D6.86 lead-with-answer
+    block appended. Defaults to True; engine flips this off via the
+    LEAD_WITH_ANSWER_ENABLED env var if the rollout produces worse
+    answers in any category. See packages/rag/rag/prompts.py for the
+    full block text and rationale."""
+    if lead_with_answer:
+        return SYSTEM_PROMPT + "\n\n" + LEAD_WITH_ANSWER_BLOCK
+    return SYSTEM_PROMPT
+
 CLASSIFIER_PROMPT = (
     "Classify this user query for the RegKnots maritime compliance assistant. "
     "Return ONE digit:\n"

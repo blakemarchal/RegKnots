@@ -34,7 +34,11 @@ from rag.followup import compose_followup_query, detect_followup
 from rag.hedge import detect_hedge
 from rag.query_distill import LENGTH_THRESHOLD_CHARS
 from rag.models import ChatMessage, ChatResponse, CitedRegulation
-from rag.prompts import NAVIGATION_AID_REMINDER, SYSTEM_PROMPT
+from rag.prompts import (
+    NAVIGATION_AID_REMINDER,
+    SYSTEM_PROMPT,
+    assemble_system_prompt,
+)
 from rag.retriever import retrieve, retrieve_enhanced
 from rag.router import REGENERATION_MODEL, route_query
 
@@ -1136,7 +1140,7 @@ async def _regenerate_answer(
     if model_used == FALLBACK_MODEL_ID:
         try:
             result = await fallback_chat(
-                system_prompt=SYSTEM_PROMPT,
+                system_prompt=effective_system_prompt,
                 messages=messages,
                 max_tokens=_MAX_TOKENS,
                 openai_api_key=openai_api_key,
@@ -1158,7 +1162,7 @@ async def _regenerate_answer(
         response = await anthropic_client.messages.create(
             model=regen_model,
             max_tokens=_MAX_TOKENS,
-            system=SYSTEM_PROMPT,
+            system=effective_system_prompt,
             messages=messages,
         )
         return (
@@ -1181,7 +1185,7 @@ async def _regenerate_answer(
             response = await anthropic_client.messages.create(
                 model=model_used,
                 max_tokens=_MAX_TOKENS,
-                system=SYSTEM_PROMPT,
+                system=effective_system_prompt,
                 messages=messages,
             )
             return (
@@ -1492,6 +1496,15 @@ async def chat(
     # rendered answer. 'live' renders the router's decision and surfaces
     # tier_metadata to the frontend. See packages/rag/rag/tier_router.py.
     confidence_tiers_mode: str = "off",
+    # Sprint D6.86 — run hedge judge on every cited answer (not just
+    # when the regex matched). Captures partial-miss signal on softer
+    # hedge prose like "does not specify". Web fallback firing is
+    # NOT affected; this is purely data-collection for the tier router.
+    judge_on_cited_enabled: bool = True,
+    # Sprint D6.86 — instruct the synthesizer to lead with the practical
+    # conclusion before vessel/regulatory framing. Helps mariners who
+    # skim first paragraphs (Blake's gasket observation).
+    lead_with_answer_enabled: bool = True,
 ) -> ChatResponse:
     """Run the full RAG pipeline and return a ChatResponse.
 
@@ -1507,6 +1520,14 @@ async def chat(
     # 1. Route
     route = await route_query(query, anthropic_client)
     logger.info(f"Routed query to {route.model} (score={route.score})")
+
+    # Sprint D6.86 — assemble the synthesis system prompt once per
+    # request. The lead-with-answer block is conditionally appended
+    # based on the flag; defaults to on. Toggle off via env
+    # LEAD_WITH_ANSWER_ENABLED=false if any regression appears.
+    effective_system_prompt = assemble_system_prompt(
+        lead_with_answer=lead_with_answer_enabled,
+    )
 
     # D6.58 — off-topic gate. If the router classified the query as
     # off-topic (score=0), short-circuit before any retrieval / fallback
@@ -1602,7 +1623,7 @@ async def chat(
         response = await anthropic_client.messages.create(
             model=model_used,
             max_tokens=_MAX_TOKENS,
-            system=SYSTEM_PROMPT,
+            system=effective_system_prompt,
             messages=messages,
         )
         answer = response.content[0].text
@@ -1615,7 +1636,7 @@ async def chat(
             str(exc)[:200],
         )
         fallback_result = await fallback_chat(
-            system_prompt=SYSTEM_PROMPT,
+            system_prompt=effective_system_prompt,
             messages=messages,
             max_tokens=_MAX_TOKENS,
             openai_api_key=openai_api_key,
@@ -1666,43 +1687,64 @@ async def chat(
     # Only complete_miss + partial_miss fire the ensemble; precision
     # callouts and false hedges suppress.
     hedge_phrase = detect_hedge(cleaned_answer)
+    regex_matched = hedge_phrase is not None
     web_fallback_card = None
     judge_verdict: str | None = None
     judge_reasoning: str | None = None
     judge_missing_topic: str | None = None
     chunks_truncated_for_judge = False
-    if hedge_phrase is not None:
-        # 1. Judge — gates the fallback decision. Failure → default to
-        # complete_miss (preserves regex-only behavior on judge errors).
-        if hedge_judge_enabled:
-            from rag.hedge_judge import judge_hedge
-            try:
-                verdict = await judge_hedge(
-                    question=query,
-                    answer=cleaned_answer,
-                    chunks=chunks,
-                    citations=[
-                        {"source": c.source, "section_number": c.section_number,
-                         "section_title": c.section_title}
-                        for c in verified_cited
-                    ],
-                    anthropic_client=anthropic_client,
-                )
-                judge_verdict = verdict.verdict
-                judge_reasoning = verdict.reasoning or None
-                judge_missing_topic = verdict.missing_topic
-                chunks_truncated_for_judge = verdict.chunks_truncated
-            except Exception as exc:
-                logger.warning(
-                    "hedge_judge unexpected failure (defaulting to complete_miss): %s: %s",
-                    type(exc).__name__, str(exc)[:200],
-                )
-                judge_verdict = "complete_miss"
-        else:
-            # Judge disabled: behave like the legacy regex-only path.
-            judge_verdict = "complete_miss"
 
-        # 2. Log to retrieval_misses with the judge verdict.
+    # Sprint D6.86 — judge fires on EITHER (a) regex matched, OR (b)
+    # judge_on_cited_enabled AND ≥1 verified citation. Path (b) catches
+    # partial-misses on softer hedge prose ("does not specify..."). Web
+    # fallback firing is still gated on regex match below (Phase 1
+    # preserves legacy UX; Phase 2 may unlock fallback for cited
+    # partial_miss).
+    should_run_judge = hedge_judge_enabled and (
+        regex_matched
+        or (judge_on_cited_enabled and len(verified_cited) >= 1)
+    )
+
+    if should_run_judge:
+        from rag.hedge_judge import judge_hedge
+        try:
+            verdict = await judge_hedge(
+                question=query,
+                answer=cleaned_answer,
+                chunks=chunks,
+                citations=[
+                    {"source": c.source, "section_number": c.section_number,
+                     "section_title": c.section_title}
+                    for c in verified_cited
+                ],
+                anthropic_client=anthropic_client,
+            )
+            judge_verdict = verdict.verdict
+            judge_reasoning = verdict.reasoning or None
+            judge_missing_topic = verdict.missing_topic
+            chunks_truncated_for_judge = verdict.chunks_truncated
+        except Exception as exc:
+            logger.warning(
+                "hedge_judge unexpected failure: %s: %s",
+                type(exc).__name__, str(exc)[:200],
+            )
+            # Fail-safe default ONLY on the regex-matched path
+            # (preserves legacy fire-the-ensemble behavior on judge
+            # errors). For judge-on-cited invocations with no regex
+            # match, leave verdict=None so we don't false-fire web
+            # fallback or false-demote a Tier 1 answer.
+            if regex_matched:
+                judge_verdict = "complete_miss"
+    elif regex_matched and not hedge_judge_enabled:
+        # Judge disabled but regex matched: behave like the legacy
+        # regex-only path (every regex hit fires fallback).
+        judge_verdict = "complete_miss"
+
+    if regex_matched:
+        # Log to retrieval_misses on the regex-matched path only.
+        # retrieval_misses semantics are "regex matched, here's what
+        # happened next" — D6.86 judge-on-cited invocations skip the
+        # log to avoid polluting the existing analytics surface.
         try:
             await _log_retrieval_miss(
                 pool=pool,
@@ -1728,8 +1770,9 @@ async def chat(
                 str(exc)[:200],
             )
 
-        # 3. Fire fallback only on miss verdicts. precision_callout +
-        # false_hedge → suppress (the answer was good, no card needed).
+        # Fire fallback only on miss verdicts AND only on the regex-
+        # matched path (D6.86 Phase 1 — see comment above). Tier 2
+        # ships in Phase 2 to handle the cited-partial-miss case.
         should_fire_fallback = judge_verdict in ("complete_miss", "partial_miss")
         if web_fallback_enabled and should_fire_fallback:
             top_cosine = (
@@ -2905,6 +2948,9 @@ async def chat_with_progress(
     hybrid_rrf_k: int = 60,
     # Sprint D6.84 — confidence tier router mode. See chat() docstring.
     confidence_tiers_mode: str = "off",
+    # Sprint D6.86 — see chat() docstring.
+    judge_on_cited_enabled: bool = True,
+    lead_with_answer_enabled: bool = True,
 ) -> AsyncIterator[dict]:
     """Same RAG pipeline as chat() but yields lightweight progress events.
 
@@ -2919,6 +2965,12 @@ async def chat_with_progress(
     yield {"event": "status", "data": "Analyzing your question…"}
     route = await route_query(query, anthropic_client)
     logger.info(f"Routed query to {route.model} (score={route.score})")
+
+    # Sprint D6.86 — assemble synthesis system prompt with optional
+    # lead-with-answer block. See chat() for rationale.
+    effective_system_prompt = assemble_system_prompt(
+        lead_with_answer=lead_with_answer_enabled,
+    )
 
     # D6.58 — off-topic short-circuit (streaming path). Same gate as
     # the non-streaming chat() function. Skip retrieval/fallback/
@@ -3031,7 +3083,7 @@ async def chat_with_progress(
         async with anthropic_client.messages.stream(
             model=model_used,
             max_tokens=_MAX_TOKENS,
-            system=SYSTEM_PROMPT,
+            system=effective_system_prompt,
             messages=messages,
         ) as stream:
             async for text_chunk in stream.text_stream:
@@ -3065,7 +3117,7 @@ async def chat_with_progress(
         # in one response; we yield it as a single delta so the same
         # client-side accumulator path works.
         fallback_result = await fallback_chat(
-            system_prompt=SYSTEM_PROMPT,
+            system_prompt=effective_system_prompt,
             messages=messages,
             max_tokens=_MAX_TOKENS,
             openai_api_key=openai_api_key,
@@ -3116,50 +3168,57 @@ async def chat_with_progress(
     # suppress. See the chat() path above for full rationale.
     # Fire-and-forget: DB errors never fail the SSE stream.
     hedge_phrase = detect_hedge(cleaned_answer)
+    regex_matched = hedge_phrase is not None
     web_fallback_card = None
     judge_verdict: str | None = None
     judge_reasoning: str | None = None
     judge_missing_topic: str | None = None
     chunks_truncated_for_judge = False
-    if hedge_phrase is not None:
+
+    # Sprint D6.86 — judge fires on (a) regex matched OR (b)
+    # judge_on_cited_enabled AND ≥1 verified citation. See chat() for
+    # the full rationale. Web fallback firing is still gated on regex
+    # match below (Phase 1 preserves legacy UX).
+    should_run_judge = hedge_judge_enabled and (
+        regex_matched
+        or (judge_on_cited_enabled and len(verified_cited) >= 1)
+    )
+
+    if should_run_judge:
         # Sprint D6.74 — emit a status BEFORE the judge call so the
         # user sees the message change between "Verifying citations…"
-        # and the post-judge oracle/fallback statuses. Without this,
-        # the same "Verifying citations…" can sit for the citation
-        # verification (5-15s if regen) PLUS the judge call (~2-3s)
-        # PLUS detection time — risking ~18s of static text and the
-        # "it stopped streaming" trust hit.
+        # and the post-judge oracle/fallback statuses.
         yield {"event": "status", "data": "Reviewing answer quality…"}
 
-        # 1. Judge — gates the fallback decision.
-        if hedge_judge_enabled:
-            from rag.hedge_judge import judge_hedge
-            try:
-                verdict = await judge_hedge(
-                    question=query,
-                    answer=cleaned_answer,
-                    chunks=chunks,
-                    citations=[
-                        {"source": c.source, "section_number": c.section_number,
-                         "section_title": c.section_title}
-                        for c in verified_cited
-                    ],
-                    anthropic_client=anthropic_client,
-                )
-                judge_verdict = verdict.verdict
-                judge_reasoning = verdict.reasoning or None
-                judge_missing_topic = verdict.missing_topic
-                chunks_truncated_for_judge = verdict.chunks_truncated
-            except Exception as exc:
-                logger.warning(
-                    "hedge_judge unexpected failure (defaulting to complete_miss): %s: %s",
-                    type(exc).__name__, str(exc)[:200],
-                )
+        from rag.hedge_judge import judge_hedge
+        try:
+            verdict = await judge_hedge(
+                question=query,
+                answer=cleaned_answer,
+                chunks=chunks,
+                citations=[
+                    {"source": c.source, "section_number": c.section_number,
+                     "section_title": c.section_title}
+                    for c in verified_cited
+                ],
+                anthropic_client=anthropic_client,
+            )
+            judge_verdict = verdict.verdict
+            judge_reasoning = verdict.reasoning or None
+            judge_missing_topic = verdict.missing_topic
+            chunks_truncated_for_judge = verdict.chunks_truncated
+        except Exception as exc:
+            logger.warning(
+                "hedge_judge unexpected failure: %s: %s",
+                type(exc).__name__, str(exc)[:200],
+            )
+            if regex_matched:
                 judge_verdict = "complete_miss"
-        else:
-            judge_verdict = "complete_miss"
+    elif regex_matched and not hedge_judge_enabled:
+        judge_verdict = "complete_miss"
 
-        # 2. Log to retrieval_misses with verdict.
+    if regex_matched:
+        # Log to retrieval_misses on the regex-matched path only.
         try:
             await _log_retrieval_miss(
                 pool=pool,
@@ -3185,7 +3244,7 @@ async def chat_with_progress(
                 str(exc)[:200],
             )
 
-        # 3. Fire fallback only on miss verdicts.
+        # Fire fallback only on miss verdicts (regex-matched path).
         should_fire_fallback = judge_verdict in ("complete_miss", "partial_miss")
         if web_fallback_enabled and should_fire_fallback:
             top_cosine = (
