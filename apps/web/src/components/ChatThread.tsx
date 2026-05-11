@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef } from 'react'
 import type { Message } from '@/types/chat'
 import { ChatMessage } from './ChatMessage'
 import { TypingIndicator } from './TypingIndicator'
@@ -15,125 +15,75 @@ interface Props {
   onCitationTap: (source: string, sectionNumber: string, sectionTitle: string) => void
   isNewConversation: boolean
   vessel?: VesselProfileForPrompts | null
-  // Sprint D6.88 Phase 3 — when the model's streamed answer is done
-  // and the engine has fired (or is firing) a web fallback ensemble,
-  // render an inline indicator below the latest message so the user
-  // knows more content is incoming rather than the chat being hung.
+  // Sprint D6.88 Phase 3 — render an inline indicator below the latest
+  // message while the engine is dispatching a web fallback. Lets the
+  // user know more content is coming after the streamed answer.
   webFallbackInFlight?: boolean
 }
 
-// Sprint D6.87 — how close to the bottom of the scrollable container
-// counts as "the user is reading the latest content." Below this
-// threshold, auto-scroll engages; above it, we leave them where they
-// are and surface a "Jump to latest" button instead.
-const AT_BOTTOM_THRESHOLD_PX = 100
+// Sprint D6.89 — within this many pixels of the bottom counts as
+// "user is following the latest content." Outside this window we
+// don't auto-scroll because the user has deliberately scrolled up
+// to read prior content. Synchronously computed at scroll-decision
+// time — no IntersectionObserver, no state, no event listeners.
+const AT_BOTTOM_THRESHOLD_PX = 120
+
+/** Walk up the DOM from a child element until we find the scrollable
+ *  ancestor (the .chat-thread main element). Returns null if none
+ *  found, in which case auto-scroll falls back to scrollIntoView
+ *  defaults. */
+function findScrollContainer(el: HTMLElement | null): HTMLElement | null {
+  let cur: HTMLElement | null = el
+  while (cur && !cur.classList.contains('chat-thread')) {
+    cur = cur.parentElement
+  }
+  return cur
+}
 
 export function ChatThread({
   messages, loading, progressMsg = null, onPrompt, onCitationTap,
   isNewConversation, vessel = null, webFallbackInFlight = false,
 }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null)
-  // Sprint D6.88 Phase 1.5 — `followLatest` lives in a ref, not state,
-  // so the intersection observer can update it without re-running the
-  // auto-scroll useEffect. Previously this was state, and the previous
-  // smooth-scroll behavior produced a jitter loop:
-  //   observer fires "in view" → state changes → useEffect re-runs →
-  //   scrollIntoView({behavior:'smooth'}) → animation moves bottomRef
-  //   through viewport → observer fires "out of view" → state changes
-  //   → re-runs again → restart smooth scroll → repeat.
-  // Storing as a ref breaks the feedback path. The button visibility
-  // is a separate piece of state that the observer can flip freely
-  // without affecting the scroll logic.
-  const followLatestRef = useRef(true)
-  const [showJumpButton, setShowJumpButton] = useState(false)
-  // Sprint D6.88 Phase 2 follow-up — timestamp of the last user-
-  // initiated scroll input (wheel, touch, keyboard). The auto-scroll
-  // effect skips when this is recent so the user's wheel doesn't
-  // fight the auto-scroll during streaming. Was: jitter while
-  // streaming, even after the ref refactor + 'auto' behavior. Root
-  // cause: every delta (~50ms) fired scrollIntoView, which on some
-  // browsers/contexts still produced a subtle animation that
-  // conflicted with concurrent wheel input. Suppress for 800ms
-  // post user-input gives wheels and touches breathing room.
-  const lastUserScrollAtRef = useRef(0)
-  const USER_SCROLL_GRACE_MS = 800
 
-  useEffect(() => {
-    const el = bottomRef.current
-    if (!el) return
-    const obs = new IntersectionObserver(
-      ([entry]) => {
-        followLatestRef.current = entry.isIntersecting
-        setShowJumpButton(!entry.isIntersecting)
-      },
-      // rootMargin lets the sentinel "see" itself slightly above the
-      // viewport bottom, so small content additions during streaming
-      // (typing indicator height shifts) don't toggle the state.
-      { rootMargin: `0px 0px ${AT_BOTTOM_THRESHOLD_PX}px 0px`, threshold: 0 },
-    )
-    obs.observe(el)
-    return () => obs.disconnect()
-  }, [])
-
-  // Sprint D6.88 Phase 2 follow-up — track user-initiated scroll
-  // input so the auto-scroll effect can defer when the user is
-  // actively wheeling or touching. Attach listeners to the nearest
-  // scrollable parent (the chat-thread main element) so the events
-  // fire during real scroll interaction.
-  useEffect(() => {
-    const sentinel = bottomRef.current
-    if (!sentinel) return
-    // Walk up to find the scrollable ancestor — Tailwind class
-    // 'chat-thread' marks it in ChatInterface.
-    let container: HTMLElement | null = sentinel.parentElement
-    while (container && !container.classList.contains('chat-thread')) {
-      container = container.parentElement
-    }
-    if (!container) return
-
-    function markUserScroll() {
-      lastUserScrollAtRef.current = Date.now()
-    }
-    container.addEventListener('wheel', markUserScroll, { passive: true })
-    container.addEventListener('touchmove', markUserScroll, { passive: true })
-    container.addEventListener('touchstart', markUserScroll, { passive: true })
-    return () => {
-      container?.removeEventListener('wheel', markUserScroll)
-      container?.removeEventListener('touchmove', markUserScroll)
-      container?.removeEventListener('touchstart', markUserScroll)
-    }
-  }, [])
-
-  // Auto-scroll only when (a) the user is following the latest AND
-  // (b) they haven't actively scrolled in the last 800ms. The grace
-  // window prevents the wheel-vs-auto-scroll fight Blake reported
-  // mid-stream. Uses 'instant' explicitly (not 'auto') so no browser
-  // interprets the call as a smooth animation.
+  // Sprint D6.89 — auto-scroll logic, simplified.
+  //
+  // What got removed: the IntersectionObserver-based followLatest ref,
+  // the user-scroll grace window, the wheel/touchmove event listeners,
+  // the showJumpButton state, the "Jump to latest" pill.
+  //
+  // What we have instead: a single useEffect that computes scroll
+  // position SYNCHRONOUSLY at the moment of the scroll decision. If
+  // the user is within AT_BOTTOM_THRESHOLD_PX of the bottom of the
+  // scrollable container, we scroll. Otherwise we don't. No state
+  // toggling, no observer callbacks, no jitter, no fight with wheel
+  // input — because the scroll decision reads the literal scroll
+  // position rather than tracking it via a separate observer that
+  // can race against the render.
+  //
+  // The 'instant' behavior is critical: smooth-scroll animation
+  // during streaming was the original source of the jitter loop
+  // (D6.87 history). Instant snap = no animation = no oscillation.
   useEffect(() => {
     if (messages.length === 0 && !loading) return
-    if (!followLatestRef.current) return
-    if (Date.now() - lastUserScrollAtRef.current < USER_SCROLL_GRACE_MS) return
-    bottomRef.current?.scrollIntoView({ behavior: 'instant' as ScrollBehavior })
+    const sentinel = bottomRef.current
+    if (!sentinel) return
+    const container = findScrollContainer(sentinel)
+    if (!container) {
+      // Defensive: if we can't find the scrollable parent, do nothing.
+      // Better to leave the page where it is than to auto-scroll a
+      // surface we can't reason about.
+      return
+    }
+    const distanceFromBottom =
+      container.scrollHeight - container.scrollTop - container.clientHeight
+    if (distanceFromBottom > AT_BOTTOM_THRESHOLD_PX) {
+      // User scrolled up to read earlier content. Don't yank them
+      // back to the bottom.
+      return
+    }
+    sentinel.scrollIntoView({ behavior: 'instant' as ScrollBehavior })
   }, [messages, loading, progressMsg])
-
-  // Manual jump-to-bottom — the explicit user-initiated path. Keep
-  // 'smooth' here because (a) it's a single one-shot action, not a
-  // streaming barrage, and (b) the user pressed a button so they
-  // expect a deliberate animation. Re-arm follow-latest manually
-  // because the smooth-scroll animation may take a moment to land,
-  // and we want the NEXT incoming token to follow immediately rather
-  // than waiting for the observer to catch up.
-  function jumpToLatest() {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-    followLatestRef.current = true
-    setShowJumpButton(false)
-  }
-
-  // The jump-to-latest button appears when the user is scrolled up.
-  // Only render it when there's something worth jumping to (either
-  // a stream is in flight, or there's at least one message). On an
-  // empty chat with no in-flight generation, the button is noise.
-  const showJumpPill = showJumpButton && (loading || messages.length > 0)
 
   return (
     <div className="flex flex-col min-h-full">
@@ -145,13 +95,10 @@ export function ChatThread({
             <ChatMessage key={msg.id} message={msg} onCitationTap={onCitationTap} />
           ))}
           {/* Sprint D6.88 Phase 3 — inline web-fallback indicator.
-              Renders below the streamed answer (above the
-              TypingIndicator) so it sits in the user's reading flow
-              rather than at the bottom-of-page where they may not
-              notice it. Visually distinct (amber) from the teal
-              typing indicator so it reads as a separate, more
-              substantive activity ("we're searching external
-              sources" rather than "we're processing"). */}
+              Sits in the user's reading flow (just below the streamed
+              answer, above the page-bottom typing indicator) so the
+              "more content coming" signal is reachable without
+              re-tracking the bottom of the page. */}
           {loading && webFallbackInFlight && (
             <div className="flex items-start gap-3 px-4 py-2 animate-[fadeSlideIn_0.2s_ease-out]">
               <div className="w-0.5 self-stretch bg-amber-400/40 rounded-full flex-shrink-0 mt-0.5" />
@@ -173,34 +120,6 @@ export function ChatThread({
         </div>
       )}
       <div ref={bottomRef} />
-
-      {/* Sprint D6.87 — Jump-to-latest pill. Anchored to the bottom of
-          the scrollable container but sticky to the viewport, so it
-          rides above the input bar and is reachable mid-stream.
-          Position uses `sticky` rather than `fixed` so it scrolls
-          out of the way naturally if the user reaches the bottom on
-          their own. */}
-      {showJumpPill && (
-        <button
-          type="button"
-          onClick={jumpToLatest}
-          aria-label="Jump to latest message"
-          className="sticky bottom-3 self-center z-30 mb-2
-            inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full
-            bg-[#0d1225]/95 backdrop-blur-sm
-            border border-[#2dd4bf]/40 text-[#2dd4bf]
-            text-xs font-mono font-medium
-            shadow-[0_4px_12px_rgba(0,0,0,0.4)]
-            hover:bg-[#111a30] hover:border-[#2dd4bf]/70
-            active:scale-95
-            transition-all duration-150"
-        >
-          <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="6 9 12 15 18 9" />
-          </svg>
-          Jump to latest
-        </button>
-      )}
     </div>
   )
 }

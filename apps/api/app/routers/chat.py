@@ -806,9 +806,25 @@ async def chat_stream_endpoint(
     Auth/billing/rate-limit checks run synchronously before the stream is
     opened so they surface as normal HTTP errors. Once the stream begins, the
     server emits `status` events at each pipeline stage and finishes with a
-    single `done` event carrying the full ChatResponse payload. Persistence
-    happens inside the generator after the `done` event so the connection
-    stays open until DB writes complete.
+    single `done` event carrying the full ChatResponse payload.
+
+    Sprint D6.89 — engine task isolation. The engine (chat_with_progress)
+    now runs in a TOP-LEVEL asyncio task, decoupled from the SSE
+    generator's lifecycle. The SSE generator just observes events
+    via an asyncio.Queue and forwards to the client. When the client
+    disconnects, the SSE generator dies but the engine task continues
+    independently to completion AND handles its own persistence.
+
+    Why this matters: prior to D6.89, persist was only scheduled when
+    the engine reached the "done" event. If a client disconnected
+    after the engine emitted "Verifying citations..." but before it
+    reached "done" (e.g., during a 30-60s web fallback ensemble
+    dispatch), the engine task was cancelled along with the SSE
+    generator and the answer was lost. Karynn lost two questions to
+    this pattern on 2026-05-11 (conv 69ad63be) — the engine ran for
+    62-122 seconds, hit citation verification, SSE dropped, engine
+    cancelled, persist never fired. With the decoupled engine task,
+    the engine runs to completion regardless of client state.
     """
     from rag.engine import chat_with_progress
     from app.config import settings
@@ -823,18 +839,25 @@ async def chat_stream_endpoint(
     openai_api_key: str = request.app.state.openai_api_key
     user_uuid = uuid.UUID(current_user.user_id)
 
-    async def event_generator():
+    # Queue of engine events. The engine task puts events on the
+    # queue as they're generated; the SSE consumer pulls them off
+    # and yields to the client. None sentinel signals "engine done".
+    event_queue: asyncio.Queue = asyncio.Queue()
+
+    async def _engine_runner():
+        """Run chat_with_progress to completion and persist on done.
+
+        This task is INDEPENDENT of the SSE generator's lifecycle —
+        if the client disconnects, this task continues running until
+        chat_with_progress finishes its pipeline. The persist happens
+        inline at the end (no _schedule_persist needed; this task
+        IS the background task).
+
+        On any exception path (engine error, persist failure), the
+        sentinel is still put on the queue so the SSE consumer
+        terminates cleanly.
+        """
         final_data: dict | None = None
-        # Sprint D6.23d — emit a `started` event up front carrying the
-        # conversation_id, so the client can persist a "pending question"
-        # marker keyed by conversation_id BEFORE the slow generation runs.
-        # That makes phone-lock / network-blip recovery work for new
-        # conversations (not just existing ones) — the client's recovery
-        # poll has the conversation id from the moment the request lands.
-        yield (
-            "event: started\n"
-            f"data: {json.dumps({'conversation_id': str(conversation_id)})}\n\n"
-        )
         try:
             async for event in chat_with_progress(
                 query=body.query,
@@ -851,7 +874,6 @@ async def chat_stream_endpoint(
                 user_jurisdiction_focus=user_jurisdiction_focus,
                 user_verbosity=user_verbosity,
                 user_id=user_uuid,
-                # D6.58 Slice 3 — ensemble cap is gated by user tier.
                 subscription_tier=current_user.tier,
                 xai_api_key=settings.xai_api_key,
                 web_fallback_enabled=settings.web_fallback_enabled,
@@ -861,33 +883,43 @@ async def chat_stream_endpoint(
                 hedge_judge_enabled=settings.hedge_judge_enabled,
                 query_rewrite_enabled=settings.query_rewrite_enabled,
                 reranker_enabled=settings.reranker_enabled,
-                # D6.70 Sprint 8 — Layer-2 citation oracle intervention.
                 citation_oracle_enabled=settings.citation_oracle_enabled,
-                # D6.71 Sprint 7 — Hybrid BM25 + dense retrieval (default OFF).
                 hybrid_retrieval_enabled=settings.hybrid_retrieval_enabled,
                 hybrid_rrf_k=settings.hybrid_rrf_k,
-                # D6.84 Sprint A — confidence tier router. off / shadow / live.
                 confidence_tiers_mode=settings.confidence_tiers_mode,
-                # D6.86 Phase 1 — judge fires on every cited answer +
-                # lead-with-answer synthesis prompt.
                 judge_on_cited_enabled=settings.judge_on_cited_enabled,
                 lead_with_answer_enabled=settings.lead_with_answer_enabled,
             ):
-                event_type = event["event"]
-                payload = event["data"]
-                if event_type == "done":
-                    # Enrich answer if a missing regulation source was detected
-                    payload = _enrich_missing_source_note(body.query, payload)
-                    final_data = payload
-                    # D6.85 Fix A — schedule persist BEFORE the final yield.
-                    # If the client disconnected between the engine
-                    # finishing and this yield, the yield will raise
-                    # CancelledError — but the persist task is already
-                    # running on the event loop and will complete.
-                    # Survives the SSE generator dying.
+                if event["event"] == "done":
+                    # Capture done payload for the persist step below.
+                    event["data"] = _enrich_missing_source_note(body.query, event["data"])
+                    final_data = event["data"]
+                event_queue.put_nowait(event)
+        except asyncio.CancelledError:
+            # Engine task itself cancelled (only happens on app
+            # shutdown — the SSE generator's cancellation does NOT
+            # propagate here because this is a top-level task).
+            logger.warning(
+                "engine task cancelled (conv=%s) — likely app shutdown",
+                conversation_id,
+            )
+            raise
+        except Exception:
+            logger.exception(
+                "engine runner failed (conv=%s)", conversation_id,
+            )
+        finally:
+            # Persist BEFORE the sentinel so the SSE consumer
+            # doesn't try to consume more events while we're writing.
+            # The user message is already in DB (preflight Fix B);
+            # this writes the assistant message + vessel updates.
+            if final_data is not None:
+                try:
                     tier_md = final_data.get("tier_metadata")
-                    tier_metadata_json = json.dumps(tier_md) if tier_md else None
-                    _schedule_persist(
+                    tier_metadata_json = (
+                        json.dumps(tier_md) if tier_md else None
+                    )
+                    await asyncio.wait_for(
                         _persist_chat_outcome(
                             pool=pool,
                             anthropic_client=anthropic_client,
@@ -899,34 +931,81 @@ async def chat_stream_endpoint(
                             input_tokens=final_data["input_tokens"],
                             output_tokens=final_data["output_tokens"],
                             cited_section_numbers=[
-                                c["section_number"] for c in final_data["cited_regulations"]
+                                c["section_number"]
+                                for c in final_data["cited_regulations"]
                             ],
                             vessel_id=body.vessel_id,
                             vessel_update=final_data.get("vessel_update"),
                             is_new_conversation=is_new_conversation,
                             tier_metadata_json=tier_metadata_json,
                         ),
-                        description=f"chat_stream conv={conversation_id}",
+                        timeout=_PERSIST_TIMEOUT_SECONDS,
                     )
+                except asyncio.TimeoutError:
+                    logger.error(
+                        "engine-task persist timed out (conv=%s)",
+                        conversation_id,
+                    )
+                except Exception:
+                    logger.exception(
+                        "engine-task persist failed (conv=%s)",
+                        conversation_id,
+                    )
+            try:
+                event_queue.put_nowait(None)
+            except Exception:
+                pass
+
+    # Spawn the engine as a top-level task. asyncio.create_task creates
+    # a task on the event loop that is NOT a child of the current
+    # task. When the current task (the request handler / SSE generator)
+    # is cancelled, this task continues running.
+    engine_task = asyncio.create_task(_engine_runner())
+    # Track for shutdown hygiene (same set used by _schedule_persist).
+    _PENDING_PERSIST_TASKS.add(engine_task)
+    engine_task.add_done_callback(_PENDING_PERSIST_TASKS.discard)
+
+    async def event_generator():
+        # Sprint D6.23d — emit a `started` event up front carrying
+        # the conversation_id, so the client can persist a "pending
+        # question" marker keyed by conversation_id BEFORE the slow
+        # generation runs.
+        yield (
+            "event: started\n"
+            f"data: {json.dumps({'conversation_id': str(conversation_id)})}\n\n"
+        )
+        try:
+            while True:
+                event = await event_queue.get()
+                if event is None:
+                    # Engine task signaled completion.
+                    break
+                event_type = event["event"]
+                payload = event["data"]
                 yield f"event: {event_type}\ndata: {json.dumps(payload)}\n\n"
         except asyncio.CancelledError:
-            # Client disconnected mid-stream. The persist task (if any)
-            # is already running on the loop and will complete. No
-            # error event to emit — the connection is gone. Re-raise
-            # to let the generator wind down cleanly.
+            # Client disconnected. The engine task continues
+            # INDEPENDENTLY — do not cancel it. It will finish its
+            # pipeline (including web fallback / tier router) and
+            # persist the assistant message even though we'll
+            # never deliver it to this client. Next page load by
+            # the same user will see the message in conversation
+            # history.
             logger.info(
-                "SSE generator cancelled by client disconnect (conv=%s); "
-                "persist task continues in background",
+                "SSE consumer cancelled by client disconnect (conv=%s); "
+                "engine task continues independently",
                 conversation_id,
             )
             raise
         except Exception:
-            logger.exception("Streaming chat error during generation")
+            logger.exception(
+                "SSE consumer error during stream (conv=%s)",
+                conversation_id,
+            )
             yield (
                 "event: error\n"
                 f"data: {json.dumps({'message': 'An error occurred processing your request.'})}\n\n"
             )
-            return
 
     return StreamingResponse(
         event_generator(),
