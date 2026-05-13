@@ -1669,6 +1669,62 @@ class CustomEmailCountResult(BaseModel):
     count: int
 
 
+# Sprint D6.91 — recipient filter resolver for the admin custom-email
+# sender. Returns the SQL needed to enumerate matching email addresses
+# for a given filter key. Shared between the count preview and the
+# actual send endpoint so they can never drift out of sync.
+#
+# Most filters are simple WHERE clauses over the `users` table.
+# `wheelhouse` is the exception — it pulls owners of active workspaces
+# via a JOIN against `workspaces`. We return a full SELECT body for
+# that one and let the caller wrap it.
+def _custom_email_recipient_query(filter_key: str) -> str | None:
+    """Return a complete `SELECT email FROM ... WHERE ...` statement
+    for the given filter, or None if the key is unknown. Each query
+    returns deduplicated email addresses for non-internal users.
+    """
+    # User-row filters — all use `email_verified = true` for any
+    # outreach that's pricing or marketing-shaped (Sprint D6.91 add).
+    # Existing 'all' and 'trial' filters are kept as-is to avoid
+    # changing pre-D6.91 behavior; admins can pivot to the more
+    # specific buttons when they need verified-only targeting.
+    user_filters = {
+        # Existing pre-D6.91 (preserved for back-compat)
+        "all":   "subscription_status = 'active'",
+        "pro":   "subscription_tier = 'solo' AND subscription_status = 'active'",
+        "trial": "trial_ends_at IS NOT NULL AND trial_ends_at > NOW() AND subscription_tier = 'free'",
+        # Sprint D6.91 new filters
+        "expired": (
+            "trial_ends_at <= NOW() "
+            "AND subscription_tier = 'free' "
+            "AND email_verified = true"
+        ),
+        "cadet":   "subscription_tier = 'cadet'   AND subscription_status = 'active'",
+        "mate":    "subscription_tier = 'mate'    AND subscription_status = 'active'",
+        # Captain folds legacy 'pro' since the account page already
+        # maps pro → Captain label; treat them as the same audience
+        # for outreach purposes.
+        "captain": "subscription_tier IN ('captain', 'pro') AND subscription_status = 'active'",
+    }
+    if filter_key in user_filters:
+        return (
+            f"SELECT DISTINCT email FROM users "
+            f"WHERE {user_filters[filter_key]} AND is_internal = FALSE"
+        )
+
+    # Wheelhouse — owners of active workspaces. The owner pays and is
+    # the billing decision-maker; crew members aren't the audience
+    # for pricing or product-tier announcements.
+    if filter_key == "wheelhouse":
+        return (
+            "SELECT DISTINCT u.email FROM users u "
+            "JOIN workspaces w ON w.owner_user_id = u.id "
+            "WHERE w.status = 'active' AND u.is_internal = FALSE"
+        )
+
+    return None
+
+
 @router.get("/custom-email-count", response_model=CustomEmailCountResult)
 async def get_custom_email_count(
     filter: str,
@@ -1676,21 +1732,19 @@ async def get_custom_email_count(
     pool: Annotated[asyncpg.Pool, Depends(get_pool)],
 ) -> CustomEmailCountResult:
     """Preview how many users match a recipient filter."""
-    clause = {
-        "all": "subscription_status = 'active'",
-        "pro": "subscription_tier = 'solo' AND subscription_status = 'active'",
-        "trial": "trial_ends_at IS NOT NULL AND trial_ends_at > NOW() AND subscription_tier = 'free'",
-    }.get(filter, "FALSE")
-    count = await pool.fetchval(
-        f"SELECT count(*) FROM users WHERE {clause} AND is_internal = FALSE"
-    )
+    inner = _custom_email_recipient_query(filter)
+    if inner is None:
+        return CustomEmailCountResult(count=0)
+    count = await pool.fetchval(f"SELECT count(*) FROM ({inner}) AS t")
     return CustomEmailCountResult(count=int(count or 0))
 
 
 class CustomEmailRequest(BaseModel):
     subject: str
     body_text: str
-    recipient_filter: str  # "all" | "pro" | "trial" | "custom"
+    # Sprint D6.91 — extended to: all / pro / trial / expired / cadet /
+    # mate / captain / wheelhouse / custom. See _custom_email_recipient_query.
+    recipient_filter: str
     custom_emails: list[str] | None = None
 
 
@@ -1711,23 +1765,18 @@ async def send_custom_email_blast(
 
     from app.email import send_custom_email, send_with_throttle, RESEND_THROTTLE_SECONDS
 
-    # Resolve recipients
+    # Resolve recipients via the shared filter resolver (Sprint D6.91).
+    # Single source of truth shared with /custom-email-count so the
+    # admin's preview count exactly matches the actual send target.
     if body.recipient_filter == "custom":
         if not body.custom_emails:
             raise HTTPException(status_code=400, detail="custom_emails required for custom filter")
         emails = body.custom_emails
     else:
-        filter_clause = {
-            "all": "subscription_status = 'active'",
-            "pro": "subscription_tier = 'solo' AND subscription_status = 'active'",
-            "trial": "trial_ends_at IS NOT NULL AND trial_ends_at > NOW() AND subscription_tier = 'free'",
-        }.get(body.recipient_filter)
-        if not filter_clause:
+        inner = _custom_email_recipient_query(body.recipient_filter)
+        if inner is None:
             raise HTTPException(status_code=400, detail=f"Unknown filter: {body.recipient_filter}")
-
-        rows = await pool.fetch(
-            f"SELECT email FROM users WHERE {filter_clause} AND is_internal = FALSE"
-        )
+        rows = await pool.fetch(inner)
         emails = [r["email"] for r in rows]
 
     if not emails:
