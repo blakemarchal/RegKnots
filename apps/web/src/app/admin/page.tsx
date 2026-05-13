@@ -436,7 +436,13 @@ function AdminContent() {
   // Custom email state
   const [customSubject, setCustomSubject] = useState('')
   const [customBody, setCustomBody] = useState('')
-  const [customFilter, setCustomFilter] = useState<'all' | 'pro' | 'trial' | 'custom'>('all')
+  // Sprint D6.91 — added expired/cadet/mate/captain/wheelhouse so the
+  // admin sender can target each paid tier and the trial-expired bucket
+  // without hand-pasting email lists.
+  const [customFilter, setCustomFilter] = useState<
+    'all' | 'pro' | 'trial' | 'expired' |
+    'cadet' | 'mate' | 'captain' | 'wheelhouse' | 'custom'
+  >('all')
   const [customEmails, setCustomEmails] = useState('')
   const [customSending, setCustomSending] = useState(false)
   const [customToast, setCustomToast] = useState<{ msg: string; ok: boolean } | null>(null)
@@ -1924,8 +1930,17 @@ function AdminContent() {
                     placeholder:text-[#6b7594] focus:border-[#2dd4bf]/50 focus:outline-none"
                 />
                 <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center">
-                  <div className="flex gap-1.5">
-                    {(['all', 'pro', 'trial', 'custom'] as const).map((f) => (
+                  {/* Sprint D6.91 — wrapped to flex-wrap so all nine
+                      filter buttons line up cleanly even on narrow
+                      admin viewports. Ordered: tier states (paid),
+                      lifecycle (all/trial/expired), legacy (pro),
+                      manual (custom). */}
+                  <div className="flex flex-wrap gap-1.5">
+                    {([
+                      'all', 'expired',
+                      'cadet', 'mate', 'captain', 'wheelhouse',
+                      'trial', 'pro', 'custom',
+                    ] as const).map((f) => (
                       <button
                         key={f}
                         onClick={() => setCustomFilter(f)}
