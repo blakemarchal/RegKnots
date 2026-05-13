@@ -63,6 +63,19 @@ class Settings(BaseSettings):
     stripe_price_captain_promo: str = Field(
         default="", validation_alias="STRIPE_PRICE_CAPTAIN_PROMO"
     )
+    # Sprint D6.91 — Cadet tier ($9.99/mo, 25-msg cap). Entry-level paid
+    # plan; inherits all Mate features. Three prices total: monthly,
+    # annual ($89.88/yr = $7.49 effective), and promo ($7.49/mo on
+    # /womenoffshore / /ass / /captainkarynn referral pages).
+    stripe_price_cadet_monthly: str = Field(
+        default="", validation_alias="STRIPE_PRICE_CADET_MONTHLY"
+    )
+    stripe_price_cadet_annual: str = Field(
+        default="", validation_alias="STRIPE_PRICE_CADET_ANNUAL"
+    )
+    stripe_price_cadet_promo: str = Field(
+        default="", validation_alias="STRIPE_PRICE_CADET_PROMO"
+    )
     # Sprint D6.54 — Wheelhouse (crew tier) pricing. One product, two
     # billing intervals. No promo variants by design — margin risk on
     # multi-seat tier is too high to discount. See plans_workspace.py

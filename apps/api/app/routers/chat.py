@@ -165,31 +165,38 @@ async def _run_chat_preflight(
                 detail="Trial expired or message limit reached. Subscribe to continue.",
             )
 
-    # ── Mate tier monthly cap gate (Sprint D6.2) ───────────────────────────
-    # Mate plan caps at 100 messages per rolling 30-day cycle. Captain and
-    # privileged users bypass. Pre-check saves the expensive RAG call when
-    # the user is already capped. Race with concurrent requests is bounded
-    # to at most one extra message past the cap (the atomic increment step
-    # gates subsequent calls).
+    # ── Per-tier monthly cap gate (Sprint D6.2 + D6.91) ────────────────────
+    # Cadet plan caps at 25 messages per rolling 30-day cycle.
+    # Mate plan caps at 100 messages per rolling 30-day cycle.
+    # Captain and privileged users bypass. Pre-check saves the expensive
+    # RAG call when the user is already capped. Race with concurrent
+    # requests is bounded to at most one extra message past the cap
+    # (the atomic increment step gates subsequent calls).
     # D6.55 — same workspace bypass applies; workspace bills the owner.
     if (
         not is_workspace_chat
-        and sub_row and sub_row["subscription_tier"] == "mate"
+        and sub_row and sub_row["subscription_tier"] in ("cadet", "mate")
         and not _is_privileged
     ):
-        from app.plans import MATE_MESSAGE_CAP as _MATE_CAP
-        cycle_start = sub_row["message_cycle_started_at"]
-        cycle_age = datetime.now(timezone.utc) - cycle_start if cycle_start else None
-        cycle_still_current = cycle_age is not None and cycle_age.days < 30
-        used_this_cycle = sub_row["monthly_message_count"]
-        if cycle_still_current and used_this_cycle >= _MATE_CAP:
-            raise HTTPException(
-                status_code=status.HTTP_402_PAYMENT_REQUIRED,
-                detail=(
-                    f"Mate plan monthly cap reached ({_MATE_CAP} messages). "
-                    "Upgrade to Captain for unlimited messages."
-                ),
-            )
+        from app.plans import message_cap_for_tier as _cap_for_tier
+        tier = sub_row["subscription_tier"]
+        cap = _cap_for_tier(tier)
+        if cap is not None:
+            cycle_start = sub_row["message_cycle_started_at"]
+            cycle_age = datetime.now(timezone.utc) - cycle_start if cycle_start else None
+            cycle_still_current = cycle_age is not None and cycle_age.days < 30
+            used_this_cycle = sub_row["monthly_message_count"]
+            if cycle_still_current and used_this_cycle >= cap:
+                # Upsell target depends on which tier hit the cap.
+                upgrade_target = "Mate" if tier == "cadet" else "Captain"
+                raise HTTPException(
+                    status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                    detail=(
+                        f"{tier.capitalize()} plan monthly cap reached "
+                        f"({cap} messages). Upgrade to {upgrade_target} "
+                        f"for more."
+                    ),
+                )
 
     # 1. Load vessel profile (including enriched fields)
     vessel_profile: dict | None = None

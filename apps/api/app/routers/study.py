@@ -236,16 +236,23 @@ async def _check_cap(pool, user_uuid: _uuid.UUID) -> tuple[int, Optional[int]]:
     if is_priv:
         return 0, None
 
-    if tier not in ("mate", "captain"):
+    # Sprint D6.91 — Cadet inherits Mate-level Study Tools access (full
+    # quiz + study-guide generators, same 200/mo cap). Cadet is the
+    # student/cadet-targeted tier so Study Tools are core, not optional.
+    # The only differentiator vs Mate is the chat-message cap (25 vs 100).
+    if tier not in ("cadet", "mate", "captain"):
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
             detail=(
-                "Study Tools require a Mate or Captain subscription. "
+                "Study Tools require a Cadet, Mate, or Captain subscription. "
                 "Subscribe to unlock quiz + study guide generators."
             ),
         )
 
-    cap = _MATE_STUDY_CAP_PER_MONTH if tier == "mate" else _CAPTAIN_STUDY_CAP_PER_MONTH
+    cap = (
+        _CAPTAIN_STUDY_CAP_PER_MONTH if tier == "captain"
+        else _MATE_STUDY_CAP_PER_MONTH  # cadet + mate share the 200/mo cap
+    )
 
     used = int(await pool.fetchval(
         """
@@ -1109,7 +1116,8 @@ async def get_usage(
             can_generate=True,
         )
 
-    if tier == "mate":
+    # Sprint D6.91 — Cadet shares Mate's 200/mo Study Tools cap.
+    if tier in ("cadet", "mate"):
         used = int(await pool.fetchval(
             """
             SELECT COUNT(*) FROM study_generations

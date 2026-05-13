@@ -1001,17 +1001,28 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
         </div>
       )}
 
-      {/* ── Mate tier monthly-cap banner (Sprint D6.2) ─────────────── */}
-      {billing && billing.tier === 'mate' && !billing.unlimited &&
+      {/* ── Per-tier monthly-cap banner (Sprint D6.2 + D6.91) ──────────
+          Renders for any capped paid tier: Cadet (25-msg) and Mate
+          (100-msg). Thresholds scale by percentage of cap so the banner
+          fires at the same proportional usage regardless of tier.
+          Captain (unlimited) has monthly_message_cap=null so this
+          block doesn't render. */}
+      {billing && (billing.tier === 'cadet' || billing.tier === 'mate') && !billing.unlimited &&
         billing.monthly_message_cap !== null && (() => {
           const used = billing.monthly_messages_used
           const cap = billing.monthly_message_cap
           const remaining = billing.monthly_messages_remaining ?? 0
-          // At cap: full-width red banner + upgrade CTA. At 90: red banner.
-          // At 75: soft amber. Below 75: quiet single-line counter.
+          const tierName = billing.tier === 'cadet' ? 'Cadet' : 'Mate'
+          // D6.91 — upsell target depends on tier. Cadet bumps to Mate
+          // for a larger cap; Mate bumps to Captain for unlimited.
+          const upgradeTargetName = billing.tier === 'cadet' ? 'Mate' : 'Captain'
+          const upgradeBenefit = billing.tier === 'cadet' ? '100 messages' : 'unlimited messages'
+          // Banner severity by percent of cap consumed (same ratios as
+          // the Mate banner had: 75% soft, 90% near, 100% at cap).
+          const pct = used / cap
           const atCap = remaining === 0
-          const nearCap = used >= 90 && !atCap
-          const approachingCap = used >= 75 && used < 90
+          const nearCap = pct >= 0.9 && !atCap
+          const approachingCap = pct >= 0.75 && pct < 0.9
           const bgClass = atCap
             ? 'bg-rose-950/60 border-rose-800/50'
             : nearCap
@@ -1025,20 +1036,20 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
             ? 'text-amber-400'
             : 'text-slate-400'
           const label = atCap
-            ? `You've used all ${cap} messages on the Mate plan this month.`
-            : `Mate plan: ${used}/${cap} messages used this month`
+            ? `You've used all ${cap} messages on the ${tierName} plan this month.`
+            : `${tierName} plan: ${used}/${cap} messages used this month`
           return (
             <div className={`flex-shrink-0 flex items-center justify-between gap-3 px-4 py-2 border-b ${bgClass}`}>
               <p className={`font-mono text-xs ${textClass}`}>
                 {label}
-                {!atCap && approachingCap && ' — upgrade to Captain for unlimited.'}
+                {!atCap && approachingCap && ` — upgrade to ${upgradeTargetName} for ${upgradeBenefit}.`}
               </p>
               {(atCap || nearCap || approachingCap) && (
                 <button
                   onClick={() => router.push('/pricing')}
                   className="font-mono text-xs font-bold text-[#2dd4bf] hover:underline whitespace-nowrap"
                 >
-                  {atCap ? 'Upgrade to Captain' : 'Upgrade'}
+                  {atCap ? `Upgrade to ${upgradeTargetName}` : 'Upgrade'}
                 </button>
               )}
             </div>

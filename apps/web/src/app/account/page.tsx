@@ -30,6 +30,7 @@ function tierLabel(tier: string): string {
     pro: 'Captain',
     captain: 'Captain',
     mate: 'Mate',
+    cadet: 'Cadet',  // Sprint D6.91 — entry-level $9.99/25-msg tier
   }
   if (map[tier]) return map[tier]
   return tier.charAt(0).toUpperCase() + tier.slice(1)
@@ -595,6 +596,61 @@ function AccountContent() {
                   return ' — Active'
                 })()}
               </p>
+
+              {/* Sprint D6.91 — monthly message usage. Shown for any
+                  capped paid tier (Cadet 25/mo, Mate 100/mo); Captain
+                  and legacy pro have monthly_message_cap=null so this
+                  block is skipped. Cadet sees an upgrade-to-Mate
+                  nudge when they're past 75% of their cap. */}
+              {billing.monthly_message_cap !== null && !billing.unlimited && (() => {
+                const used = billing.monthly_messages_used
+                const cap = billing.monthly_message_cap
+                const pct = cap > 0 ? used / cap : 0
+                const remaining = billing.monthly_messages_remaining ?? 0
+                const cycleResetLabel = billing.cycle_resets_at
+                  ? new Date(billing.cycle_resets_at).toLocaleDateString()
+                  : null
+                const atCap = remaining === 0
+                const showUpgradeNudge = billing.tier === 'cadet' && pct >= 0.75
+                const barColor = atCap
+                  ? 'bg-rose-500'
+                  : pct >= 0.9
+                  ? 'bg-rose-400'
+                  : pct >= 0.75
+                  ? 'bg-amber-400'
+                  : 'bg-[#2dd4bf]'
+                return (
+                  <div className="bg-[#0a0e1a]/60 border border-white/8 rounded-lg p-3 flex flex-col gap-2">
+                    <div className="flex items-baseline justify-between">
+                      <p className="font-mono text-xs text-[#6b7594] uppercase tracking-wider">
+                        Monthly usage
+                      </p>
+                      <p className="font-mono text-xs text-[#f0ece4]/80">
+                        <span className="text-[#f0ece4] font-bold">{used}</span> of {cap}
+                      </p>
+                    </div>
+                    <div className="h-1.5 bg-white/8 rounded-full overflow-hidden">
+                      <div
+                        className={`h-full ${barColor} transition-[width] duration-300`}
+                        style={{ width: `${Math.min(100, pct * 100)}%` }}
+                      />
+                    </div>
+                    {cycleResetLabel && (
+                      <p className="font-mono text-[11px] text-[#6b7594]">
+                        Resets {cycleResetLabel}
+                      </p>
+                    )}
+                    {showUpgradeNudge && (
+                      <a
+                        href="/pricing"
+                        className="font-mono text-xs text-[#2dd4bf] hover:underline"
+                      >
+                        Running low? Upgrade to Mate for 100 messages →
+                      </a>
+                    )}
+                  </div>
+                )
+              })()}
 
               {billing.cancel_at_period_end && billing.current_period_end && (
                 <div className="bg-amber-400/10 border border-amber-400/30 rounded-lg p-3">
