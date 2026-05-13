@@ -309,7 +309,11 @@ export default function LandingPage() {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+          {/* Sprint D6.91 — Cadet ($9.99/mo, 25-msg cap) inserted as the
+              entry-level paid option. Grid bumped from 3 to 4 columns on
+              lg+ screens; 2-up on md; stacked on mobile so each card
+              keeps breathing room. */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
             <PricingCard
               name="Free Trial"
               price="$0"
@@ -324,15 +328,30 @@ export default function LandingPage() {
               cta="Start Free Trial"
             />
             <PricingCard
+              name="Cadet"
+              price={plan === 'monthly' ? '$9.99' : '$7.49'}
+              priceSub={plan === 'monthly' ? 'per month' : 'per month, billed $89.88/year'}
+              badge="New"
+              features={[
+                '25 messages per month',
+                'Full reg corpus (see above)',
+                'Vessel profile + chat history',
+                'Credential vault with auto-OCR',
+                'Renewal alerts (90 / 30 / 7 days)',
+                'Study Tools — quiz + study guide generators',
+              ]}
+              cta="Subscribe to Cadet"
+            />
+            <PricingCard
               name="Mate"
               price={plan === 'monthly' ? '$19.99' : '$14.99'}
               priceSub={plan === 'monthly' ? 'per month' : 'per month, billed $179.88/year'}
               features={[
                 '100 messages per month',
-                'Full reg corpus (see above)',
-                'Vessel profile + chat history',
-                'Credential vault with auto-OCR',
-                'Renewal alerts (90 / 30 / 7 days)',
+                'Everything in Cadet',
+                'AI Renewal Co-Pilot + Career Path',
+                'Vessel Analysis + Compliance Changelog',
+                'Priority support',
                 'Cited regulation answers, not summaries',
               ]}
               cta="Subscribe to Mate"
