@@ -20,10 +20,15 @@ import type { BillingStatus } from '@/lib/auth'
 // because there is no annual promo price. CTAs route to *_promo plan
 // keys in that case so Stripe charges the right amount.
 
-type Tier = 'mate' | 'captain'
+// Sprint D6.91 — Cadet ($9.99/mo, 25-msg cap) added as the entry-level
+// paid tier. Cadet inherits full Mate feature parity (Study Tools,
+// vessel dossier, credentials, all Co-Pilots). The only differentiator
+// is the monthly chat-message cap (25 vs 100 vs unlimited).
+type Tier = 'cadet' | 'mate' | 'captain'
 type Interval = 'monthly' | 'annual'
 
 type PlanKey =
+  | 'cadet_monthly' | 'cadet_annual' | 'cadet_promo'
   | 'mate_monthly' | 'mate_annual' | 'mate_promo'
   | 'captain_monthly' | 'captain_annual' | 'captain_promo'
 
@@ -34,17 +39,27 @@ function resolvePlanKey(tier: Tier, interval: Interval, referral: boolean): Plan
 }
 
 const TIER_FEATURES: Record<Tier, { headline: string; perks: string[] }> = {
-  mate: {
-    headline: 'For mariners building their record and asking compliance questions.',
+  cadet: {
+    headline: 'For cadets, students, and casual users — pocket-money compliance insurance.',
     perks: [
-      '100 messages per month',
+      '25 messages per month',
       'Full reg corpus (see below)',
       'Vessel profile + chat history',
       'Credential vault with auto-OCR',
       'Renewal alerts (90 / 30 / 7 days)',
+      'Study Tools — quiz + study guide generators',
+      'All AI Co-Pilots included',
+      'Cited regulation answers, not summaries',
+    ],
+  },
+  mate: {
+    headline: 'For mariners building their record and asking compliance questions.',
+    perks: [
+      'Everything in Cadet, plus:',
+      '100 messages per month',
       'AI Renewal Co-Pilot + Career Path',
       'Vessel Analysis + Compliance Changelog',
-      'Cited regulation answers, not summaries',
+      'Priority support',
     ],
   },
   captain: {
@@ -67,6 +82,7 @@ const TIER_DISPLAY: Record<Tier, {
   annualEq: number
   annualTotal: number
 }> = {
+  cadet:   { name: 'Cadet',   monthly:  9.99, monthlyPromo:  7.49, annualEq:  7.49, annualTotal:  89.88 },
   mate:    { name: 'Mate',    monthly: 19.99, monthlyPromo: 14.99, annualEq: 14.99, annualTotal: 179.88 },
   captain: { name: 'Captain', monthly: 39.99, monthlyPromo: 29.99, annualEq: 29.99, annualTotal: 359.88 },
 }
@@ -147,7 +163,7 @@ export default function PricingPage() {
 
   const showSubscribed =
     billing && billing.subscription_status === 'active' &&
-    (billing.tier === 'mate' || billing.tier === 'captain' || billing.tier === 'pro')
+    (billing.tier === 'cadet' || billing.tier === 'mate' || billing.tier === 'captain' || billing.tier === 'pro')
 
   return (
     <div className="min-h-screen bg-[#0a0e1a] flex flex-col">
@@ -214,7 +230,12 @@ export default function PricingPage() {
           <p className="font-mono text-xs text-red-400 mb-4 text-center">{error}</p>
         )}
 
-        <div className="grid w-full max-w-5xl gap-5 md:grid-cols-3">
+        {/* D6.91 — grid bumped to 4 cards (Trial + Cadet + Mate + Captain).
+            On mobile each card stacks; on tablet 2-up; on lg+ all four side
+            by side. Captain stays the "Most popular" anchor since that's the
+            unlimited-tier target; Cadet gets a "New" badge to draw eyes to
+            the entry-level option. */}
+        <div className="grid w-full max-w-6xl gap-5 sm:grid-cols-2 lg:grid-cols-4">
           {/* ── Free Trial (de-emphasized) ────────────────────────────── */}
           <div className="flex flex-col rounded-2xl p-6 border border-white/8 bg-[#0b1020]">
             <div className="mb-4">
@@ -264,11 +285,12 @@ export default function PricingPage() {
             )}
           </div>
 
-          {/* ── Mate ──────────────────────────────────────────────────── */}
-          {(['mate', 'captain'] as Tier[]).map((tier) => {
+          {/* ── Cadet / Mate / Captain ──────────────────────────────── */}
+          {(['cadet', 'mate', 'captain'] as Tier[]).map((tier) => {
             const display = TIER_DISPLAY[tier]
             const features = TIER_FEATURES[tier]
             const featured = tier === 'captain'
+            const isNewBadge = tier === 'cadet'
             const plan = resolvePlanKey(tier, interval, hasReferral)
             const isLoading = loading === plan
             const monthlyPrice = hasReferral ? display.monthlyPromo : display.monthly
@@ -304,6 +326,12 @@ export default function PricingPage() {
                     <span className="font-mono text-[10px] font-bold text-[#2dd4bf] bg-[#2dd4bf]/10
                       border border-[#2dd4bf]/30 rounded px-2 py-1 uppercase tracking-wider whitespace-nowrap">
                       Most popular
+                    </span>
+                  )}
+                  {isNewBadge && (
+                    <span className="font-mono text-[10px] font-bold text-amber-300 bg-amber-300/10
+                      border border-amber-300/30 rounded px-2 py-1 uppercase tracking-wider whitespace-nowrap">
+                      New
                     </span>
                   )}
                 </div>

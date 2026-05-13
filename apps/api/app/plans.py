@@ -29,7 +29,9 @@ from dataclasses import dataclass
 
 from app.config import settings
 
-# Hard caps applied at the Mate and free-trial tiers respectively.
+# Hard caps applied per tier. Cadet (D6.91) is the entry-level paid
+# plan; Mate is the standard tier; free trial covers the unpaid window.
+CADET_MESSAGE_CAP = 25
 MATE_MESSAGE_CAP = 100
 FREE_TRIAL_MESSAGE_CAP = 50
 
@@ -39,7 +41,7 @@ class PlanInfo:
     """Describes a paid plan a user is subscribed to."""
 
     tier: str
-    """'mate' | 'captain'"""
+    """'cadet' | 'mate' | 'captain'"""
 
     interval: str
     """'month' | 'year' — Stripe-native naming."""
@@ -58,6 +60,14 @@ _PRICE_MAP_CACHE: dict[str, PlanInfo] | None = None
 
 def _build_price_map() -> dict[str, PlanInfo]:
     entries: list[tuple[str, PlanInfo]] = [
+        # Sprint D6.91 — Cadet tier ($9.99/mo, 25-msg cap). Entry-level
+        # paid plan with full Mate feature parity at a tighter cap.
+        (settings.stripe_price_cadet_monthly,
+         PlanInfo("cadet", "month", False, CADET_MESSAGE_CAP)),
+        (settings.stripe_price_cadet_annual,
+         PlanInfo("cadet", "year", False, CADET_MESSAGE_CAP)),
+        (settings.stripe_price_cadet_promo,
+         PlanInfo("cadet", "month", True, CADET_MESSAGE_CAP)),
         # Primary two-tier pricing — Sprint D6.1
         (settings.stripe_price_mate_monthly,
          PlanInfo("mate", "month", False, MATE_MESSAGE_CAP)),
@@ -123,6 +133,9 @@ def resolve_price_for_plan(
     lookup so new checkouts always hit the new pricing.
     """
     candidates = {
+        ("cadet",   "month", False): settings.stripe_price_cadet_monthly,
+        ("cadet",   "year",  False): settings.stripe_price_cadet_annual,
+        ("cadet",   "month", True):  settings.stripe_price_cadet_promo,
         ("mate",    "month", False): settings.stripe_price_mate_monthly,
         ("mate",    "year",  False): settings.stripe_price_mate_annual,
         ("mate",    "month", True):  settings.stripe_price_mate_promo,
@@ -137,8 +150,8 @@ def resolve_price_for_plan(
 # ── Convenience helpers ──────────────────────────────────────────────────
 
 def is_paid_tier(tier: str | None) -> bool:
-    """True if the given tier is any paying plan (mate/captain and legacy pro)."""
-    return tier in {"mate", "captain", "pro"}
+    """True if the given tier is any paying plan (cadet/mate/captain and legacy pro)."""
+    return tier in {"cadet", "mate", "captain", "pro"}
 
 
 def message_cap_for_tier(tier: str | None) -> int | None:
@@ -148,6 +161,8 @@ def message_cap_for_tier(tier: str | None) -> int | None:
     gated by the 50-message trial cap handled separately; this helper
     only covers paid tiers.
     """
+    if tier == "cadet":
+        return CADET_MESSAGE_CAP
     if tier == "mate":
         return MATE_MESSAGE_CAP
     # captain and legacy pro are unlimited

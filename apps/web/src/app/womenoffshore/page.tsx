@@ -28,25 +28,44 @@ import { useAuthStore } from '@/lib/auth'
 // agreement; we are donors. Same convention applies to all charity-
 // linked landing pages (/captainkarynn, /ass, etc.).
 
-type PromoPlan = 'mate_promo' | 'captain_promo' | 'mate_annual' | 'captain_annual'
+// Sprint D6.91 — Cadet ($7.49/mo promo, 25-msg cap) added as the
+// entry-level tier on promo pages. Same feature parity as Mate aside
+// from the chat-message cap.
+type PromoPlan =
+  | 'cadet_promo' | 'cadet_annual'
+  | 'mate_promo'  | 'mate_annual'
+  | 'captain_promo' | 'captain_annual'
 
 const REFERRAL_KEY = 'regknot_referral_source'
 const REFERRAL_VALUE = 'womenoffshore'
 
 const PRICING = {
+  cadet_promo: {
+    label: 'Cadet',
+    price: '$7.49',
+    sub: 'per month · billed monthly',
+    badge: '25% off',
+    features: [
+      '25 messages per month',
+      'Full reg corpus (see below)',
+      'Vessel profile + chat history',
+      'Credential vault with auto-OCR',
+      'Renewal alerts (90 / 30 / 7 days)',
+      'Study Tools — quiz + study guide generators',
+      'All AI Co-Pilots included',
+    ],
+  },
   mate_promo: {
     label: 'Mate',
     price: '$14.99',
     sub: 'per month · billed monthly',
     badge: '25% off',
     features: [
+      'Everything in Cadet, plus:',
       '100 messages per month',
-      'Full reg corpus (see below)',
-      'Vessel profile + chat history',
-      'Credential vault with auto-OCR',
-      'Renewal alerts (90 / 30 / 7 days)',
       'AI Renewal Co-Pilot + Career Path',
       'Vessel Analysis + Compliance Changelog',
+      'Priority support',
     ],
   },
   captain_promo: {
@@ -65,6 +84,12 @@ const PRICING = {
 } as const
 
 const ANNUAL_DESCRIPTORS = {
+  cadet_annual: {
+    label: 'Cadet',
+    monthlyEq: '$7.49',
+    annualTotal: '$89.88',
+    standardMonthly: '$9.99/mo',
+  },
   mate_annual: {
     label: 'Mate',
     monthlyEq: '$14.99',
@@ -214,8 +239,8 @@ export default function WomenOffshorePage() {
             <p className="font-mono text-xs text-red-400 mb-4 text-center">{error}</p>
           )}
 
-          <div className="grid gap-5 md:grid-cols-2">
-            {(['mate_promo', 'captain_promo'] as const).map((plan) => {
+          <div className="grid gap-5 md:grid-cols-3">
+            {(['cadet_promo', 'mate_promo', 'captain_promo'] as const).map((plan) => {
               const data = PRICING[plan]
               const featured = plan === 'captain_promo'
               const isLoading = loading === plan
@@ -276,8 +301,8 @@ export default function WomenOffshorePage() {
             <p className="font-mono text-xs uppercase tracking-widest text-[#6b7594] text-center mb-4">
               Prefer to commit annually? Lock in the same rate, paid yearly.
             </p>
-            <div className="grid gap-4 md:grid-cols-2 max-w-3xl mx-auto">
-              {(['mate_annual', 'captain_annual'] as const).map((plan) => {
+            <div className="grid gap-4 md:grid-cols-3 max-w-4xl mx-auto">
+              {(['cadet_annual', 'mate_annual', 'captain_annual'] as const).map((plan) => {
                 const data = ANNUAL_DESCRIPTORS[plan]
                 const isLoading = loading === plan
                 return (

@@ -48,6 +48,10 @@ def _get_current_period_end_ts(subscription) -> int | None:
 # Legacy "monthly"/"annual" route to Captain tier for backward compat with
 # any pre-D6.1 frontend code paths still in flight.
 _PLAN_TO_LOOKUP: dict[str, tuple[str, str, bool]] = {
+    # Sprint D6.91 — Cadet ($9.99/mo, 25-msg cap) entry-level plan.
+    "cadet_monthly":   ("cadet", "month", False),
+    "cadet_annual":    ("cadet", "year",  False),
+    "cadet_promo":     ("cadet", "month", True),
     "mate_monthly":    ("mate", "month", False),
     "mate_annual":     ("mate", "year",  False),
     "mate_promo":      ("mate", "month", True),
@@ -878,7 +882,7 @@ async def _on_invoice_payment_failed(invoice, pool) -> None:
         UPDATE users
         SET subscription_status = 'past_due'
         WHERE stripe_customer_id = $1
-          AND subscription_tier IN ('pro', 'mate', 'captain')
+          AND subscription_tier IN ('pro', 'cadet', 'mate', 'captain')
         """,
         customer_id,
     )

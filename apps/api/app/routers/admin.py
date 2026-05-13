@@ -89,7 +89,9 @@ async def audit_log(
 
 class TierBreakdown(BaseModel):
     """Sprint D6.32 — paid-tier counts. Replaces the legacy single
-    `pro_subscribers` field which only counted the deprecated `pro` tier."""
+    `pro_subscribers` field which only counted the deprecated `pro` tier.
+    Sprint D6.91 — added `cadet` for the entry-level $9.99/25-msg plan."""
+    cadet: int = 0
     mate: int
     captain: int
     pro_legacy: int  # Karynn + early users still on the deprecated tier
@@ -265,6 +267,10 @@ async def get_stats(
             f"""
             SELECT
               COUNT(*) FILTER (
+                WHERE subscription_tier = 'cadet'
+                  AND subscription_status = 'active'
+              ) AS cadet_active,
+              COUNT(*) FILTER (
                 WHERE subscription_tier = 'mate'
                   AND subscription_status = 'active'
               ) AS mate_active,
@@ -277,12 +283,12 @@ async def get_stats(
                   AND subscription_status = 'active'
               ) AS pro_legacy_active,
               COUNT(*) FILTER (
-                WHERE subscription_tier IN ('mate', 'captain', 'pro')
+                WHERE subscription_tier IN ('cadet', 'mate', 'captain', 'pro')
                   AND subscription_status = 'active'
                   AND billing_interval = 'month'
               ) AS subs_monthly,
               COUNT(*) FILTER (
-                WHERE subscription_tier IN ('mate', 'captain', 'pro')
+                WHERE subscription_tier IN ('cadet', 'mate', 'captain', 'pro')
                   AND subscription_status = 'active'
                   AND billing_interval = 'year'
               ) AS subs_annual,
@@ -297,7 +303,7 @@ async def get_stats(
         # paid tiers + any non-zero subscription state.
         paid_users_alltime = await conn.fetchval(
             f"SELECT COUNT(*) FROM users u "
-            f"WHERE subscription_tier IN ('mate', 'captain', 'pro') "
+            f"WHERE subscription_tier IN ('cadet', 'mate', 'captain', 'pro') "
             f"  AND subscription_status IN ('active', 'past_due', 'paused'){uf}"
         )
         trial_active = await conn.fetchval(
@@ -441,6 +447,7 @@ async def get_stats(
         bad_answer_rate_7d=round(bad_answer_rate_7d, 1),
         # Subscriptions
         subs_active=TierBreakdown(
+            cadet=subs_row["cadet_active"] or 0,
             mate=subs_row["mate_active"] or 0,
             captain=subs_row["captain_active"] or 0,
             pro_legacy=subs_row["pro_legacy_active"] or 0,
