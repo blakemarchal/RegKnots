@@ -1098,9 +1098,13 @@ function AdminContent() {
                 <p className="font-mono text-[10px] text-[#6b7594] uppercase tracking-wider mb-3">
                   Subscriptions
                 </p>
-                {/* Sprint D6.91 — grid bumped from 5→6 cols to make room
-                    for the Cadet stat card; mobile stays 2-up. */}
-                <div className="grid grid-cols-2 md:grid-cols-6 gap-x-4 gap-y-2">
+                {/* Sprint D6.92 — Pro (legacy) stat card removed per
+                    Blake's call: 0 users on pro/solo today, no
+                    actionable signal. Any legacy pro user still rolls
+                    up into "Total active paid" below. Grid back to
+                    5 columns: Cadet · Mate · Captain · Trial active ·
+                    Past-due/paused. */}
+                <div className="grid grid-cols-2 md:grid-cols-5 gap-x-4 gap-y-2">
                   <div>
                     <p className="font-mono text-[10px] text-[#2dd4bf]/70 uppercase tracking-wider">Cadet</p>
                     <p className="font-display text-2xl font-bold text-[#2dd4bf]">{stats.subs_active.cadet ?? 0}</p>
@@ -1112,10 +1116,6 @@ function AdminContent() {
                   <div>
                     <p className="font-mono text-[10px] text-[#2dd4bf]/70 uppercase tracking-wider">Captain</p>
                     <p className="font-display text-2xl font-bold text-[#2dd4bf]">{stats.subs_active.captain}</p>
-                  </div>
-                  <div>
-                    <p className="font-mono text-[10px] text-[#6b7594] uppercase tracking-wider">Pro (legacy)</p>
-                    <p className="font-display text-2xl font-bold text-[#f0ece4]/70">{stats.subs_active.pro_legacy}</p>
                   </div>
                   <div>
                     <p className="font-mono text-[10px] text-[#f59e0b]/80 uppercase tracking-wider">Trial active</p>
