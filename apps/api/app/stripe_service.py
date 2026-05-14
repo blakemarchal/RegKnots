@@ -518,6 +518,15 @@ async def _on_subscription_change(subscription, pool) -> None:
     # Sprint D6.1 — resolve tier from the subscription's price_id rather
     # than hardcoding 'pro'. Falls back to 'captain' if price is unmapped
     # (safer than silently pinning to 'free' on a genuine unknown).
+    # Sprint D6.92 — narrowed the bare except so a missing
+    # billing_interval gets surfaced in logs instead of silently
+    # nulled. Nate's first Cadet conversion (2026-05-14) wrote
+    # billing_interval=NULL because this block swallowed AttributeError
+    # silently; the Monthly badge on the admin Users page then never
+    # rendered for him. Catching specifically AttributeError +
+    # IndexError (the shapes that genuinely happen on a malformed
+    # subscription payload) and logging both so we can audit any
+    # future webhook anomalies.
     price_id: str | None = None
     billing_interval: str | None = None
     try:
@@ -525,8 +534,12 @@ async def _on_subscription_change(subscription, pool) -> None:
             item = subscription.items.data[0]
             price_id = item.price.id
             billing_interval = item.price.recurring.interval  # 'month' | 'year'
-    except Exception:
-        pass
+    except (AttributeError, IndexError) as exc:
+        logger.warning(
+            "Could not extract price_id/billing_interval from subscription %s: "
+            "%s: %s. Tier resolution will fall back to default.",
+            sub_id, type(exc).__name__, str(exc)[:200],
+        )
 
     plan_info = plan_info_from_price_id(price_id)
     if plan_info is None and price_id:
