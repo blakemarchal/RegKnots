@@ -19,6 +19,10 @@ import {
 // Sprint D6.32 — restructured shape. See backend AdminStats model for the
 // section breakdown rationale. Frontend cards group by these sections.
 interface TierBreakdown {
+  // Sprint D6.91 — `cadet` joined the schema (entry-level tier).
+  // Optional on the frontend type for compatibility with any cached
+  // pre-D6.91 responses; backend always returns it (defaults to 0).
+  cadet?: number
   mate: number
   captain: number
   pro_legacy: number
@@ -183,9 +187,17 @@ interface AdminNotification {
 
 type TicketFilter = 'all' | 'open' | 'replied' | 'closed'
 
+// Sprint D6.92 — UserFilter type/list updated for D6.91 tier expansion.
+// 'pro' filter key kept for URL/state back-compat but now matches ANY
+// paying tier (cadet / mate / captain / pro / solo). Label flipped to
+// "Paid" to reflect the broader semantic. Per-tier filters (cadet /
+// mate / captain) added so admins can drill into a specific tier.
 type UserFilter =
   | 'all'
-  | 'pro'
+  | 'pro'      // ← back-compat key; now means "any paid tier"
+  | 'cadet'
+  | 'mate'
+  | 'captain'
   | 'trial'
   | 'expired'
   | 'paused'
@@ -196,7 +208,10 @@ type UserFilter =
 
 const USER_FILTERS: { value: UserFilter; label: string }[] = [
   { value: 'all', label: 'All' },
-  { value: 'pro', label: 'Pro' },
+  { value: 'pro', label: 'Paid' },
+  { value: 'cadet', label: 'Cadet' },
+  { value: 'mate', label: 'Mate' },
+  { value: 'captain', label: 'Captain' },
   { value: 'trial', label: 'Trial' },
   { value: 'expired', label: 'Expired' },
   { value: 'monthly', label: 'Monthly' },
@@ -463,19 +478,40 @@ function AdminContent() {
       }
       if (userFilter === 'all') return true
       const trialTs = u.trial_ends_at ? new Date(u.trial_ends_at).getTime() : null
-      const isPro = u.subscription_tier === 'pro' && u.subscription_status === 'active'
+      // Sprint D6.92 — paid tier recognition fix. Pre-fix this was narrow
+      // to `tier === 'pro'`, which mis-classified the first Cadet customer
+      // (Nathaniel Leachman, 2026-05-14) as "Expired" because his account
+      // dropped into the `isExpired` fallthrough. The five paying tiers
+      // are cadet (D6.91), mate, captain, and legacy pro/solo.
+      const isPaid =
+        u.subscription_status === 'active' &&
+        (u.subscription_tier === 'cadet' ||
+         u.subscription_tier === 'mate' ||
+         u.subscription_tier === 'captain' ||
+         u.subscription_tier === 'pro' ||
+         u.subscription_tier === 'solo')
       const isPaused = u.subscription_status === 'paused'
       const isCanceled = u.subscription_status === 'canceled' || u.subscription_status === 'canceling'
-      const isTrial = !isPro && !isPaused && !isCanceled && trialTs !== null && trialTs > now
-      const isExpired = !isPro && !isPaused && !isCanceled && (trialTs === null || trialTs <= now)
+      const isTrial = !isPaid && !isPaused && !isCanceled && trialTs !== null && trialTs > now
+      const isExpired = !isPaid && !isPaused && !isCanceled && (trialTs === null || trialTs <= now)
       switch (userFilter) {
-        case 'pro': return isPro
+        // 'pro' filter keeps its name for URL/state back-compat but
+        // matches any paying tier now (label updated to "Paid" in the
+        // USER_FILTERS array).
+        case 'pro': return isPaid
+        // Sprint D6.92 — per-tier filters added for parity with the
+        // admin custom-email filter row. Lets admins drill into a
+        // specific paid tier without scrolling the whole table.
+        case 'cadet':   return u.subscription_tier === 'cadet'   && u.subscription_status === 'active'
+        case 'mate':    return u.subscription_tier === 'mate'    && u.subscription_status === 'active'
+        case 'captain': return (u.subscription_tier === 'captain' || u.subscription_tier === 'pro')
+                              && u.subscription_status === 'active'
         case 'trial': return isTrial
         case 'expired': return isExpired
         case 'paused': return isPaused
         case 'canceled': return isCanceled
-        case 'monthly': return isPro && u.billing_interval === 'month'
-        case 'annual': return isPro && u.billing_interval === 'year'
+        case 'monthly': return isPaid && u.billing_interval === 'month'
+        case 'annual': return isPaid && u.billing_interval === 'year'
         case 'admin': return u.is_admin
         default: return true
       }
@@ -1062,7 +1098,13 @@ function AdminContent() {
                 <p className="font-mono text-[10px] text-[#6b7594] uppercase tracking-wider mb-3">
                   Subscriptions
                 </p>
-                <div className="grid grid-cols-2 md:grid-cols-5 gap-x-4 gap-y-2">
+                {/* Sprint D6.91 — grid bumped from 5→6 cols to make room
+                    for the Cadet stat card; mobile stays 2-up. */}
+                <div className="grid grid-cols-2 md:grid-cols-6 gap-x-4 gap-y-2">
+                  <div>
+                    <p className="font-mono text-[10px] text-[#2dd4bf]/70 uppercase tracking-wider">Cadet</p>
+                    <p className="font-display text-2xl font-bold text-[#2dd4bf]">{stats.subs_active.cadet ?? 0}</p>
+                  </div>
                   <div>
                     <p className="font-mono text-[10px] text-[#2dd4bf]/70 uppercase tracking-wider">Mate</p>
                     <p className="font-display text-2xl font-bold text-[#2dd4bf]">{stats.subs_active.mate}</p>
@@ -1088,7 +1130,7 @@ function AdminContent() {
                   <span>
                     <span className="text-[#6b7594] uppercase tracking-wider text-[10px]">Total active paid:</span>{' '}
                     <span className="font-bold text-[#f0ece4]">
-                      {stats.subs_active.mate + stats.subs_active.captain + stats.subs_active.pro_legacy}
+                      {(stats.subs_active.cadet ?? 0) + stats.subs_active.mate + stats.subs_active.captain + stats.subs_active.pro_legacy}
                     </span>
                   </span>
                   <span>
@@ -2084,11 +2126,25 @@ function AdminContent() {
               const now = Date.now()
               const trialTs = u.trial_ends_at ? new Date(u.trial_ends_at).getTime() : null
 
-              // Derive status label
+              // Sprint D6.92 — status label resolves to the actual paid
+              // tier (Cadet/Mate/Captain) rather than always labeling as
+              // "Pro" or falling through to "Expired" for non-pro paying
+              // users. Legacy 'pro' / 'solo' tiers map to "Captain" for
+              // visual consistency (account page already does this).
+              const PAID_TIER_LABEL: Record<string, string> = {
+                cadet:   'Cadet',
+                mate:    'Mate',
+                captain: 'Captain',
+                pro:     'Captain',  // legacy → Captain label
+                solo:    'Captain',  // legacy → Captain label
+              }
               let statusLabel: string
               let statusClass: string
-              if (u.subscription_tier === 'pro' && u.subscription_status === 'active') {
-                statusLabel = 'Pro'
+              if (
+                u.subscription_status === 'active' &&
+                PAID_TIER_LABEL[u.subscription_tier] !== undefined
+              ) {
+                statusLabel = PAID_TIER_LABEL[u.subscription_tier]
                 statusClass = 'bg-[#2dd4bf]/15 text-[#2dd4bf] border-[#2dd4bf]/30'
               } else if (u.subscription_status === 'paused') {
                 statusLabel = 'Paused'
@@ -2104,9 +2160,10 @@ function AdminContent() {
                 statusClass = 'bg-red-500/10 text-red-400/80 border-red-500/30'
               }
 
-              // Billing interval badge (only for pro)
+              // Billing interval badge — shown for any active paid tier.
               const intervalLabel =
-                u.subscription_tier === 'pro' && u.subscription_status === 'active'
+                u.subscription_status === 'active' &&
+                PAID_TIER_LABEL[u.subscription_tier] !== undefined
                   ? u.billing_interval === 'year'
                     ? 'Annual'
                     : u.billing_interval === 'month'
