@@ -1707,6 +1707,13 @@ async def chat(
 
     if should_run_judge:
         from rag.hedge_judge import judge_hedge
+        # Sprint D6.92 — tell the judge which mode it's in so it can
+        # apply the right decision rubric. The pre-D6.92 prompt assumed
+        # every call was regex-triggered and biased toward finding a
+        # hedge; that mis-rated three cited-confident answers as
+        # complete_miss in May 2026. The new prompt switches rubric
+        # based on this parameter.
+        judge_mode = "regex_triggered" if regex_matched else "precautionary"
         try:
             verdict = await judge_hedge(
                 question=query,
@@ -1718,6 +1725,7 @@ async def chat(
                     for c in verified_cited
                 ],
                 anthropic_client=anthropic_client,
+                mode=judge_mode,
             )
             judge_verdict = verdict.verdict
             judge_reasoning = verdict.reasoning or None
@@ -1891,6 +1899,7 @@ async def chat(
             cleaned_answer_pre_tier=cleaned_answer,
             layer_c_fired=layer_c_fired,
             judge_verdict=judge_verdict,
+            judge_reasoning=judge_reasoning,
             web_fallback_card=web_fallback_card,
             verified_citations_count=len(verified_cited),
             anthropic_client=anthropic_client,
@@ -2803,6 +2812,10 @@ async def _run_tier_router_and_log(
     cleaned_answer_pre_tier: str,
     layer_c_fired: bool,
     judge_verdict: str | None,
+    # Sprint D6.92 — capture the judge's reasoning so post-hoc audits
+    # can inspect WHY a verdict landed (e.g. distinguish a real corpus
+    # gap from a mis-rated cited answer).
+    judge_reasoning: str | None,
     web_fallback_card: "WebFallbackCard | None",
     verified_citations_count: int,
     anthropic_client: AsyncAnthropic,
@@ -2869,7 +2882,8 @@ async def _run_tier_router_and_log(
             """
             INSERT INTO tier_router_shadow_log (
                 conversation_id, user_id, query, mode,
-                current_answer, current_judge_verdict, current_layer_c_fired,
+                current_answer, current_judge_verdict, current_judge_reasoning,
+                current_layer_c_fired,
                 current_verified_citations_count, current_web_confidence,
                 shadow_tier, shadow_label, shadow_answer, shadow_reason,
                 shadow_classifier_verdict, shadow_classifier_reasoning,
@@ -2878,10 +2892,11 @@ async def _run_tier_router_and_log(
                 shadow_total_latency_ms, shadow_error, differs
             )
             VALUES ($1, $2, $3, $4,
-                    $5, $6, $7, $8, $9,
-                    $10, $11, $12, $13,
-                    $14, $15, $16,
-                    $17, $18, $19, $20, $21)
+                    $5, $6, $7, $8,
+                    $9, $10,
+                    $11, $12, $13, $14,
+                    $15, $16, $17,
+                    $18, $19, $20, $21, $22)
             """,
             conversation_id,
             user_id,
@@ -2889,6 +2904,7 @@ async def _run_tier_router_and_log(
             mode,
             cleaned_answer_pre_tier[:8000],
             judge_verdict,
+            (judge_reasoning or "")[:2000] if judge_reasoning else None,
             layer_c_fired,
             verified_citations_count,
             web_fallback_card.confidence if web_fallback_card else None,
@@ -3191,6 +3207,13 @@ async def chat_with_progress(
         yield {"event": "status", "data": "Reviewing answer quality…"}
 
         from rag.hedge_judge import judge_hedge
+        # Sprint D6.92 — tell the judge which mode it's in so it can
+        # apply the right decision rubric. The pre-D6.92 prompt assumed
+        # every call was regex-triggered and biased toward finding a
+        # hedge; that mis-rated three cited-confident answers as
+        # complete_miss in May 2026. The new prompt switches rubric
+        # based on this parameter.
+        judge_mode = "regex_triggered" if regex_matched else "precautionary"
         try:
             verdict = await judge_hedge(
                 question=query,
@@ -3202,6 +3225,7 @@ async def chat_with_progress(
                     for c in verified_cited
                 ],
                 anthropic_client=anthropic_client,
+                mode=judge_mode,
             )
             judge_verdict = verdict.verdict
             judge_reasoning = verdict.reasoning or None
@@ -3367,6 +3391,7 @@ async def chat_with_progress(
             cleaned_answer_pre_tier=cleaned_answer,
             layer_c_fired=layer_c_fired,
             judge_verdict=judge_verdict,
+            judge_reasoning=judge_reasoning,
             web_fallback_card=web_fallback_card,
             verified_citations_count=len(verified_cited),
             anthropic_client=anthropic_client,
