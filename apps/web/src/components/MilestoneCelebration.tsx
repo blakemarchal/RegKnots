@@ -27,11 +27,34 @@ const STORAGE_KEY = 'regknot_milestone_seen'
 
 // Each entry: count threshold + flavor copy. Tuned to be celebratory
 // but not saccharine; tone matches the rest of the brand voice.
+//
+// Sprint D6.92 — every paid signup #1 through #10 fires its own
+// celebration (Blake's call: "I'd actually like the confetti for every
+// paid sign up until 10, then back to our original system"). After 10,
+// the original milestone cadence (25, 50, 100, 250, ...) resumes.
+// Rationale: the first 10 paying users are the highest-signal validation
+// in the company's life; each one deserves an earned beat. Past 10 the
+// noise-to-signal of "another one" drops, and the larger thresholds do
+// the celebrating.
 const MILESTONES: { count: number; title: string; body: string }[] = [
   { count:     1, title: 'Paid user #1',
     body: 'The first one. There is only one #1 — and you got there. Pour something.' },
+  { count:     2, title: 'Paid user #2',
+    body: 'Two paying mariners. Whoever signed up second saw what #1 saw. The signal isn’t a coincidence.' },
+  { count:     3, title: 'Paid user #3',
+    body: 'Three. The first ones aren’t a fluke anymore. Whatever happened to draw them in, it’s repeatable.' },
+  { count:     4, title: 'Paid user #4',
+    body: 'Four. Past the first hand of fingers. Pattern turning into traction.' },
   { count:     5, title: 'Five paying mariners',
     body: 'Five. The hardest five. Word of mouth is the only marketing channel that matters.' },
+  { count:     6, title: 'Paid user #6',
+    body: 'Six. The first five proved a thing exists. The sixth proves it’s not just early adopters.' },
+  { count:     7, title: 'Paid user #7',
+    body: 'Seven mariners trust this. A standing watch rotation — paid.' },
+  { count:     8, title: 'Paid user #8',
+    body: 'Eight. Closing in on double digits. Whatever’s working, keep doing it.' },
+  { count:     9, title: 'Paid user #9',
+    body: 'Nine. One short of the badge. The next one is the milestone — bring it home.' },
   { count:    10, title: 'Double digits',
     body: 'RegKnot is officially A Thing. People you don’t know are paying you for it.' },
   { count:    25, title: 'A quarter-hundred',
@@ -113,8 +136,13 @@ export function MilestoneCelebration({ paidUsersAlltime }: Props) {
     // Second wave 250ms later so the burst has presence
     window.setTimeout(() => { fire(0.5) }, 250)
 
-    // Auto-dismiss after 6s
-    const dismissTimer = window.setTimeout(() => setShowing(null), 6000)
+    // Sprint D6.92 — auto-dismiss bumped 6s → 15s. Blake reported the
+    // 6s window was too tight to read the flavor copy in a real
+    // workflow (he caught Nate's #1 celebration but the toast cleared
+    // before he finished reading). 15s gives a leisurely read without
+    // making the toast feel sticky; the manual × dismiss is still
+    // wired for an admin who wants to clear it sooner.
+    const dismissTimer = window.setTimeout(() => setShowing(null), 15000)
     return () => window.clearTimeout(dismissTimer)
   }, [paidUsersAlltime])
 
