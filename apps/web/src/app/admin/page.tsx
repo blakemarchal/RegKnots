@@ -530,11 +530,18 @@ function AdminContent() {
       })
   }, [ei])
 
+  // Sprint D6.92 — page size bumped 50 → 200 (matches backend's max).
+  // Pre-bump: with 55+ total users, position-#51-and-back fell off page
+  // 1, including Nate (the first Cadet conversion at created_at=#61 in
+  // the DESC order). His row was invisible in the admin Users panel
+  // even though Overview stats correctly counted him. 200 covers us
+  // comfortably until ~3-4x current user count; the existing Load More
+  // button still wires through if we ever exceed it.
   const fetchUsers = useCallback((offset: number, append: boolean) => {
-    apiRequest<AdminUser[]>(`/admin/users?limit=50&offset=${offset}&exclude_internal=${ei}`)
+    apiRequest<AdminUser[]>(`/admin/users?limit=200&offset=${offset}&exclude_internal=${ei}`)
       .then((data) => {
         setUsers((prev) => append ? [...prev, ...data] : data)
-        setHasMore(data.length === 50)
+        setHasMore(data.length === 200)
       })
       .catch(() => {})
   }, [ei])
