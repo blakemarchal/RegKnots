@@ -187,11 +187,36 @@ const CITATION_PATTERNS: CitationPattern[] = [
     sourceHint: 'usc',
     toSection: m => `${m[1]} USC ${m[2]}`,
   },
-  // SOLAS Ch.VI Reg.2, para.6 / SOLAS Ch.II-2 Reg.10 / SOLAS Ch.VI Part A
+  // Sprint D6.91 — SOLAS regulation/sub-paragraph citation chips.
+  //
+  // The pre-D6.91 pattern was overfitted to "SOLAS Ch.II-2 Reg.10"
+  // (no-space, no-comma, abbreviated-only form). Kenan's 2026-05-13
+  // answer cited the same SOLAS section in three other valid forms
+  // and got zero chips:
+  //   "SOLAS Ch. II-2, Reg. 9.4.1.1.5"   (comma separator)
+  //   "SOLAS Chapter II-2, Regulation 9" (full-word forms)
+  //   "SOLAS II-2/9.4.1.1.5.3"           (slash form, no Ch. prefix)
+  //
+  // New regex handles all four:
+  //   - Optional "Ch" / "Ch." / "Chapter" prefix
+  //   - Separator can be whitespace, comma+space, or slash
+  //   - Optional "Reg" / "Reg." / "Regulation" prefix
+  //   - Reg number can be arbitrarily deep (Reg.9.4.1.1.5.3) — the
+  //     suffix-strip fallback in regulations.py D6.88 Phase 2 resolves
+  //     deep refs to their parent row at click time.
+  //
+  // "Part X" form (e.g. SOLAS Ch.VI Part A) handled as a separate
+  // entry below so the digit-vs-Part branches don't pollute one regex.
   {
-    re: /\bSOLAS\s+Ch\.?\s*([IVX]+(?:-\d+)?)\s+(Reg\.?\s*\d+(?:[,.]\s*para\.?\s*\d+(?:\.\d+)?)?|Part\s+[A-Z])/g,
+    re: /\bSOLAS\s+(?:Ch(?:apter)?\.?\s*)?([IVX]+(?:-\d+)?)(?:\s*[,/]\s*|\s+)(?:Reg(?:ulation)?\.?\s*)?(\d+(?:\.\d+)*)/g,
     sourceHint: 'solas',
-    toSection: m => `SOLAS Ch.${m[1]} ${m[2].replace(/\s+/g, ' ')}`,
+    toSection: m => `SOLAS Ch.${m[1]} Reg.${m[2]}`,
+  },
+  // SOLAS Ch.VI Part A / SOLAS Chapter II-2, Part D / SOLAS II-2/Part D
+  {
+    re: /\bSOLAS\s+(?:Ch(?:apter)?\.?\s*)?([IVX]+(?:-\d+)?)(?:\s*[,/]\s*|\s+)Part\s+([A-Z])\b/g,
+    sourceHint: 'solas',
+    toSection: m => `SOLAS Ch.${m[1]} Part ${m[2]}`,
   },
   // IMDG Ch.7.4 / IMDG Chapter 7.4 / IMDG 7.3 / IMDG 7.3.1
   {
