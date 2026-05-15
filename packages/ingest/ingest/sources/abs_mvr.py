@@ -119,6 +119,25 @@ def _detect_part(pdf_path: Path) -> str:
     return pdf_path.stem
 
 
+def _dedupe_consecutive_same_number(matches: list) -> list:
+    """ABS rule books repeat the chapter/section banner on every page as
+    a running header. With pdftotext output, this produces many
+    consecutive regex matches with the same number (e.g. ten ``CHAPTER 1
+    General`` matches inside Chapter 1, then one ``CHAPTER 2``, then
+    fifteen ``CHAPTER 2 ...`` etc.). Slicing on every match shreds the
+    body into page-sized fragments and most sub-sections fall on the
+    seams. Keep only the first match in each consecutive run.
+    """
+    if not matches:
+        return []
+    out = [matches[0]]
+    for m in matches[1:]:
+        if m.group(1) == out[-1].group(1):
+            continue
+        out.append(m)
+    return out
+
+
 def _split_chapters_and_sections(
     full_text: str,
 ) -> list[tuple[str, str, str, str]]:
@@ -130,7 +149,11 @@ def _split_chapters_and_sections(
     "Chapter-less" — straight to Sections), chapter_num is "".
     """
     # First split by chapter, then split each chapter into sections.
-    chapter_matches = list(_CHAPTER_HEADER.finditer(full_text))
+    # Dedupe before TOC-filter so a TOC-skipped chapter doesn't leave a
+    # gap that lets the next body banner restart the same chapter number.
+    chapter_matches = _dedupe_consecutive_same_number(
+        list(_CHAPTER_HEADER.finditer(full_text))
+    )
 
     if not chapter_matches:
         # No chapter headers — treat the whole thing as Chapter "" and
@@ -168,9 +191,12 @@ def _split_into_sections(chapter_body: str) -> list[tuple[str, str, str]]:
     ``Section 3   Engineering Systems Overview...........5`` whose
     title group contains a leader-dot run. The same real section
     header appears later in the body without leader dots and lands
-    in the output normally.
+    in the output normally. Also dedupes running-header section
+    banners (same section number repeating on every page).
     """
-    matches = list(_SECTION_HEADER.finditer(chapter_body))
+    matches = _dedupe_consecutive_same_number(
+        list(_SECTION_HEADER.finditer(chapter_body))
+    )
     if not matches:
         return []
 
