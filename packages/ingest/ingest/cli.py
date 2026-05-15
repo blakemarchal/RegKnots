@@ -346,8 +346,11 @@ _PDF_SOURCE_CONFIG: dict[str, dict] = {
         # Lloyd's Register Rules and Regulations for the Classification
         # of Ships (LR-RU-001). Same .docx format as LR-CO-001; shares
         # the lloyds_docx.py parser. This is the document Karynn's
-        # 2026-05-13 transformer-failure question needs.
-        "raw_dir": _DATA_RAW / "lloyds_rules",
+        # 2026-05-13 transformer-failure question needs. Files live in
+        # per-Part subfolders ("Part 6 Control, Electrical, Refrigeration
+        # and Fire") plus the per-edition Notice at the top level —
+        # the lloyds_docx adapter walks both layouts.
+        "raw_dir": _DATA_RAW / "lloyds_rules_classification",
         "adapter": "ingest.sources.lr_rules",
     },
     "abs_mvr": {

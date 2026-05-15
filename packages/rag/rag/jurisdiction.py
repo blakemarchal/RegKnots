@@ -75,6 +75,17 @@ SOURCE_TO_JURISDICTIONS: dict[str, list[str]] = {
     "gr_ynanp":         ["gr"],
     # Sprint D6.50 — OCIMF (international industry guidance).
     "ocimf":            ["intl"],
+    # Sprint D6.93 — class society rules. Class society scope is per
+    # vessel, not per flag (ABS classes Liberian/MH/SG-flag vessels in
+    # large numbers; same for Lloyd's). Tagging the society's HQ flag
+    # would silently exclude these from non-US/non-UK queries that
+    # legitimately need them. 'intl' mirrors the IACS UR / SOLAS
+    # posture: universally available, and the synthesizer disambiguates
+    # which society applies via vessel profile / query mention at
+    # answer time.
+    "abs_mvr":          ["intl"],
+    "lr_lifting_code":  ["intl"],
+    "lr_rules":         ["intl"],
     # Norway (Sprint D6.23) — first non-English flag (but content is in English)
     "nma_rsv":          ["no"],
     # Sprint D6.23 — Tier D international references. All tagged 'intl'

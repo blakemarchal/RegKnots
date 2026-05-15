@@ -189,6 +189,15 @@ _SOURCE_TO_JURISDICTIONS: dict[str, list[str]] = {
     "gr_ynanp":         ["gr"],
     # Sprint D6.50 — OCIMF (industry, treated as international tier-4).
     "ocimf":            ["intl"],
+    # Sprint D6.93 — class society rules. Class is a vessel-level choice
+    # (an ABS-classed Liberian-flag tanker, an LR-classed Marshallese
+    # bulker), not a flag-level one — tagging the society's HQ country
+    # would silently hide these from the very mariners whose vessels
+    # are classed by them. 'intl' keeps them universally retrievable;
+    # the synthesizer routes by vessel context at answer time.
+    "abs_mvr":          ["intl"],
+    "lr_lifting_code":  ["intl"],
+    "lr_rules":         ["intl"],
     # Norway (Sprint D6.23)
     "nma_rsv":          ["no"],
     # Tier D international references (Sprint D6.23)
