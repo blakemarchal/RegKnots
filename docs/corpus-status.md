@@ -1,6 +1,6 @@
 # Corpus Status
 
-_Last updated: 2026-04-28 (Sprint D6.23)_
+_Last updated: 2026-05-15 (Sprint D6.93 — class-society corpus: ABS + Lloyd's Register)_
 
 This document is the engineering counterpart to the user-facing
 [/coverage](https://regknots.com/coverage) page. It tracks what's
@@ -33,8 +33,10 @@ vague about it"). This document is for engineering planning.
 | IMDG Code | `imdg` | 1 | Vol 1 + Vol 2 (2024 Edition / Amdt 42-24) + per-row DGL chunking | Manual |
 | ERG | `erg` | 4 | Full guide set (2020 edition) | Static |
 | WHO IHR | `who_ihr` | 1 | Full (2005 + 2014/2022/2024 amendments) | Manual |
+| ABS Marine Vessel Rules | `abs_mvr` | 1 | Pt.3, 4, 5C-1, 5C-2, 5D, 6 + Notices + Notations Table (2025 ed., 217 MB; Pt.1/2/5A/5B/7 deferred — different filename pattern). 354 sections / 5,851 chunks. | Manual |
+| Lloyd's Register Code for Lifting Appliances | `lr_lifting_code` | 1 | Full LR-CO-001 July 2025 — 15 .docx, 81 sections / 448 chunks | Manual (Regs4ships) |
 
-**~52,000 chunks across these sources.**
+**~52,000 chunks pre-D6.93. ABS + LR add 6,299 (5,851 abs_mvr + 448 lr_lifting_code).**
 
 ## Curated subset (operational essentials only)
 
@@ -67,6 +69,9 @@ vague about it"). This document is for engineering planning.
 | MOU PSC reports | `mou_psc` | parismou.org returned 403/404 on tested URLs | Manual download + scp into raw_dir | Next sprint |
 | 20 IACS URs (ClassNK mirror) | `iacs_ur` | ClassNK rate-limits non-JP IPs to 8 successive requests | Member-society mirror rotation (ABS, DNV, LR, BV) | Next sprint |
 | 11 BMA Marine Notices | `bma_mn` | Filename-pattern guesses didn't match WP upload paths | Visit listing page, extract actual filenames | Next sprint |
+| Lloyd's Register Rules for Classification of Ships | `lr_rules` | Files not yet pulled from Regs4ships portal (slow manual export) | Blake pulling — adapter wired, just awaiting `data/raw/lloyds_rules/` contents | This sprint (Blake) |
+| DNV Rules | n/a yet | `rules.dnv.com` is a React SPA — returns JS shim to non-browser agents; PDFs gated behind authenticated browser sessions | Playwright headless Chromium scrape; see `docs/sprint-audits/class-society-corpus-d693.md` | Next sprint (~1 day) |
+| ABS Pt.1/2/5A/5B/7 | `abs_mvr` | `1-mvr-part-N-jul25.pdf` 404'd for those parts — different prefix or date variant | Visit ABS publications page in browser, copy actual URLs, re-run `--update` | Blake to confirm filenames |
 
 ## Translation-deferred (pipeline pending)
 
@@ -86,7 +91,7 @@ prompt), and quality validation are designed but not yet built.
 
 ## Permanently out of scope (no value/cost ratio)
 
-- Class society proprietary rules (ABS, DNV, Lloyd's Register, Bureau Veritas, ClassNK, RINA, CCS) — paid; IACS URs cover the unified-requirement layer.
+- ~~Class society proprietary rules~~ — Sprint D6.93 overturned this assumption. ABS rules are free and publicly hosted on `ww2.eagle.org`; Lloyd's rules are accessible via the Regs4ships portal (commercial subscription Blake holds). DNV is wired-but-blocked; BV / ClassNK / RINA / CCS / KR / IRS remain gated behind member portals or paywalls and are still out of scope barring partner-shared credentials.
 - OCIMF SIRE / SIRE 2.0 inspection questionnaires — paywalled.
 - INTERTANKO contract templates — proprietary.
 - Small open registries below ~30M GT (Cook Islands, Vanuatu, Belize, Antigua & Barbuda, etc.) — diminishing marginal value.
