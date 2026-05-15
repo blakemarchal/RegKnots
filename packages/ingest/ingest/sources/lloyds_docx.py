@@ -54,6 +54,16 @@ _CHAPTER_FROM_FILENAME = re.compile(
     re.IGNORECASE,
 )
 
+# Matches the "Part N" pattern inside a parent folder name. LR-RU-001
+# (Rules for Classification of Ships) ships with one folder per Part
+# (e.g. "Part 6 Control, Electrical, Refrigeration and Fire"), each
+# holding the per-chapter .docx files. LR-CO-001 (Code for Lifting
+# Appliances) is flat — no Part folders — so this is optional.
+_PART_FROM_FOLDER = re.compile(
+    r"^Part\s+(\d+)\s+",
+    re.IGNORECASE,
+)
+
 
 def _read_docx_paragraphs(docx_path: Path) -> list[str]:
     """Extract non-empty paragraphs from a .docx file in document order.
@@ -139,6 +149,31 @@ def _detect_chapter(docx_path: Path) -> tuple[str, str]:
     return docx_path.stem, docx_path.stem
 
 
+def _collect_docx_with_part(raw_dir: Path) -> list[tuple[Path, str | None]]:
+    """Walk ``raw_dir`` and return (docx_path, part_or_none) tuples.
+
+    Top-level .docx files (e.g. the per-edition Notice) come back with
+    part=None. .docx files under a "Part N <name>" subfolder come back
+    with part=N. LR-CO-001 has no Part folders → all files are top-level
+    with part=None (existing flat behavior).
+    """
+    out: list[tuple[Path, str | None]] = []
+    for f in sorted(raw_dir.glob("*.docx")):
+        out.append((f, None))
+    for sub in sorted(p for p in raw_dir.iterdir() if p.is_dir()):
+        m = _PART_FROM_FOLDER.match(sub.name)
+        part = m.group(1) if m else None
+        if part is None:
+            # Subfolders without a "Part N" prefix are ignored. Lloyd's
+            # exports don't put anything ingest-relevant in unparented
+            # subdirs; if a future export changes that we'll warn and
+            # add support explicitly.
+            continue
+        for f in sorted(sub.glob("*.docx")):
+            out.append((f, part))
+    return out
+
+
 def parse_lloyds_docx_dir(
     raw_dir: Path,
     *,
@@ -148,9 +183,19 @@ def parse_lloyds_docx_dir(
 ) -> list[Section]:
     """Parse every .docx in ``raw_dir`` into Section objects.
 
+    Handles two layouts:
+
+      Flat (LR-CO-001): one .docx per chapter at the top level, plus
+      auxiliary docs (General Regulations, Notice).
+
+      Nested (LR-RU-001): a top-level Notice doc plus per-Part folders
+      ("Part 6 Control, Electrical, Refrigeration and Fire") holding
+      the per-chapter .docx files. Part number is read from the
+      folder name and folded into the citation as ``Pt.N``.
+
     Args:
-        raw_dir: Directory containing the .docx files (one per chapter
-                 plus auxiliary docs).
+        raw_dir: Directory containing the .docx files (top level or
+                 nested under "Part N <name>" folders).
         source_name: DB source value, e.g. "lr_lifting_code".
         doc_prefix: Citation prefix mariners would use, e.g. "LR-CO-001"
                     for the Code for Lifting Appliances, "LR-RU-001"
@@ -161,13 +206,13 @@ def parse_lloyds_docx_dir(
     if not raw_dir.exists():
         raise FileNotFoundError(f"Lloyd's raw directory not found: {raw_dir}")
 
-    docx_files = sorted(raw_dir.glob("*.docx"))
+    docx_files = _collect_docx_with_part(raw_dir)
     if not docx_files:
         logger.warning("No .docx files found in %s", raw_dir)
         return []
 
     sections: list[Section] = []
-    for docx_path in docx_files:
+    for docx_path, part in docx_files:
         chapter_num, chapter_title = _detect_chapter(docx_path)
         paragraphs = _read_docx_paragraphs(docx_path)
         if not paragraphs:
@@ -178,21 +223,29 @@ def parse_lloyds_docx_dir(
             f"Ch.{chapter_num}" if chapter_num.isdigit() else chapter_num
         )
 
+        # Citation prefix: e.g. "LR-RU-001 Pt.6 Ch.2" when a Part is
+        # present, "LR-CO-001 Ch.10" when flat. Notice docs live at
+        # the top level and never carry a Part.
+        if part:
+            prefix = f"{doc_prefix} Pt.{part} {chapter_label}"
+        else:
+            prefix = f"{doc_prefix} {chapter_label}"
+
         splits = _split_into_sections(paragraphs)
         for sec_num, sec_title, body in splits:
             if not body:
                 continue
             # Section number convention:
+            #   "LR-RU-001 Pt.6 Ch.2 Sec.3 — Electrical Engineering — Generators"
             #   "LR-CO-001 Ch.10 Sec.2 — Control, alarm and safety systems"
-            # mariners will write either "LR-CO-001 Ch.10 Sec.2" or
-            # "Lloyd's CO-001 Ch.10 Sec.2"; the citation regex on the
-            # frontend bridges that.
+            # The frontend citation regex accepts both shapes (Part is
+            # optional in the matcher).
             if sec_num == "0":
                 # Preamble — no section number, use chapter as anchor.
-                section_number = f"{doc_prefix} {chapter_label}"
-                section_title = f"{chapter_title}"
+                section_number = prefix
+                section_title = chapter_title
             else:
-                section_number = f"{doc_prefix} {chapter_label} Sec.{sec_num}"
+                section_number = f"{prefix} Sec.{sec_num}"
                 section_title = f"{chapter_title} — {sec_title}"
 
             sections.append(Section(
@@ -202,7 +255,7 @@ def parse_lloyds_docx_dir(
                 section_title=section_title[:500],  # DB column safety
                 full_text=body,
                 up_to_date_as_of=source_date,
-                parent_section_number=f"{doc_prefix} {chapter_label}",
+                parent_section_number=prefix,
             ))
 
     logger.info(

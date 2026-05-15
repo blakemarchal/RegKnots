@@ -386,9 +386,13 @@ const CITATION_PATTERNS: CitationPattern[] = [
   // by Ch.X Sec.Y.
 
   // LR-CO-001 / LR-RU-001 — "LR-CO-001 Ch.10 Sec.2", "LR-RU-001 Ch.5",
-  // "LR-CO-001 GenReg Sec.4", "LR-CO-001 Notice1 Sec.1".
+  // "LR-CO-001 GenReg Sec.4", "LR-CO-001 Notice1 Sec.1", and (D6.93
+  // follow-up after LR-RU-001 ingest landed in per-Part folders)
+  // "LR-RU-001 Pt.6 Ch.2 Sec.3". The Part segment is optional so
+  // both LR-CO-001 (flat, no Part) and LR-RU-001 (Part-bearing)
+  // citations chip cleanly.
   {
-    re: /\bLR-(CO|RU)-(\d{3})\s+(?:Ch\.\w+|GenReg|Notice\d+)(?:\s+Sec\.\d+)?/g,
+    re: /\bLR-(CO|RU)-(\d{3})\s+(?:Pt\.\w+\s+)?(?:Ch\.\w+|GenReg|Notice\d+)(?:\s+Sec\.\d+)?/g,
     sourceHint: m => m[1] === 'CO' ? 'lr_lifting_code' : 'lr_rules',
     toSection: m => m[0].replace(/\s+/g, ' '),
   },
