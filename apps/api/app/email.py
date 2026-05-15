@@ -73,6 +73,39 @@ async def send_with_throttle(
 
 resend.api_key = settings.resend_api_key
 
+
+# Sprint D6.92 — tier-aware copy helpers for subscription lifecycle
+# emails. Pre-D6.92 every lifecycle email said "RegKnot Pro" — a dead
+# legacy tier — and `send_subscription_confirmed_email` claimed
+# "Unlimited questions — no message caps" regardless of which tier the
+# user actually subscribed to (a flat lie for Cadet at 25/mo and Mate
+# at 100/mo). These helpers let each email render the actual tier name
+# and cap line.
+def _tier_label(tier: str | None) -> str:
+    """User-facing label for an internal tier value. Legacy `pro`/`solo`
+    map to Captain for visual consistency with the account page; an
+    unrecognized tier returns the empty string so callers can fall back
+    to generic "RegKnot subscription" wording."""
+    return {
+        "cadet":   "Cadet",
+        "mate":    "Mate",
+        "captain": "Captain",
+        "pro":     "Captain",  # legacy → Captain
+        "solo":    "Captain",  # legacy → Captain
+    }.get(tier or "", "")
+
+
+def _tier_cap_line(tier: str | None) -> str:
+    """One-line description of the tier's message-cap benefit. Used in
+    the welcome email's "Here's what you get" list."""
+    if tier == "cadet":
+        return "25 compliance questions per month"
+    if tier == "mate":
+        return "100 compliance questions per month"
+    if tier in ("captain", "pro", "solo"):
+        return "Unlimited compliance questions"
+    return "RegKnot subscription benefits"
+
 FROM_EMAIL = "RegKnot <hello@mail.regknots.com>"
 CAPTAIN_EMAIL = "RegKnot <captain@mail.regknots.com>"
 APP_URL = "https://regknots.com"
@@ -291,6 +324,14 @@ async def send_password_reset_email(to_email: str, reset_token: str) -> None:
 
 
 async def send_trial_expiring_email(to_email: str, full_name: str, messages_used: int) -> None:
+    """3-day pre-expiry trial reminder.
+
+    Sprint D6.92 — copy refreshed for current tier landscape. Leads with
+    Cadet at $9.99 as the low-friction entry; mentions Mate/Captain as
+    upsells. Pre-D6.92 this said only "our paid plans cover unlimited
+    compliance questions" — true for Captain but misleading for Cadet
+    and Mate, both of which have caps.
+    """
     raw_first = full_name.split()[0] if full_name.strip() else "Mariner"
     first_name = _html_lib.escape(raw_first)
     html = _html(f"""
@@ -306,9 +347,23 @@ async def send_trial_expiring_email(to_email: str, full_name: str, messages_used
         work. Just hit reply to this email; I read every response personally.
       </p>
       <p>
-        If you've found it useful and want to keep going, our paid plans cover unlimited
-        compliance questions, vessel-specific answers, and every regulation source we've
-        ingested.
+        If you've found it useful and want to keep going, we now offer three plans:
+      </p>
+      <ul style="padding-left:20px; margin:0 0 16px;">
+        <li style="color:#6b7594; font-size:14px; line-height:1.7;">
+          <strong style="color:#f0ece4;">Cadet</strong> — $9.99/month — 25 questions per month
+        </li>
+        <li style="color:#6b7594; font-size:14px; line-height:1.7;">
+          <strong style="color:#f0ece4;">Mate</strong> — $19.99/month — 100 questions per month
+        </li>
+        <li style="color:#6b7594; font-size:14px; line-height:1.7;">
+          <strong style="color:#f0ece4;">Captain</strong> — $39.99/month — unlimited
+        </li>
+      </ul>
+      <p>
+        Most mariners we hear from end up on Cadet — designed as pocket-money
+        compliance insurance, a straight answer the one time per month a question
+        stumps you.
       </p>
       <a href="{APP_URL}/pricing" class="cta">See plans</a>
       <p style="font-size:12px; color:rgba(107,117,148,0.7); margin-top:14px;">
@@ -323,32 +378,13 @@ async def send_trial_expiring_email(to_email: str, full_name: str, messages_used
     })
 
 
-async def send_pilot_ended_email(to_email: str, full_name: str) -> None:
-    """Trial-ended email. Function name preserved for admin/test-email compatibility."""
-    raw_first = full_name.split()[0] if full_name.strip() else "Mariner"
-    first_name = _html_lib.escape(raw_first)
-    html = _html(f"""
-      <h1>Your free trial has ended</h1>
-      <p>
-        Hey {first_name} — your 14-day RegKnot free trial has expired.
-      </p>
-      <p>
-        To continue getting instant cited answers across CFR, COLREGs, NVICs, SOLAS, STCW,
-        the ISM Code, and the ERG — subscribe to RegKnot Pro for
-        <strong style="color:#f0ece4;">$39/month</strong>
-        (or save 26% with the annual plan at <strong style="color:#f0ece4;">$29/month</strong>).
-      </p>
-      <a href="{APP_URL}/pricing" class="cta">Subscribe to Pro</a>
-      <p style="font-size:12px; color:rgba(107,117,148,0.7); margin-top:8px;">
-        Questions? Reply to this email — we read every message.
-      </p>
-    """)
-    resend.Emails.send({
-        "from": CAPTAIN_EMAIL,
-        "to": [to_email],
-        "subject": f"Your RegKnot trial has ended, {raw_first}",
-        "html": html,
-    })
+# Sprint D6.92 — `send_pilot_ended_email` REMOVED. This was a legacy
+# function from the pre-launch pilot era that wasn't wired to any
+# scheduled job (only the admin test-email endpoint exercised it). Its
+# copy hardcoded "$39/month for RegKnot Pro" which contradicted the
+# current /pricing page. Rather than refresh dead code, delete it.
+# The trial 3-day warning above (send_trial_expiring_email) is the
+# only auto-fired trial touchpoint going forward.
 
 
 async def send_waitlist_confirmed_email(to_email: str, full_name: str) -> None:
@@ -378,14 +414,22 @@ async def send_waitlist_confirmed_email(to_email: str, full_name: str) -> None:
     })
 
 
-async def send_subscription_cancelled_email(to_email: str, full_name: str) -> None:
+async def send_subscription_cancelled_email(
+    to_email: str, full_name: str, tier: str | None = None,
+) -> None:
+    """Sprint D6.92 — tier-aware copy. Pre-D6.92 hardcoded `RegKnot Pro`
+    even for users on Cadet/Mate/Captain. `tier` is optional so legacy
+    callers still work; falls back to generic "your RegKnot subscription"
+    wording when omitted."""
     raw_first = full_name.split()[0] if full_name.strip() else "Mariner"
     first_name = _html_lib.escape(raw_first)
+    tier_label = _tier_label(tier)
+    sub_phrase = f"RegKnot {tier_label}" if tier_label else "RegKnot"
     html = _html(f"""
       <h1>Your subscription has been cancelled</h1>
       <p>
-        Hi {first_name} — your RegKnot Pro subscription has been cancelled.
-        You'll continue to have Pro access until the end of your current billing period.
+        Hi {first_name} — your {sub_phrase} subscription has been cancelled.
+        You'll continue to have access until the end of your current billing period.
       </p>
       <p>
         If you change your mind, you can re-subscribe anytime:
@@ -404,20 +448,29 @@ async def send_subscription_cancelled_email(to_email: str, full_name: str) -> No
     })
 
 
-async def send_subscription_confirmed_email(to_email: str, full_name: str) -> None:
+async def send_subscription_confirmed_email(
+    to_email: str, full_name: str, tier: str | None = None,
+) -> None:
+    """Sprint D6.92 — tier-aware welcome copy. Pre-D6.92 claimed
+    "Unlimited questions — no message caps" for every signup, which was
+    a flat lie for Cadet (25/mo) and Mate (100/mo). Now names the
+    actual tier and shows the right cap line."""
     raw_first = full_name.split()[0] if full_name.strip() else "Mariner"
     first_name = _html_lib.escape(raw_first)
+    tier_label = _tier_label(tier)
+    welcome_title = f"Welcome to RegKnot {tier_label}".strip()
+    cap_line = _tier_cap_line(tier)
     html = _html(f"""
-      <h1>Welcome to RegKnot Pro</h1>
+      <h1>{welcome_title}</h1>
       <p>
-        Welcome aboard, {first_name} — your Pro plan is now active.
+        Welcome aboard, {first_name} — your {f"RegKnot {tier_label}" if tier_label else "RegKnot"} subscription is now active.
       </p>
       <p>
         Here's what you get:
       </p>
       <ul style="padding-left:20px; margin:0 0 16px;">
-        <li style="color:#6b7594; font-size:14px; line-height:1.7;">Unlimited questions — no message caps</li>
-        <li style="color:#6b7594; font-size:14px; line-height:1.7;">CFR Titles 33, 46 &amp; 49 + COLREGs, NVICs, SOLAS 2024, STCW, ISM Code &amp; ERG</li>
+        <li style="color:#6b7594; font-size:14px; line-height:1.7;">{cap_line}</li>
+        <li style="color:#6b7594; font-size:14px; line-height:1.7;">CFR Titles 33, 46 &amp; 49 + SOLAS, COLREGs, NVICs, STCW, MARPOL, ISM Code &amp; ERG</li>
         <li style="color:#6b7594; font-size:14px; line-height:1.7;">Vessel-specific compliance answers</li>
         <li style="color:#6b7594; font-size:14px; line-height:1.7;">Audit-ready chat logs</li>
       </ul>
@@ -426,18 +479,23 @@ async def send_subscription_confirmed_email(to_email: str, full_name: str) -> No
     resend.Emails.send({
         "from": CAPTAIN_EMAIL,
         "to": [to_email],
-        "subject": f"Welcome to RegKnot Pro, {raw_first}",
+        "subject": f"{welcome_title}, {raw_first}",
         "html": html,
     })
 
 
-async def send_payment_failed_email(to_email: str, full_name: str) -> None:
+async def send_payment_failed_email(
+    to_email: str, full_name: str, tier: str | None = None,
+) -> None:
+    """Sprint D6.92 — tier-aware (drops `Pro` wording)."""
     raw_first = full_name.split()[0] if full_name.strip() else "Mariner"
     first_name = _html_lib.escape(raw_first)
+    tier_label = _tier_label(tier)
+    sub_phrase = f"RegKnot {tier_label}" if tier_label else "RegKnot"
     html = _html(f"""
       <h1>Action Required: Payment Failed</h1>
       <p>
-        Hi {first_name} — we were unable to process your latest RegKnot Pro payment.
+        Hi {first_name} — we were unable to process your latest {sub_phrase} payment.
         Your payment method may have expired or been declined.
       </p>
       <p>
@@ -457,13 +515,18 @@ async def send_payment_failed_email(to_email: str, full_name: str) -> None:
     })
 
 
-async def send_subscription_paused_email(to_email: str, full_name: str) -> None:
+async def send_subscription_paused_email(
+    to_email: str, full_name: str, tier: str | None = None,
+) -> None:
+    """Sprint D6.92 — tier-aware (drops `Pro` wording)."""
     raw_first = full_name.split()[0] if full_name.strip() else "Mariner"
     first_name = _html_lib.escape(raw_first)
+    tier_label = _tier_label(tier)
+    sub_phrase = f"RegKnot {tier_label}" if tier_label else "RegKnot"
     html = _html(f"""
       <h1>Your Subscription is Paused</h1>
       <p>
-        Hi {first_name} — your RegKnot Pro subscription has been paused.
+        Hi {first_name} — your {sub_phrase} subscription has been paused.
         You won't be charged during the pause period.
       </p>
       <p>
@@ -518,12 +581,17 @@ async def send_charity_suggestion_email(
 def render_founding_member_email(full_name: str | None) -> tuple[str, str]:
     """Return (subject, html) for the early-user thank-you announcement email.
 
-    Function name preserved for admin dashboard compatibility; copy is now a
-    generic RegKnot Pro welcome email.
+    Sprint D6.92 — copy refreshed for current tier landscape and 7-day
+    trial (was 14-day pre-0050). Pre-D6.92 this hardcoded "$39/$29 for
+    RegKnot Pro" and mentioned "Enterprise subdomains" which doesn't
+    exist (replaced by Wheelhouse). Now leads with the three-tier
+    structure including the new $9.99 Cadet entry point.
+
+    Function name preserved for admin-dashboard backward compatibility.
     """
     raw_first = (full_name or "").split()[0] if (full_name or "").strip() else ""
     first_name = _html_lib.escape(raw_first) if raw_first else "Captain"
-    subject = "Your RegKnot Pro access is ready"
+    subject = "Your RegKnot access is ready"
     html = _html(f"""
       <h1>Hi {first_name},</h1>
       <p>
@@ -532,34 +600,41 @@ def render_founding_member_email(full_name: str | None) -> tuple[str, str]:
         couldn&rsquo;t have done alone.
       </p>
       <p>
-        RegKnot Pro is now live at
-        <strong style="color:#f0ece4;">$39/month</strong>
-        (or save 26% with the annual plan at
-        <strong style="color:#f0ece4;">$29/month</strong>, billed
-        <strong style="color:#f0ece4;">$348/year</strong>).
-        Every subscription includes a 14-day free trial &mdash; no credit card required.
-      </p>
-      <p style="color:#f0ece4; font-weight:700; margin-top:24px; margin-bottom:8px;">
-        What you get with Pro:
+        RegKnot now offers three plans, all billed monthly or annually:
       </p>
       <ul style="padding-left:20px; margin:0 0 16px;">
         <li style="color:#6b7594; font-size:14px; line-height:1.7;">
-          Unlimited compliance questions across CFR, SOLAS, COLREGs, STCW, NVICs, ISM, and the ERG
+          <strong style="color:#f0ece4;">Cadet</strong> &mdash; $9.99/month &mdash; 25 questions per month
         </li>
         <li style="color:#6b7594; font-size:14px; line-height:1.7;">
-          Cited, regulation-backed answers you can trust
+          <strong style="color:#f0ece4;">Mate</strong> &mdash; $19.99/month &mdash; 100 questions per month
+        </li>
+        <li style="color:#6b7594; font-size:14px; line-height:1.7;">
+          <strong style="color:#f0ece4;">Captain</strong> &mdash; $39.99/month &mdash; unlimited
+        </li>
+      </ul>
+      <p>
+        Every subscription includes a 7-day free trial &mdash; no credit card required.
+        For crews, Wheelhouse covers up to 10 seats per vessel.
+      </p>
+      <p style="color:#f0ece4; font-weight:700; margin-top:24px; margin-bottom:8px;">
+        What you get:
+      </p>
+      <ul style="padding-left:20px; margin:0 0 16px;">
+        <li style="color:#6b7594; font-size:14px; line-height:1.7;">
+          Cited, regulation-backed answers across CFR, SOLAS, MARPOL, STCW, COLREGs, NVICs, ISM Code, IMDG, and the ERG
         </li>
         <li style="color:#6b7594; font-size:14px; line-height:1.7;">
           Vessel-aware context that remembers your ship&rsquo;s profile
         </li>
         <li style="color:#6b7594; font-size:14px; line-height:1.7;">
-          Real-time progress tracking as your question is researched across regulations
+          Study Tools &mdash; quiz and study-guide generators (Mate and Cadet plans)
+        </li>
+        <li style="color:#6b7594; font-size:14px; line-height:1.7;">
+          Real-time progress tracking as your question is researched
         </li>
         <li style="color:#6b7594; font-size:14px; line-height:1.7;">
           Export your chat history for personal records
-        </li>
-        <li style="color:#6b7594; font-size:14px; line-height:1.7;">
-          Enterprise subdomains for fleet-wide deployment
         </li>
         <li style="color:#6b7594; font-size:14px; line-height:1.7;">
           Priority access to new features as we add them
@@ -569,17 +644,17 @@ def render_founding_member_email(full_name: str | None) -> tuple[str, str]:
         What your subscription supports:
       </p>
       <p>
-        10% of every dollar goes directly to charities &mdash; Mercy Ships,
-        Waves of Impact, and Elijah Rising. When you subscribe, you&rsquo;re not just
-        getting a tool. You&rsquo;re supporting organizations doing meaningful work
-        in the world.
+        10% of every dollar goes directly to maritime charities &mdash; Mercy Ships,
+        Waves of Impact, Women Offshore, and a few others. When you subscribe,
+        you&rsquo;re not just getting a tool. You&rsquo;re supporting organizations
+        doing meaningful work.
         <a href="{APP_URL}/giving" style="color:#2dd4bf; text-decoration:none;">Learn more &rarr;</a>
       </p>
       <p>
-        Your trial is still active, so there&rsquo;s no rush. But when you&rsquo;re
-        ready, you can upgrade in the app:
+        Your trial is still active, so there&rsquo;s no rush. When you&rsquo;re
+        ready, pick a plan:
       </p>
-      <a href="{APP_URL}/pricing" class="cta">Upgrade to Pro</a>
+      <a href="{APP_URL}/pricing" class="cta">See plans</a>
       <p>
         If you have questions, feedback, or just want to say hey &mdash; reply to this
         email. It comes straight to us, not a support queue.
@@ -655,15 +730,21 @@ async def send_contact_inquiry_email(
     })
 
 
-async def send_subscription_resumed_email(to_email: str, full_name: str) -> None:
+async def send_subscription_resumed_email(
+    to_email: str, full_name: str, tier: str | None = None,
+) -> None:
+    """Sprint D6.92 — tier-aware (drops `Pro` + the false "unlimited"
+    claim that applied only to Captain)."""
     raw_first = full_name.split()[0] if full_name.strip() else "Mariner"
     first_name = _html_lib.escape(raw_first)
+    tier_label = _tier_label(tier)
+    sub_phrase = f"RegKnot {tier_label}" if tier_label else "RegKnot"
     html = _html(f"""
       <h1>Welcome Back, {first_name}!</h1>
       <p>
-        Your RegKnot Pro subscription has been resumed. Full access is restored —
-        unlimited questions, vessel-specific answers, and all regulation sources
-        are available again.
+        Your {sub_phrase} subscription has been resumed. Full access is restored —
+        vessel-specific answers and every regulation source we've ingested are
+        available again.
       </p>
       <a href="{APP_URL}" class="cta">Start Asking Questions</a>
     """)
