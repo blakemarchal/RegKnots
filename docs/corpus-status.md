@@ -35,8 +35,9 @@ vague about it"). This document is for engineering planning.
 | WHO IHR | `who_ihr` | 1 | Full (2005 + 2014/2022/2024 amendments) | Manual |
 | ABS Marine Vessel Rules | `abs_mvr` | 1 | Pt.3, 4, 5C-1, 5C-2, 5D, 6 + Notices + Notations Table (2025 ed., 217 MB; Pt.1/2/5A/5B/7 deferred — different filename pattern). 354 sections / 5,851 chunks. | Manual |
 | Lloyd's Register Code for Lifting Appliances | `lr_lifting_code` | 1 | Full LR-CO-001 July 2025 — 15 .docx, 81 sections / 448 chunks | Manual (Regs4ships) |
+| Lloyd's Register Rules for Classification of Ships | `lr_rules` | 1 | LR-RU-001 July 2025 — Pt.1, 2, 3, 4, 5, 6, 8 + Notice 1 (Pt.7 pending Blake's pull). 615 sections / 2,982 chunks. | Manual (Regs4ships) |
 
-**~52,000 chunks pre-D6.93. ABS + LR add 6,299 (5,851 abs_mvr + 448 lr_lifting_code).**
+**~52,000 chunks pre-D6.93. Class-society corpus adds 9,281 (5,851 abs_mvr + 448 lr_lifting_code + 2,982 lr_rules).**
 
 ## Curated subset (operational essentials only)
 
@@ -69,7 +70,7 @@ vague about it"). This document is for engineering planning.
 | MOU PSC reports | `mou_psc` | parismou.org returned 403/404 on tested URLs | Manual download + scp into raw_dir | Next sprint |
 | 20 IACS URs (ClassNK mirror) | `iacs_ur` | ClassNK rate-limits non-JP IPs to 8 successive requests | Member-society mirror rotation (ABS, DNV, LR, BV) | Next sprint |
 | 11 BMA Marine Notices | `bma_mn` | Filename-pattern guesses didn't match WP upload paths | Visit listing page, extract actual filenames | Next sprint |
-| Lloyd's Register Rules for Classification of Ships | `lr_rules` | Files not yet pulled from Regs4ships portal (slow manual export) | Blake pulling — adapter wired, just awaiting `data/raw/lloyds_rules/` contents | This sprint (Blake) |
+| LR-RU-001 Pt.7 (Other Ship Types and Systems) | `lr_rules` | Folder exists empty — Blake will pull tonight | `run_ingest.sh --source lr_rules --update --no-notify` after files land — hashes skip the seven Parts already ingested | This sprint (Blake) |
 | DNV Rules | n/a yet | `rules.dnv.com` is a React SPA — returns JS shim to non-browser agents; PDFs gated behind authenticated browser sessions | Playwright headless Chromium scrape; see `docs/sprint-audits/class-society-corpus-d693.md` | Next sprint (~1 day) |
 | ABS Pt.1/2/5A/5B/7 | `abs_mvr` | `1-mvr-part-N-jul25.pdf` 404'd for those parts — different prefix or date variant | Visit ABS publications page in browser, copy actual URLs, re-run `--update` | Blake to confirm filenames |
 

@@ -10,7 +10,19 @@
 |---|---|---|---|
 | ABS Marine Vessel Rules (2025) | `abs_mvr` | `ABS MVR Pt.4 Ch.2 Sec.1` | **Live** — 354 sections / 5,851 chunks (Pt.3, 4, 5C-1, 5C-2, 5D, 6 + Notices + Notations Table; 217 MB) |
 | Lloyd's Register — Code for Lifting Appliances (LR-CO-001, July 2025) | `lr_lifting_code` | `LR-CO-001 Ch.10 Sec.2` | **Live** — 81 sections / 448 chunks across 15 .docx files |
-| Lloyd's Register — Rules for Classification of Ships (LR-RU-001, July 2025) | `lr_rules` | `LR-RU-001 Ch.X Sec.Y` | **Wired, awaiting files** — Blake pulling from Regs4ships portal |
+| Lloyd's Register — Rules for Classification of Ships (LR-RU-001, July 2025) | `lr_rules` | `LR-RU-001 Pt.6 Ch.2 Sec.3` | **Live** — 615 sections / 2,982 chunks across Pt.1, 2, 3, 4, 5, 6, 8 + Notice 1. Pt.7 (Other Ship Types and Systems) pending Blake's pull. |
+
+## Classification model
+
+All three new sources are tagged uniformly:
+
+- **Jurisdictions:** `["intl"]` (universal). Class society scope is per-vessel, not per-flag. ABS classes Liberian/MH/Singapore-flag tankers; LR classes vessels under just as many flags. Tagging the society's HQ flag (`["us"]` for ABS, `["uk"]` for LR) would silently hide the rules from non-US/non-UK users whose vessels are classed by them. `intl` mirrors the IACS UR / SOLAS / IMO codes posture. Made explicit in `packages/ingest/ingest/store.py` _SOURCE_TO_JURISDICTIONS and `packages/rag/rag/jurisdiction.py` SOURCE_TO_JURISDICTIONS (previously fell through to the default — fragile, now documented).
+
+- **Authority tier:** Tier 1 (binding regulation/treaty). By analogy to `mca_msn` (Tier 1 — "binding technical detail of UK Statutory Instruments"). SOLAS Ch.II-1 delegates construction approval to "recognized organizations" — the class society's rules ARE the binding technical detail behind that SOLAS delegation for the classed vessel. Not interpretive guidance (Tier 2), not domain-reference (Tier 4 — that's IACS URs, common-denominator across all members).
+
+- **Retrieval group:** `class_society` in `packages/rag/rag/retriever.py` SOURCE_GROUPS. Independent candidate pool: up to 6 chunks per source per query, so a class-survey query doesn't crowd CFR/SOLAS candidates. When all three surface together, the synthesizer disambiguates by vessel profile (which society the user's vessel is actually classed by).
+
+- **References authority order:** placed between Tier 3 (USCG bulletins) and flag-state circulars in `_REFERENCES_AUTHORITY_ORDER` (`apps/api/app/routers/regulations.py`). On citation 404 fallback, class society rules surface above flag-state circulars but below the primary IMO/CFR sources — they're binding for the classed vessel but ABS Pt.4 isn't more authoritative than SOLAS itself.
 
 Migration `0099_add_class_society_sources.py` adds all three to the
 `regulations.source` CHECK constraint. RAG side: `_SOURCE_TO_TIER`
@@ -157,15 +169,34 @@ the following IS in the corpus and should surface via retrieval:
   alarm and safety systems" — electrical control-system class scope
   on lifting appliances; same caveat.
 
+**LR-RU-001 update (post-pull 2026-05-15):** LR-RU-001 is now LIVE.
+The directly-relevant chapter is:
+
+- **LR-RU-001 Pt.6 Ch.2 Electrical Engineering** (24 sections / 386 chunks):
+  - Sec.2: Main source of electrical power
+  - **Sec.3: Emergency source of electrical power** ← Karynn's emergency-power scenario
+  - Sec.5: Supply and distribution
+  - **Sec.6: System design – Protection** ← transformer protection coordination
+  - Sec.7: Switchgear and controlgear assemblies
+  - Sec.21: Testing and trials (post-failure re-validation)
+  - + 18 more sections covering propulsion, batteries, lightning, safety systems.
+
+LR-RU-001 also includes **Pt.1 Ch.3 Periodical Survey Regulations**
+(the survey-trigger authority for the "when do I have to report
+this" question) and **Pt.6 Ch.1 Control Engineering Systems**
+(control/alarm/safety from a control-engineering lens).
+
 **Action for the ship-handover question:** ask the chat directly with
-phrasing like "ABS-classed transformer failure — when is it
-reportable?" The retrieval pipeline will surface the Pt.4 Ch.8 +
-Pt.6 chunks above. If a citation chip appears as
-`ABS MVR Pt.4 Ch.8 Sec.4`, click-through resolves to the
-"Shipboard Installation and Tests" body and confirms the chip
-plumbing works end-to-end. If neither covers her exact scenario,
-flag the gap and her transcript becomes a gold-set entry; that's
-what the LR-RU-001 ingest (once Blake's files land) will close.
+phrasing like "ABS or Lloyd's classed vessel transformer failure —
+when is it reportable to class?" Retrieval will surface chunks from
+both ABS Pt.4 Ch.8 + Pt.6 and LR-RU-001 Pt.1 Ch.3 + Pt.6 Ch.2. The
+synthesizer routes to the correct society once vessel profile is
+known (or the chat asks). Citation chips like
+`LR-RU-001 Pt.6 Ch.2 Sec.3` and `ABS MVR Pt.4 Ch.8 Sec.4` should
+click through cleanly.
+
+**Still pending:** LR-RU-001 Pt.7 (Other Ship Types and Systems).
+Blake pulling tonight; re-run `--update` mode to fold it in.
 
 ---
 
