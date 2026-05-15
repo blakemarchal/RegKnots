@@ -66,19 +66,26 @@ _PART_FROM_NAME = re.compile(
 
 # Chapter header inside the text. ABS uses both upper-case ("CHAPTER 3")
 # in body banners and title-case ("Chapter 3") in cross-references and
-# the front-matter table of contents.
+# the front-matter table of contents. The title must start with a
+# letter to exclude column-style page footers that emit
+# "Part/Chapter/Section" labels on one line and the corresponding
+# digits on the following lines — pdftotext renders those as
+# "Chapter\n\n8\n\nElectrical Systems", which without the letter
+# anchor matches as Chapter 8 with title "Electrical Systems" but
+# also occasionally as Chapter 4 with title "8" depending on where
+# the dedupe boundary lands.
 _CHAPTER_HEADER = re.compile(
-    r"^\s*CHAPTER\s+(\d+)\s+(.+?)\s*$",
+    r"^\s*CHAPTER\s+(\d+)\s+([A-Za-z][^\n]*?)\s*$",
     re.MULTILINE | re.IGNORECASE,
 )
 
-# Section header inside the text. Same case-variance applies. The
-# trailing portion of the line may include TOC leader dots and a page
+# Section header inside the text. Same case-variance + letter-anchor
+# applies. The trailing portion may include TOC leader dots and a page
 # number (e.g. "Section 3   Engineering Systems Overview...........5");
 # we exclude those at split time by checking the captured title for a
 # leader-dot run — see _split_into_sections.
 _SECTION_HEADER = re.compile(
-    r"^\s*Section\s+(\d+)\s+(.+?)\s*$",
+    r"^\s*Section\s+(\d+)\s+([A-Za-z][^\n]*?)\s*$",
     re.MULTILINE | re.IGNORECASE,
 )
 
@@ -86,6 +93,22 @@ _SECTION_HEADER = re.compile(
 # title text followed by leader dots and a page number. We treat any
 # match with 4+ consecutive dots as a TOC false positive.
 _TOC_LEADER = re.compile(r"\.{4,}")
+
+
+def _is_likely_title(title: str) -> bool:
+    """Reject obvious false-positive titles that survive the line-anchor
+    regex. pdftotext sometimes places a TABLE/FIGURE caption immediately
+    after a section banner, so the lazy ``(.+?)`` captures the caption
+    line instead of the real section title. Same logic for "PART" /
+    "CHAPTER" page-header lines that follow a section banner near a
+    page break.
+    """
+    stripped = title.strip()
+    if not stripped:
+        return False
+    upper = stripped.upper()
+    bad_prefixes = ("TABLE ", "FIGURE ", "APPENDIX ", "PART ", "CHAPTER ")
+    return not any(upper.startswith(p) for p in bad_prefixes)
 
 # PDF noise patterns — header footers, page numbers, ABS branding.
 _PAGE_NUMBER = re.compile(r"^\s*\d{1,4}\s*$", re.MULTILINE)
@@ -166,8 +189,8 @@ def _split_chapters_and_sections(
     out: list[tuple[str, str, str, str]] = []
     for i, m in enumerate(chapter_matches):
         ch_title = m.group(2).strip()
-        if _TOC_LEADER.search(ch_title):
-            continue  # TOC chapter listing — real banner appears later
+        if _TOC_LEADER.search(ch_title) or not _is_likely_title(ch_title):
+            continue  # TOC chapter listing or page-header false positive
         ch_num = m.group(1)
         start = m.end()
         end = chapter_matches[i + 1].start() if i + 1 < len(chapter_matches) else len(full_text)
@@ -203,8 +226,8 @@ def _split_into_sections(chapter_body: str) -> list[tuple[str, str, str]]:
     out: list[tuple[str, str, str]] = []
     for i, m in enumerate(matches):
         sec_title = m.group(2).strip()
-        if _TOC_LEADER.search(sec_title):
-            continue  # TOC entry — real section header arrives later
+        if _TOC_LEADER.search(sec_title) or not _is_likely_title(sec_title):
+            continue  # TOC entry or TABLE/FIGURE caption false positive
         sec_num = m.group(1)
         start = m.end()
         end = matches[i + 1].start() if i + 1 < len(matches) else len(chapter_body)
