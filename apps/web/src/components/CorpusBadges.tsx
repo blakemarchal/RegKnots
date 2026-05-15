@@ -122,6 +122,24 @@ const CORPUS: CorpusSource[] = [
     category: 'international',
     url: 'https://iacs.org.uk/resolutions/unified-requirements',
   },
+  // Sprint D6.93 — first per-society class rule books on top of the
+  // IACS umbrella standards. ABS (~70% of U.S.-flag commercial vessels)
+  // and Lloyd's Register (LR-CO-001 lifting code + LR-RU-001 full
+  // classification rules). DNV/BV/ClassNK are deferred — they don't
+  // publish freely scrapable rule sets (DNV needs an authenticated
+  // browser session, BV/ClassNK gate behind member portals).
+  {
+    short: 'ABS Rules',
+    full: 'American Bureau of Shipping — Rules for Building and Classing Marine Vessels (hull, machinery, electrical, surveys, vessel-type-specific construction)',
+    category: 'international',
+    url: 'https://ww2.eagle.org/en/rules-and-resources/rules-and-guides.html',
+  },
+  {
+    short: 'LR Rules',
+    full: "Lloyd's Register — Rules and Regulations for the Classification of Ships (LR-RU-001) plus Code for Lifting Appliances in a Marine Environment (LR-CO-001)",
+    category: 'international',
+    url: 'https://www.lr.org/en/rules-and-regulations/',
+  },
 
   // ── Non-U.S. flag-state regulators ────────────────────────────────────
   // Sprint D6.26 — flagCC drives a small flag chip rendered inside each

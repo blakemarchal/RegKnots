@@ -86,6 +86,16 @@ _SOURCE_TO_TIER: dict[str, int] = {
     # ERG gets: authoritative within domain, doesn't outrank SOLAS for
     # questions outside class-survey scope.
     "iacs_ur": 4,
+    # Class society rules — Sprint D6.93. ABS Marine Vessel Rules and
+    # Lloyd's Register Rules (LR-CO-001 + LR-RU-001). For a vessel
+    # classed by that society these are the binding technical standard —
+    # without class the vessel may be uninsurable and barred from most
+    # ports. Tier 1 in the classed-vessel context. The synthesizer
+    # routes them via jurisdiction priors so an ABS-classed query
+    # surfaces abs_mvr above lr_rules and vice versa.
+    "abs_mvr": 1,
+    "lr_rules": 1,
+    "lr_lifting_code": 1,
     # IMO codes that supplement SOLAS — Sprint D6.23. Tier 1 binding
     # for the vessel types they govern (peers of SOLAS, not subordinate).
     "imo_css": 1,

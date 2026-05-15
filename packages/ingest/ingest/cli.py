@@ -330,6 +330,35 @@ _PDF_SOURCE_CONFIG: dict[str, dict] = {
         "raw_dir": _DATA_RAW / "uscg_msm",
         "adapter": "ingest.sources.uscg_msm",
     },
+    # Sprint D6.93 — first class-society corpus expansion. All three
+    # are static raw_dir sources (no download phase; files placed
+    # manually). Adapters expose a no-op discover_and_download() so
+    # the multi-PDF dispatch path proceeds straight to parse_source().
+    "lr_lifting_code": {
+        # Lloyd's Register Code for Lifting Appliances in a Marine
+        # Environment (LR-CO-001). Source files are .docx exports from
+        # the Regs4ships portal (one per chapter, plus General
+        # Regulations and the per-edition Notice docs).
+        "raw_dir": _DATA_RAW / "lloyds",
+        "adapter": "ingest.sources.lr_lifting_code",
+    },
+    "lr_rules": {
+        # Lloyd's Register Rules and Regulations for the Classification
+        # of Ships (LR-RU-001). Same .docx format as LR-CO-001; shares
+        # the lloyds_docx.py parser. This is the document Karynn's
+        # 2026-05-13 transformer-failure question needs.
+        "raw_dir": _DATA_RAW / "lloyds_rules",
+        "adapter": "ingest.sources.lr_rules",
+    },
+    "abs_mvr": {
+        # ABS Marine Vessel Rules — consolidated PDF rule set from
+        # ww2.eagle.org. Filename convention: 1-mvr-part-N-jul25.pdf
+        # (Parts 3, 4, 5C-1, 5C-2, 5D, 6 + Notices + Class Notations
+        # table; Parts 1/2/5A/5B/7 use a different filename pattern and
+        # are deferred). ~217 MB total.
+        "raw_dir": _DATA_RAW / "abs",
+        "adapter": "ingest.sources.abs_mvr",
+    },
 }
 
 _DATA_FAILED = Path(__file__).resolve().parents[3] / "data" / "failed"
@@ -509,6 +538,10 @@ async def _run(
                 adapter.dry_run(cfg["text_dir"])
             elif "pdf" in cfg and hasattr(adapter, "dry_run"):
                 adapter.dry_run(cfg["pdf"])
+            elif "raw_dir" in cfg and hasattr(adapter, "dry_run"):
+                # Sprint D6.93 — class-society raw_dir sources (lr_*,
+                # abs_mvr). Adapter's dry_run takes the directory.
+                adapter.dry_run(cfg["raw_dir"])
             else:
                 console.print(
                     f"[yellow]--dry-run is not supported for '{source}'.[/yellow]"

@@ -181,6 +181,12 @@ _REFERENCES_AUTHORITY_ORDER = [
     "imo_igf", "imo_css", "imo_iamsar", "imo_loadlines",
     # Tier 3 — NMC / IACS / WHO
     "nmc_policy", "nmc_checklist", "iacs_ur", "iacs_pr", "who_ihr",
+    # Class society rules — Sprint D6.93. Binding for vessels classed by
+    # the society. Ranked above flag-state circulars because for the
+    # classed vessel they are technical standard, not interpretive
+    # guidance. Two Lloyd's docs (LR-CO-001 lifting code, LR-RU-001 the
+    # full classification rules) and ABS's Marine Vessel Rules.
+    "lr_rules", "lr_lifting_code", "abs_mvr",
     # Tier 4 — flag-state circulars (alphabetical by flag)
     "amsa_mo", "bg_verkehr", "bma_mn",
     "iri_mn", "liscr_mn", "mardep_msin", "mca_mgn", "mca_msn",
