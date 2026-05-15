@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import logging
 import re
+import subprocess
 from datetime import date
 from pathlib import Path
 
@@ -187,10 +188,26 @@ def _split_into_sections(chapter_body: str) -> list[tuple[str, str, str]]:
     return out
 
 
+def _extract_text(pdf_path: Path) -> str:
+    """Shell out to ``pdftotext`` for memory-light PDF text extraction.
+
+    Mirrors uscg_msm.py — pdfplumber loaded the full ABS Pt.5C-2 (58 MB,
+    ~2000 pages) into ~1 GB resident memory which thrashes our 1.5 GB
+    cgroup cap. pdftotext is a streaming C utility from poppler-utils
+    with a flat memory profile regardless of PDF size. The ABS rule
+    text is paragraph-based (no critical table layout), so the layout
+    fidelity loss is acceptable.
+    """
+    out = subprocess.check_output(
+        ["pdftotext", str(pdf_path), "-"],
+        text=True,
+        stderr=subprocess.DEVNULL,
+    )
+    return out
+
+
 def parse_source(raw_dir: Path) -> list[Section]:
     """Parse every PDF in ``raw_dir`` into Section objects."""
-    import pdfplumber
-
     if not raw_dir.exists():
         raise FileNotFoundError(f"ABS raw directory not found: {raw_dir}")
 
@@ -204,13 +221,7 @@ def parse_source(raw_dir: Path) -> list[Section]:
         part = _detect_part(pdf_path)
         logger.info("ABS MVR: parsing %s (Part %s)…", pdf_path.name, part)
 
-        # Extract full text from all pages.
-        pages_text: list[str] = []
-        with pdfplumber.open(pdf_path) as pdf:
-            for page in pdf.pages:
-                text = page.extract_text() or ""
-                pages_text.append(text)
-        full_text = "\n".join(pages_text)
+        full_text = _extract_text(pdf_path)
 
         # Two of the auxiliary PDFs lack a proper chapter/section
         # hierarchy and the heuristic split produces garbage on them:
