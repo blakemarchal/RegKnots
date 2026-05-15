@@ -21,7 +21,7 @@ TITLE_NAMES: dict[int, str] = {
 }
 
 # Sources ingested from text/PDF/XML files (not eCFR API). title_number=0 for all.
-PDF_SOURCES: list[str] = ["amsa_mo", "bg_verkehr", "bma_mn", "colregs", "dgmm_es", "erg", "fr_transport", "gr_ynanp", "iacs_pr", "iacs_ur", "imdg", "imdg_manual", "imdg_supplement", "imo_bwm", "imo_css", "imo_hsc", "imo_iamsar", "imo_ibc", "imo_igc", "imo_igf", "imo_loadlines", "imo_polar", "iri_mn", "ism", "ism_supplement", "it_capitaneria", "liscr_mn", "mardep_msin", "marpol", "marpol_amend", "marpol_supplement", "mca_mgn", "mca_msn", "mou_psc", "mpa_sc", "nma_rsv", "nmc_checklist", "nmc_exam_bank", "nmc_policy", "nvic", "ocimf", "solas", "solas_supplement", "stcw", "stcw_amend", "stcw_supplement", "tc_ssb", "usc_46", "uscg_bulletin", "uscg_msm", "who_ihr"]
+PDF_SOURCES: list[str] = ["abs_mvr", "amsa_mo", "bg_verkehr", "bma_mn", "colregs", "dgmm_es", "erg", "fr_transport", "gr_ynanp", "iacs_pr", "iacs_ur", "imdg", "imdg_manual", "imdg_supplement", "imo_bwm", "imo_css", "imo_hsc", "imo_iamsar", "imo_ibc", "imo_igc", "imo_igf", "imo_loadlines", "imo_polar", "iri_mn", "ism", "ism_supplement", "it_capitaneria", "liscr_mn", "lr_lifting_code", "lr_rules", "mardep_msin", "marpol", "marpol_amend", "marpol_supplement", "mca_mgn", "mca_msn", "mou_psc", "mpa_sc", "nma_rsv", "nmc_checklist", "nmc_exam_bank", "nmc_policy", "nvic", "ocimf", "solas", "solas_supplement", "stcw", "stcw_amend", "stcw_supplement", "tc_ssb", "usc_46", "uscg_bulletin", "uscg_msm", "who_ihr"]
 
 
 # ── Data models ─────────────────────────────────────────────────────────────

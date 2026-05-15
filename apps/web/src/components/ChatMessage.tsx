@@ -376,6 +376,32 @@ const CITATION_PATTERNS: CitationPattern[] = [
     sourceHint: 'iacs_ur',
     toSection: m => m[0].replace(/\s+/g, ' '),
   },
+
+  // Sprint D6.93 — class society rules. Two corpora live behind the
+  // LR- prefix (LR-CO-001 Code for Lifting Appliances and LR-RU-001
+  // Rules for Classification of Ships), so the sourceHint switches on
+  // the captured doc family. ABS Marine Vessel Rules use a single
+  // citation shape covering Pt.N (digit or "5C1"/"5D"/etc. variants
+  // plus the "Notices"/"Notations" pseudo-parts) optionally followed
+  // by Ch.X Sec.Y.
+
+  // LR-CO-001 / LR-RU-001 — "LR-CO-001 Ch.10 Sec.2", "LR-RU-001 Ch.5",
+  // "LR-CO-001 GenReg Sec.4", "LR-CO-001 Notice1 Sec.1".
+  {
+    re: /\bLR-(CO|RU)-(\d{3})\s+(?:Ch\.\w+|GenReg|Notice\d+)(?:\s+Sec\.\d+)?/g,
+    sourceHint: m => m[1] === 'CO' ? 'lr_lifting_code' : 'lr_rules',
+    toSection: m => m[0].replace(/\s+/g, ' '),
+  },
+
+  // ABS Marine Vessel Rules — "ABS MVR Pt.4 Ch.2 Sec.1",
+  // "ABS MVR Pt.5C1 Ch.3 Sec.2", "ABS MVR Pt.Notices",
+  // "ABS MVR Pt.Notations". Part is alphanumeric to cover the 5A/5B/
+  // 5C-1/5C-2/5D variants ABS uses for Vessel Types.
+  {
+    re: /\bABS\s+MVR\s+Pt\.\w+(?:\s+Ch\.\d+(?:\s+Sec\.\d+)?)?/g,
+    sourceHint: 'abs_mvr',
+    toSection: m => m[0].replace(/\s+/g, ' '),
+  },
 ]
 
 /** Scan a string for all maritime citations across every pattern.

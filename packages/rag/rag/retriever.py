@@ -107,6 +107,12 @@ SOURCE_GROUPS: dict[str, tuple[str, ...]] = {
     # IACS class society in its own group so technical-class queries
     # can find UR content without crowding the IMO instrument groups.
     "iacs": ("iacs_ur",),
+    # Sprint D6.93 — class society rule books. Lloyd's Register
+    # (LR-CO-001 lifting code + LR-RU-001 classification rules) and
+    # ABS Marine Vessel Rules. Grouped together so a classed-vessel
+    # query draws from both bodies, then jurisdiction priors / chat
+    # filters narrow to the relevant society at synthesis time.
+    "class_society": ("lr_lifting_code", "lr_rules", "abs_mvr"),
     # IMO codes share a group — they're peer instruments to SOLAS that
     # bind specific vessel types (HSC for fast craft, IGC/IBC for
     # gas/chemical tankers, Load Lines universal, CSS via SOLAS Ch.VI).
