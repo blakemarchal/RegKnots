@@ -1483,8 +1483,8 @@ async def phase2_review(
 EmailType = Literal[
     # Auth & account
     "welcome", "verification", "password_reset", "password_changed",
-    # Subscription & trial
-    "trial_expiry", "pilot_ended", "subscription_confirmed", "payment_failed",
+    # Subscription & trial — Sprint D6.92 dropped 'pilot_ended' (dead).
+    "trial_expiry", "subscription_confirmed", "payment_failed",
     "subscription_cancelled", "subscription_paused", "subscription_resumed",
     # Support & inquiry
     "support_confirmation", "support_reply", "contact_inquiry",
@@ -1504,7 +1504,7 @@ EMAIL_CATEGORIES: dict[str, list[dict]] = {
     ],
     "Subscription & Trial": [
         {"type": "trial_expiry", "label": "Trial Expiring"},
-        {"type": "pilot_ended", "label": "Pilot Ended"},
+        # Sprint D6.92 — 'pilot_ended' option removed (dead function).
         {"type": "subscription_confirmed", "label": "Subscription Confirmed"},
         {"type": "payment_failed", "label": "Payment Failed"},
         {"type": "subscription_cancelled", "label": "Subscription Cancelled"},
@@ -1560,7 +1560,9 @@ async def send_test_email(
         send_password_reset_email,
         send_password_changed_email,
         send_trial_expiring_email,
-        send_pilot_ended_email,
+        # Sprint D6.92 — send_pilot_ended_email removed (was legacy
+        # dead code with stale "$39 RegKnot Pro" pricing, only wired
+        # to this test endpoint, never fired in production).
         send_subscription_confirmed_email,
         send_payment_failed_email,
         send_subscription_cancelled_email,
@@ -1591,18 +1593,19 @@ async def send_test_email(
             await send_password_changed_email(recipient, test_name)
         elif body.type == "trial_expiry":
             await send_trial_expiring_email(recipient, test_name, 37)
-        elif body.type == "pilot_ended":
-            await send_pilot_ended_email(recipient, test_name)
+        # Sprint D6.92 — 'pilot_ended' test type removed (function dead).
         elif body.type == "subscription_confirmed":
-            await send_subscription_confirmed_email(recipient, test_name)
+            # Sprint D6.92 — pass a representative tier for the test
+            # so admins see Cadet/Mate/Captain in the preview.
+            await send_subscription_confirmed_email(recipient, test_name, tier="cadet")
         elif body.type == "payment_failed":
-            await send_payment_failed_email(recipient, test_name)
+            await send_payment_failed_email(recipient, test_name, tier="cadet")
         elif body.type == "subscription_cancelled":
-            await send_subscription_cancelled_email(recipient, test_name)
+            await send_subscription_cancelled_email(recipient, test_name, tier="cadet")
         elif body.type == "subscription_paused":
-            await send_subscription_paused_email(recipient, test_name)
+            await send_subscription_paused_email(recipient, test_name, tier="cadet")
         elif body.type == "subscription_resumed":
-            await send_subscription_resumed_email(recipient, test_name)
+            await send_subscription_resumed_email(recipient, test_name, tier="cadet")
         elif body.type == "support_confirmation":
             await send_support_confirmation_email(recipient, test_name, "Test Support Request")
         elif body.type == "support_reply":

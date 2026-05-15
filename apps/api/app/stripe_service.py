@@ -495,10 +495,12 @@ async def _on_checkout_completed(session, pool) -> None:
         logger.warning("Checkout UPDATE matched no user for customer %s", customer_id)
 
     # Send subscription confirmed email only on first activation.
+    # Sprint D6.92 — pass `tier` so the email can render the right
+    # tier name (Cadet/Mate/Captain) instead of the dead "Pro" label.
     if row and not was_already_paid:
         try:
             from app.email import send_subscription_confirmed_email
-            await send_subscription_confirmed_email(row["email"], row["full_name"] or "")
+            await send_subscription_confirmed_email(row["email"], row["full_name"] or "", tier=tier)
         except Exception as exc:
             logger.error("Failed to send subscription confirmed email: %s", exc)
 
@@ -652,20 +654,22 @@ async def _on_subscription_change(subscription, pool) -> None:
     )
 
     # Send cancellation email when transitioning to canceling
+    # Sprint D6.92 — pass `tier` to all lifecycle emails (the resolved
+    # paid tier for cancel/pause/resume; the new tier for confirm).
     if sub_status == "canceling" and prev_status != "canceling" and row:
         try:
             from app.email import send_subscription_cancelled_email
-            await send_subscription_cancelled_email(row["email"], row["full_name"] or "")
+            await send_subscription_cancelled_email(row["email"], row["full_name"] or "", tier=tier)
             logger.info("Sent cancellation email to %s", row["email"])
         except Exception as exc:
             logger.error("Failed to send cancellation email: %s", exc)
 
     # Send welcome email only on first activation (not already paid).
-    # Fires for any paid tier — mate, captain, or legacy pro.
+    # Fires for any paid tier — cadet, mate, captain, or legacy pro.
     if is_paid_tier(tier) and sub_status == "active" and not was_already_paid and row:
         try:
             from app.email import send_subscription_confirmed_email
-            await send_subscription_confirmed_email(row["email"], row["full_name"] or "")
+            await send_subscription_confirmed_email(row["email"], row["full_name"] or "", tier=tier)
             logger.info("Sent %s welcome email to %s", tier, row["email"])
         except Exception as exc:
             logger.error("Failed to send subscription confirmed email: %s", exc)
@@ -674,7 +678,7 @@ async def _on_subscription_change(subscription, pool) -> None:
     if sub_status == "paused" and prev_status != "paused" and row:
         try:
             from app.email import send_subscription_paused_email
-            await send_subscription_paused_email(row["email"], row["full_name"] or "")
+            await send_subscription_paused_email(row["email"], row["full_name"] or "", tier=tier)
             logger.info("Sent subscription paused email to %s", row["email"])
         except Exception as exc:
             logger.error("Failed to send subscription paused email: %s", exc)
@@ -683,7 +687,7 @@ async def _on_subscription_change(subscription, pool) -> None:
     if sub_status == "active" and prev_status == "paused" and row:
         try:
             from app.email import send_subscription_resumed_email
-            await send_subscription_resumed_email(row["email"], row["full_name"] or "")
+            await send_subscription_resumed_email(row["email"], row["full_name"] or "", tier=tier)
             logger.info("Sent subscription resumed email to %s", row["email"])
         except Exception as exc:
             logger.error("Failed to send subscription resumed email: %s", exc)
@@ -903,12 +907,17 @@ async def _on_invoice_payment_failed(invoice, pool) -> None:
 
     try:
         from app.email import send_payment_failed_email
+        # Sprint D6.92 — pull subscription_tier so the email names the
+        # right tier (Cadet/Mate/Captain) instead of "RegKnot Pro".
         user_row = await pool.fetchrow(
-            "SELECT email, full_name FROM users WHERE stripe_customer_id = $1",
+            "SELECT email, full_name, subscription_tier FROM users WHERE stripe_customer_id = $1",
             customer_id,
         )
         if user_row:
-            await send_payment_failed_email(user_row["email"], user_row["full_name"] or "")
+            await send_payment_failed_email(
+                user_row["email"], user_row["full_name"] or "",
+                tier=user_row["subscription_tier"],
+            )
     except Exception as exc:
         logger.error("Failed to send payment failed email: %s", exc)
 

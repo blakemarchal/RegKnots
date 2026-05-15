@@ -259,11 +259,20 @@ export function PilotSurveyModal({ billing, forceOpen, onClose, preview }: Props
             onChange={setFavorite}
           />
 
-          {/* 4. Missing feature */}
+          {/* 4. Missing feature
+              Sprint D6.92 — replaced "More regulation sources (MARPOL,
+              STCW)" with options pointing at real gaps. MARPOL/STCW
+              have been in the corpus since the D6 series; the original
+              option made us look like we lacked them and forced any
+              user wanting "more coverage" to mis-pick that fake gap
+              (Matthew Hofer 2026-05-14 hit this). New options name
+              actual corpus weaknesses without misrepresenting what's
+              already shipped. */}
           <RadioGroup
             label="What feature would you most want added?"
             options={[
-              { value: 'More regulation sources (MARPOL, STCW)', label: 'More regulation sources (MARPOL, STCW)' },
+              { value: 'More flag-state coverage', label: 'More flag-state coverage' },
+              { value: 'Faster updates on new amendments', label: 'Faster updates on new amendments' },
               { value: 'Offline access', label: 'Offline access' },
               { value: 'COI/document scanning', label: 'COI/document scanning' },
               { value: 'Fleet/team features', label: 'Fleet/team features' },
