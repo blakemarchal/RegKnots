@@ -122,7 +122,12 @@ class AdminStats(BaseModel):
     """
 
     # Row 1 — Headline KPIs
+    # Sprint D6.92 — Blake's Overview redesign promotes the topline
+    # totals (Users / Questions / Conversations / Bad-Answer Rate) to
+    # Row 1. Engagement metrics (7d/24h active, etc.) move below into
+    # their own row. `total_questions` is new.
     total_users: int
+    total_questions: int  # NEW D6.92 — all-time questions (was only 7d)
     active_users_7d: int
     questions_7d: int
     bad_answer_rate_7d: float  # 0.0–100.0
@@ -148,9 +153,28 @@ class AdminStats(BaseModel):
     # Row 4 — Quality
     citation_errors_7d: int
     retrieval_misses_7d: int
-    hedge_rate_7d: float  # 0.0–100.0
+    hedge_rate_7d: float  # 0.0–100.0 (legacy: regex matches / answers)
+    # Sprint D6.92 — "real" hedge rate. hedge_rate_7d above counts every
+    # regex match in retrieval_misses, including ones the LLM judge
+    # later classified as false_hedge or precision_callout (i.e. NOT
+    # presented to the user as "we don't know"). hedges_presented_*
+    # counts only judge verdicts that actually surface as hedges to
+    # the user (complete_miss + partial_miss in tier_router_shadow_log).
+    hedges_presented_7d: int
+    hedges_presented_rate_7d: float  # 0.0–100.0
     message_limit_reached: int
-    recent_hedges: list[HedgeEvent]
+    recent_hedges: list[HedgeEvent]  # back-compat; UI no longer renders
+
+    # Row 5 — Business / cap signals (Sprint D6.92)
+    conversion_rate: float  # 0.0–100.0; paid / total
+    cap_saturation_rate: float  # 0.0–100.0; cadet+mate at ≥75% of cap
+
+    # Row 6 — Content awareness (Sprint D6.92)
+    # Surfaces the "you have stuff to look at" signals on Overview so
+    # admin doesn't have to tab-hop to know there's a new ticket or
+    # survey response.
+    support_tickets_open: int
+    survey_responses_7d: int
 
     # Row 4b — Web fallback (Sprint D6.48)
     web_fallback_attempts_7d: int       # total fallback firings (production only)
@@ -319,6 +343,65 @@ async def get_stats(
             f"WHERE subscription_tier = 'free' AND message_count >= 50{uf}"
         )
 
+        # Sprint D6.92 — all-time question count for Overview top-4
+        # totals row. Same is_internal/is_admin filter as questions_7d.
+        total_questions = await conn.fetchval(
+            f"SELECT COUNT(*) FROM messages m WHERE m.role = 'user'{muf}"
+        ) or 0
+
+        # Sprint D6.92 — cap saturation. % of cadet+mate users at ≥75%
+        # of their monthly cap. Indicates whether the cheaper tier is
+        # being undersold (high saturation → upsell to bigger tier).
+        # Captain is uncapped so excluded from both numerator and
+        # denominator. Admin/internal accounts excluded regardless of
+        # the exclude_internal flag (their cap state is meaningless).
+        cap_sat_row = await conn.fetchrow(
+            """
+            SELECT
+              COUNT(*) FILTER (
+                WHERE subscription_tier IN ('cadet', 'mate')
+                  AND subscription_status = 'active'
+              ) AS capped_total,
+              COUNT(*) FILTER (
+                WHERE (subscription_tier = 'cadet'
+                       AND monthly_message_count >= 0.75 * 25)
+                   OR (subscription_tier = 'mate'
+                       AND monthly_message_count >= 0.75 * 100)
+              ) AS at_threshold
+            FROM users
+            WHERE is_admin = false AND is_internal = false
+            """
+        )
+        capped_total = cap_sat_row["capped_total"] or 0
+        at_threshold = cap_sat_row["at_threshold"] or 0
+
+        # Sprint D6.92 — content awareness signals for Overview cards.
+        support_tickets_open = await conn.fetchval(
+            "SELECT COUNT(*) FROM support_tickets WHERE status = 'open'"
+        ) or 0
+        survey_responses_7d = await conn.fetchval(
+            "SELECT COUNT(*) FROM pilot_survey_responses "
+            "WHERE created_at > NOW() - INTERVAL '7 days'"
+        ) or 0
+
+        # Sprint D6.92 — "real" hedge rate. Counts only verdicts that
+        # actually presented as hedges to the user (complete_miss +
+        # partial_miss in tier_router_shadow_log post-D6.84). The
+        # legacy hedge_rate_7d above counts every regex match including
+        # ones the judge classified as false_hedge / precision_callout
+        # (i.e. NOT presented to user). Uses internal-filter for
+        # consistency with the other 7d metrics.
+        hedges_presented_7d = await conn.fetchval(
+            "SELECT COUNT(*) FROM tier_router_shadow_log s "
+            "LEFT JOIN users u ON u.id = s.user_id "
+            "WHERE s.created_at > NOW() - INTERVAL '7 days' "
+            f"  AND s.current_judge_verdict IN ('complete_miss', 'partial_miss'){uf}"
+            if exclude_internal else
+            "SELECT COUNT(*) FROM tier_router_shadow_log "
+            "WHERE created_at > NOW() - INTERVAL '7 days' "
+            "  AND current_judge_verdict IN ('complete_miss', 'partial_miss')"
+        ) or 0
+
         # ── Quality signals ─────────────────────────────────────────
         # Sprint D6.35 — bad-answer-rate fix.
         # PRIOR BUG: numerator counted INCIDENTS not affected answers.
@@ -439,9 +522,21 @@ async def get_stats(
         questions_7d / active_users_7d if active_users_7d > 0 else 0.0
     )
 
+    # Sprint D6.92 — derived metrics for the new Overview cards.
+    conversion_rate = (
+        100.0 * (paid_users_alltime or 0) / total_users if total_users > 0 else 0.0
+    )
+    cap_saturation_rate = (
+        100.0 * at_threshold / capped_total if capped_total > 0 else 0.0
+    )
+    hedges_presented_rate_7d = (
+        100.0 * hedges_presented_7d / answers_7d if answers_7d > 0 else 0.0
+    )
+
     return AdminStats(
         # Headline KPIs
         total_users=total_users,
+        total_questions=total_questions,  # Sprint D6.92 — new
         active_users_7d=active_users_7d,
         questions_7d=questions_7d,
         bad_answer_rate_7d=round(bad_answer_rate_7d, 1),
@@ -470,7 +565,15 @@ async def get_stats(
         citation_errors_7d=citation_errors_7d or 0,
         retrieval_misses_7d=retrieval_misses_7d or 0,
         hedge_rate_7d=round(hedge_rate_7d, 1),
+        # Sprint D6.92 — "real" hedge rate from judge verdicts.
+        hedges_presented_7d=hedges_presented_7d,
+        hedges_presented_rate_7d=round(hedges_presented_rate_7d, 1),
         message_limit_reached=message_limit_reached or 0,
+        # Sprint D6.92 — business + content signals.
+        conversion_rate=round(conversion_rate, 1),
+        cap_saturation_rate=round(cap_saturation_rate, 1),
+        support_tickets_open=support_tickets_open,
+        survey_responses_7d=survey_responses_7d,
         recent_hedges=[
             HedgeEvent(
                 created_at=r["created_at"].isoformat(),
@@ -2249,6 +2352,54 @@ async def usage_by_vessel_type(
     ]
 
 
+# Sprint D6.92 — Usage by role chart on Overview replaces Usage by
+# vessel type. Role is a more actionable signal at our current scale
+# (cadets/students vs working mariners vs other) than vessel type
+# (dominated by 1-2 vessel categories among the early users). Vessel
+# type endpoint above kept for back-compat with any external consumers.
+class RoleUsage(BaseModel):
+    role: str
+    message_count: int
+    user_count: int
+
+
+@router.get("/analytics/usage-by-role", response_model=list[RoleUsage])
+async def usage_by_role(
+    _admin: Annotated[CurrentUser, Depends(require_admin)],
+    exclude_internal: bool = Query(default=False),
+) -> list[RoleUsage]:
+    """Aggregate question volume by user role. Mirrors the existing
+    usage-by-vessel-type endpoint but groups on the user's stored
+    `role` field rather than the vessel's `vessel_type`. NULL/empty
+    roles are bucketed as "(unset)" so they're visible without
+    inflating any real category."""
+    pool = await get_pool()
+    rows = await pool.fetch(
+        """
+        SELECT
+          COALESCE(NULLIF(TRIM(u.role), ''), '(unset)') AS role,
+          COUNT(m.id) AS message_count,
+          COUNT(DISTINCT c.user_id) AS user_count
+        FROM messages m
+        JOIN conversations c ON m.conversation_id = c.id
+        JOIN users u ON c.user_id = u.id
+        WHERE m.role = 'user'
+          AND ($1 = FALSE OR (u.is_internal IS NOT TRUE AND u.is_admin IS NOT TRUE))
+        GROUP BY COALESCE(NULLIF(TRIM(u.role), ''), '(unset)')
+        ORDER BY message_count DESC
+        """,
+        exclude_internal,
+    )
+    return [
+        RoleUsage(
+            role=r["role"],
+            message_count=r["message_count"],
+            user_count=r["user_count"],
+        )
+        for r in rows
+    ]
+
+
 class DayMessageCount(BaseModel):
     day: str
     message_count: int
@@ -2322,6 +2473,13 @@ class FeatureUsageUserRow(BaseModel):
     psc_checklists: int
     vessels: int
     vessel_documents: int
+    # Sprint D6.92 — added engagement columns for new feature surfaces.
+    # `conversations` captures chat engagement (primary signal); `studies`
+    # captures Study Tools quiz + guide generations (D6.83 feature).
+    # `subscription_tier` lets the frontend show the current tier inline.
+    conversations: int = 0
+    studies: int = 0
+    subscription_tier: str = "free"
     last_activity_at: str | None
 
 
@@ -2398,25 +2556,34 @@ async def feature_usage(
     )
 
     # Per-user breakdown — single query joining all feature tables via
-    # subquery counts. last_activity_at is the max across all five
-    # features so we can sort "who's active where."
+    # subquery counts. last_activity_at is the max across all features
+    # so we can sort "who's active where."
+    # Sprint D6.92 — added conversations (chat engagement, primary
+    # signal) and study_generations (D6.83 quiz/guide feature). The
+    # users.subscription_tier is selected inline so the frontend can
+    # show tier next to the email without a second fetch.
     top_users_rows = await pool.fetch(
         """
         SELECT
             u.id AS user_id,
             u.email,
             u.full_name,
+            u.subscription_tier,
             COALESCE(cred.cnt, 0) AS credentials,
             COALESCE(clog.cnt, 0) AS compliance_logs,
             COALESCE(psc.cnt, 0) AS psc_checklists,
             COALESCE(ves.cnt, 0) AS vessels,
             COALESCE(vdoc.cnt, 0) AS vessel_documents,
+            COALESCE(conv.cnt, 0) AS conversations,
+            COALESCE(stud.cnt, 0) AS studies,
             GREATEST(
                 COALESCE(cred.last_at, '1900-01-01'::timestamptz),
                 COALESCE(clog.last_at, '1900-01-01'::timestamptz),
                 COALESCE(psc.last_at, '1900-01-01'::timestamptz),
                 COALESCE(ves.last_at, '1900-01-01'::timestamptz),
-                COALESCE(vdoc.last_at, '1900-01-01'::timestamptz)
+                COALESCE(vdoc.last_at, '1900-01-01'::timestamptz),
+                COALESCE(conv.last_at, '1900-01-01'::timestamptz),
+                COALESCE(stud.last_at, '1900-01-01'::timestamptz)
             ) AS last_activity_at
         FROM users u
         LEFT JOIN (
@@ -2442,15 +2609,25 @@ async def feature_usage(
             JOIN vessels v ON v.id = vd.vessel_id
             GROUP BY v.user_id
         ) vdoc ON vdoc.user_id = u.id
+        LEFT JOIN (
+            SELECT user_id, COUNT(*) cnt, MAX(created_at) last_at
+            FROM conversations GROUP BY user_id
+        ) conv ON conv.user_id = u.id
+        LEFT JOIN (
+            SELECT user_id, COUNT(*) cnt, MAX(created_at) last_at
+            FROM study_generations GROUP BY user_id
+        ) stud ON stud.user_id = u.id
         WHERE
             (COALESCE(cred.cnt,0) + COALESCE(clog.cnt,0)
              + COALESCE(psc.cnt,0) + COALESCE(ves.cnt,0)
-             + COALESCE(vdoc.cnt,0)) > 0
+             + COALESCE(vdoc.cnt,0)
+             + COALESCE(conv.cnt,0) + COALESCE(stud.cnt,0)) > 0
             AND ($1 = FALSE OR (u.is_internal IS NOT TRUE AND u.is_admin IS NOT TRUE))
         ORDER BY
             (COALESCE(cred.cnt,0) + COALESCE(clog.cnt,0)
              + COALESCE(psc.cnt,0) + COALESCE(ves.cnt,0)
-             + COALESCE(vdoc.cnt,0)) DESC,
+             + COALESCE(vdoc.cnt,0)
+             + COALESCE(conv.cnt,0) + COALESCE(stud.cnt,0)) DESC,
             last_activity_at DESC
         LIMIT $2
         """,
@@ -2480,6 +2657,9 @@ async def feature_usage(
                 psc_checklists=r["psc_checklists"],
                 vessels=r["vessels"],
                 vessel_documents=r["vessel_documents"],
+                conversations=r["conversations"],
+                studies=r["studies"],
+                subscription_tier=r["subscription_tier"] or "free",
                 last_activity_at=r["last_activity_at"].isoformat()
                 if r["last_activity_at"] and r["last_activity_at"].year > 1900
                 else None,

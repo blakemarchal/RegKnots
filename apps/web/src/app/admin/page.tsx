@@ -36,8 +36,9 @@ interface HedgeEvent {
 }
 
 interface AdminStats {
-  // Headline KPIs
+  // Headline KPIs (Sprint D6.92 Overview redesign — totals row)
   total_users: number
+  total_questions: number  // NEW D6.92
   active_users_7d: number
   questions_7d: number
   bad_answer_rate_7d: number
@@ -60,9 +61,17 @@ interface AdminStats {
   // Quality
   citation_errors_7d: number
   retrieval_misses_7d: number
-  hedge_rate_7d: number
+  hedge_rate_7d: number  // legacy regex-match rate
+  hedges_presented_7d?: number    // NEW D6.92 — judge-verified hedge count
+  hedges_presented_rate_7d?: number  // NEW D6.92 — rate
   message_limit_reached: number
-  recent_hedges: HedgeEvent[]
+  recent_hedges: HedgeEvent[]  // back-compat; UI no longer renders
+  // Business / cap signals (Sprint D6.92)
+  conversion_rate?: number    // 0–100; paid / total
+  cap_saturation_rate?: number  // 0–100; cadet+mate at ≥75% of cap
+  // Content awareness (Sprint D6.92)
+  support_tickets_open?: number
+  survey_responses_7d?: number
   // Knowledge base
   total_chunks: number
   chunks_by_source: Record<string, number>
@@ -148,6 +157,13 @@ interface VesselTypeUsage {
   user_count: number
 }
 
+// Sprint D6.92 — Usage by role replaces Usage by vessel type on Overview.
+interface RoleUsage {
+  role: string
+  message_count: number
+  user_count: number
+}
+
 interface ModelUsageItem {
   model: string
   message_count: number
@@ -221,8 +237,31 @@ const USER_FILTERS: { value: UserFilter; label: string }[] = [
   { value: 'admin', label: 'Admin' },
 ]
 
-// Chart color ramp
-const CHART_COLORS = ['#2dd4bf', '#1d9e75', '#0f6e56', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899']
+// Sprint D6.92 — colorblind-safe chart palette.
+//
+// Pre-D6.92 palette had three teals/greens (#2dd4bf, #1d9e75, #0f6e56)
+// in the first three slots, indistinguishable to deuteranope viewers
+// (~5% of mariners). Blake flagged: "I cannot see the difference
+// between Opus and Sonnet well." Replaced with the Okabe-Ito palette
+// (Okabe & Ito 2008) which is the industry standard for colorblind-safe
+// categorical color sets — explicitly designed to be distinguishable
+// across all three major color-vision deficiency types.
+//
+// Color names in order:  orange, sky blue, bluish green, yellow, blue,
+//                        vermillion, reddish purple, black-substitute.
+// The yellow is light enough that we substitute a darker gold (#dbab09)
+// for legibility on the dark dashboard. Final 8th slot is teal-gray
+// (rather than literal black) for the same reason.
+const CHART_COLORS = [
+  '#e69f00',  // orange
+  '#56b4e9',  // sky blue
+  '#009e73',  // bluish green
+  '#dbab09',  // gold (darker yellow for dark theme)
+  '#0072b2',  // blue
+  '#d55e00',  // vermillion
+  '#cc79a7',  // reddish purple
+  '#94a3b8',  // teal-gray (replaces literal black for dark theme)
+]
 
 // Read-only admin emails — mirrors backend READONLY_ADMIN_EMAILS
 // (Karynn promoted to full admin 2026-04-12)
@@ -422,6 +461,8 @@ function AdminContent() {
   const [messagesPerDay, setMessagesPerDay] = useState<DayMessageCount[]>([])
   const [topCitations, setTopCitations] = useState<TopCitation[]>([])
   const [vesselUsage, setVesselUsage] = useState<VesselTypeUsage[]>([])
+  // Sprint D6.92 — role usage replaces vessel usage on Overview.
+  const [roleUsage, setRoleUsage] = useState<RoleUsage[]>([])
   const [modelUsage, setModelUsage] = useState<ModelUsageItem[]>([])
   const [analyticsLoading, setAnalyticsLoading] = useState(true)
 
@@ -572,13 +613,18 @@ function AdminContent() {
     Promise.all([
       apiRequest<DayMessageCount[]>(`/admin/analytics/messages-per-day?exclude_internal=${ei}`).catch(() => []),
       apiRequest<TopCitation[]>(`/admin/analytics/top-citations?exclude_internal=${ei}`).catch(() => []),
+      // Sprint D6.92 — Vessel-type swapped for Role on Overview. Keep
+      // vessel-type fetch in case any other view references it later;
+      // both endpoints exist on the backend.
       apiRequest<VesselTypeUsage[]>(`/admin/analytics/usage-by-vessel-type?exclude_internal=${ei}`).catch(() => []),
       apiRequest<ModelUsageItem[]>('/admin/model-usage').catch(() => []),
-    ]).then(([mpd, tc, vu, mu]) => {
+      apiRequest<RoleUsage[]>(`/admin/analytics/usage-by-role?exclude_internal=${ei}`).catch(() => []),
+    ]).then(([mpd, tc, vu, mu, ru]) => {
       setMessagesPerDay(mpd)
       setTopCitations(tc)
       setVesselUsage(vu)
       setModelUsage(mu)
+      setRoleUsage(ru)
     }).finally(() => setAnalyticsLoading(false))
   }, [ei])
 
@@ -1082,18 +1128,18 @@ function AdminContent() {
 
           {stats && (
             <div className="flex flex-col gap-3 mb-8">
-              {/* ─────────── Row 1 — Headline KPIs ─────────── */}
+              {/* ─── Row 1 — Headline TOTALS (Sprint D6.92 redesign) ─────
+                  Pre-D6.92 mixed totals + 7d in the top row. Blake's
+                  redesign promotes the four topline TOTALS to row 1 so
+                  the dashboard headline shows the company's size at a
+                  glance: Users · Questions · Conversations · Bad-Answer
+                  Rate. 7d / 24h metrics moved to the engagement row.
+                  (Bad-Answer Rate stays a rate, not a count, since
+                  "total bad answers ever" isn't actionable.) */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                 <StatCard label="Total Users" value={stats.total_users} />
-                <StatCard
-                  label="Active (7d)"
-                  value={
-                    stats.total_users > 0
-                      ? `${stats.active_users_7d} (${Math.round(100 * stats.active_users_7d / stats.total_users)}%)`
-                      : stats.active_users_7d
-                  }
-                />
-                <StatCard label="Questions (7d)" value={stats.questions_7d} />
+                <StatCard label="Total Questions" value={stats.total_questions} />
+                <StatCard label="Total Conversations" value={stats.total_conversations} />
                 <StatCard
                   label="Bad-answer rate (7d)"
                   value={`${stats.bad_answer_rate_7d}%`}
@@ -1159,59 +1205,260 @@ function AdminContent() {
                 </div>
               </div>
 
-              {/* ─────────── Row 3 — Engagement ─────────── */}
+              {/* ─── Row 3 — Engagement (Sprint D6.92) ───
+                  Active windows + avg engagement. Active% is shown
+                  inline as it's the most useful "is this growing or
+                  is everyone churning" signal. */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                <StatCard label="Questions Today" value={stats.questions_today} />
-                <StatCard label="Conversations (7d)" value={stats.conversations_7d} />
+                <StatCard label="Active (24h)" value={stats.active_users_24h} />
+                <StatCard
+                  label="Active (7d)"
+                  value={
+                    stats.total_users > 0
+                      ? `${stats.active_users_7d} (${Math.round(100 * stats.active_users_7d / stats.total_users)}%)`
+                      : stats.active_users_7d
+                  }
+                />
+                <StatCard label="Questions (24h)" value={stats.questions_today} />
                 <StatCard
                   label="Avg Q / active user"
                   value={stats.avg_questions_per_active_user_7d}
                 />
-                <StatCard label="Active (24h)" value={stats.active_users_24h} />
               </div>
 
-              {/* ─────────── Row 4 — Quality ─────────── */}
+              {/* ─── Row 4 — Quality + Business (Sprint D6.92) ───
+                  Mixes AI-quality signals (real hedge rate, retrieval
+                  misses) with business funnel signals (conversion rate,
+                  cap saturation). Recent Hedges card removed — drill
+                  into individual hedges via the Chats tab if any of
+                  these numbers move. */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                <StatCard label="Citation Errors (7d)" value={stats.citation_errors_7d} />
+                <StatCard
+                  label="Hedge Rate (7d)"
+                  value={`${stats.hedges_presented_rate_7d ?? stats.hedge_rate_7d}%`}
+                />
                 <StatCard label="Retrieval Misses (7d)" value={stats.retrieval_misses_7d} />
-                <StatCard label="Hedge Rate (7d)" value={`${stats.hedge_rate_7d}%`} />
-                <StatCard label="Total Conversations" value={stats.total_conversations} />
+                <StatCard
+                  label="Conversion Rate"
+                  value={`${stats.conversion_rate ?? 0}%`}
+                />
+                <StatCard
+                  label="Cap Saturation"
+                  value={`${stats.cap_saturation_rate ?? 0}%`}
+                />
               </div>
 
-              {/* Recent hedges list (only when populated, to avoid cluttering empty days) */}
-              {stats.recent_hedges.length > 0 && (
-                <div className="bg-[#111827] rounded-xl border border-white/8 px-4 py-3">
-                  <p className="font-mono text-[10px] text-[#6b7594] uppercase tracking-wider mb-2">
-                    Recent hedges (last 5)
-                  </p>
-                  <div className="flex flex-col divide-y divide-white/5">
-                    {stats.recent_hedges.map((h, i) => (
-                      <div key={i} className="py-1.5 flex flex-col gap-0.5">
-                        <div className="flex items-center justify-between gap-2 text-[11px] font-mono">
-                          <span className="text-[#f0ece4]/85 truncate flex-1">{h.query}</span>
-                          <span className="text-[#6b7594] flex-shrink-0">{fmtRelative(h.created_at)}</span>
-                        </div>
-                        <div className="text-[10px] font-mono text-[#6b7594] truncate">
-                          {h.user_email ?? 'anon'} &middot; matched: <span className="text-amber-400/70">&ldquo;{h.hedge_phrase}&rdquo;</span>
-                        </div>
-                      </div>
-                    ))}
+              {/* ─── Row 5 — Content awareness (Sprint D6.92) ───
+                  Surfaces "you have stuff to look at" signals so the
+                  admin doesn't have to tab-hop to know there's work
+                  pending. Open support tickets count is real, survey
+                  responses are last-7d new ones. */}
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                <StatCard
+                  label="Open Support Tickets"
+                  value={stats.support_tickets_open ?? 0}
+                />
+                <StatCard
+                  label="New Surveys (7d)"
+                  value={stats.survey_responses_7d ?? 0}
+                />
+                <StatCard
+                  label="System Errors"
+                  value={sentryIssues.length}
+                />
+              </div>
+            </div>
+          )}
+
+          {/* ─── Analytics charts — promoted ABOVE the Chunks card per
+              Blake's D6.92 redesign. Pre-D6.92 these lived at the very
+              bottom of the Overview, after the chunks list. */}
+          {stats && (
+            <div className="mb-8">
+              <h2 className="font-display text-lg font-bold text-[#f0ece4] tracking-wide mb-3">Analytics</h2>
+              {analyticsLoading ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                  {[1, 2, 3, 4].map(i => (
+                    <div key={i} className="bg-[#111827] rounded-xl border border-white/8 h-[280px] animate-pulse" />
+                  ))}
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                  {/* Chart 1: Messages per day */}
+                  <div className="bg-[#111827] rounded-xl border border-white/8 p-4">
+                    <p className="font-mono text-[10px] text-[#6b7594] uppercase tracking-wider mb-3">Messages per Day (30d)</p>
+                    {messagesPerDay.length > 0 ? (
+                      <ResponsiveContainer width="100%" height={220}>
+                        <LineChart data={messagesPerDay}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                          <XAxis
+                            dataKey="day"
+                            tick={{ fontSize: 10, fill: '#6b7594' }}
+                            tickFormatter={(v: string) => new Date(v).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                            interval="preserveStartEnd"
+                          />
+                          <YAxis tick={{ fontSize: 10, fill: '#6b7594' }} allowDecimals={false} />
+                          <Tooltip
+                            contentStyle={{ backgroundColor: '#1a2332', border: '1px solid #2dd4bf33', borderRadius: '8px', fontSize: '11px', fontFamily: 'monospace' }}
+                            labelStyle={{ color: '#6b7594' }}
+                            itemStyle={{ color: '#2dd4bf' }}
+                            labelFormatter={(v) => new Date(String(v)).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                          />
+                          <Line type="monotone" dataKey="message_count" stroke="#2dd4bf" strokeWidth={2} dot={false} />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    ) : (
+                      <p className="font-mono text-xs text-[#6b7594] text-center py-16">No data yet</p>
+                    )}
+                  </div>
+
+                  {/* Chart 2: Top cited regulations */}
+                  <div className="bg-[#111827] rounded-xl border border-white/8 p-4">
+                    <p className="font-mono text-[10px] text-[#6b7594] uppercase tracking-wider mb-3">Top Cited Regulations</p>
+                    {topCitations.length > 0 ? (
+                      <ResponsiveContainer width="100%" height={Math.max(220, topCitations.slice(0, 10).length * 28)}>
+                        <BarChart
+                          data={topCitations.slice(0, 10)}
+                          layout="vertical"
+                          margin={{ top: 4, right: 12, bottom: 4, left: 4 }}
+                        >
+                          <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                          <XAxis type="number" tick={{ fontSize: 10, fill: '#6b7594' }} allowDecimals={false} />
+                          <YAxis
+                            type="category"
+                            dataKey="section_number"
+                            tick={{ fontSize: 10, fill: '#6b7594' }}
+                            width={Math.min(
+                              140,
+                              Math.max(
+                                64,
+                                topCitations.slice(0, 10).reduce((m, c) => Math.max(m, (c.section_number || '').length), 0) * 7,
+                              ),
+                            )}
+                            tickFormatter={(v: string) => (v.length > 18 ? v.slice(0, 17) + '…' : v)}
+                          />
+                          <Tooltip
+                            content={(props: { active?: boolean; payload?: ReadonlyArray<{ payload?: unknown; value?: unknown }> }) => {
+                              if (!props.active || !props.payload || !props.payload[0]) return null
+                              const entry = props.payload[0]
+                              const row = entry.payload as TopCitation | undefined
+                              if (!row) return null
+                              const count = typeof entry.value === 'number' ? entry.value : Number(entry.value) || 0
+                              return (
+                                <div style={{
+                                  backgroundColor: '#1a2332',
+                                  border: '1px solid #2dd4bf33',
+                                  borderRadius: '8px',
+                                  padding: '8px 12px',
+                                  fontSize: '11px',
+                                  fontFamily: 'monospace',
+                                  maxWidth: 320,
+                                }}>
+                                  <div style={{ color: '#f0ece4', fontWeight: 700 }}>{row.section_number}</div>
+                                  {row.section_title && (
+                                    <div style={{ color: '#6b7594', marginTop: 2 }}>{row.section_title}</div>
+                                  )}
+                                  <div style={{ color: '#2dd4bf', marginTop: 4 }}>
+                                    {count} citation{count === 1 ? '' : 's'}
+                                  </div>
+                                </div>
+                              )
+                            }}
+                          />
+                          <Bar dataKey="cite_count" fill="#2dd4bf" radius={[0, 4, 4, 0]} />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    ) : (
+                      <p className="font-mono text-xs text-[#6b7594] text-center py-16">No data yet</p>
+                    )}
+                  </div>
+
+                  {/* Chart 3: Usage by role (Sprint D6.92 — replaces Vessel Type)
+                      Role is more actionable at our scale: cadets/students vs
+                      working mariners vs other gives a TAM mix signal that
+                      vessel-type (dominated by 1-2 categories) doesn't. */}
+                  <div className="bg-[#111827] rounded-xl border border-white/8 p-4">
+                    <p className="font-mono text-[10px] text-[#6b7594] uppercase tracking-wider mb-3">Usage by Role</p>
+                    {roleUsage.length > 0 ? (
+                      <ResponsiveContainer width="100%" height={220}>
+                        <PieChart>
+                          <Pie
+                            data={roleUsage}
+                            dataKey="message_count"
+                            nameKey="role"
+                            cx="50%"
+                            cy="50%"
+                            innerRadius={50}
+                            outerRadius={80}
+                            paddingAngle={2}
+                          >
+                            {roleUsage.map((_, i) => (
+                              <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
+                            ))}
+                          </Pie>
+                          <Tooltip
+                            contentStyle={{ backgroundColor: '#1a2332', border: '1px solid #2dd4bf33', borderRadius: '8px', fontSize: '11px', fontFamily: 'monospace' }}
+                          />
+                          <Legend
+                            wrapperStyle={{ fontSize: '10px', fontFamily: 'monospace' }}
+                            formatter={(value) => <span style={{ color: '#6b7594' }}>{String(value)}</span>}
+                          />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    ) : (
+                      <p className="font-mono text-xs text-[#6b7594] text-center py-16">No data yet</p>
+                    )}
+                  </div>
+
+                  {/* Chart 4: Model usage distribution */}
+                  <div className="bg-[#111827] rounded-xl border border-white/8 p-4">
+                    <p className="font-mono text-[10px] text-[#6b7594] uppercase tracking-wider mb-3">Model Usage Distribution</p>
+                    {modelUsage.length > 0 ? (
+                      <ResponsiveContainer width="100%" height={220}>
+                        <PieChart>
+                          <Pie
+                            data={modelUsage}
+                            dataKey="message_count"
+                            nameKey="model"
+                            cx="50%"
+                            cy="50%"
+                            innerRadius={50}
+                            outerRadius={80}
+                            paddingAngle={2}
+                          >
+                            {modelUsage.map((_, i) => (
+                              <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
+                            ))}
+                          </Pie>
+                          <Tooltip
+                            contentStyle={{ backgroundColor: '#1a2332', border: '1px solid #2dd4bf33', borderRadius: '8px', fontSize: '11px', fontFamily: 'monospace' }}
+                            formatter={(value) => [Number(value).toLocaleString(), 'Messages']}
+                          />
+                          <Legend
+                            wrapperStyle={{ fontSize: '10px', fontFamily: 'monospace' }}
+                            formatter={(value) => <span style={{ color: '#6b7594' }}>{String(value)}</span>}
+                          />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    ) : (
+                      <p className="font-mono text-xs text-[#6b7594] text-center py-16">No data yet</p>
+                    )}
                   </div>
                 </div>
               )}
-
-              {/* ─────────── Row 5 — Knowledge base ───────────
-                  Sprint D6.77 — Karynn UX: replaced the wall-of-text
-                  "source: count" inline list with a sorted grid + a
-                  collapse-all-below-top-12 control. Quicker glance: the
-                  dominant sources are the first row, and the long tail
-                  collapses by default so the dashboard doesn't drown
-                  in 40+ flag-state corpora. */}
-              <RegulationChunksCard
-                total={stats.total_chunks}
-                bySource={stats.chunks_by_source}
-              />
             </div>
+          )}
+
+          {/* ─── Knowledge base (Sprint D6.92 — now last on Overview) ───
+              Sprint D6.77 — Karynn UX: replaced the wall-of-text
+              "source: count" inline list with a sorted grid + a
+              collapse-all-below-top-12 control. Sprint D6.92 demoted
+              this below Analytics per Blake's call. */}
+          {stats && (
+            <RegulationChunksCard
+              total={stats.total_chunks}
+              bySource={stats.chunks_by_source}
+            />
           )}
 
           </>
@@ -1763,183 +2010,13 @@ function AdminContent() {
           </>
           )}
 
-          {activeTab === 'overview' && (
-          <>
-          {/* ── Analytics Charts ─────────────────────────────────────── */}
-          <div className="mb-8">
-            <h2 className="font-display text-lg font-bold text-[#f0ece4] tracking-wide mb-3">Analytics</h2>
-
-            {analyticsLoading ? (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                {[1, 2, 3, 4].map(i => (
-                  <div key={i} className="bg-[#111827] rounded-xl border border-white/8 h-[280px] animate-pulse" />
-                ))}
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                {/* Chart 1: Messages per day */}
-                <div className="bg-[#111827] rounded-xl border border-white/8 p-4">
-                  <p className="font-mono text-[10px] text-[#6b7594] uppercase tracking-wider mb-3">Messages per Day (30d)</p>
-                  {messagesPerDay.length > 0 ? (
-                    <ResponsiveContainer width="100%" height={220}>
-                      <LineChart data={messagesPerDay}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
-                        <XAxis
-                          dataKey="day"
-                          tick={{ fontSize: 10, fill: '#6b7594' }}
-                          tickFormatter={(v: string) => new Date(v).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                          interval="preserveStartEnd"
-                        />
-                        <YAxis tick={{ fontSize: 10, fill: '#6b7594' }} allowDecimals={false} />
-                        <Tooltip
-                          contentStyle={{ backgroundColor: '#1a2332', border: '1px solid #2dd4bf33', borderRadius: '8px', fontSize: '11px', fontFamily: 'monospace' }}
-                          labelStyle={{ color: '#6b7594' }}
-                          itemStyle={{ color: '#2dd4bf' }}
-                          labelFormatter={(v) => new Date(String(v)).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-                        />
-                        <Line type="monotone" dataKey="message_count" stroke="#2dd4bf" strokeWidth={2} dot={false} />
-                      </LineChart>
-                    </ResponsiveContainer>
-                  ) : (
-                    <p className="font-mono text-xs text-[#6b7594] text-center py-16">No data yet</p>
-                  )}
-                </div>
-
-                {/* Chart 2: Top cited regulations */}
-                <div className="bg-[#111827] rounded-xl border border-white/8 p-4">
-                  <p className="font-mono text-[10px] text-[#6b7594] uppercase tracking-wider mb-3">Top Cited Regulations</p>
-                  {topCitations.length > 0 ? (
-                    <ResponsiveContainer width="100%" height={Math.max(220, topCitations.slice(0, 10).length * 28)}>
-                      <BarChart
-                        data={topCitations.slice(0, 10)}
-                        layout="vertical"
-                        margin={{ top: 4, right: 12, bottom: 4, left: 4 }}
-                      >
-                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
-                        <XAxis type="number" tick={{ fontSize: 10, fill: '#6b7594' }} allowDecimals={false} />
-                        <YAxis
-                          type="category"
-                          dataKey="section_number"
-                          tick={{ fontSize: 10, fill: '#6b7594' }}
-                          width={Math.min(
-                            140,
-                            Math.max(
-                              64,
-                              topCitations.slice(0, 10).reduce((m, c) => Math.max(m, (c.section_number || '').length), 0) * 7,
-                            ),
-                          )}
-                          tickFormatter={(v: string) => (v.length > 18 ? v.slice(0, 17) + '…' : v)}
-                        />
-                        <Tooltip
-                          content={(props: { active?: boolean; payload?: ReadonlyArray<{ payload?: unknown; value?: unknown }> }) => {
-                            if (!props.active || !props.payload || !props.payload[0]) return null
-                            const entry = props.payload[0]
-                            const row = entry.payload as TopCitation | undefined
-                            if (!row) return null
-                            const count = typeof entry.value === 'number' ? entry.value : Number(entry.value) || 0
-                            return (
-                              <div style={{
-                                backgroundColor: '#1a2332',
-                                border: '1px solid #2dd4bf33',
-                                borderRadius: '8px',
-                                padding: '8px 12px',
-                                fontSize: '11px',
-                                fontFamily: 'monospace',
-                                maxWidth: 320,
-                              }}>
-                                <div style={{ color: '#f0ece4', fontWeight: 700 }}>{row.section_number}</div>
-                                {row.section_title && (
-                                  <div style={{ color: '#6b7594', marginTop: 2 }}>{row.section_title}</div>
-                                )}
-                                <div style={{ color: '#2dd4bf', marginTop: 4 }}>
-                                  {count} citation{count === 1 ? '' : 's'}
-                                </div>
-                              </div>
-                            )
-                          }}
-                        />
-                        <Bar dataKey="cite_count" fill="#2dd4bf" radius={[0, 4, 4, 0]} />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  ) : (
-                    <p className="font-mono text-xs text-[#6b7594] text-center py-16">No data yet</p>
-                  )}
-                </div>
-
-                {/* Chart 3: Usage by vessel type */}
-                <div className="bg-[#111827] rounded-xl border border-white/8 p-4">
-                  <p className="font-mono text-[10px] text-[#6b7594] uppercase tracking-wider mb-3">Usage by Vessel Type</p>
-                  {vesselUsage.length > 0 ? (
-                    <ResponsiveContainer width="100%" height={220}>
-                      <PieChart>
-                        <Pie
-                          data={vesselUsage}
-                          dataKey="message_count"
-                          nameKey="vessel_type"
-                          cx="50%"
-                          cy="50%"
-                          innerRadius={50}
-                          outerRadius={80}
-                          paddingAngle={2}
-                        >
-                          {vesselUsage.map((_, i) => (
-                            <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
-                          ))}
-                        </Pie>
-                        <Tooltip
-                          contentStyle={{ backgroundColor: '#1a2332', border: '1px solid #2dd4bf33', borderRadius: '8px', fontSize: '11px', fontFamily: 'monospace' }}
-                        />
-                        <Legend
-                          wrapperStyle={{ fontSize: '10px', fontFamily: 'monospace' }}
-                          formatter={(value) => <span style={{ color: '#6b7594' }}>{String(value)}</span>}
-                        />
-                      </PieChart>
-                    </ResponsiveContainer>
-                  ) : (
-                    <p className="font-mono text-xs text-[#6b7594] text-center py-16">No data yet</p>
-                  )}
-                </div>
-
-                {/* Chart 4: Model usage distribution */}
-                <div className="bg-[#111827] rounded-xl border border-white/8 p-4">
-                  <p className="font-mono text-[10px] text-[#6b7594] uppercase tracking-wider mb-3">Model Usage Distribution</p>
-                  {modelUsage.length > 0 ? (
-                    <ResponsiveContainer width="100%" height={220}>
-                      <PieChart>
-                        <Pie
-                          data={modelUsage}
-                          dataKey="message_count"
-                          nameKey="model"
-                          cx="50%"
-                          cy="50%"
-                          innerRadius={50}
-                          outerRadius={80}
-                          paddingAngle={2}
-                        >
-                          {modelUsage.map((_, i) => (
-                            <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
-                          ))}
-                        </Pie>
-                        <Tooltip
-                          contentStyle={{ backgroundColor: '#1a2332', border: '1px solid #2dd4bf33', borderRadius: '8px', fontSize: '11px', fontFamily: 'monospace' }}
-                          formatter={(value) => [Number(value).toLocaleString(), 'Messages']}
-                        />
-                        <Legend
-                          wrapperStyle={{ fontSize: '10px', fontFamily: 'monospace' }}
-                          formatter={(value) => <span style={{ color: '#6b7594' }}>{String(value)}</span>}
-                        />
-                      </PieChart>
-                    </ResponsiveContainer>
-                  ) : (
-                    <p className="font-mono text-xs text-[#6b7594] text-center py-16">No data yet</p>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-
-          </>
-          )}
+          {/* Sprint D6.92 — old standalone Analytics block REMOVED.
+              Analytics charts are now rendered inline above the
+              RegulationChunksCard in the first activeTab === 'overview'
+              block. Old block was a duplicate render path that lived
+              after Notifications/AuditLog; merging into the main
+              Overview render makes the visual hierarchy match Blake's
+              redesign and prevents two-render-path drift. */}
 
           {activeTab === 'email' && (
           <>
@@ -2557,6 +2634,11 @@ function DataTab() {
   const [search, setSearch] = useState('')
   const [offset, setOffset] = useState(0)
   const [expandedRow, setExpandedRow] = useState<number | null>(null)
+  // Sprint D6.92 — toggle to hide ID columns. UUID columns eat ~36
+  // chars of width each and rarely carry signal in a quick scan;
+  // hide-by-default-but-toggleable lets the admin see content
+  // without scrolling sideways.
+  const [hideIds, setHideIds] = useState(true)
   const limit = 50
 
   useEffect(() => {
@@ -2652,6 +2734,18 @@ function DataTab() {
           >
             Export JSON
           </button>
+          {/* Sprint D6.92 — Hide IDs toggle. Filters columns named
+              `id` or ending in `_id` from the rendered table. The
+              expanded-row JSON view always shows everything. */}
+          <label className="flex items-center gap-1.5 font-mono text-[10px] text-[#6b7594] cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={hideIds}
+              onChange={(e) => setHideIds(e.target.checked)}
+              className="accent-[#2dd4bf]"
+            />
+            Hide IDs
+          </label>
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
@@ -2689,13 +2783,20 @@ function DataTab() {
         <div className="bg-[#111827] rounded-xl border border-white/8 h-32 animate-pulse" />
       )}
 
-      {/* Rows */}
-      {data && (
+      {/* Rows — Sprint D6.92: columns filtered when Hide IDs is on.
+          The expanded-row JSON view always shows ALL columns regardless
+          of the toggle, so no data is hidden — just collapsed from the
+          condensed scan view. */}
+      {data && (() => {
+        const visibleColumns = hideIds
+          ? data.columns.filter(c => c !== 'id' && !c.endsWith('_id'))
+          : data.columns
+        return (
         <div className="bg-[#111827] rounded-xl border border-white/8 overflow-x-auto">
           <table className="w-full font-mono text-xs">
             <thead>
               <tr className="border-b border-white/8">
-                {data.columns.map((c) => (
+                {visibleColumns.map((c) => (
                   <th key={c} className="text-left px-3 py-2 text-[10px] uppercase tracking-wider text-[#6b7594] whitespace-nowrap">
                     {c}
                   </th>
@@ -2705,7 +2806,7 @@ function DataTab() {
             <tbody>
               {data.rows.length === 0 && (
                 <tr>
-                  <td colSpan={data.columns.length} className="px-3 py-6 text-center text-[#6b7594]">
+                  <td colSpan={visibleColumns.length} className="px-3 py-6 text-center text-[#6b7594]">
                     No rows
                   </td>
                 </tr>
@@ -2719,7 +2820,7 @@ function DataTab() {
                       onClick={() => setExpandedRow(isExpanded ? null : idx)}
                       className="border-b border-white/5 hover:bg-white/2 cursor-pointer transition-colors"
                     >
-                      {data.columns.map((c) => {
+                      {visibleColumns.map((c) => {
                         const v = row[c]
                         const display =
                           v === null || v === undefined
@@ -2738,7 +2839,7 @@ function DataTab() {
                     </tr>
                     {isExpanded && (
                       <tr key={`${idx}-detail`} className="bg-[#0d1225]">
-                        <td colSpan={data.columns.length} className="px-3 py-3">
+                        <td colSpan={visibleColumns.length} className="px-3 py-3">
                           <pre className="font-mono text-[10px] text-[#f0ece4]/80 whitespace-pre-wrap break-all">
                             {JSON.stringify(row, null, 2)}
                           </pre>
@@ -2751,7 +2852,7 @@ function DataTab() {
             </tbody>
           </table>
         </div>
-      )}
+      )})()}
 
       {/* Pagination */}
       {data && data.total > limit && (
@@ -3507,8 +3608,20 @@ interface FeatureUserRow {
   psc_checklists: number
   vessels: number
   vessel_documents: number
+  // Sprint D6.92 — new feature columns + tier inline
+  conversations?: number
+  studies?: number
+  subscription_tier?: string
   last_activity_at: string | null
 }
+
+// Sprint D6.92 — sortable column keys for the Top Users table.
+type FeatureUserSortKey =
+  | 'email' | 'tier' | 'conversations' | 'studies'
+  | 'credentials' | 'compliance_logs' | 'psc_checklists'
+  | 'vessels' | 'vessel_documents' | 'last_activity_at'
+
+type SortDir = 'asc' | 'desc'
 
 function FeaturesTab() {
   const [totals, setTotals] = useState<FeatureTotal[]>([])
@@ -3516,6 +3629,13 @@ function FeaturesTab() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [excludeInternal, setExcludeInternal] = useState(true)
+
+  // Sprint D6.92 — sortable Top Users table.
+  // Default: server-side ORDER BY (total feature touches DESC). Once
+  // the admin clicks a header, switch to client-side sort by that
+  // column. Toggling the same header flips direction.
+  const [sortKey, setSortKey] = useState<FeatureUserSortKey | null>(null)
+  const [sortDir, setSortDir] = useState<SortDir>('desc')
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -3538,6 +3658,62 @@ function FeaturesTab() {
   }, [excludeInternal])
 
   useEffect(() => { load() }, [load])
+
+  /** Click handler: same key flips direction, new key resets to desc. */
+  function onSort(key: FeatureUserSortKey) {
+    if (sortKey === key) {
+      setSortDir(d => d === 'asc' ? 'desc' : 'asc')
+    } else {
+      setSortKey(key)
+      setSortDir('desc')
+    }
+  }
+
+  /** Apply client-side sort when a column has been clicked; otherwise
+   *  preserve the server's default ordering. */
+  const sortedUsers = useMemo(() => {
+    if (!sortKey) return users
+    const dir = sortDir === 'asc' ? 1 : -1
+    const out = [...users]
+    out.sort((a, b) => {
+      let av: string | number
+      let bv: string | number
+      switch (sortKey) {
+        case 'email':           av = a.email.toLowerCase(); bv = b.email.toLowerCase(); break
+        case 'tier':            av = a.subscription_tier ?? ''; bv = b.subscription_tier ?? ''; break
+        case 'conversations':   av = a.conversations ?? 0; bv = b.conversations ?? 0; break
+        case 'studies':         av = a.studies ?? 0; bv = b.studies ?? 0; break
+        case 'credentials':     av = a.credentials; bv = b.credentials; break
+        case 'compliance_logs': av = a.compliance_logs; bv = b.compliance_logs; break
+        case 'psc_checklists':  av = a.psc_checklists; bv = b.psc_checklists; break
+        case 'vessels':         av = a.vessels; bv = b.vessels; break
+        case 'vessel_documents': av = a.vessel_documents; bv = b.vessel_documents; break
+        case 'last_activity_at':
+          av = a.last_activity_at ? new Date(a.last_activity_at).getTime() : 0
+          bv = b.last_activity_at ? new Date(b.last_activity_at).getTime() : 0
+          break
+      }
+      if (av < bv) return -1 * dir
+      if (av > bv) return  1 * dir
+      return 0
+    })
+    return out
+  }, [users, sortKey, sortDir])
+
+  /** Sort-header indicator arrow. */
+  function SortHeader({ label, k, right }: { label: string; k: FeatureUserSortKey; right?: boolean }) {
+    const active = sortKey === k
+    const arrow = active ? (sortDir === 'asc' ? '▲' : '▼') : ''
+    return (
+      <th
+        className={`${right ? 'text-right' : 'text-left'} px-3 py-2 cursor-pointer hover:text-[#f0ece4] transition-colors select-none`}
+        onClick={() => onSort(k)}
+        title={`Sort by ${label.toLowerCase()}`}
+      >
+        {label} {arrow && <span className="text-[#2dd4bf]">{arrow}</span>}
+      </th>
+    )
+  }
 
   return (
     <div>
@@ -3586,42 +3762,59 @@ function FeaturesTab() {
             ))}
       </div>
 
-      {/* Per-user breakdown */}
+      {/* Per-user breakdown — Sprint D6.92 sortable columns + new
+          feature columns (Conversations, Studies, Tier). Click any
+          header to sort by it; click again to flip direction. */}
       <h3 className="font-mono text-xs uppercase tracking-wider text-[#6b7594] mb-2">
         Top users (any feature)
       </h3>
-      <div className="bg-[#111827] rounded-xl border border-white/8 overflow-hidden">
+      <div className="bg-[#111827] rounded-xl border border-white/8 overflow-x-auto">
         <table className="w-full text-xs font-mono">
           <thead>
             <tr className="bg-[#0d1224] text-[#6b7594]">
-              <th className="text-left px-3 py-2">User</th>
-              <th className="text-right px-3 py-2">Creds</th>
-              <th className="text-right px-3 py-2">Logs</th>
-              <th className="text-right px-3 py-2">PSC</th>
-              <th className="text-right px-3 py-2">Vessels</th>
-              <th className="text-right px-3 py-2">Docs</th>
-              <th className="text-right px-3 py-2">Last activity</th>
+              <SortHeader label="User"     k="email" />
+              <SortHeader label="Tier"     k="tier" />
+              <SortHeader label="Convos"   k="conversations" right />
+              <SortHeader label="Studies"  k="studies" right />
+              <SortHeader label="Creds"    k="credentials" right />
+              <SortHeader label="Logs"     k="compliance_logs" right />
+              <SortHeader label="PSC"      k="psc_checklists" right />
+              <SortHeader label="Vessels"  k="vessels" right />
+              <SortHeader label="Docs"     k="vessel_documents" right />
+              <SortHeader label="Last activity" k="last_activity_at" />
             </tr>
           </thead>
           <tbody>
             {loading && users.length === 0 && (
-              <tr><td colSpan={7} className="px-3 py-6 text-center text-[#6b7594]">Loading…</td></tr>
+              <tr><td colSpan={10} className="px-3 py-6 text-center text-[#6b7594]">Loading…</td></tr>
             )}
             {!loading && users.length === 0 && (
-              <tr><td colSpan={7} className="px-3 py-6 text-center text-[#6b7594]">No users have engaged any feature yet.</td></tr>
+              <tr><td colSpan={10} className="px-3 py-6 text-center text-[#6b7594]">No users have engaged any feature yet.</td></tr>
             )}
-            {users.map((u) => (
+            {sortedUsers.map((u) => (
               <tr key={u.user_id} className="border-t border-white/5 hover:bg-white/[0.02]">
                 <td className="px-3 py-2">
-                  <div className="text-[#f0ece4] truncate max-w-[280px]">{u.email}</div>
-                  {u.full_name && <div className="text-[#6b7594] truncate max-w-[280px]">{u.full_name}</div>}
+                  <div className="text-[#f0ece4] truncate max-w-[240px]">{u.email}</div>
+                  {u.full_name && <div className="text-[#6b7594] truncate max-w-[240px]">{u.full_name}</div>}
                 </td>
+                <td className="px-3 py-2">
+                  {u.subscription_tier && u.subscription_tier !== 'free' ? (
+                    <span className="inline-block text-[9px] font-bold uppercase tracking-wider
+                      px-1.5 py-0.5 rounded border border-[#2dd4bf]/30 text-[#2dd4bf] bg-[#2dd4bf]/5">
+                      {u.subscription_tier}
+                    </span>
+                  ) : (
+                    <span className="text-[#6b7594]">—</span>
+                  )}
+                </td>
+                <td className="text-right px-3 py-2 text-[#f0ece4]">{u.conversations || '—'}</td>
+                <td className="text-right px-3 py-2 text-[#f0ece4]">{u.studies || '—'}</td>
                 <td className="text-right px-3 py-2 text-[#f0ece4]">{u.credentials || '—'}</td>
                 <td className="text-right px-3 py-2 text-[#f0ece4]">{u.compliance_logs || '—'}</td>
                 <td className="text-right px-3 py-2 text-[#f0ece4]">{u.psc_checklists || '—'}</td>
                 <td className="text-right px-3 py-2 text-[#f0ece4]">{u.vessels || '—'}</td>
                 <td className="text-right px-3 py-2 text-[#f0ece4]">{u.vessel_documents || '—'}</td>
-                <td className="text-right px-3 py-2 text-[#6b7594]">{fmtRelative(u.last_activity_at)}</td>
+                <td className="px-3 py-2 text-[#6b7594]">{fmtRelative(u.last_activity_at)}</td>
               </tr>
             ))}
           </tbody>
