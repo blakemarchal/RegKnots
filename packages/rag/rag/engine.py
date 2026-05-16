@@ -949,6 +949,16 @@ def _build_chat_messages(
         # this gap.
         if vessel_profile.get("flag_state"):
             lines.append(f"- Flag state: {vessel_profile['flag_state']}")
+        # Sprint D6.94 — class society. When set, AUTHORITY AND
+        # APPLICABILITY routes class-society rules (ABS MVR / LR-RU-001 /
+        # LR-CO-001 / DNV / etc.) by this value. An ABS-classed vessel's
+        # binding construction + survey standard is ABS rules, not LR's
+        # or DNV's; the synthesizer treats other societies as cross-
+        # reference only.
+        if vessel_profile.get("classification_society"):
+            lines.append(
+                f"- Class society: {vessel_profile['classification_society']}"
+            )
         if vessel_profile.get("route_types"):
             lines.append(f"- Routes: {', '.join(vessel_profile['route_types'])}")
         if vessel_profile.get("cargo_types"):

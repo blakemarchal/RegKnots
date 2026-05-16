@@ -7,6 +7,7 @@ NULL, the legacy personal-vessel behavior). Listing accepts an optional
 ?workspace_id= query param to surface workspace vessels.
 """
 
+import logging
 import uuid
 from typing import Annotated
 
@@ -16,6 +17,8 @@ from pydantic import BaseModel
 from app.auth.deps import get_current_user
 from app.auth.schemas import CurrentUser
 from app.db import get_pool
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/vessels", tags=["vessels"])
 
@@ -43,6 +46,12 @@ class VesselListItem(BaseModel):
     # scanned cert without making the user retype.
     additional_details: dict | None = None
     latest_coi_extracted: dict | None = None
+    # D6.94 — class society routing. Source distinguishes user-picked
+    # ('user') from auto-populated via the IACS lookup table
+    # ('iacs_lookup'); the UI shows a "verify" hint when source=
+    # iacs_lookup so the mariner can correct an upstream stale value.
+    classification_society: str | None = None
+    classification_society_source: str | None = None
 
 
 async def _require_workspace_member(
@@ -85,6 +94,7 @@ async def list_vessels(
                        gross_tonnage, subchapter, inspection_certificate_type,
                        manning_requirement, route_limitations, workspace_id,
                        additional_details,
+                       classification_society, classification_society_source,
                        (
                          SELECT extracted_data
                          FROM vessel_documents
@@ -107,6 +117,7 @@ async def list_vessels(
                        gross_tonnage, subchapter, inspection_certificate_type,
                        manning_requirement, route_limitations, workspace_id,
                        additional_details,
+                       classification_society, classification_society_source,
                        (
                          SELECT extracted_data
                          FROM vessel_documents
@@ -156,8 +167,16 @@ async def list_vessels(
             workspace_id=str(r["workspace_id"]) if r["workspace_id"] else None,
             additional_details=addn if isinstance(addn, dict) else None,
             latest_coi_extracted=coi_ex if isinstance(coi_ex, dict) else None,
+            classification_society=r["classification_society"],
+            classification_society_source=r["classification_society_source"],
         ))
     return out
+
+
+_VALID_SOCIETIES = {
+    "ABS", "LR", "DNV", "ClassNK", "BV", "KR", "CCS",
+    "RINA", "CRS", "IRS", "PRS", "other", "unclassed",
+}
 
 
 class VesselCreate(BaseModel):
@@ -172,6 +191,10 @@ class VesselCreate(BaseModel):
     inspection_certificate_type: str | None = None
     manning_requirement: str | None = None
     route_limitations: str | None = None
+    # D6.94 — class society. User-picked here is authoritative and
+    # locks out the IACS auto-lookup. Leave None to let the create
+    # path try the auto-populate from imo_mmsi.
+    classification_society: str | None = None
     # D6.55 — when set, this vessel belongs to a workspace; only
     # Owner/Admin members may create. Personal users / regular members
     # leave this null and create personal vessels (legacy path).
@@ -186,6 +209,9 @@ class VesselResponse(BaseModel):
     route_types: list[str]
     cargo_types: list[str]
     workspace_id: str | None = None
+    # D6.94 — class society routing.
+    classification_society: str | None = None
+    classification_society_source: str | None = None
 
 
 def _validate_route_types(route_types: list[str]) -> None:
@@ -202,6 +228,19 @@ def _validate_route_types(route_types: list[str]) -> None:
         )
 
 
+def _validate_classification_society(value: str | None) -> None:
+    if value is None:
+        return
+    if value not in _VALID_SOCIETIES:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                f"Invalid classification_society: {value}. "
+                f"Must be one of: {', '.join(sorted(_VALID_SOCIETIES))}"
+            ),
+        )
+
+
 @router.post("", status_code=status.HTTP_201_CREATED, response_model=VesselResponse)
 async def create_vessel(
     body: VesselCreate,
@@ -209,6 +248,7 @@ async def create_vessel(
     pool=Depends(get_pool),
 ) -> VesselResponse:
     _validate_route_types(body.route_types)
+    _validate_classification_society(body.classification_society)
 
     # D6.55 — workspace vessel creation requires Owner/Admin role.
     if body.workspace_id is not None:
@@ -222,6 +262,12 @@ async def create_vessel(
                     detail="Only Owner or Admin can add a workspace vessel.",
                 )
 
+    # D6.94 — when the user picks a society explicitly, that's the truth
+    # (source='user'). When they leave it blank but provide an IMO, the
+    # post-insert auto-populate path will try the IACS lookup.
+    initial_society = body.classification_society
+    initial_society_source = "user" if initial_society is not None else None
+
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             """
@@ -229,10 +275,12 @@ async def create_vessel(
                 (user_id, workspace_id, name, imo_mmsi, vessel_type, gross_tonnage,
                  flag_state, route_types, cargo_types,
                  subchapter, inspection_certificate_type, manning_requirement,
-                 route_limitations)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+                 route_limitations,
+                 classification_society, classification_society_source)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
             RETURNING id, name, vessel_type, gross_tonnage, route_types,
-                      cargo_types, workspace_id
+                      cargo_types, workspace_id,
+                      classification_society, classification_society_source
             """,
             uuid.UUID(user.user_id),
             body.workspace_id,
@@ -247,7 +295,33 @@ async def create_vessel(
             body.inspection_certificate_type,
             body.manning_requirement,
             body.route_limitations,
+            initial_society,
+            initial_society_source,
         )
+
+        # D6.94 — IACS auto-populate. Only fires when society is still
+        # NULL (user didn't pick) AND IMO is provided. Best-effort: any
+        # failure here is logged and swallowed so it doesn't break the
+        # vessel-create flow.
+        society_after = row["classification_society"]
+        society_source_after = row["classification_society_source"]
+        if society_after is None and body.imo_mmsi:
+            try:
+                from app.services.class_society import (
+                    auto_populate_classification_society,
+                )
+                filled = await auto_populate_classification_society(
+                    conn, row["id"], body.imo_mmsi,
+                )
+                if filled:
+                    society_after = filled
+                    society_source_after = "iacs_lookup"
+            except Exception as exc:
+                logger.warning(
+                    "create_vessel: classification_society auto-populate "
+                    "failed for vessel %s: %s: %s",
+                    row["id"], type(exc).__name__, str(exc)[:200],
+                )
 
     return VesselResponse(
         id=str(row["id"]),
@@ -257,6 +331,8 @@ async def create_vessel(
         route_types=list(row["route_types"]),
         cargo_types=list(row["cargo_types"]),
         workspace_id=str(row["workspace_id"]) if row["workspace_id"] else None,
+        classification_society=society_after,
+        classification_society_source=society_source_after,
     )
 
 
@@ -271,6 +347,9 @@ class VesselUpdate(BaseModel):
     inspection_certificate_type: str | None = None
     manning_requirement: str | None = None
     route_limitations: str | None = None
+    # D6.94 — user-facing edit of class society. Setting this stamps
+    # source='user', overriding any prior auto-populated value.
+    classification_society: str | None = None
 
 
 async def _authorize_vessel_write(
@@ -321,16 +400,25 @@ async def update_vessel(
 ) -> VesselResponse:
     if body.route_types is not None:
         _validate_route_types(body.route_types)
+    _validate_classification_society(body.classification_society)
 
     sets: list[str] = []
     params: list[object] = []
     idx = 1
+    # D6.94 — when the user submits classification_society in an update,
+    # stamp source='user' atomically so we don't reopen the lookup-path
+    # on the next save.
+    if body.classification_society is not None:
+        sets.append(f"classification_society_source = ${idx}")
+        params.append("user")
+        idx += 1
     for field, value in [
         ("name", body.name.strip() if body.name else None),
         ("vessel_type", body.vessel_type),
         ("gross_tonnage", body.gross_tonnage),
         ("route_types", body.route_types),
         ("cargo_types", body.cargo_types),
+        ("classification_society", body.classification_society),
         ("subchapter", body.subchapter),
         ("inspection_certificate_type", body.inspection_certificate_type),
         ("manning_requirement", body.manning_requirement),
@@ -360,7 +448,8 @@ async def update_vessel(
             UPDATE vessels SET {', '.join(sets)}
             WHERE id = ${idx}
             RETURNING id, name, vessel_type, gross_tonnage, route_types,
-                      cargo_types, workspace_id
+                      cargo_types, workspace_id,
+                      classification_society, classification_society_source
             """,
             *params,
         )
@@ -376,7 +465,72 @@ async def update_vessel(
         route_types=list(row["route_types"]),
         cargo_types=list(row["cargo_types"]),
         workspace_id=str(row["workspace_id"]) if row["workspace_id"] else None,
+        classification_society=row["classification_society"],
+        classification_society_source=row["classification_society_source"],
     )
+
+
+class ClassSocietyLookupResult(BaseModel):
+    """Response from the on-demand class-society lookup endpoint."""
+    classification_society: str | None
+    classification_society_source: str | None
+    matched: bool  # True if IACS had a row for this IMO
+
+
+@router.post(
+    "/{vessel_id}/lookup-class-society",
+    response_model=ClassSocietyLookupResult,
+)
+async def lookup_class_society(
+    vessel_id: str,
+    user: Annotated[CurrentUser, Depends(get_current_user)],
+    pool=Depends(get_pool),
+) -> ClassSocietyLookupResult:
+    """On-demand IACS class-society lookup for an existing vessel.
+
+    D6.94 — exposed for the existing-user banner that surfaces when a
+    user has IMO on file but no classification_society yet. The
+    backend hits the iacs_ships_in_class table; if a match exists it
+    writes the result with source='iacs_lookup'. Idempotent — never
+    overwrites a user-set value.
+
+    Refuses if classification_society is already set (call PUT to
+    overwrite). Returns matched=False when no IACS row exists for the
+    vessel's IMO; the UI then prompts the user to pick from the dropdown.
+    """
+    async with pool.acquire() as conn:
+        await _authorize_vessel_write(
+            conn, uuid.UUID(vessel_id), uuid.UUID(user.user_id),
+        )
+        existing = await conn.fetchrow(
+            "SELECT id, imo_mmsi, classification_society, "
+            "       classification_society_source "
+            "FROM vessels WHERE id = $1",
+            uuid.UUID(vessel_id),
+        )
+        if existing is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Vessel not found",
+            )
+        if existing["classification_society"] is not None:
+            # Already set — return current value, no overwrite.
+            return ClassSocietyLookupResult(
+                classification_society=existing["classification_society"],
+                classification_society_source=existing["classification_society_source"],
+                matched=True,
+            )
+
+        from app.services.class_society import (
+            auto_populate_classification_society,
+        )
+        filled = await auto_populate_classification_society(
+            conn, existing["id"], existing["imo_mmsi"],
+        )
+        return ClassSocietyLookupResult(
+            classification_society=filled,
+            classification_society_source="iacs_lookup" if filled else None,
+            matched=filled is not None,
+        )
 
 
 @router.delete("/{vessel_id}", status_code=status.HTTP_204_NO_CONTENT)

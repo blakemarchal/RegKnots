@@ -89,7 +89,30 @@ interface VesselData {
   inspection_certificate_type: string | null
   manning_requirement: string | null
   route_limitations: string | null
+  // D6.94 — class society routing.
+  classification_society: string | null
+  classification_society_source: string | null
 }
+
+// D6.94 — IACS member societies plus 'other' / 'unclassed' sentinels.
+// Kept in sync with the CHECK constraint in migration 0100 and the
+// _VALID_SOCIETIES set in apps/api/app/routers/vessels.py.
+const CLASS_SOCIETIES: { value: string; label: string }[] = [
+  { value: '', label: 'Not set' },
+  { value: 'ABS', label: 'ABS — American Bureau of Shipping' },
+  { value: 'LR', label: "LR — Lloyd's Register" },
+  { value: 'DNV', label: 'DNV — Det Norske Veritas' },
+  { value: 'ClassNK', label: 'ClassNK — Nippon Kaiji Kyokai' },
+  { value: 'BV', label: 'BV — Bureau Veritas' },
+  { value: 'KR', label: 'KR — Korean Register' },
+  { value: 'CCS', label: 'CCS — China Classification Society' },
+  { value: 'RINA', label: 'RINA — Registro Italiano Navale' },
+  { value: 'CRS', label: 'CRS — Croatian Register of Shipping' },
+  { value: 'IRS', label: 'IRS — Indian Register of Shipping' },
+  { value: 'PRS', label: 'PRS — Polish Register of Shipping' },
+  { value: 'other', label: 'Other society' },
+  { value: 'unclassed', label: 'Not classed' },
+]
 
 interface DocumentData {
   id: string
@@ -388,6 +411,10 @@ function VesselEditContent() {
   const [certType, setCertType] = useState('')
   const [manning, setManning] = useState('')
   const [routeLimitations, setRouteLimitations] = useState('')
+  // D6.94 — class society. source distinguishes user-picked from
+  // IACS-auto-populated; the UI shows a "Verify" hint when source=iacs_lookup.
+  const [classSociety, setClassSociety] = useState('')
+  const [classSocietySource, setClassSocietySource] = useState<string | null>(null)
 
   // Document state
   const [documents, setDocuments] = useState<DocumentData[]>([])
@@ -433,6 +460,8 @@ function VesselEditContent() {
           setCertType(v.inspection_certificate_type ?? '')
           setManning(v.manning_requirement ?? '')
           setRouteLimitations(v.route_limitations ?? '')
+          setClassSociety(v.classification_society ?? '')
+          setClassSocietySource(v.classification_society_source ?? null)
         } else {
           setError('Vessel not found')
         }
@@ -477,6 +506,7 @@ function VesselEditContent() {
           inspection_certificate_type: certType.trim() || null,
           manning_requirement: manning.trim() || null,
           route_limitations: routeLimitations.trim() || null,
+          classification_society: classSociety || null,
         }),
       })
       setSuccess(true)
@@ -779,6 +809,39 @@ function VesselEditContent() {
                   className="font-mono w-full bg-[#0d1225] border border-white/10 rounded-lg px-3 py-2 text-sm
                     text-[#f0ece4] outline-none focus:border-[#2dd4bf] transition-colors resize-none"
                 />
+              </div>
+
+              {/* D6.94 — Classification society. When auto-populated from the
+                  IACS CSV (source='iacs_lookup'), show a verify hint so the
+                  mariner can correct an upstream stale value. */}
+              <div className="flex flex-col gap-1">
+                <label className="font-mono text-xs text-[#6b7594]">
+                  Classification Society
+                  {classSocietySource === 'iacs_lookup' && (
+                    <span className="ml-2 text-[#2dd4bf]/80 normal-case">
+                      auto-populated from IACS — please verify
+                    </span>
+                  )}
+                </label>
+                <select
+                  value={classSociety}
+                  onChange={(e) => setClassSociety(e.target.value)}
+                  className="font-mono w-full border border-white/10 rounded-lg px-3 py-2 text-sm
+                    outline-none focus:border-[#2dd4bf] transition-colors appearance-none"
+                  style={{ backgroundColor: '#0d1225', color: '#f0ece4' }}
+                >
+                  {CLASS_SOCIETIES.map((s) => (
+                    <option key={s.value} value={s.value} style={{ backgroundColor: '#111827', color: '#f0ece4' }}>
+                      {s.label}
+                    </option>
+                  ))}
+                </select>
+                <p className="font-mono text-[10px] text-[#6b7594]/70 leading-snug mt-0.5">
+                  Drives class-society retrieval routing. Set this so RegKnot
+                  surfaces YOUR society&apos;s rules (ABS Pt.4 vs.
+                  Lloyd&apos;s LR-RU-001 Pt.6, etc.) on technical class
+                  questions.
+                </p>
               </div>
             </div>
           </div>

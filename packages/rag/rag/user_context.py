@@ -81,6 +81,10 @@ class ActiveVesselSummary:
     route_types: list[str]
     cargo_types: list[str]
     has_coi_extraction: bool   # flag — full extraction lives in vessel_profile
+    # D6.94 — class society. NULL when the vessel record has not been
+    # tagged yet (user hasn't picked AND IACS auto-lookup missed). When
+    # present, drives the synthesis prompt's binding-rule routing.
+    classification_society: Optional[str] = None
 
 
 @dataclass
@@ -302,7 +306,7 @@ async def build_user_context(
                 """
                 SELECT v.id, v.name, v.vessel_type, v.flag_state,
                        v.gross_tonnage, v.subchapter, v.route_types,
-                       v.cargo_types,
+                       v.cargo_types, v.classification_society,
                        (
                          SELECT COUNT(*) > 0 FROM vessel_documents vd
                          WHERE vd.vessel_id = v.id
@@ -325,6 +329,7 @@ async def build_user_context(
                     route_types=list(v["route_types"] or []),
                     cargo_types=list(v["cargo_types"] or []),
                     has_coi_extraction=bool(v["has_coi"]),
+                    classification_society=v["classification_society"],
                 )
         except Exception as exc:
             logger.info(
