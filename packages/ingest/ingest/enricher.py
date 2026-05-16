@@ -6,9 +6,14 @@ prepending them as a `[Search terms: ...]` block so the embedding
 model captures operational vocabulary that mariners actually use.
 
 Results are cached by content hash so re-ingests only call the API
-for genuinely modified chunks.
+for genuinely modified chunks. D6.94 — API calls are now parallelized
+within each batch via asyncio.gather + a semaphore (10 concurrent)
+because sequential per-chunk calls put lr_rules and abs_mvr enrichment
+on a 30-50 minute critical path. Cache also checkpoints per batch so a
+crash mid-run doesn't lose all progress.
 """
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -25,7 +30,14 @@ logger = logging.getLogger(__name__)
 _ENCODER = tiktoken.get_encoding("cl100k_base")
 _MAX_TOKENS = 512
 _MODEL = "claude-sonnet-4-20250514"
-_BATCH_SIZE = 20  # chunks per API batch (sequential, not parallel)
+_BATCH_SIZE = 20  # chunks per API batch — kept as the per-batch
+                  # window so we can checkpoint the cache between
+                  # batches and recover from interruptions.
+_BATCH_CONCURRENCY = 10  # D6.94 — concurrent API calls per batch.
+                         # Anthropic's tier-2 limit is 1000 req/min so
+                         # 10 in flight gives ~10x throughput for
+                         # large sources (lr_rules / abs_mvr) without
+                         # tripping rate limits.
 _MAX_ALIAS_TOKENS = 60  # hard cap on alias block token count
 
 _SYSTEM_PROMPT = """\
@@ -94,9 +106,29 @@ class AliasEnricher:
         skipped_budget = 0
         skipped_errors = 0
 
+        # D6.94 — process batches concurrently. Within each batch, fire
+        # up to _BATCH_CONCURRENCY API calls in parallel via
+        # asyncio.gather. Cache + budget skips remain synchronous (fast
+        # local lookups, no point parallelizing).
+        sem = asyncio.Semaphore(_BATCH_CONCURRENCY)
+
+        async def _generate_with_sem(chunk: Chunk) -> tuple[Chunk, list[str] | None, Exception | None]:
+            """Call _generate_aliases under the concurrency semaphore.
+            Returns (chunk, aliases, exception) — exception is None on
+            success. Never raises so the gather call doesn't short-circuit."""
+            async with sem:
+                try:
+                    aliases = await self._generate_aliases(chunk)
+                    return chunk, aliases, None
+                except Exception as exc:  # noqa: BLE001
+                    return chunk, None, exc
+
         for i in range(0, len(chunks), _BATCH_SIZE):
             batch = chunks[i : i + _BATCH_SIZE]
+            to_generate: list[Chunk] = []
 
+            # Synchronous pre-pass: handle budget-skip + cache hits, queue
+            # the rest for the parallel API generation step.
             for chunk in batch:
                 original_hash = chunk.content_hash
                 original_tokens = chunk.token_count or _count(chunk.chunk_text)
@@ -114,19 +146,30 @@ class AliasEnricher:
                     cache_hits += 1
                     continue
 
-                # Generate aliases via API
-                try:
-                    aliases = await self._generate_aliases(chunk)
-                    self._cache[original_hash] = aliases
-                    enriched.append(self._apply_aliases(chunk, aliases))
-                    api_calls += 1
-                except Exception as exc:
-                    logger.warning(
-                        "enricher: API error for %s chunk %d: %s — using original",
-                        chunk.section_number, chunk.chunk_index, exc,
-                    )
-                    enriched.append(chunk)
-                    skipped_errors += 1
+                to_generate.append(chunk)
+
+            # Parallel API generation for the to_generate slice.
+            if to_generate:
+                results = await asyncio.gather(
+                    *(_generate_with_sem(c) for c in to_generate)
+                )
+                for chunk, aliases, exc in results:
+                    if exc is not None:
+                        logger.warning(
+                            "enricher: API error for %s chunk %d: %s — using original",
+                            chunk.section_number, chunk.chunk_index, exc,
+                        )
+                        enriched.append(chunk)
+                        skipped_errors += 1
+                    else:
+                        self._cache[chunk.content_hash] = aliases
+                        enriched.append(self._apply_aliases(chunk, aliases))
+                        api_calls += 1
+
+            # Checkpoint the cache after each batch so a crash mid-run
+            # doesn't lose progress (the prior implementation only saved
+            # once at the end).
+            self._save_cache(source, self._cache)
 
         self._save_cache(source, self._cache)
 
