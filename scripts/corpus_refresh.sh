@@ -108,6 +108,23 @@ log "=== refresh start: tier=$TIER, ${#sources[@]} sources ==="
 for src in "${sources[@]}"; do
   run_source "$src" || failed=$((failed + 1))
 done
+
+# Sprint D6.94 — IACS Vessels-in-Class lookup table refresh. Runs on
+# the weekly tier because IACS publishes the CSV every Wednesday. Not
+# a regulations.source — it's the per-IMO class-society directory
+# powering the vessels.classification_society auto-populate path.
+if [[ "$TIER" == "weekly" || "$TIER" == "monthly" || "$TIER" == "quarterly" || "$TIER" == "all" ]]; then
+  log "REFRESH: iacs_ships_in_class"
+  if cd "$INGEST_ROOT" && "$UV_BIN" run --project "$INGEST_ROOT" \
+        python "${INGEST_ROOT%/packages/ingest}/scripts/refresh_iacs_ships_in_class.py" >>"$LOG" 2>&1
+  then
+    log "  → ok: iacs_ships_in_class"
+  else
+    log "  → FAIL: iacs_ships_in_class (exit $?)"
+    failed=$((failed + 1))
+  fi
+fi
+
 log "=== refresh end: $failed failures ==="
 
 exit $failed
