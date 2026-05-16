@@ -63,6 +63,13 @@ async def run_pdf_pipeline(
 
     embedder = EmbedderClient(api_key=cfg.openai_api_key)
 
+    # D6.94 — Rich Live's refresh thread deadlocks against the asyncio
+    # event loop when stdout is redirected to a file with the enricher
+    # phase active (observed on lr_rules --fresh --enrich: 30+ min wall,
+    # 26s CPU, MainThread parked in selectors.select while Thread-1 sits
+    # in rich/live.py:wait). Disable the progress bar when not on a real
+    # terminal — non-TTY runs only need the console.print() summary
+    # lines anyway, not the live spinner.
     progress = Progress(
         SpinnerColumn(),
         TextColumn("[bold cyan]{task.description:<40}"),
@@ -72,6 +79,7 @@ async def run_pdf_pipeline(
         TimeRemainingColumn(),
         console=console,
         transient=False,
+        disable=not console.is_terminal,
     )
 
     try:
