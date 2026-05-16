@@ -1,19 +1,38 @@
-"""46 USC source adapter (Sprint D5.1).
+"""46 USC source adapter (Sprint D5.1, expanded D6.95).
 
 Parses United States Code Title 46 USLM (United States Legislative Markup)
 XML and emits Section objects for the shared chunker→embedder→store pipeline.
 
-Scope: Subtitle II (Vessels and Seamen) only. Subtitles I, III-VII are
-intentionally out of scope for this sprint — see docs/corpus-gap-analysis.md
-for rationale.
+Scope: ALL EIGHT SUBTITLES. The D5.1 launch covered only Subtitle II
+(Vessels and Seamen). D6.95 expands to the full title because:
+
+  Subtitle I   — General (incl. § 501 navigation/inspection waiver auth)
+  Subtitle II  — Vessels and Seamen (the original scope)
+  Subtitle III — Maritime Liability (Limitation of Liability Act, DOHSA,
+                 salvage, Suits in Admiralty)
+  Subtitle IV  — Regulation of Ocean Shipping (Shipping Act 1984, FMC)
+  Subtitle V   — Merchant Marine (THE JONES ACT — § 55102, coastwise
+                 trade, Subtitle V Ch.551 + waivers in § 55109-55121)
+  Subtitle VI  — Clearance, Tonnage Taxes, and Duties
+  Subtitle VII — Security and Drug Enforcement (port + facility security)
+  Subtitle VIII— Miscellaneous
+
+Trigger was Nicholas Brauckmann's 2026-05-16 Jones Act waiver question:
+the chat fell to web fallback and Claude hallucinated 46 USC § 55113
+(an OSRV-specific provision) as the answer's anchor because § 55102 +
+§ 501 weren't in our corpus. With full-title coverage every mariner-
+asked 46 USC question now retrieves the right statute.
 
 Source: https://uscode.house.gov/download/releasepoints/us/pl/119/84/xml_usc46@119-84.zip
 The zip contains a single usc46.xml file following the USLM 1.0 schema.
 Download, unzip, and pass the XML path to parse_source().
 
-Section identifiers in USLM follow `/us/usc/t46/stII/ptE/ch71/s7101`
+Section identifiers in USLM follow `/us/usc/t46/st<II>/pt<E>/ch<71>/s<7101>`
 pattern. We extract the trailing `/s<num>` to produce `46 USC 7101`
-section_number values matching our existing citation regex.
+section_number values matching our existing citation regex. Chapter
+numbers do not collide across subtitles (Subtitle II uses Ch.21-89,
+Subtitle V uses Ch.501-587, etc.) so the section_number stays unique
+without a subtitle prefix.
 
 Skipped by design:
 - Sections with status="repealed" (USLM marks these explicitly)
@@ -138,17 +157,15 @@ def _is_repealed(section_elem: ET.Element) -> bool:
     return False
 
 
-def _find_subtitle_ii(root: ET.Element) -> ET.Element:
+def _find_title(root: ET.Element) -> ET.Element:
+    """Return the top-level <title> element holding all eight subtitles."""
     main = root.find("u:main", _NS)
     if main is None:
         raise ValueError("USLM XML missing <main> element")
     title = main.find("u:title", _NS)
     if title is None:
         raise ValueError("USLM XML missing <title> element")
-    for subtitle in title.findall("u:subtitle", _NS):
-        if subtitle.get("identifier", "").endswith("/stII"):
-            return subtitle
-    raise ValueError("Could not locate Subtitle II in USC 46 XML")
+    return title
 
 
 def _walk_for_sections(elem: ET.Element, sections_out: list[Section], chapter_label: str | None = None):
@@ -221,14 +238,16 @@ def _section_to_ingest(section_elem: ET.Element, chapter_label: str | None) -> S
 # ── Public API ────────────────────────────────────────────────────────────────
 
 def parse_source(xml_path: Path) -> list[Section]:
-    """Parse 46 USC USLM XML, return list of Section objects for Subtitle II.
+    """Parse 46 USC USLM XML, return list of Section objects for the
+    entire Title 46 (all eight subtitles).
 
     Args:
         xml_path: Path to `usc46.xml` extracted from the House release-point zip.
 
     Returns:
-        List of Section objects (one per non-repealed section in Subtitle II),
-        ordered by appearance in the XML (which matches statutory order).
+        List of Section objects (one per non-repealed section across all
+        subtitles), ordered by appearance in the XML (which matches
+        statutory order: Subtitle I → II → … → VIII).
     """
     if not xml_path.exists():
         raise FileNotFoundError(f"USC 46 XML not found: {xml_path}")
@@ -236,13 +255,13 @@ def parse_source(xml_path: Path) -> list[Section]:
     tree = ET.parse(xml_path)
     root = tree.getroot()
 
-    subtitle_ii = _find_subtitle_ii(root)
+    title = _find_title(root)
 
     sections: list[Section] = []
-    _walk_for_sections(subtitle_ii, sections, chapter_label=None)
+    _walk_for_sections(title, sections, chapter_label=None)
 
     logger.info(
-        "Parsed %d non-repealed sections from 46 USC Subtitle II (source_date=%s)",
+        "Parsed %d non-repealed sections from 46 USC (all subtitles, source_date=%s)",
         len(sections),
         SOURCE_DATE,
     )
