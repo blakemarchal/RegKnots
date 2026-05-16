@@ -205,7 +205,8 @@ async def _run_chat_preflight(
             """
             SELECT name, vessel_type, flag_state, route_types, cargo_types, gross_tonnage,
                    subchapter, inspection_certificate_type, manning_requirement,
-                   key_equipment, route_limitations, additional_details
+                   key_equipment, route_limitations, additional_details,
+                   classification_society
             FROM vessels
             WHERE id = $1 AND user_id = $2
             """,
@@ -225,6 +226,10 @@ async def _run_chat_preflight(
                 "manning_requirement": row["manning_requirement"],
                 "key_equipment": list(row["key_equipment"] or []) if row["key_equipment"] else None,
                 "route_limitations": row["route_limitations"],
+                # D6.94 — surfaces in the engine.py vessel_profile block
+                # and drives class-society binding-rule routing in the
+                # AUTHORITY AND APPLICABILITY prompt section.
+                "classification_society": row["classification_society"],
                 "additional_details": (
                     json.loads(row["additional_details"])
                     if isinstance(row["additional_details"], str)
