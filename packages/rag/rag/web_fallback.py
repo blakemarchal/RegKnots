@@ -447,6 +447,59 @@ async def verify_quote_in_source(
 # ── Result dataclass ────────────────────────────────────────────────────────
 
 
+# ── D6.96 Maritime current-events news whitelist ─────────────────────────
+#
+# Trusted maritime trade press + official primary sources. Used by the
+# news fallback path (attempt_news_fallback) when the detector fires on
+# a current-events question. Curation is a 1-hour quarterly review;
+# adding/removing domains requires a one-line note in
+# docs/whitelist-trusted-sources.md.
+#
+# Two sub-tiers:
+#   Trade press: editorial coverage of maritime industry
+#   Official:    primary source for the underlying announcements
+#                (DHS press releases, USCG news, MARAD news, IMO press
+#                briefings). Always preferred when the user asks about
+#                a specific waiver, regulation, or official action.
+TRUSTED_NEWS_DOMAINS: frozenset[str] = frozenset({
+    # Trade press — free
+    "maritime-executive.com",
+    "gcaptain.com",
+    "ajot.com",
+    "splash247.com",
+    # Trade press — paywalled (use teaser + link)
+    "lloydslist.com",
+    "tradewindsnews.com",
+    # News wires
+    "reuters.com",
+    "apnews.com",
+    # Official / primary sources
+    "dhs.gov",
+    "uscg.mil",
+    "news.uscg.mil",
+    "maritime.dot.gov",
+    "imo.org",
+})
+
+
+def is_trusted_news_domain(url: str) -> bool:
+    """Return True if URL's domain is on the maritime-news whitelist."""
+    try:
+        host = urlparse(url).netloc.lower()
+    except Exception:
+        return False
+    if host.startswith("www."):
+        host = host[4:]
+    if host in TRUSTED_NEWS_DOMAINS:
+        return True
+    # Allow subdomains of whitelisted domains (e.g. news.uscg.mil already
+    # explicit but other sources may use subdomains too).
+    for d in TRUSTED_NEWS_DOMAINS:
+        if host.endswith("." + d):
+            return True
+    return False
+
+
 @dataclass
 class FallbackResult:
     """Outcome of a single fallback attempt — surfaced or not, plus all
@@ -628,6 +681,157 @@ async def attempt_web_fallback(
             result.surface_blocked_reason = "quote_unverified"
 
     result.surfaced = True
+    result.latency_ms = int((time.monotonic() - started) * 1000)
+    return result
+
+
+# ── D6.96 Maritime current-events news fallback ─────────────────────────────
+
+
+@dataclass
+class NewsSource:
+    """One attributed quote from a maritime news source."""
+    url: str
+    domain: str
+    publication: str            # human label, e.g. "Maritime Executive"
+    quote: str                  # verbatim
+    published_date: Optional[str] = None  # ISO date if extractable
+
+
+@dataclass
+class NewsFallbackResult:
+    """Outcome of a current-events news fallback attempt.
+
+    Parallels FallbackResult but keeps the news-specific shape (multiple
+    attributed sources, per-source dates, refusal reasons) cleanly
+    separable from the regulatory-fallback path.
+    """
+    query:                  str
+    markers_matched:        list[str] = field(default_factory=list)
+    sources:                list[NewsSource] = field(default_factory=list)
+    answer_text:            Optional[str] = None
+    refusal_reason:         Optional[str] = None  # 'policy_advocacy', 'no_fresh_sources', 'stale_only'
+    oldest_quote_date:      Optional[str] = None  # ISO
+    newest_quote_date:      Optional[str] = None  # ISO
+    surfaced:               bool = False
+    surface_tier:           str = "blocked"  # 'current_events' | 'blocked'
+    latency_ms:             int = 0
+
+
+_NEWS_FALLBACK_SYSTEM_PROMPT = """You are a maritime current-events research assistant. The user has asked about a current-events maritime topic (waivers, geopolitical shipping issues, port disruptions, sanctions activity, etc.).
+
+Use the web_search tool to find an answer from trusted maritime trade press and official primary sources ONLY. The tool will restrict search to a whitelist of trusted publications and government sources — do not invent URLs outside that whitelist.
+
+Your job is to synthesize a SHORT, DATED, ATTRIBUTED answer from those sources. You are NOT writing a verified regulatory citation; you are summarizing current reading on a moving topic.
+
+STRICT RULES:
+  1. EVERY factual claim must be attributed to a specific source and dated. Use the format: "<Publication> reported on <YYYY-MM-DD> that <verbatim quote>" or "<Publication> (<date>): <verbatim quote>".
+  2. Require AT LEAST 2 distinct domains for any contested or load-bearing factual claim. Single-source claims are acceptable only for verbatim quotes from official primary sources (DHS press release, USCG news release, IMO press briefing).
+  3. Quote VERBATIM. Never paraphrase a fact as your own. We will verify quotes programmatically.
+  4. If the most recent source you can find on the topic is older than 180 days, that's stale — note it explicitly in the answer ("As of <date>, the most recent reporting we can find is...").
+  5. REFUSE to answer if the user is asking for policy advocacy ("should we militarily defend X", "is the Jones Act right or wrong"). Answer descriptive policy questions ("what is the U.S. Navy doing in X", "what positions have industry groups taken on the Jones Act") with attributed quotes.
+  6. The user is a working maritime professional. Be concise, factual, and attribute everything.
+
+You MUST return a JSON object (and ONLY the JSON object, no prose around it) with these fields:
+  - "sources": array of {"url": str, "publication": str, "quote": verbatim str, "published_date": "YYYY-MM-DD" or null}
+  - "answer": the synthesized answer with inline attribution — ≤ 300 words
+  - "refusal_reason": one of "policy_advocacy", "no_fresh_sources", "stale_only", or null if no refusal
+  - "search_query": the query you used (for audit)
+
+If you refuse (policy_advocacy), set sources=[] and answer should briefly explain the refusal and point the user to the relevant trusted publications.
+"""
+
+
+async def attempt_news_fallback(
+    *,
+    query: str,
+    markers_matched: list[str],
+    anthropic_client,
+    model: str = "claude-sonnet-4-6",
+    max_age_days: int = 180,
+) -> NewsFallbackResult:
+    """Run the maritime current-events news fallback. Returns a
+    NewsFallbackResult with attributed quotes from the trusted-news
+    whitelist or a refusal if the topic is out of scope.
+
+    D6.96 — fires in parallel with corpus retrieval when
+    detect_current_events_intent(query) returns True. The result joins
+    the regulatory framework block (if corpus matched) in the
+    synthesizer to produce a hybrid framework + current-reading answer.
+    """
+    started = time.monotonic()
+    result = NewsFallbackResult(query=query, markers_matched=markers_matched)
+
+    try:
+        response = await anthropic_client.messages.create(
+            model=model,
+            max_tokens=2048,
+            system=_NEWS_FALLBACK_SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": query}],
+            tools=[{
+                "type": "web_search_20250305",
+                "name": "web_search",
+                "max_uses": 5,
+                # Constrain the tool to maritime trade press + official
+                # primary sources. The trusted-domain list lives at
+                # module top; quarterly curation review keeps it tight.
+                "allowed_domains": sorted(TRUSTED_NEWS_DOMAINS),
+            }],
+        )
+    except Exception as exc:
+        logger.warning("News fallback API call failed: %s: %s",
+                       type(exc).__name__, str(exc)[:200])
+        result.surface_tier = "blocked"
+        result.latency_ms = int((time.monotonic() - started) * 1000)
+        return result
+
+    payload = _extract_final_json(response)
+    if payload is None:
+        result.surface_tier = "blocked"
+        result.latency_ms = int((time.monotonic() - started) * 1000)
+        return result
+
+    # Refusal path — synthesizer declines on policy advocacy.
+    refusal = payload.get("refusal_reason")
+    if refusal:
+        result.refusal_reason = refusal
+        result.answer_text = payload.get("answer")
+        result.surface_tier = "blocked"
+        result.latency_ms = int((time.monotonic() - started) * 1000)
+        return result
+
+    # Parse sources — every entry must hit the whitelist or it's dropped.
+    raw_sources = payload.get("sources") or []
+    for s in raw_sources:
+        url = s.get("url") or ""
+        if not url or not is_trusted_news_domain(url):
+            continue
+        domain = normalize_domain(urlparse(url).netloc)
+        result.sources.append(NewsSource(
+            url=url,
+            domain=domain,
+            publication=s.get("publication") or domain,
+            quote=s.get("quote") or "",
+            published_date=s.get("published_date"),
+        ))
+
+    # If no surviving sources, block.
+    if not result.sources:
+        result.refusal_reason = "no_fresh_sources"
+        result.surface_tier = "blocked"
+        result.latency_ms = int((time.monotonic() - started) * 1000)
+        return result
+
+    # Compute the freshness window from the source dates.
+    iso_dates = [s.published_date for s in result.sources if s.published_date]
+    if iso_dates:
+        iso_dates.sort()
+        result.oldest_quote_date = iso_dates[0]
+        result.newest_quote_date = iso_dates[-1]
+
+    result.answer_text = payload.get("answer")
+    result.surfaced = True
+    result.surface_tier = "current_events"
     result.latency_ms = int((time.monotonic() - started) * 1000)
     return result
 
