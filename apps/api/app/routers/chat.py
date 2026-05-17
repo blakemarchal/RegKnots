@@ -774,6 +774,31 @@ async def chat_endpoint(
         lead_with_answer_enabled=settings.lead_with_answer_enabled,
     )
 
+    # D6.96 — current-events tier append. Best-effort; if the helper
+    # fails or returns nothing the answer is unchanged. The helper
+    # gates itself on settings.current_events_tier (off / paid_only /
+    # live) and the detector's gold-set discipline. We modify
+    # response.answer in place so both the client AND the persistence
+    # path see the augmented text.
+    current_events_log_id: uuid.UUID | None = None
+    try:
+        from app.services.current_events import maybe_run_current_events
+        ce_block, current_events_log_id = await maybe_run_current_events(
+            query=body.query,
+            user_id=uuid.UUID(current_user.user_id),
+            subscription_tier=current_user.tier,
+            feature_flag=settings.current_events_tier,
+            pool=pool,
+            anthropic_client=anthropic_client,
+        )
+        if ce_block:
+            response.answer = response.answer + "\n\n" + ce_block
+    except Exception as exc:
+        logger.warning(
+            "current_events orchestration failed (non-fatal): %s: %s",
+            type(exc).__name__, str(exc)[:200],
+        )
+
     # D6.84 — encode the TierMetadata Pydantic to JSON for the JSONB
     # column. None when CONFIDENCE_TIERS_MODE != live.
     tier_metadata_json = (
@@ -905,6 +930,32 @@ async def chat_stream_endpoint(
                 if event["event"] == "done":
                     # Capture done payload for the persist step below.
                     event["data"] = _enrich_missing_source_note(body.query, event["data"])
+                    # D6.96 — current-events tier append on the streaming
+                    # path. Runs synchronously between engine completion
+                    # and the SSE 'done' event so the client receives one
+                    # final answer. Adds ~5-15s perceived latency for
+                    # detector-tripping queries; non-tripping queries
+                    # short-circuit at the feature-flag gate (zero cost).
+                    try:
+                        from app.services.current_events import maybe_run_current_events
+                        ce_block, _ = await maybe_run_current_events(
+                            query=body.query,
+                            user_id=user_uuid,
+                            subscription_tier=current_user.tier,
+                            feature_flag=settings.current_events_tier,
+                            pool=pool,
+                            anthropic_client=anthropic_client,
+                        )
+                        if ce_block:
+                            event["data"]["answer"] = (
+                                event["data"]["answer"] + "\n\n" + ce_block
+                            )
+                    except Exception as exc:
+                        logger.warning(
+                            "stream current_events orchestration failed "
+                            "(non-fatal): %s: %s",
+                            type(exc).__name__, str(exc)[:200],
+                        )
                     final_data = event["data"]
                 event_queue.put_nowait(event)
         except asyncio.CancelledError:

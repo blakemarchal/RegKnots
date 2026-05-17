@@ -5134,3 +5134,126 @@ async def update_hedge_audit(
         if r.id == str(audit_id):
             return r
     raise HTTPException(404, "Hedge audit not found after update")
+
+
+
+# ── D6.96 — Maritime current-events tier admin views ────────────────────────
+
+
+class CurrentEventsResponseDTO(BaseModel):
+    """One row from current_events_responses, projected for the admin
+    audit view at /admin/current-events. Karynn reviews this weekly to
+    catch stale-flag patterns and identify topics that need a whitelist
+    refresh."""
+    id: str
+    created_at: str
+    user_email: str | None
+    query: str
+    markers_matched: list[str]
+    surface_tier: str
+    refusal_reason: str | None
+    source_urls: list[str]
+    source_domains: list[str]
+    oldest_quote_date: str | None
+    newest_quote_date: str | None
+    answer_text: str | None
+    latency_ms: int
+    user_flagged_stale: bool
+    user_flag_note: str | None
+    flagged_at: str | None
+
+
+@router.get(
+    "/current-events", response_model=list[CurrentEventsResponseDTO],
+)
+async def list_current_events_responses(
+    _admin: Annotated[CurrentUser, Depends(require_admin)],
+    pool: Annotated[asyncpg.Pool, Depends(get_pool)],
+    flagged_only: Annotated[bool, Query()] = False,
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
+) -> list[CurrentEventsResponseDTO]:
+    """Recent current-events tier responses for the admin audit view.
+
+    D6.96 — supports Karynn's weekly review. Default returns the most
+    recent 100 across all surface tiers (current_events + blocked).
+    ``flagged_only=true`` narrows to entries where a user clicked the
+    'Flag as stale' button — the queue Karynn works first."""
+    where = "WHERE user_flagged_stale = TRUE" if flagged_only else ""
+    rows = await pool.fetch(
+        f"""
+        SELECT cer.id, cer.created_at,
+               u.email AS user_email,
+               cer.query, cer.markers_matched, cer.surface_tier,
+               cer.refusal_reason,
+               cer.source_urls, cer.source_domains,
+               cer.oldest_quote_date, cer.newest_quote_date,
+               cer.answer_text, cer.latency_ms,
+               cer.user_flagged_stale, cer.user_flag_note, cer.flagged_at
+        FROM current_events_responses cer
+        LEFT JOIN users u ON u.id = cer.user_id
+        {where}
+        ORDER BY cer.created_at DESC
+        LIMIT $1
+        """,
+        limit,
+    )
+    return [
+        CurrentEventsResponseDTO(
+            id=str(r["id"]),
+            created_at=r["created_at"].isoformat(),
+            user_email=r["user_email"],
+            query=r["query"],
+            markers_matched=list(r["markers_matched"] or []),
+            surface_tier=r["surface_tier"],
+            refusal_reason=r["refusal_reason"],
+            source_urls=list(r["source_urls"] or []),
+            source_domains=list(r["source_domains"] or []),
+            oldest_quote_date=(
+                r["oldest_quote_date"].isoformat()
+                if r["oldest_quote_date"] else None
+            ),
+            newest_quote_date=(
+                r["newest_quote_date"].isoformat()
+                if r["newest_quote_date"] else None
+            ),
+            answer_text=r["answer_text"],
+            latency_ms=r["latency_ms"],
+            user_flagged_stale=r["user_flagged_stale"],
+            user_flag_note=r["user_flag_note"],
+            flagged_at=r["flagged_at"].isoformat() if r["flagged_at"] else None,
+        )
+        for r in rows
+    ]
+
+
+class FlagStaleBody(BaseModel):
+    note: str | None = None
+
+
+@router.post("/current-events/{response_id}/flag-stale", status_code=200)
+async def flag_current_events_stale(
+    response_id: uuid.UUID,
+    body: FlagStaleBody,
+    user: Annotated[CurrentUser, Depends(get_current_user)],
+    pool: Annotated[asyncpg.Pool, Depends(get_pool)],
+) -> dict:
+    """User-facing endpoint: 'Flag as stale' button on a Current Reading
+    block. Marks the row for Karynn's weekly review.
+
+    Note: this is NOT admin-only — any authenticated user who SAW the
+    current-events answer can flag it. We do not enforce that the
+    response_id belongs to the user's conversation here because the
+    answer was already surfaced to them; the flag is just telemetry."""
+    result = await pool.execute(
+        """
+        UPDATE current_events_responses
+           SET user_flagged_stale = TRUE,
+               user_flag_note     = COALESCE($2, user_flag_note),
+               flagged_at         = NOW()
+         WHERE id = $1
+        """,
+        response_id, body.note,
+    )
+    if result == "UPDATE 0":
+        raise HTTPException(404, "Current events response not found")
+    return {"ok": True}

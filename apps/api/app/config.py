@@ -266,6 +266,31 @@ class Settings(BaseSettings):
         default="off", validation_alias="CONFIDENCE_TIERS_MODE",
     )
 
+    # ── D6.96 — Maritime current-events tier (Option C) ─────────────────
+    # Three-mode flag controlling whether the chat fires the news
+    # fallback path alongside the regulatory pipeline.
+    #
+    #   off        — current-events detector + news fallback skipped
+    #                entirely. Zero cost, zero behavior change. Default.
+    #   paid_only  — fires only for users on a paid subscription tier.
+    #                Used for the initial 2-week soak post-deploy so we
+    #                see flag-as-stale rates and quality before exposing
+    #                trial users.
+    #   live       — fires for any authenticated user whose query trips
+    #                the detector.
+    #
+    # The detector itself (packages/rag/rag/current_events_triggers.py)
+    # is independently testable and has a gold-set test that locks in
+    # Blake's IMO-amendment regression case — regulatory questions are
+    # not affected regardless of this flag's value.
+    #
+    # Revert path:
+    #   ssh prod, edit /opt/RegKnots/.env to set CURRENT_EVENTS_TIER=off,
+    #   systemctl restart regknots-api. ~5 seconds. No deploy needed.
+    current_events_tier: str = Field(
+        default="off", validation_alias="CURRENT_EVENTS_TIER",
+    )
+
     # Monitoring
     sentry_dsn: str = Field(default="", validation_alias="SENTRY_DSN")
     sentry_auth_token: str = Field(default="", validation_alias="SENTRY_AUTH_TOKEN")
