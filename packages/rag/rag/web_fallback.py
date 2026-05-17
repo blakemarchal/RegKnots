@@ -470,9 +470,15 @@ TRUSTED_NEWS_DOMAINS: frozenset[str] = frozenset({
     # Trade press — paywalled (use teaser + link)
     "lloydslist.com",
     "tradewindsnews.com",
-    # News wires
-    "reuters.com",
-    "apnews.com",
+    # D6.96 audit (2026-05-17): reuters.com and apnews.com REMOVED from
+    # the whitelist. Anthropic's web_search tool returns
+    # invalid_request_error 400 when either is in allowed_domains
+    # ("The following domains are not accessible to our user agent:
+    # ['apnews.com', 'reuters.com']"). The error rejects the entire
+    # request, not just those domains — every single news-fallback call
+    # was failing because of these two entries. Trade press + official
+    # primary sources cover the practical news coverage well; if a future
+    # Anthropic update unblocks the news wires we'll add them back.
     # Official / primary sources
     "dhs.gov",
     "uscg.mil",
