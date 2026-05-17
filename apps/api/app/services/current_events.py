@@ -31,10 +31,11 @@ logger = logging.getLogger(__name__)
 
 
 # Subscription tiers that count as "paid" for the paid_only feature-flag
-# mode. Trial / cadet / free are excluded so the initial soak only
-# exposes the feature to paying users while we measure flag-as-stale
-# rates and quality.
-_PAID_TIERS = frozenset({"mate", "member", "captain", "admiral"})
+# mode. Real tier values in the DB as of D6.96: 'free' (trial/unpaid),
+# 'pro' (paying subscriber), 'cadet' (student persona — free). Only
+# 'pro' counts as paid; trial users get the feature once the operator
+# flips CURRENT_EVENTS_TIER=live.
+_PAID_TIERS = frozenset({"pro"})
 
 
 def _format_current_reading_block(news_result, briefing_date: str) -> str:
