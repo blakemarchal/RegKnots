@@ -1107,6 +1107,7 @@ async def _regenerate_answer(
     model_used: str,
     anthropic_client: AsyncAnthropic,
     openai_api_key: str,
+    effective_system_prompt: str,
     ungrounded_un_numbers: list[str] | None = None,
 ) -> tuple[str, int, int] | None:
     """Call Claude (or the GPT-4o fallback) again with a corrective instruction.
@@ -1114,6 +1115,14 @@ async def _regenerate_answer(
     Returns (answer, input_tokens, output_tokens) or None if regeneration fails.
     Routes to whichever backend produced the original answer — if the first
     response came from the GPT-4o fallback, the regeneration goes there too.
+
+    `effective_system_prompt` is the SAME prompt the original call used (with
+    vessel profile, jurisdictional context, etc. baked in) — without it the
+    regen would lose all the soft jurisdictional anchoring and produce
+    weaker answers. Sprint D6.96 audit: this parameter was previously
+    referenced as a closure variable that didn't exist, causing every
+    regeneration trigger to crash with NameError and break the chat for
+    the user. Now required.
 
     `ungrounded_un_numbers` carries Sprint D6.16 UN-grounding violations —
     UN numbers the model claimed an identity for without a supporting chunk.
@@ -1223,6 +1232,7 @@ async def _finalize_answer(
     context_str: str,
     anthropic_client: AsyncAnthropic,
     openai_api_key: str,
+    effective_system_prompt: str,
     chunks: list[dict] | None = None,
 ) -> tuple[str, list[CitedRegulation], list[str], dict | None, int, int, bool]:
     """Vessel-update extraction, citation verification, regeneration, cleanup.
@@ -1294,15 +1304,31 @@ async def _finalize_answer(
         len(all_unverified),
         len(ungrounded_un),
     )
-    regen = await _regenerate_answer(
-        query=query,
-        context_str=context_str,
-        unverified=all_unverified,
-        model_used=model_used,
-        anthropic_client=anthropic_client,
-        openai_api_key=openai_api_key,
-        ungrounded_un_numbers=ungrounded_un,
-    )
+    # Sprint D6.96 audit — wrap regen call defensively. Prior to this
+    # change, any uncaught exception inside _regenerate_answer (the
+    # NameError on effective_system_prompt was the smoking gun) would
+    # propagate up through _finalize_answer and crash chat_with_progress,
+    # which presented to the user as a half-rendered chat with no
+    # assistant message ever landing. The strip+disclaim fallback below
+    # is the correct degraded-but-shippable path — make sure we ALWAYS
+    # take it instead of crashing the engine runner.
+    try:
+        regen = await _regenerate_answer(
+            query=query,
+            context_str=context_str,
+            unverified=all_unverified,
+            model_used=model_used,
+            anthropic_client=anthropic_client,
+            openai_api_key=openai_api_key,
+            effective_system_prompt=effective_system_prompt,
+            ungrounded_un_numbers=ungrounded_un,
+        )
+    except Exception as exc:
+        logger.exception(
+            "Regeneration crashed (%s: %s) — falling through to strip+disclaim",
+            type(exc).__name__, str(exc)[:200],
+        )
+        regen = None
 
     if regen is None:
         # Regeneration unavailable — fall back to the legacy strip + disclaim path.
@@ -1681,6 +1707,7 @@ async def chat(
         context_str=context_str,
         anthropic_client=anthropic_client,
         openai_api_key=openai_api_key,
+        effective_system_prompt=effective_system_prompt,
         chunks=chunks,
     )
     input_tokens += regen_in
@@ -3180,6 +3207,7 @@ async def chat_with_progress(
         context_str=context_str,
         anthropic_client=anthropic_client,
         openai_api_key=openai_api_key,
+        effective_system_prompt=effective_system_prompt,
         chunks=chunks,
     )
     input_tokens += regen_in
