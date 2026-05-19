@@ -386,7 +386,20 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
    * Sprint D6.85 Fix D — timeout dropped from 90s to 30s. The old window
    * was wishful thinking from a pre-background-task era; with Fix A,
    * any successful generation is persisted within seconds of completion.
-   * If 30s passes with no assistant message, the request is dead.
+   *
+   * Sprint D6.97 Phase 1b — bumped back to 90s. The D6.85 assumption
+   * ("any successful generation persists within seconds") didn't account
+   * for fallback chains: when web_fallback + citation_oracle + judge
+   * all fire on a query, total engine wall-time can hit 50-70s — well
+   * past the 30s recovery deadline. The Issue #3 misfire pattern from
+   * the 2026-05-19 audit: SSE drops mid-generation, recovery loop polls
+   * the messages table, times out at 30s, banner shows "couldn't finish
+   * that one"… then 10-20s later the engine lands the answer. User sees
+   * BOTH the failure banner AND the answer.
+   *
+   * Cost of the bump: if a request IS truly dead, user waits 90s instead
+   * of 30s before the banner. Acceptable trade for eliminating the
+   * spurious "couldn't finish" on slow-but-live generations.
    *
    * When recovery fails, we surface the original query (passed via
    * `failedQueryText`) so the user can one-click resend instead of
@@ -400,7 +413,7 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
       const abort = new AbortController()
       recoveryAbortRef.current = abort
       const startedAt = Date.now()
-      const deadline = 30_000  // D6.85 Fix D — was 90s
+      const deadline = 90_000  // D6.97 Phase 1b — was 30s, see Issue #3
 
       try {
         while (Date.now() - startedAt < deadline) {

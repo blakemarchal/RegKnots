@@ -1506,7 +1506,15 @@ async def chat(
     subscription_tier: str | None = None,
     xai_api_key: str = "",
     web_fallback_enabled: bool = True,
-    web_fallback_cosine_threshold: float = 0.5,
+    # Sprint D6.97 Phase 1c — was 0.5; chat_with_progress() has always
+    # defaulted to 0.7, so the streaming path (which the frontend uses)
+    # has been 40% more conservative about firing web_fallback than the
+    # non-streaming path. Unifying on 0.7 to eliminate the drift. The
+    # canonical caller (chat.py) explicitly passes a value sourced from
+    # settings, so the default only affects callers that omit the
+    # argument entirely (eval harness, ad-hoc scripts). No user-visible
+    # behavior change for the frontend.
+    web_fallback_cosine_threshold: float = 0.7,
     web_fallback_daily_cap: int = 10,
     web_fallback_cascade_enabled: bool = True,
     hedge_judge_enabled: bool = True,
@@ -1817,7 +1825,23 @@ async def chat(
         # Fire fallback only on miss verdicts AND only on the regex-
         # matched path (D6.86 Phase 1 — see comment above). Tier 2
         # ships in Phase 2 to handle the cited-partial-miss case.
-        should_fire_fallback = judge_verdict in ("complete_miss", "partial_miss")
+        #
+        # Sprint D6.97 Phase 1a — Issue #2 fix. When the answer already
+        # carries verified citations, suppress web_fallback regardless of
+        # the hedge_judge verdict. The trust contract for a Tier-1 cited
+        # answer is "this is the law, full stop"; stapling a 🌐 web card
+        # to it dilutes that contract. Three doc-confirmed misfires in the
+        # 2026-05-19 audit (46 CFR 10.215, MAN B&W cylinder lubrication,
+        # Jones Act §501 waiver) all triggered web_fallback because the
+        # answer body contained a "What I Can't Confirm" section that the
+        # regex + judge read as partial_miss — even though the actual
+        # answer was cleanly cited. This parallels the news-on-Tier-1
+        # gate already shipped in current_events.py D6.97.
+        has_verified_citations = bool(verified_cited)
+        should_fire_fallback = (
+            judge_verdict in ("complete_miss", "partial_miss")
+            and not has_verified_citations
+        )
         if web_fallback_enabled and should_fire_fallback:
             top_cosine = (
                 chunks[0].get("similarity", 0.0) if chunks else 0.0
@@ -1880,9 +1904,17 @@ async def chat(
                         str(exc)[:200],
                     )
         elif not should_fire_fallback:
+            # D6.97 Phase 1a — log the suppression reason so audit can
+            # distinguish verdict-driven (judge said precision_callout /
+            # false_hedge / None) from the new verified-citations gate.
+            suppress_reason = (
+                "verified_citations" if has_verified_citations
+                else f"verdict={judge_verdict}"
+            )
             logger.info(
-                "hedge_judge suppressed fallback: verdict=%s reasoning=%r",
-                judge_verdict, (judge_reasoning or "")[:200],
+                "hedge_judge suppressed fallback: %s verified_cites=%d reasoning=%r",
+                suppress_reason, len(verified_cited),
+                (judge_reasoning or "")[:200],
             )
 
         # 4. Sprint D6.58 Slice 2 hedge classifier — fires on every
@@ -3031,7 +3063,18 @@ async def chat_with_progress(
             )
 
         # Fire fallback only on miss verdicts (regex-matched path).
-        should_fire_fallback = judge_verdict in ("complete_miss", "partial_miss")
+        #
+        # Sprint D6.97 Phase 1a — Issue #2 fix (streaming twin of the
+        # chat() gate above). See the chat() comment for full rationale.
+        # Short version: when the answer already carries verified
+        # citations, the Tier-1 trust contract is intact — don't dilute
+        # it with a 🌐 web card based on a "What I Can't Confirm"
+        # subsection that the judge mis-read as a partial miss.
+        has_verified_citations = bool(verified_cited)
+        should_fire_fallback = (
+            judge_verdict in ("complete_miss", "partial_miss")
+            and not has_verified_citations
+        )
         if web_fallback_enabled and should_fire_fallback:
             top_cosine = (
                 chunks[0].get("similarity", 0.0) if chunks else 0.0
@@ -3101,9 +3144,15 @@ async def chat_with_progress(
                         str(exc)[:200],
                     )
         elif not should_fire_fallback:
+            # D6.97 Phase 1a — see chat() twin above for rationale.
+            suppress_reason = (
+                "verified_citations" if has_verified_citations
+                else f"verdict={judge_verdict}"
+            )
             logger.info(
-                "hedge_judge suppressed fallback (streaming): verdict=%s reasoning=%r",
-                judge_verdict, (judge_reasoning or "")[:200],
+                "hedge_judge suppressed fallback (streaming): %s verified_cites=%d reasoning=%r",
+                suppress_reason, len(verified_cited),
+                (judge_reasoning or "")[:200],
             )
 
         # 4. Hedge classifier — fires on every hedge regardless of verdict.
