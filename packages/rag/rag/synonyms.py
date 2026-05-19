@@ -98,6 +98,37 @@ SYNONYM_DICT: dict[str, tuple[str, ...]] = {
     # 180.70, 199.70). Bare "marking" stays out — it would flood with
     # navigation aids, OPA-90 markings, ERG placards, etc.
     "stencil":     ("clearly legible", "block capital letters", "marked with the name"),
+    # Sprint D6.97 — added on documented evidence:
+    # Karynn Marchal (Maersk Seletar, M/V containership), 2026-05-17,
+    # asked about the "Foreign box" entry on CG-705A Shipping Articles
+    # particulars. Top-k retrieval cosine was 0.016 (noise floor); the
+    # chat hedged with "verified context doesn't directly resolve this."
+    # But NVIC 01-86 §1 is in corpus with 9 chunks containing CG-705A +
+    # voyage description — pure vocabulary mismatch, not a corpus gap.
+    #
+    # "coastwise" is maritime-specific and unambiguous in our context.
+    # Adding it as a key, expanding to NVIC 01-86 §1 vocabulary:
+    #   voyage description       — NVIC §1 line-by-line CG-705A instructions
+    #   particulars of engagement — formal CG-705A title
+    #   shipping articles         — the form's common name in NVIC 01-86
+    #
+    # Frequency-checked 2026-05-19:
+    #   voyage description        20 chunks  (NVIC 01-86 §1 + 46 USC scope)
+    #   particulars of engagement 11 chunks  (NVIC 01-86 §1 / 46 CFR 14.205)
+    #   shipping articles         15 chunks  (NVIC 01-86 + 46 CFR 14, 46 USC 10302)
+    # All three are maritime-narrow phrases that won't bleed into
+    # unrelated "coastwise voyage" / "coastwise endorsement" / "coastwise
+    # trade" (Jones Act) queries — those routes pull different chunks
+    # via their own primary keywords.
+    #
+    # Intentionally NOT added:
+    #   - "break" / "break articles" — too idiomatic, query_rewrite's
+    #     LLM reformulator handles this on the embedding side
+    #   - "foreign" — too broad (would conflict with foreign-flag vessel
+    #     compliance, foreign port-state, foreign trade zone)
+    #   - "discharge" — would bleed into pollution discharge, cargo
+    #     discharge, electrical discharge regulations
+    "coastwise":   ("voyage description", "particulars of engagement", "shipping articles"),
     "stenciled":   ("clearly legible", "block capital letters", "marked with the name"),
     "stenciling":  ("clearly legible", "block capital letters", "marked with the name"),
 }

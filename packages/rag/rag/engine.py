@@ -1526,11 +1526,10 @@ async def chat(
     # Behavior with the flag OFF is bit-for-bit identical to today.
     hybrid_retrieval_enabled: bool = False,
     hybrid_rrf_k: int = 60,
-    # Sprint D6.84 — confidence tier router. "off" | "shadow" | "live".
-    # 'off' skips the router entirely (zero cost). 'shadow' computes the
-    # decision and writes to tier_router_shadow_log without changing the
-    # rendered answer. 'live' renders the router's decision and surfaces
-    # tier_metadata to the frontend. See packages/rag/rag/tier_router.py.
+    # D6.97 — tier_router removed (see audit doc). Parameter kept on
+    # the signature for backward compatibility with chat.py callers that
+    # still read settings.confidence_tiers_mode. The value is now
+    # ignored; the router doesn't fire regardless of what gets passed.
     confidence_tiers_mode: str = "off",
     # Sprint D6.86 — run hedge judge on every cited answer (not just
     # when the regex matched). Captures partial-miss signal on softer
@@ -1922,25 +1921,16 @@ async def chat(
         cleaned_answer = _apply_layer_c_inversion(cleaned_answer, web_fallback_card)
         layer_c_fired = True
 
-    # Sprint D6.84 — confidence tier router. Wraps everything in
-    # try/except internally; on any failure, returns the original answer
-    # and None metadata so today's behavior is preserved exactly.
+    # Sprint D6.97 — tier_router removed (see
+    # docs/sprint-audits/tier-router-shadow-kill-2026-05-19.md).
+    # 14-day shadow audit showed the classifier would have surfaced
+    # 23/50 answers as ✓ Verified that the hedge_judge correctly
+    # flagged as precision_callout — net-negative if shipped live.
+    # The dead zone it was designed to close (Karynn/Kenan misfires)
+    # was instead closed by the D6.92 hedge_judge prompt rewrite.
+    # Keeping `tier_metadata=None` for response shape compatibility
+    # so any cached frontend code still parses ChatResponse cleanly.
     tier_metadata = None
-    if confidence_tiers_mode in ("shadow", "live"):
-        cleaned_answer, tier_metadata = await _run_tier_router_and_log(
-            pool=pool,
-            conversation_id=conversation_id,
-            user_id=user_id,
-            query=query,
-            mode=confidence_tiers_mode,
-            cleaned_answer_pre_tier=cleaned_answer,
-            layer_c_fired=layer_c_fired,
-            judge_verdict=judge_verdict,
-            judge_reasoning=judge_reasoning,
-            web_fallback_card=web_fallback_card,
-            verified_citations_count=len(verified_cited),
-            anthropic_client=anthropic_client,
-        )
 
     return ChatResponse(
         answer=cleaned_answer,
@@ -2195,179 +2185,33 @@ async def _dispatch_web_fallback(
     judge_verdict: str | None = None,
     judge_missing_topic: str | None = None,
 ) -> "WebFallbackCard | None":
-    """Tier-aware fallback dispatcher (D6.58 Slice 3).
+    """Web fallback dispatcher (single-LLM only as of D6.97).
 
-    Decision tree:
-      1. If user has Big-3 ensemble cap remaining for their tier
-         AND xAI key is configured AND user_id is known →
-         fire ensemble (parallel Claude+GPT+Grok web search +
-         synthesis). Surfaces as 'verified' / 'consensus' /
-         'reference' / 'blocked' per the synthesizer's verdict.
-      2. Else → fall back to single-LLM (Slice 1) path. Surfaces as
-         'verified' / 'reference' / 'blocked'.
+    D6.97 — Big-3 ensemble removed (see docs/sprint-audits/
+    tier-router-shadow-kill-2026-05-19.md for related rationale, and the
+    commit message of the ensemble kill). Lifetime stats: 12 fires
+    total, 3 consensus-tier hits, 0 in the last 30 days. The single-LLM
+    path is what actually fires (~10-100/day during corpus refreshes).
 
-    The ensemble strictly subsumes the single-LLM path — Claude with
-    web search is one of its three providers — so we never fire both.
+    `xai_api_key`, `cascade_enabled`, and `subscription_tier` parameters
+    are kept on the signature for backward compatibility with chat.py
+    callers but are no longer used here.
     """
-    # Anonymous users → single-LLM path only (no ensemble for unauth).
-    # User with empty xAI key → single-LLM (xAI couldn't fire anyway).
-    if user_id is None or not xai_api_key:
-        return await _try_web_fallback(
-            query=query, conversation_id=conversation_id, user_id=user_id,
-            pool=pool, anthropic_client=anthropic_client,
-            top_cosine=top_cosine, cosine_threshold=cosine_threshold,
-            daily_cap=daily_cap,
-            override_query=override_query,
-            judge_verdict=judge_verdict,
-            judge_missing_topic=judge_missing_topic,
-        )
-
-    # Per-tier ensemble cap check.
-    from rag.ensemble_fallback import is_under_ensemble_cap
-    try:
-        allowed, used, cap = await is_under_ensemble_cap(
-            pool=pool, user_id=user_id,
-            subscription_tier=subscription_tier or "free",
-        )
-    except Exception as exc:
-        logger.warning("ensemble cap check failed: %s — falling back", exc)
-        allowed = False
-        used = 0
-        cap = 0
-
-    if not allowed:
-        logger.info(
-            "ensemble cap reached for user %s tier=%s (used %d/%d) — single-LLM fallback",
-            user_id, subscription_tier, used, cap,
-        )
-        return await _try_web_fallback(
-            query=query, conversation_id=conversation_id, user_id=user_id,
-            pool=pool, anthropic_client=anthropic_client,
-            top_cosine=top_cosine, cosine_threshold=cosine_threshold,
-            daily_cap=daily_cap,
-            override_query=override_query,
-            judge_verdict=judge_verdict,
-            judge_missing_topic=judge_missing_topic,
-        )
-
-    # Big-3 ensemble path.
-    return await _try_ensemble_fallback(
+    return await _try_web_fallback(
         query=query, conversation_id=conversation_id, user_id=user_id,
         pool=pool, anthropic_client=anthropic_client,
-        openai_api_key=openai_api_key, xai_api_key=xai_api_key,
-        top_cosine=top_cosine,
-        cascade_enabled=cascade_enabled,
+        top_cosine=top_cosine, cosine_threshold=cosine_threshold,
+        daily_cap=daily_cap,
         override_query=override_query,
         judge_verdict=judge_verdict,
         judge_missing_topic=judge_missing_topic,
     )
 
 
-async def _try_ensemble_fallback(
-    *,
-    query: str,
-    conversation_id: UUID,
-    user_id: UUID,
-    pool: asyncpg.Pool,
-    anthropic_client: AsyncAnthropic,
-    openai_api_key: str,
-    xai_api_key: str,
-    top_cosine: float,
-    cascade_enabled: bool = True,
-    override_query: str | None = None,
-    judge_verdict: str | None = None,
-    judge_missing_topic: str | None = None,
-) -> "WebFallbackCard | None":
-    """Run the Big-3 ensemble + persist + return a card if surfaced.
-
-    Logs to web_fallback_responses with is_ensemble=TRUE so per-tier
-    cap accounting works on subsequent calls. Caller already verified
-    the user is under cap.
-
-    When cascade_enabled is True (D6.59 default), uses the cost-aware
-    cascading orchestrator that probes Claude alone first and only fans
-    out to GPT + Grok when needed. When False, uses the legacy always-
-    parallel D6.58 Slice-3 orchestrator. The two share the same DB
-    persistence shape so flipping the flag has no schema impact.
-
-    D6.60 — when judge_verdict is 'partial_miss', override_query is the
-    focused topic the judge identified as missing. We send THAT to the
-    LLMs but persist the user's original query in `query` (preserving
-    audit linkage to the actual chat turn) and the override in
-    `web_query_used`.
-    """
-    from rag.ensemble_fallback import (
-        attempt_cascade_ensemble,
-        attempt_ensemble_fallback,
-    )
-    from rag.models import WebFallbackCard
-
-    # Use override_query for the actual LLM calls; keep `query` as the
-    # canonical user-facing question for persistence + audit.
-    llm_query = override_query or query
-
-    if cascade_enabled:
-        result = await attempt_cascade_ensemble(
-            query=llm_query,
-            anthropic_client=anthropic_client,
-            openai_api_key=openai_api_key,
-            xai_api_key=xai_api_key,
-        )
-    else:
-        result = await attempt_ensemble_fallback(
-            query=llm_query,
-            anthropic_client=anthropic_client,
-            openai_api_key=openai_api_key,
-            xai_api_key=xai_api_key,
-        )
-
-    fallback_id: str | None = None
-    try:
-        import json as _json
-        row = await pool.fetchrow(
-            """
-            INSERT INTO web_fallback_responses
-              (is_calibration, is_ensemble, user_id, chat_message_id, query,
-               web_query_used,
-               confidence, source_url, source_domain, quote_text,
-               quote_verified, surfaced, surface_tier, surface_blocked_reason,
-               answer_text, latency_ms, retrieval_top1_cosine,
-               ensemble_providers, ensemble_agreement_count, provider_errors,
-               judge_verdict, judge_missing_topic)
-            VALUES (FALSE, TRUE, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-                    $11, $12, $13, $14, $15, $16::text[], $17, $18::jsonb,
-                    $19, $20)
-            RETURNING id
-            """,
-            user_id, conversation_id, query,
-            override_query,
-            result.best_confidence, result.best_source_url,
-            result.best_source_domain, result.best_quote,
-            result.best_quote_verified, result.surfaced,
-            result.surface_tier, result.surface_blocked_reason,
-            result.best_answer, result.latency_ms, top_cosine,
-            result.providers_succeeded or [],
-            result.agreement_count,
-            _json.dumps(result.provider_errors or {}),
-            judge_verdict, judge_missing_topic,
-        )
-        if row is not None:
-            fallback_id = str(row["id"])
-    except Exception as exc:
-        logger.warning("ensemble persist failed (non-fatal): %s", exc)
-
-    if not result.surfaced:
-        return None
-
-    return WebFallbackCard(
-        fallback_id=fallback_id or "",
-        source_url=result.best_source_url or "",
-        source_domain=result.best_source_domain or "",
-        quote=result.best_quote or "",
-        summary=result.best_summary or result.best_answer or "",
-        confidence=result.best_confidence or 0,
-        surface_tier=result.surface_tier,
-    )
+# D6.97 — _try_ensemble_fallback removed. See ensemble_fallback.py
+# module deletion in the same commit. Lifetime stats: 12 fires total
+# across ~3 months, 3 consensus-tier hits, 0 fires in the last 30 days.
+# Single-LLM web_fallback now handles all "corpus missed" cases.
 
 
 async def _try_web_fallback(
@@ -2839,132 +2683,12 @@ async def _log_retrieval_miss(
     )
 
 
-async def _run_tier_router_and_log(
-    *,
-    pool: asyncpg.Pool,
-    conversation_id: UUID,
-    user_id: "UUID | None",
-    query: str,
-    mode: str,
-    cleaned_answer_pre_tier: str,
-    layer_c_fired: bool,
-    judge_verdict: str | None,
-    # Sprint D6.92 — capture the judge's reasoning so post-hoc audits
-    # can inspect WHY a verdict landed (e.g. distinguish a real corpus
-    # gap from a mis-rated cited answer).
-    judge_reasoning: str | None,
-    web_fallback_card: "WebFallbackCard | None",
-    verified_citations_count: int,
-    anthropic_client: AsyncAnthropic,
-) -> tuple[str, "TierMetadata | None"]:
-    """Sprint D6.84 — run the confidence tier router and log to
-    tier_router_shadow_log. Returns (final_answer, tier_metadata).
-
-      mode='shadow' — render today's behavior; metadata is None;
-                      shadow log captures what tier router would have done.
-      mode='live'   — render the tier router's decision; metadata is
-                      populated for the frontend; shadow log captures
-                      both.
-
-    Wraps every external call (LLM, DB) in try/except. On any internal
-    failure, returns (cleaned_answer_pre_tier, None) so the caller falls
-    through to today's behavior.
-    """
-    from rag.tier_router import route_tier
-    from rag.models import TierMetadata
-
-    started = time.monotonic()
-    try:
-        decision = await route_tier(
-            query=query,
-            cleaned_answer=cleaned_answer_pre_tier,
-            verified_citations_count=verified_citations_count,
-            judge_verdict=judge_verdict,
-            web_fallback_card=web_fallback_card,
-            anthropic_client=anthropic_client,
-        )
-    except Exception as exc:
-        logger.warning(
-            "tier_router unexpected failure (falling through): %s: %s",
-            type(exc).__name__, str(exc)[:200],
-        )
-        return (cleaned_answer_pre_tier, None)
-
-    total_latency_ms = int((time.monotonic() - started) * 1000)
-
-    final_answer = cleaned_answer_pre_tier
-    if mode == "live" and decision.rendered_answer is not None:
-        final_answer = decision.rendered_answer
-
-    tier_metadata = None
-    if mode == "live":
-        tier_metadata = TierMetadata(
-            tier=decision.tier,
-            label=decision.label,
-            reason=decision.reason or "",
-            classifier_verdict=decision.classifier_verdict,
-            self_consistency_pass=decision.self_consistency_pass,
-            web_confidence=decision.web_confidence,
-        )
-
-    # The "would the surface differ" signal admin filters on. True when
-    # the router computed an answer override that differs from current.
-    shadow_would_differ = (
-        decision.rendered_answer is not None
-        and decision.rendered_answer != cleaned_answer_pre_tier
-    )
-
-    try:
-        await pool.execute(
-            """
-            INSERT INTO tier_router_shadow_log (
-                conversation_id, user_id, query, mode,
-                current_answer, current_judge_verdict, current_judge_reasoning,
-                current_layer_c_fired,
-                current_verified_citations_count, current_web_confidence,
-                shadow_tier, shadow_label, shadow_answer, shadow_reason,
-                shadow_classifier_verdict, shadow_classifier_reasoning,
-                shadow_self_consistency_pass,
-                shadow_classifier_latency_ms, shadow_self_consistency_latency_ms,
-                shadow_total_latency_ms, shadow_error, differs
-            )
-            VALUES ($1, $2, $3, $4,
-                    $5, $6, $7, $8,
-                    $9, $10,
-                    $11, $12, $13, $14,
-                    $15, $16, $17,
-                    $18, $19, $20, $21, $22)
-            """,
-            conversation_id,
-            user_id,
-            query[:2000],
-            mode,
-            cleaned_answer_pre_tier[:8000],
-            judge_verdict,
-            (judge_reasoning or "")[:2000] if judge_reasoning else None,
-            layer_c_fired,
-            verified_citations_count,
-            web_fallback_card.confidence if web_fallback_card else None,
-            decision.tier,
-            decision.label,
-            (decision.rendered_answer or cleaned_answer_pre_tier)[:8000],
-            (decision.reason or "")[:2000],
-            decision.classifier_verdict,
-            (decision.classifier_reasoning or "")[:1000] if decision.classifier_reasoning else None,
-            decision.self_consistency_pass,
-            decision.classifier_latency_ms,
-            decision.self_consistency_latency_ms,
-            total_latency_ms,
-            decision.error,
-            shadow_would_differ,
-        )
-    except Exception as exc:
-        logger.warning(
-            "tier_router shadow log insert failed (non-fatal): %s: %s",
-            type(exc).__name__, str(exc)[:200],
-        )
-
-    return (final_answer, tier_metadata)
+# D6.97 — _run_tier_router_and_log removed. See
+# docs/sprint-audits/tier-router-shadow-kill-2026-05-19.md for the
+# 14-day shadow audit that documented the classifier's net-negative
+# performance vs the existing hedge_judge + web_fallback ladder.
+# tier_router.py module is also removed in the same commit. The
+# tier_router_shadow_log table is preserved for 90-day archival.
 
 
 async def chat_with_progress(
@@ -2999,7 +2723,7 @@ async def chat_with_progress(
     # See chat() docstring.
     hybrid_retrieval_enabled: bool = False,
     hybrid_rrf_k: int = 60,
-    # Sprint D6.84 — confidence tier router mode. See chat() docstring.
+    # D6.97 — kept for backward compat with chat.py callers; ignored.
     confidence_tiers_mode: str = "off",
     # Sprint D6.86 — see chat() docstring.
     judge_on_cited_enabled: bool = True,
@@ -3416,24 +3140,8 @@ async def chat_with_progress(
         layer_c_fired = True
 
     # Sprint D6.84 — confidence tier router (streaming-path twin of the
-    # chat() integration above). Same fail-safe contract: any failure
-    # falls through to today's rendered answer + None metadata.
+    # D6.97 — tier_router removed (see chat() above + audit doc).
     tier_metadata = None
-    if confidence_tiers_mode in ("shadow", "live"):
-        cleaned_answer, tier_metadata = await _run_tier_router_and_log(
-            pool=pool,
-            conversation_id=conversation_id,
-            user_id=user_id,
-            query=query,
-            mode=confidence_tiers_mode,
-            cleaned_answer_pre_tier=cleaned_answer,
-            layer_c_fired=layer_c_fired,
-            judge_verdict=judge_verdict,
-            judge_reasoning=judge_reasoning,
-            web_fallback_card=web_fallback_card,
-            verified_citations_count=len(verified_cited),
-            anthropic_client=anthropic_client,
-        )
 
     # Stage 6: Final event with the complete response
     done_payload = {
@@ -3466,13 +3174,6 @@ async def chat_with_progress(
             # renders the right badge (verified vs reference).
             "surface_tier": web_fallback_card.surface_tier,
         }
-    if tier_metadata is not None:
-        done_payload["tier_metadata"] = {
-            "tier": tier_metadata.tier,
-            "label": tier_metadata.label,
-            "reason": tier_metadata.reason,
-            "classifier_verdict": tier_metadata.classifier_verdict,
-            "self_consistency_pass": tier_metadata.self_consistency_pass,
-            "web_confidence": tier_metadata.web_confidence,
-        }
+    # D6.97 — tier_metadata always None after tier_router removal.
+    # Field kept on the payload shape for frontend compatibility.
     yield {"event": "done", "data": done_payload}
