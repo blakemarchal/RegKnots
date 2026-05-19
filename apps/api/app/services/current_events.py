@@ -155,6 +155,7 @@ async def maybe_run_current_events(
     pool: asyncpg.Pool,
     anthropic_client: AsyncAnthropic,
     timeout_s: float = 20.0,
+    verified_citations_count: int = 0,
 ) -> tuple[Optional[str], Optional[uuid.UUID]]:
     """Run the current-events orchestration and return the block to
     append (or None) + the log row id (or None).
@@ -167,9 +168,25 @@ async def maybe_run_current_events(
         is inserted.
 
     Never raises — all failure modes return ``(None, None)``.
+
+    Sprint D6.97 — when the regulatory answer carries ANY verified
+    citation, suppress the news append. The risk Blake flagged: a fully-
+    cited Tier 1 answer with the ✓ Verified badge should not have a
+    🌐 Current Reading block stapled to it, because the user's trust
+    contract with the verified tier is "this is the law, full stop."
+    News context that wasn't in corpus belongs on partial-miss or
+    fallback answers, not on confirmed regulatory citations.
     """
-    # ── Gate 0: feature flag + subscription ───────────────────────────
+    # ── Gate 0a: feature flag + subscription ──────────────────────────
     if not _is_enabled_for_user(feature_flag, subscription_tier):
+        return None, None
+
+    # ── Gate 0b: news-on-Tier-1 suppression ──────────────────────────
+    # If the regulatory pipeline already produced a verified-citation
+    # answer, that's the trust contract the user gets. Don't dilute it
+    # with news context. The detector / news fallback still doesn't
+    # fire — saves the API call cost too.
+    if verified_citations_count > 0:
         return None, None
 
     # ── Gate 1: detector ─────────────────────────────────────────────

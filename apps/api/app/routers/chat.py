@@ -790,6 +790,9 @@ async def chat_endpoint(
             feature_flag=settings.current_events_tier,
             pool=pool,
             anthropic_client=anthropic_client,
+            # D6.97 — Tier 1 suppression. Verified-cited answers don't
+            # get a news block appended.
+            verified_citations_count=len(response.cited_regulations or []),
         )
         if ce_block:
             response.answer = response.answer + "\n\n" + ce_block
@@ -938,6 +941,12 @@ async def chat_stream_endpoint(
                     # short-circuit at the feature-flag gate (zero cost).
                     try:
                         from app.services.current_events import maybe_run_current_events
+                        # D6.97 — pass verified-citation count so Tier 1
+                        # answers suppress the news block. The streaming
+                        # event payload exposes cited_regulations.
+                        verified_cited_count = len(
+                            event["data"].get("cited_regulations") or []
+                        )
                         ce_block, _ = await maybe_run_current_events(
                             query=body.query,
                             user_id=user_uuid,
@@ -945,6 +954,7 @@ async def chat_stream_endpoint(
                             feature_flag=settings.current_events_tier,
                             pool=pool,
                             anthropic_client=anthropic_client,
+                            verified_citations_count=verified_cited_count,
                         )
                         if ce_block:
                             event["data"]["answer"] = (
