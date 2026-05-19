@@ -89,6 +89,11 @@ class ConversationMessage(BaseModel):
     # True when the user hit Stop mid-generation; frontend renders
     # the message distinctly (italic, "Stopped" badge, etc.).
     cancelled: bool = False
+    # Sprint D6.97 Phase 2 — image attachments on the user message.
+    # List of {data_url, mime, width, height, size_bytes} dicts. Empty
+    # for assistant messages and for any user message persisted before
+    # D6.97 Phase 2 ran the 0103 migration.
+    image_attachments: list[dict] = []
 
 
 # ── Endpoints ──────────────────────────────────────────────────────────────────
@@ -371,7 +376,8 @@ async def get_conversation_messages(
 
         rows = await conn.fetch(
             """
-            SELECT role, content, cited_regulation_ids, created_at, tier_metadata, cancelled
+            SELECT role, content, cited_regulation_ids, created_at,
+                   tier_metadata, cancelled, image_attachments
             FROM messages
             WHERE conversation_id = $1
             ORDER BY created_at ASC
@@ -419,6 +425,23 @@ async def get_conversation_messages(
                 except Exception:
                     tier_md = None
 
+        # D6.97 Phase 2 — same defensive parse for image_attachments
+        # JSONB. Default empty list when NULL or unparseable so the
+        # frontend doesn't have to null-check.
+        raw_imgs = row["image_attachments"]
+        image_attachments: list[dict] = []
+        if raw_imgs is not None:
+            if isinstance(raw_imgs, list):
+                image_attachments = raw_imgs
+            else:
+                try:
+                    import json as _json
+                    parsed = _json.loads(raw_imgs)
+                    if isinstance(parsed, list):
+                        image_attachments = parsed
+                except Exception:
+                    image_attachments = []
+
         result.append(
             ConversationMessage(
                 role=row["role"],
@@ -427,6 +450,7 @@ async def get_conversation_messages(
                 created_at=row["created_at"].isoformat(),
                 tier_metadata=tier_md,
                 cancelled=bool(row["cancelled"]) if row["cancelled"] is not None else False,
+                image_attachments=image_attachments,
             )
         )
 

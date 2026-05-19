@@ -23,6 +23,18 @@ import { VerificationBanner } from './VerificationBanner'
 import { ComingUpWidget } from './ComingUpWidget'
 import type { VesselProfileForPrompts } from '@/lib/vesselPrompts'
 import { useViewMode } from '@/lib/useViewMode'
+import { resizeImageForChat, ImageRejectedError, type ResizedImage } from '@/utils/image_resize'
+import type { ChatImageAttachment } from '@/types/chat'
+
+// D6.97 Phase 2 — image upload is gated by NEXT_PUBLIC_CHAT_IMAGE_UPLOAD_ENABLED
+// build-time env var. When 'true', the paperclip button is rendered in
+// InputBar; when anything else (including unset), the button is hidden
+// AND the backend would reject submissions anyway. Keep the two env
+// vars (this one + server-side CHAT_IMAGE_UPLOAD_MODE) in sync on prod;
+// scripts/deploy.sh rebuilds the frontend on every push so flipping the
+// flag still requires one deploy cycle.
+const IMAGE_UPLOAD_ENABLED = process.env.NEXT_PUBLIC_CHAT_IMAGE_UPLOAD_ENABLED === 'true'
+const MAX_IMAGES_PER_QUERY = 5
 
 interface ConversationMessage {
   role: string
@@ -31,6 +43,9 @@ interface ConversationMessage {
   created_at: string
   // Sprint D6.84 — confidence tier metadata (live mode only).
   tier_metadata?: import('@/types/chat').TierMetadata | null
+  // Sprint D6.97 Phase 2 — image attachments restored on conversation
+  // hydration. Empty for assistant messages and pre-D6.97 user messages.
+  image_attachments?: ChatImageAttachment[]
 }
 
 interface Props {
@@ -51,6 +66,12 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [progressMsg, setProgressMsg] = useState<string | null>(null)
+  // D6.97 Phase 2 — image upload. ChatInterface is the single source of
+  // truth for the pending list; InputBar just renders thumbnails +
+  // dispatches add/remove. Cleared in handleSend after the images are
+  // captured into the user message.
+  const [pendingImages, setPendingImages] = useState<ResizedImage[]>([])
+  const [imageError, setImageError] = useState<string | null>(null)
   // Sprint D6.88 Phase 3 — inline indicator for the post-stream web
   // fallback dispatch phase. The model's streamed answer renders
   // first; if the hedge judge decides to fire a web search, the
@@ -313,6 +334,9 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
           citations: r.cited_regulations,
           // D6.84 — restore tier chip on reload when present (live mode).
           tier_metadata: r.tier_metadata ?? null,
+          // D6.97 Phase 2 — restore image thumbnails on conversation
+          // reload. Empty for assistant messages and pre-D6.97 history.
+          image_attachments: r.image_attachments ?? [],
         }))
         setMessages(restored)
         // Sync vessel selector if the conversation has one. Skip when
@@ -437,6 +461,9 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
                 content: r.content,
                 citations: r.cited_regulations,
                 tier_metadata: r.tier_metadata ?? null,
+                // D6.97 Phase 2 — preserve image thumbnails through the
+                // recovery hydration path too.
+                image_attachments: r.image_attachments ?? [],
               }))
               setMessages(restored)
               setConversationId(convId)
@@ -527,18 +554,84 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
     return () => document.removeEventListener('visibilitychange', onVisibility)
   }, [conversationId, recovering, pendingKey, recoveryLoop, clearPending])
 
+  // D6.97 Phase 2 — image upload handlers. Add resizes each selected
+  // File on the client (canvas → JPEG 0.8 ≤ 1024px) then appends to
+  // pendingImages, respecting the 5-image cap. Errors surface in a
+  // small banner above the input row; the rest of the queue still
+  // adds.
+  const handleAddImages = useCallback(async (files: FileList) => {
+    const remaining = MAX_IMAGES_PER_QUERY - pendingImages.length
+    if (remaining <= 0) {
+      setImageError(`Up to ${MAX_IMAGES_PER_QUERY} images per question.`)
+      return
+    }
+    const slice = Array.from(files).slice(0, remaining)
+    if (files.length > remaining) {
+      setImageError(
+        `Only the first ${remaining} of ${files.length} images were attached ` +
+        `(cap is ${MAX_IMAGES_PER_QUERY} per question).`,
+      )
+    } else {
+      setImageError(null)
+    }
+
+    const results = await Promise.allSettled(slice.map(resizeImageForChat))
+    const successes: ResizedImage[] = []
+    const failures: string[] = []
+    for (const r of results) {
+      if (r.status === 'fulfilled') successes.push(r.value)
+      else if (r.reason instanceof ImageRejectedError) failures.push(r.reason.message)
+      else failures.push('Unknown image error.')
+    }
+    if (successes.length > 0) {
+      setPendingImages(prev => [...prev, ...successes])
+    }
+    if (failures.length > 0) {
+      setImageError(prev => [prev, ...failures].filter(Boolean).join(' '))
+    }
+  }, [pendingImages])
+
+  const handleRemoveImage = useCallback((index: number) => {
+    setPendingImages(prev => prev.filter((_, i) => i !== index))
+    setImageError(null)
+  }, [])
+
   const handleSend = useCallback(async () => {
     const query = input.trim()
-    if (!query || loading) return
+    // D6.97 Phase 2 — image-only queries are allowed. The send button
+    // gates this client-side via canSend; this guard is defense-in-depth.
+    if ((!query && pendingImages.length === 0) || loading) return
+
+    // Snapshot images BEFORE clearing so the user-message captures them
+    // even though we reset state immediately for UI responsiveness.
+    const imagesForTurn = pendingImages
+    const imagesPayload = imagesForTurn.map(img => ({
+      data_url: img.data_url,
+      width: img.width,
+      height: img.height,
+    }))
+    const imageAttachmentsForMsg: ChatImageAttachment[] = imagesForTurn.map(img => {
+      const mimeMatch = img.data_url.match(/^data:([^;]+);/)
+      return {
+        data_url: img.data_url,
+        mime: mimeMatch ? mimeMatch[1] : 'image/jpeg',
+        width: img.width,
+        height: img.height,
+        size_bytes: img.size_bytes,
+      }
+    })
 
     const userMsg: Message = {
       id: crypto.randomUUID(),
       role: 'user',
       content: query,
       citations: [],
+      image_attachments: imageAttachmentsForMsg,
     }
     setMessages(prev => [...prev, userMsg])
     setInput('')
+    setPendingImages([])
+    setImageError(null)
     setLoading(true)
     setProgressMsg(null)
 
@@ -670,6 +763,11 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
           }
         },
         abortController.signal,
+        // D6.97 Phase 2 — image attachments for this turn. Snapshotted
+        // from pendingImages before the state reset above. Backend
+        // preflight rejects ≤ 5 / ≤ 10 MB; the client-side resize keeps
+        // each well under the cap.
+        imagesPayload.length > 0 ? imagesPayload : undefined,
       )
     } catch (err) {
       // D6.85 Fix C — distinguish user-initiated abort from real errors.
@@ -758,7 +856,7 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
       streamingAccumRef.current = ''
       streamingConvIdRef.current = null
     }
-  }, [input, loading, conversationId, router, setBilling, writePending, clearPending, recoveryLoop, verbosity, savedVerbosity, activeWorkspaceId])
+  }, [input, loading, conversationId, router, setBilling, writePending, clearPending, recoveryLoop, verbosity, savedVerbosity, activeWorkspaceId, pendingImages])
 
   // Sprint D6.85 Fix C — Stop button handler.
   //
@@ -1204,12 +1302,21 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
             </button>
           </div>
         </div>
+        {imageError && IMAGE_UPLOAD_ENABLED && (
+          <div className="px-4 py-2 mx-3 mt-1 text-xs text-amber-300 bg-amber-950/30 border border-amber-800/30 rounded-lg">
+            {imageError}
+          </div>
+        )}
         <InputBar
           value={input}
           onChange={setInput}
           onSend={handleSend}
           loading={loading || restoring}
           onStop={handleStop}
+          imagesEnabled={IMAGE_UPLOAD_ENABLED}
+          pendingImages={pendingImages}
+          onAddImages={handleAddImages}
+          onRemoveImage={handleRemoveImage}
         />
         {rateLimitMsg && (
           <p className="px-4 py-2 font-mono text-xs text-amber-400 bg-amber-950/30 border-t border-amber-800/20">

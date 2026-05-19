@@ -5,9 +5,57 @@ from uuid import UUID
 from pydantic import BaseModel
 
 
+class ChatImageInput(BaseModel):
+    """One image attached to a chat query, as it arrives from the frontend.
+
+    Sprint D6.97 Phase 2 — image upload. The frontend sends a full base64
+    data URL ("data:image/jpeg;base64,...") plus the post-resize pixel
+    dimensions. The router parses this into the engine-internal
+    ``ImageInput`` (separating the mime from the raw base64 payload) before
+    calling the engine.
+
+    The frontend resizes each image to ≤ 1024px on the long edge and
+    re-encodes as JPEG quality 0.8 (or keeps WebP for already-small
+    inputs); see ``apps/web/src/utils/image_resize.ts``.
+    """
+    data_url: str  # "data:<mime>;base64,<payload>"
+    width: int
+    height: int
+
+
+class ImageInput(BaseModel):
+    """One image attached to a chat query, prepared for the Anthropic
+    multimodal API.
+
+    Sprint D6.97 Phase 2 — image upload. Engine-internal DTO produced by
+    the chat router's preflight image-parsing step. The engine consumes
+    it directly when building the multimodal user-message content array
+    (see ``_build_chat_messages``).
+
+    mime         — "image/jpeg" | "image/png" | "image/webp"
+    base64_data  — Pure base64 payload WITHOUT the "data:<mime>;base64,"
+                   prefix. This is the value Anthropic's vision API
+                   consumes under ``source.data``.
+    width        — pixel width after client-side resize (≤ 1024)
+    height       — pixel height after client-side resize (≤ 1024)
+    size_bytes   — decoded byte length (post-base64). Used for cap
+                   enforcement and logging.
+    """
+    mime: str
+    base64_data: str
+    width: int
+    height: int
+    size_bytes: int
+
+
 class ChatMessage(BaseModel):
     role: str  # "user" | "assistant"
     content: str
+    # Sprint D6.97 Phase 2 — images attached to this turn. Carried through
+    # conversation history so the engine can decide whether to re-include
+    # prior images when sending follow-up turns (today: prior images are
+    # dropped from the LLM call to save tokens; UI still shows them).
+    image_attachments: list[dict] = []
 
 
 class CitedRegulation(BaseModel):

@@ -266,6 +266,31 @@ class Settings(BaseSettings):
         default="off", validation_alias="CONFIDENCE_TIERS_MODE",
     )
 
+    # ── D6.97 Phase 2 — Image upload (multimodal vision) ──────────────────
+    # Three-mode flag controlling whether users can attach images to a
+    # chat query (vessel doc photos, regulation screenshots, equipment
+    # photos, etc.) for the synthesizer to read via Claude's vision API.
+    #
+    #   off        — image upload UI hidden in frontend; backend rejects
+    #                any images: list with HTTP 400. Default.
+    #   paid_only  — fires only for users on a paid subscription tier.
+    #                Used for the initial soak after deploy so we see
+    #                real-world resize quality + cost before exposing
+    #                trial users.
+    #   live       — fires for any authenticated user.
+    #
+    # Constraints (enforced router-side, see chat.py preflight):
+    #   - max 5 images per query (Blake-confirmed cap, no monthly cap)
+    #   - max 10 MB per image after client-side resize
+    #   - allowed MIME: image/jpeg, image/png, image/webp
+    #
+    # Revert path:
+    #   ssh prod, edit /opt/RegKnots/.env to set CHAT_IMAGE_UPLOAD_MODE=off,
+    #   systemctl restart regknots-api. ~5 seconds. No deploy needed.
+    chat_image_upload_mode: str = Field(
+        default="off", validation_alias="CHAT_IMAGE_UPLOAD_MODE",
+    )
+
     # ── D6.96 — Maritime current-events tier (Option C) ─────────────────
     # Three-mode flag controlling whether the chat fires the news
     # fallback path alongside the regulatory pipeline.
