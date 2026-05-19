@@ -663,11 +663,39 @@ export function ChatMessage({ message, onCitationTap }: Props) {
     // Sprint D6.23c — Karynn requested copy-on-question so she can re-ask
     // or rephrase without retyping. Copy button lives below the bubble,
     // right-aligned to mirror the message's right-alignment.
+    //
+    // Sprint D6.97 Phase 2 — image attachments render as a thumbnail
+    // strip above the text bubble, right-aligned to match the bubble's
+    // alignment. Clicking a thumbnail opens it full-size in a new tab
+    // (simplest UX; no lightbox needed for v1).
+    const imageAttachments = message.image_attachments ?? []
     return (
       <div className="flex flex-col items-end px-4 py-1.5 animate-[fadeSlideIn_0.2s_ease-out]">
-        <div className="max-w-[82%] px-4 py-3 rounded-2xl rounded-tr-sm bg-[#1a3254] text-[#f0ece4] text-sm leading-relaxed">
-          {message.content}
-        </div>
+        {imageAttachments.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 mb-1.5 justify-end max-w-[82%]">
+            {imageAttachments.map((img, idx) => (
+              <a
+                key={idx}
+                href={img.data_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="block"
+              >
+                <img
+                  src={img.data_url}
+                  alt={`Attached image ${idx + 1}`}
+                  className="h-24 w-24 object-cover rounded-lg border border-white/15 bg-black/40
+                    hover:border-teal/40 transition-colors"
+                />
+              </a>
+            ))}
+          </div>
+        )}
+        {message.content && (
+          <div className="max-w-[82%] px-4 py-3 rounded-2xl rounded-tr-sm bg-[#1a3254] text-[#f0ece4] text-sm leading-relaxed">
+            {message.content}
+          </div>
+        )}
         <div className="mt-0.5 -mr-2.5">
           <CopyMessageButton content={message.content} />
         </div>

@@ -917,6 +917,7 @@ def _build_chat_messages(
     user_role: str | None = None,
     user_jurisdiction_focus: str | None = None,
     user_verbosity: str | None = None,
+    images: list | None = None,
 ) -> list[dict]:
     """Construct the Claude API message list for a chat turn.
 
@@ -929,6 +930,14 @@ def _build_chat_messages(
     jurisdictional priors documented in the SOFT JURISDICTIONAL CONTEXT
     section of the system prompt. All four are optional; the prompt rules
     only apply blocks that are populated.
+
+    Sprint D6.97 Phase 2 — when ``images`` is non-empty, the final user
+    message is emitted as a list of content blocks (image blocks + a
+    single text block at the end) so the Anthropic multimodal API sees
+    the images alongside the prose context. When ``images`` is empty or
+    None, the final user message is a plain string (today's behavior
+    bit-for-bit). History images are NOT re-included on follow-up turns;
+    only the current-turn images are sent to the LLM.
     """
     history = conversation_history[-_MAX_HISTORY:]
     messages = [{"role": msg.role, "content": msg.content} for msg in history]
@@ -1079,7 +1088,30 @@ def _build_chat_messages(
         f"Regulation context:\n{context_str}\n\n"
         f"Question: {query}"
     )
-    messages.append({"role": "user", "content": user_content})
+
+    # D6.97 Phase 2 — multimodal user message when images attached.
+    # Anthropic's vision API expects content as a list of blocks; we put
+    # image blocks first (so the model "sees" them before the text frame)
+    # then the regulation-context + question text as the final block.
+    if images:
+        content_blocks: list[dict] = []
+        for img in images:
+            content_blocks.append({
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": img.mime,
+                    "data": img.base64_data,
+                },
+            })
+        content_blocks.append({"type": "text", "text": user_content})
+        messages.append({"role": "user", "content": content_blocks})
+        logger.info(
+            "Built multimodal user message: %d image(s), %d chars text",
+            len(images), len(user_content),
+        )
+    else:
+        messages.append({"role": "user", "content": user_content})
     return messages
 
 
@@ -1548,6 +1580,13 @@ async def chat(
     # conclusion before vessel/regulatory framing. Helps mariners who
     # skim first paragraphs (Blake's gasket observation).
     lead_with_answer_enabled: bool = True,
+    # Sprint D6.97 Phase 2 — image attachments for this turn. Empty list
+    # = today's behavior (text-only). When non-empty, the engine forces
+    # a vision-capable model (Sonnet/Opus, not Haiku) and builds a
+    # multimodal user-message content array. History images are NOT
+    # re-included on follow-up turns; only the current turn's images
+    # are sent to the LLM.
+    images: list | None = None,
 ) -> ChatResponse:
     """Run the full RAG pipeline and return a ChatResponse.
 
@@ -1563,6 +1602,19 @@ async def chat(
     # 1. Route
     route = await route_query(query, anthropic_client)
     logger.info(f"Routed query to {route.model} (score={route.score})")
+
+    # D6.97 Phase 2 — when images attached, force a vision-capable model
+    # of at least Sonnet quality. Haiku 4.5 has vision support but is
+    # weaker on document-heavy images (regulation screenshots, vessel
+    # docs, equipment photos). Cost overhead: ~$0.005-0.02 per image-
+    # bearing query, negligible at current volume.
+    if images and "haiku" in (route.model or "").lower():
+        original_model = route.model
+        route.model = "claude-sonnet-4-6"
+        logger.info(
+            "image upload: model upgrade %s → %s (images=%d)",
+            original_model, route.model, len(images),
+        )
 
     # Sprint D6.86 — assemble the synthesis system prompt once per
     # request. The lead-with-answer block is conditionally appended
@@ -1657,6 +1709,9 @@ async def chat(
         user_role=user_role,
         user_jurisdiction_focus=user_jurisdiction_focus,
         user_verbosity=user_verbosity,
+        # D6.97 Phase 2 — pass through image attachments. When non-empty
+        # the final user message becomes a multimodal block list.
+        images=images,
     )
 
     # 5. Call Claude — fall back to OpenAI GPT-4o on Anthropic API failures.
@@ -2760,6 +2815,10 @@ async def chat_with_progress(
     # Sprint D6.86 — see chat() docstring.
     judge_on_cited_enabled: bool = True,
     lead_with_answer_enabled: bool = True,
+    # Sprint D6.97 Phase 2 — see chat() for full contract. Streaming
+    # path consumes images identically; the only difference is the
+    # synthesis call uses messages.stream() instead of messages.create().
+    images: list | None = None,
 ) -> AsyncIterator[dict]:
     """Same RAG pipeline as chat() but yields lightweight progress events.
 
@@ -2774,6 +2833,19 @@ async def chat_with_progress(
     yield {"event": "status", "data": "Analyzing your question…"}
     route = await route_query(query, anthropic_client)
     logger.info(f"Routed query to {route.model} (score={route.score})")
+
+    # D6.97 Phase 2 — when images attached, force a vision-capable model
+    # of at least Sonnet quality. Haiku 4.5 has vision support but is
+    # weaker on document-heavy images (regulation screenshots, vessel
+    # docs, equipment photos). Cost overhead: ~$0.005-0.02 per image-
+    # bearing query, negligible at current volume.
+    if images and "haiku" in (route.model or "").lower():
+        original_model = route.model
+        route.model = "claude-sonnet-4-6"
+        logger.info(
+            "image upload: model upgrade %s → %s (images=%d)",
+            original_model, route.model, len(images),
+        )
 
     # Sprint D6.86 — assemble synthesis system prompt with optional
     # lead-with-answer block. See chat() for rationale.
@@ -2874,6 +2946,9 @@ async def chat_with_progress(
         user_role=user_role,
         user_jurisdiction_focus=user_jurisdiction_focus,
         user_verbosity=user_verbosity,
+        # D6.97 Phase 2 — pass through image attachments. When non-empty
+        # the final user message becomes a multimodal block list.
+        images=images,
     )
 
     yield {"event": "status", "data": "Consulting compliance engine…"}

@@ -54,6 +54,19 @@ export interface TierMetadata {
   web_confidence?: number | null
 }
 
+// Sprint D6.97 Phase 2 — image attachment on a chat message.
+// Wire shape matches messages.image_attachments JSONB on the backend
+// (see alembic migration 0103). For user messages, populated when the
+// user attached images to that turn. For assistant messages, always
+// empty (no current path produces image output).
+export interface ChatImageAttachment {
+  data_url: string  // "data:image/jpeg;base64,..." — directly renderable in <img>
+  mime: string      // "image/jpeg" | "image/png" | "image/webp"
+  width: number     // post-resize pixel width (≤ 1024)
+  height: number    // post-resize pixel height (≤ 1024)
+  size_bytes: number  // decoded byte length
+}
+
 export interface Message {
   id: string
   role: 'user' | 'assistant'
@@ -65,6 +78,9 @@ export interface Message {
   // Renders distinctly (italic + "Stopped" hint) and the content
   // includes the partial text that was streamed before the abort.
   cancelled?: boolean
+  // Sprint D6.97 Phase 2 — images attached by the user to this turn.
+  // Rendered as thumbnails in the user message bubble.
+  image_attachments?: ChatImageAttachment[]
 }
 
 export interface ApiResponse {

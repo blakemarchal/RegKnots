@@ -78,6 +78,10 @@ export async function sendMessageStream(
   // is responsible for POSTing /chat/cancel with the accumulated
   // partial content so the server can persist what was rendered.
   signal?: AbortSignal,
+  // Sprint D6.97 Phase 2 — image attachments for this turn. Each entry
+  // is the resized output from utils/image_resize.ts (data_url + dims).
+  // Backend preflight enforces ≤ 5 images and ≤ 10 MB per image.
+  images?: { data_url: string; width: number; height: number }[],
 ): Promise<void> {
   const body = JSON.stringify({
     query,
@@ -85,6 +89,7 @@ export async function sendMessageStream(
     ...(vesselId ? { vessel_id: vesselId } : {}),
     ...(verbosity ? { verbosity } : {}),
     ...(workspaceId ? { workspace_id: workspaceId } : {}),
+    ...(images && images.length > 0 ? { images } : {}),
   })
 
   const doFetch = (token: string | null): Promise<Response> =>

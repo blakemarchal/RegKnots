@@ -77,6 +77,106 @@ _MISSING_NOTE = (
 )
 
 
+def _validate_and_parse_images(
+    body: "ChatRequestBody",
+    current_user: CurrentUser,
+) -> list:
+    """Sprint D6.97 Phase 2 — gate + parse the request body images list.
+
+    Returns the engine-internal list[ImageInput] (possibly empty). Raises
+    HTTPException 400/402 on any validation failure. Caller is responsible
+    for storing the original data_urls on the user-message row separately;
+    this helper only produces the engine-consumable representation.
+
+    Gates (in order):
+      1. CHAT_IMAGE_UPLOAD_MODE off       → 400 if any images attached
+      2. CHAT_IMAGE_UPLOAD_MODE paid_only → 402 unless tier ∈ paid set
+      3. count > 5                        → 400
+      4. data URL parse failure           → 400
+      5. MIME not in {jpeg, png, webp}    → 400
+      6. base64 decode failure            → 400
+      7. decoded size > 10 MB             → 400
+
+    All limits are intentionally hard — the client-side resize logic
+    (apps/web/src/utils/image_resize.ts) is sized to land each image
+    well under 1 MB so a hit here means the client misbehaved.
+    """
+    import base64
+    from app.config import settings as _cfg
+    from rag.models import ImageInput
+
+    images = body.images or []
+    if not images:
+        return []
+
+    mode = (_cfg.chat_image_upload_mode or "off").lower()
+    if mode == "off":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Image upload is not enabled.",
+        )
+    # D6.97 Phase 2 — paid set includes every actual paying tier in DB
+    # (cadet/mate/captain/wheelhouse from D6.1+ pricing; 'pro' is the
+    # legacy admin-granted tier still in use). 'free' is the only
+    # explicitly unpaid value. NOTE: current_events.py's same "paid_only"
+    # gate uses {'pro'} only and silently doesn't fire for cadet/mate/
+    # captain — that's a separate stale-set bug worth flagging when
+    # this ships (see end-of-sprint follow-up list).
+    _IMG_PAID_TIERS = frozenset({"cadet", "mate", "captain", "wheelhouse", "pro"})
+    if mode == "paid_only" and (current_user.tier or "").lower() not in _IMG_PAID_TIERS:
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail="Image upload requires a paid subscription.",
+        )
+
+    if len(images) > 5:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="At most 5 images per query.",
+        )
+
+    parsed: list[ImageInput] = []
+    _ALLOWED_MIME = {"image/jpeg", "image/png", "image/webp"}
+    _MAX_BYTES = 10 * 1024 * 1024  # 10 MB decoded
+
+    for i, img in enumerate(images, start=1):
+        # data URL form: "data:image/jpeg;base64,<payload>"
+        header, sep, payload = (img.data_url or "").partition(",")
+        if not sep or not header.startswith("data:") or ";base64" not in header:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Image {i}: not a valid base64 data URL.",
+            )
+        mime = header[len("data:"):].split(";", 1)[0].strip().lower()
+        if mime not in _ALLOWED_MIME:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Image {i}: unsupported type {mime} (allowed: jpeg, png, webp).",
+            )
+        try:
+            decoded = base64.b64decode(payload, validate=True)
+        except Exception:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Image {i}: malformed base64 payload.",
+            )
+        if len(decoded) > _MAX_BYTES:
+            mb = len(decoded) / (1024 * 1024)
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Image {i}: {mb:.1f} MB exceeds 10 MB cap.",
+            )
+        parsed.append(ImageInput(
+            mime=mime,
+            base64_data=payload,
+            width=int(img.width),
+            height=int(img.height),
+            size_bytes=len(decoded),
+        ))
+
+    return parsed
+
+
 async def _run_chat_preflight(
     body: "ChatRequestBody",
     current_user: CurrentUser,
@@ -84,11 +184,18 @@ async def _run_chat_preflight(
 ) -> tuple[dict | None, uuid.UUID, list, bool]:
     """Run all auth/billing/rate-limit checks and load vessel + conversation state.
 
-    Raises HTTPException for any failure (401/402/403/404/429), so callers
-    can rely on normal FastAPI HTTP error handling.
+    Raises HTTPException for any failure (400/401/402/403/404/429), so
+    callers can rely on normal FastAPI HTTP error handling.
 
-    Returns:
-        (vessel_profile, conversation_id, history, is_new_conversation)
+    Returns an 11-tuple:
+        (vessel_profile, conversation_id, history, is_new_conversation,
+         credential_context, conversation_title, fingerprint,
+         user_persona, user_jurisdiction_focus, user_verbosity,
+         parsed_images)
+
+    Sprint D6.97 Phase 2 — parsed_images is the engine-internal
+    list[ImageInput] (possibly empty). Saved as JSONB on the user-message
+    row upfront so the conversation reads cleanly on rehydration.
     """
     from rag.models import ChatMessage
 
@@ -108,6 +215,14 @@ async def _run_chat_preflight(
         raise
     except Exception:
         pass  # If Redis is down, don't block chat
+
+    # ── D6.97 Phase 2: image upload preflight (fast-fail on cap / size) ────
+    # CPU-only, no DB. Runs BEFORE the billing / vessel / history work so
+    # a bad request short-circuits before consuming DB time. The parsed
+    # list is also used to populate image_attachments JSONB on the
+    # user-message INSERT below; storing the data_urls upfront means the
+    # conversation rehydrates cleanly on reload without a second fetch.
+    parsed_images = _validate_and_parse_images(body, current_user)
 
     # ── Email verification gate (soft — 5 messages before required) ─────────
     if not current_user.email_verified:
@@ -524,14 +639,32 @@ async def _run_chat_preflight(
     # client disconnects, the user message still exists and the user
     # can retry. Failure to insert is non-fatal — we'd rather degrade
     # to today's behavior than block the chat.
+    #
+    # D6.97 Phase 2 — image_attachments JSONB. Rebuilds the wire-format
+    # objects from the ImageInput list (keeps the column self-describing:
+    # data_url + dims + size). Engine reads from parsed_images directly,
+    # NOT from this column; the column is purely for UI rehydration on
+    # conversation reload.
+    image_attachments_json = json.dumps([
+        {
+            "data_url": f"data:{img.mime};base64,{img.base64_data}",
+            "mime": img.mime,
+            "width": img.width,
+            "height": img.height,
+            "size_bytes": img.size_bytes,
+        }
+        for img in parsed_images
+    ])
     try:
         await pool.execute(
             """
-            INSERT INTO messages (conversation_id, role, content, cited_regulation_ids)
-            VALUES ($1, 'user', $2, '{}')
+            INSERT INTO messages
+                (conversation_id, role, content, cited_regulation_ids, image_attachments)
+            VALUES ($1, 'user', $2, '{}', $3::jsonb)
             """,
             conversation_id,
             body.query,
+            image_attachments_json,
         )
     except Exception as exc:
         logger.warning(
@@ -543,6 +676,7 @@ async def _run_chat_preflight(
         vessel_profile, conversation_id, history, is_new_conversation,
         credential_context, conversation_title, fingerprint,
         user_persona, user_jurisdiction_focus, user_verbosity,
+        parsed_images,
     )
 
 
@@ -730,6 +864,7 @@ async def chat_endpoint(
         vessel_profile, conversation_id, history, is_new_conversation,
         credential_context, conversation_title, fingerprint,
         user_persona, user_jurisdiction_focus, user_verbosity,
+        parsed_images,
     ) = await _run_chat_preflight(body, current_user, pool)
 
     anthropic_client: AsyncAnthropic = request.app.state.anthropic
@@ -772,6 +907,10 @@ async def chat_endpoint(
         # via env if regressions appear.
         judge_on_cited_enabled=settings.judge_on_cited_enabled,
         lead_with_answer_enabled=settings.lead_with_answer_enabled,
+        # D6.97 Phase 2 — image attachments parsed by the preflight.
+        # Empty list when no images uploaded; engine routes to multimodal
+        # Claude only when non-empty.
+        images=parsed_images,
     )
 
     # D6.96 — current-events tier append. Best-effort; if the helper
@@ -873,6 +1012,7 @@ async def chat_stream_endpoint(
         vessel_profile, conversation_id, history, is_new_conversation,
         credential_context, conversation_title, fingerprint,
         user_persona, user_jurisdiction_focus, user_verbosity,
+        parsed_images,
     ) = await _run_chat_preflight(body, current_user, pool)
 
     anthropic_client: AsyncAnthropic = request.app.state.anthropic
@@ -929,6 +1069,8 @@ async def chat_stream_endpoint(
                 confidence_tiers_mode=settings.confidence_tiers_mode,
                 judge_on_cited_enabled=settings.judge_on_cited_enabled,
                 lead_with_answer_enabled=settings.lead_with_answer_enabled,
+                # D6.97 Phase 2 — image attachments parsed by preflight.
+                images=parsed_images,
             ):
                 if event["event"] == "done":
                     # Capture done payload for the persist step below.
@@ -1295,6 +1437,12 @@ class ChatRequestBody(BaseModel):
     # user must already be a member of the workspace; the preflight
     # validates this and raises 403 if not.
     workspace_id: uuid.UUID | None = None
+    # Sprint D6.97 Phase 2 — image upload. List of base64 data URLs +
+    # post-resize dimensions; the preflight enforces feature flag, count
+    # cap (≤ 5), MIME allowlist (jpeg/png/webp), and per-image size cap
+    # (≤ 10 MB decoded). Empty list when the user attached no images
+    # (today's behavior).
+    images: list["ChatImageInput"] = []
 
 
 class ChatCancelBody(BaseModel):
