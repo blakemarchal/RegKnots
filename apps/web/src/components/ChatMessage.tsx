@@ -184,9 +184,20 @@ const CITATION_PATTERNS: CitationPattern[] = [
     toSection: m => `${m[1]} CFR ${m[2]}`,
   },
   // 46 USC 7101 / 46 USC 11102
+  //
+  // Sprint D6.97 Track A patch — sourceHint Title-aware (parity with the
+  // D6.90 CFR fix above). The regulations.usc_* sources are split by Title
+  // (currently usc_46 is the only Title in corpus), so the hardcoded
+  // literal `usc` doesn't exist as a source row. Pre-patch the chip
+  // resolved only via the references-fallback path in regulations.py,
+  // which prepends "Full text isn't in our corpus directly" — confusing
+  // UX since the section IS in corpus. Telemetry (citation_lookups, last
+  // 4h): source=usc rows hit references-fallback; source=usc_46 rows hit
+  // the exact-match path. Same chip, two outcomes. This unifies on the
+  // exact-match path.
   {
     re: /\b(\d+)\s+USC\s+(\d+)\b/g,
-    sourceHint: 'usc',
+    sourceHint: m => `usc_${m[1]}`,
     toSection: m => `${m[1]} USC ${m[2]}`,
   },
   // Sprint D6.91 — SOLAS regulation/sub-paragraph citation chips.
