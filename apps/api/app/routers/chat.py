@@ -1419,6 +1419,15 @@ async def _generate_title(
 # ── Request body defined here to avoid circular import with rag.models ───────
 
 from pydantic import BaseModel  # noqa: E402
+# Sprint D6.97 Phase 2 — import ChatImageInput as a concrete class (not
+# a forward-ref string). Pydantic v2's TypeAdapter for ChatRequestBody
+# is built at module-load time; a stringified forward reference like
+# `list["ChatImageInput"]` never resolves and every POST /chat/stream
+# 500s with PydanticUserError ("type adapter not fully defined"). The
+# old "avoid circular import" stance was about app-level imports —
+# rag.models is leaf-pure (only stdlib + pydantic) so it's safe to
+# import at module level here.
+from rag.models import ChatImageInput  # noqa: E402
 
 
 class ChatRequestBody(BaseModel):
@@ -1442,7 +1451,7 @@ class ChatRequestBody(BaseModel):
     # cap (≤ 5), MIME allowlist (jpeg/png/webp), and per-image size cap
     # (≤ 10 MB decoded). Empty list when the user attached no images
     # (today's behavior).
-    images: list["ChatImageInput"] = []
+    images: list[ChatImageInput] = []
 
 
 class ChatCancelBody(BaseModel):
