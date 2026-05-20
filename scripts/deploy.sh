@@ -81,6 +81,18 @@ if [[ "$SKIP_BUILD" != "1" ]]; then
     pnpm install --frozen-lockfile 2>&1 | tail -3
     echo ""
     echo "[pnpm] build (production)"
+    # D6.97 Phase 2 — export NEXT_PUBLIC_* vars from the monorepo root
+    # .env so Next.js inlines them into the build. Without this only
+    # the inline NEXT_PUBLIC_API_URL below was visible to pnpm build —
+    # NEXT_PUBLIC_SENTRY_DSN and NEXT_PUBLIC_CHAT_IMAGE_UPLOAD_ENABLED
+    # silently behaved as if unset. We pick only NEXT_PUBLIC_* lines so
+    # server-only secrets (Stripe / Anthropic / JWT keys) stay server-
+    # side and never accidentally land in client JS.
+    while IFS= read -r line; do
+        if [[ "$line" =~ ^NEXT_PUBLIC_[A-Z0-9_]+= ]]; then
+            export "$line"
+        fi
+    done < "$REPO/.env"
     NEXT_PUBLIC_API_URL=https://regknots.com/api pnpm build 2>&1 | tail -5
     cd ../..
 fi
