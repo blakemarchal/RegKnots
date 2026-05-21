@@ -1590,6 +1590,23 @@ async def chat(
 ) -> ChatResponse:
     """Run the full RAG pipeline and return a ChatResponse.
 
+    Sprint D6.97 Phase 3 Lite (2026-05-21) — this function's body was
+    a ~470-line near-copy of chat_with_progress() before this refactor.
+    The duplication caused multiple drift bugs in the prior week:
+      - Phase 1c: web_fallback_cosine_threshold defaulted 0.5 vs 0.7
+      - Phase 1a: Issue #2 gate had to be pasted into both functions
+      - Phase 2c: image-upload param + model-upgrade block, also dual
+
+    Now chat() is a thin wrapper that consumes the streaming events
+    from chat_with_progress() and returns the final 'done' payload as
+    a ChatResponse. Off-topic short-circuits work transparently —
+    chat_with_progress's _handle_off_topic_stream branch yields a done
+    event with the same payload shape as the main path.
+
+    Frontend callers use /chat/stream (streaming); /chat is only hit
+    by the eval harness and the (unused on the frontend) /chat HTTP
+    endpoint, so the blast radius for any wrapper bug is small.
+
     Args:
         query:                The user's current question.
         conversation_history: Prior messages for this conversation.
@@ -1599,439 +1616,119 @@ async def chat(
         openai_api_key:       Key for OpenAI query embedding.
         conversation_id:      UUID of the conversation (new or existing).
     """
-    # 1. Route
-    route = await route_query(query, anthropic_client)
-    logger.info(f"Routed query to {route.model} (score={route.score})")
-
-    # D6.97 Phase 2 — when images attached, force a vision-capable model
-    # of at least Sonnet quality. Haiku 4.5 has vision support but is
-    # weaker on document-heavy images (regulation screenshots, vessel
-    # docs, equipment photos). Cost overhead: ~$0.005-0.02 per image-
-    # bearing query, negligible at current volume.
-    if images and "haiku" in (route.model or "").lower():
-        original_model = route.model
-        route.model = "claude-sonnet-4-6"
-        logger.info(
-            "image upload: model upgrade %s → %s (images=%d)",
-            original_model, route.model, len(images),
-        )
-
-    # Sprint D6.86 — assemble the synthesis system prompt once per
-    # request. The lead-with-answer block is conditionally appended
-    # based on the flag; defaults to on. Toggle off via env
-    # LEAD_WITH_ANSWER_ENABLED=false if any regression appears.
-    effective_system_prompt = assemble_system_prompt(
-        lead_with_answer=lead_with_answer_enabled,
-    )
-
-    # D6.58 — off-topic gate. If the router classified the query as
-    # off-topic (score=0), short-circuit before any retrieval / fallback
-    # / ensemble fires. Apply daily-cap rate limiting and trigger admin
-    # alerts on repeat abuse. See _handle_off_topic for the full policy.
-    if route.is_off_topic:
-        return await _handle_off_topic(
-            pool=pool,
-            user_id=user_id,
-            conversation_id=conversation_id,
-            query=query,
-        )
-
-    # Sprint D6.4 — conversational follow-up retrieval. If the new query
-    # looks like a clarification or pushback ("So you can't tell me...",
-    # "What about X?", "Are you sure?"), retrieve against the combined
-    # prior-question + current-query so the embedding stays anchored to
-    # the topic instead of drifting toward meta-discussion content.
-    # Also escalate synthesis to Opus on the followup turn — these are
-    # the moments where reasoning quality matters most.
-    followup_match = detect_followup(query)
-    retrieval_query = query
-    if followup_match:
-        prior_user_msg = next(
-            (m.content for m in reversed(conversation_history) if m.role == "user"),
-            None,
-        )
-        retrieval_query = compose_followup_query(prior_user_msg, query)
-        logger.info(
-            "Followup detected (pattern=%r); routing to %s with combined retrieval query",
-            followup_match, REGENERATION_MODEL,
-        )
-    elif (
-        len(conversation_history) == 0
-        and len(query) > LENGTH_THRESHOLD_CHARS
-    ):
-        # Sprint D6.51 — verbose first-turn query distillation. Pre-
-        # rewrite the query to its core regulatory question before
-        # embedding, so retrieval can find the rule the user is
-        # actually asking about. The original query still goes to the
-        # generation prompt — only the embedding-input is distilled.
-        # See packages/rag/rag/query_distill.py.
-        from rag.query_distill import distill_query
-        distilled = await distill_query(
-            query=query,
-            anthropic_client=anthropic_client,
-            pool=pool,
-            user_id=user_id,
-            conversation_id=conversation_id,
-        )
-        if distilled:
-            retrieval_query = distilled
-            logger.info(
-                "Distilled verbose first-turn query "
-                "(orig=%dch, distilled=%dch): %r",
-                len(query), len(distilled), distilled[:100],
-            )
-
-    # 2. Retrieve (D6.66 — multi-query rewrite + reranker + title-boost
-    # via retrieve_enhanced when flags enabled; identical to retrieve()
-    # when both off, so behavior is preserved on flag rollback).
-    chunks = await retrieve_enhanced(
-        query=retrieval_query,
-        pool=pool,
-        openai_api_key=openai_api_key,
-        anthropic_client=anthropic_client,
+    final_data: dict | None = None
+    async for event in chat_with_progress(
+        query=query,
+        conversation_history=conversation_history,
         vessel_profile=vessel_profile,
-        limit=8,
-        query_rewrite_enabled=query_rewrite_enabled,
-        reranker_enabled=reranker_enabled,
-        hybrid_retrieval_enabled=hybrid_retrieval_enabled,
-        hybrid_rrf_k=hybrid_rrf_k,
-    )
-    logger.info(f"Retrieved {len(chunks)} chunks")
-
-    # 3. Build context
-    context_str, cited = build_context(chunks)
-
-    # 4. Construct messages
-    messages = _build_chat_messages(
-        query, conversation_history, vessel_profile, context_str, credential_context,
+        pool=pool,
+        anthropic_client=anthropic_client,
+        openai_api_key=openai_api_key,
+        conversation_id=conversation_id,
+        credential_context=credential_context,
         conversation_title=conversation_title,
         fingerprint_summary=fingerprint_summary,
         user_role=user_role,
         user_jurisdiction_focus=user_jurisdiction_focus,
         user_verbosity=user_verbosity,
-        # D6.97 Phase 2 — pass through image attachments. When non-empty
-        # the final user message becomes a multimodal block list.
+        user_id=user_id,
+        subscription_tier=subscription_tier,
+        xai_api_key=xai_api_key,
+        web_fallback_enabled=web_fallback_enabled,
+        web_fallback_cosine_threshold=web_fallback_cosine_threshold,
+        web_fallback_daily_cap=web_fallback_daily_cap,
+        web_fallback_cascade_enabled=web_fallback_cascade_enabled,
+        hedge_judge_enabled=hedge_judge_enabled,
+        query_rewrite_enabled=query_rewrite_enabled,
+        reranker_enabled=reranker_enabled,
+        citation_oracle_enabled=citation_oracle_enabled,
+        hybrid_retrieval_enabled=hybrid_retrieval_enabled,
+        hybrid_rrf_k=hybrid_rrf_k,
+        confidence_tiers_mode=confidence_tiers_mode,
+        judge_on_cited_enabled=judge_on_cited_enabled,
+        lead_with_answer_enabled=lead_with_answer_enabled,
         images=images,
-    )
+    ):
+        # Discard status/delta/delta_reset — non-streaming caller only
+        # needs the terminal payload. Every chat_with_progress path
+        # yields exactly one done event (both off-topic short-circuit
+        # at L2597 and the main path at L3303), so we capture it and
+        # break out of the iteration.
+        if event.get("event") == "done":
+            final_data = event["data"]
 
-    # 5. Call Claude — fall back to OpenAI GPT-4o on Anthropic API failures.
-    # Followup turns escalate to Opus regardless of route score (Sprint D6.4).
-    model_used = REGENERATION_MODEL if followup_match else route.model
-    try:
-        response = await anthropic_client.messages.create(
-            model=model_used,
-            max_tokens=_MAX_TOKENS,
-            system=effective_system_prompt,
-            messages=messages,
-        )
-        answer = response.content[0].text
-        input_tokens = response.usage.input_tokens
-        output_tokens = response.usage.output_tokens
-    except _CLAUDE_FAILURE_EXCEPTIONS as exc:
-        logger.warning(
-            "Claude API failed (%s: %s), falling back to OpenAI GPT-4o",
-            type(exc).__name__,
-            str(exc)[:200],
-        )
-        fallback_result = await fallback_chat(
-            system_prompt=effective_system_prompt,
-            messages=messages,
-            max_tokens=_MAX_TOKENS,
-            openai_api_key=openai_api_key,
-        )
-        answer = fallback_result["answer"]
-        input_tokens = fallback_result["input_tokens"]
-        output_tokens = fallback_result["output_tokens"]
-        model_used = fallback_result["model"]
-        logger.warning(
-            "Fallback response received: %d input tokens, %d output tokens",
-            input_tokens,
-            output_tokens,
+    if final_data is None:
+        # Defensive — should never happen unless chat_with_progress
+        # was interrupted before reaching its done emission. Surface
+        # the failure with conversation context so the operator can
+        # diagnose from logs.
+        raise RuntimeError(
+            f"chat_with_progress yielded no done event for "
+            f"conversation_id={conversation_id}"
         )
 
-    # 6. Post-process: vessel update extraction, citation verification,
-    #    optional regeneration on citation failure, cleanup.
-    (
-        cleaned_answer,
-        verified_cited,
-        all_unverified,
-        vessel_update,
-        regen_in,
-        regen_out,
-        regenerated,
-    ) = await _finalize_answer(
-        answer=answer,
-        cited=cited,
-        conversation_id=conversation_id,
-        model_used=model_used,
-        pool=pool,
-        query=query,
-        context_str=context_str,
-        anthropic_client=anthropic_client,
-        openai_api_key=openai_api_key,
-        effective_system_prompt=effective_system_prompt,
-        chunks=chunks,
-    )
-    input_tokens += regen_in
-    output_tokens += regen_out
+    return _done_payload_to_response(final_data)
 
-    # Sprint D2-LOG: if the final answer hedges on retrieval, log the miss
-    # to `retrieval_misses` for offline analysis. Fire-and-forget — DB
-    # errors never fail the chat response.
-    #
-    # D6.60 — when hedge_judge_enabled, the regex match is just the
-    # cheap pre-filter. We run a Haiku judge (~$0.004) on
-    # (question, answer, retrieved chunks) to decide whether this is
-    # a complete_miss, partial_miss, precision_callout, or false_hedge.
-    # Only complete_miss + partial_miss fire the ensemble; precision
-    # callouts and false hedges suppress.
-    hedge_phrase = detect_hedge(cleaned_answer)
-    regex_matched = hedge_phrase is not None
-    web_fallback_card = None
-    judge_verdict: str | None = None
-    judge_reasoning: str | None = None
-    judge_missing_topic: str | None = None
-    chunks_truncated_for_judge = False
 
-    # Sprint D6.86 — judge fires on EITHER (a) regex matched, OR (b)
-    # judge_on_cited_enabled AND ≥1 verified citation. Path (b) catches
-    # partial-misses on softer hedge prose ("does not specify..."). Web
-    # fallback firing is still gated on regex match below (Phase 1
-    # preserves legacy UX; Phase 2 may unlock fallback for cited
-    # partial_miss).
-    should_run_judge = hedge_judge_enabled and (
-        regex_matched
-        or (judge_on_cited_enabled and len(verified_cited) >= 1)
-    )
+def _done_payload_to_response(data: dict) -> ChatResponse:
+    """Convert chat_with_progress's done payload (dict) into a ChatResponse.
 
-    if should_run_judge:
-        from rag.hedge_judge import judge_hedge
-        # Sprint D6.92 — tell the judge which mode it's in so it can
-        # apply the right decision rubric. The pre-D6.92 prompt assumed
-        # every call was regex-triggered and biased toward finding a
-        # hedge; that mis-rated three cited-confident answers as
-        # complete_miss in May 2026. The new prompt switches rubric
-        # based on this parameter.
-        judge_mode = "regex_triggered" if regex_matched else "precautionary"
-        try:
-            verdict = await judge_hedge(
-                question=query,
-                answer=cleaned_answer,
-                chunks=chunks,
-                citations=[
-                    {"source": c.source, "section_number": c.section_number,
-                     "section_title": c.section_title}
-                    for c in verified_cited
-                ],
-                anthropic_client=anthropic_client,
-                mode=judge_mode,
-            )
-            judge_verdict = verdict.verdict
-            judge_reasoning = verdict.reasoning or None
-            judge_missing_topic = verdict.missing_topic
-            chunks_truncated_for_judge = verdict.chunks_truncated
-        except Exception as exc:
-            logger.warning(
-                "hedge_judge unexpected failure: %s: %s",
-                type(exc).__name__, str(exc)[:200],
-            )
-            # Fail-safe default ONLY on the regex-matched path
-            # (preserves legacy fire-the-ensemble behavior on judge
-            # errors). For judge-on-cited invocations with no regex
-            # match, leave verdict=None so we don't false-fire web
-            # fallback or false-demote a Tier 1 answer.
-            if regex_matched:
-                judge_verdict = "complete_miss"
-    elif regex_matched and not hedge_judge_enabled:
-        # Judge disabled but regex matched: behave like the legacy
-        # regex-only path (every regex hit fires fallback).
-        judge_verdict = "complete_miss"
+    D6.97 Phase 3 Lite — the streaming path emits dict-shaped events
+    (JSON-friendly for SSE transport); the non-streaming wrapper
+    rebuilds the Pydantic object form here. Field-by-field with
+    defensive defaults so partial payloads (off-topic short-circuit
+    omits web_fallback / tier_metadata) work transparently.
 
-    if regex_matched:
-        # Log to retrieval_misses on the regex-matched path only.
-        # retrieval_misses semantics are "regex matched, here's what
-        # happened next" — D6.86 judge-on-cited invocations skip the
-        # log to avoid polluting the existing analytics surface.
-        try:
-            await _log_retrieval_miss(
-                pool=pool,
-                conversation_id=conversation_id,
-                query=query,
-                vessel_profile=vessel_profile,
-                hedge_phrase=hedge_phrase,
-                model_used=model_used,
-                input_tokens=input_tokens,
-                output_tokens=output_tokens,
-                retrieved_chunks=chunks,
-                cited=verified_cited,
-                answer=cleaned_answer,
-                judge_verdict=judge_verdict,
-                judge_reasoning=judge_reasoning,
-                judge_missing_topic=judge_missing_topic,
-                chunks_truncated_for_judge=chunks_truncated_for_judge,
-            )
-        except Exception as exc:
-            logger.warning(
-                "retrieval_miss log failed (non-fatal): %s: %s",
-                type(exc).__name__,
-                str(exc)[:200],
-            )
+    conversation_id arrives stringified in the done payload (per the
+    chat_with_progress docstring contract) — we parse it back to UUID
+    here.
+    """
+    raw_conv = data["conversation_id"]
+    conv_id = UUID(raw_conv) if isinstance(raw_conv, str) else raw_conv
 
-        # Fire fallback only on miss verdicts AND only on the regex-
-        # matched path (D6.86 Phase 1 — see comment above). Tier 2
-        # ships in Phase 2 to handle the cited-partial-miss case.
-        #
-        # Sprint D6.97 Phase 1a — Issue #2 fix. When the answer already
-        # carries verified citations, suppress web_fallback regardless of
-        # the hedge_judge verdict. The trust contract for a Tier-1 cited
-        # answer is "this is the law, full stop"; stapling a 🌐 web card
-        # to it dilutes that contract. Three doc-confirmed misfires in the
-        # 2026-05-19 audit (46 CFR 10.215, MAN B&W cylinder lubrication,
-        # Jones Act §501 waiver) all triggered web_fallback because the
-        # answer body contained a "What I Can't Confirm" section that the
-        # regex + judge read as partial_miss — even though the actual
-        # answer was cleanly cited. This parallels the news-on-Tier-1
-        # gate already shipped in current_events.py D6.97.
-        has_verified_citations = bool(verified_cited)
-        should_fire_fallback = (
-            judge_verdict in ("complete_miss", "partial_miss")
-            and not has_verified_citations
-        )
-        if web_fallback_enabled and should_fire_fallback:
-            top_cosine = (
-                chunks[0].get("similarity", 0.0) if chunks else 0.0
-            )
-            # partial_miss → swap query to the focused missing topic so
-            # the ensemble searches for the gap, not the whole question.
-            override_query: str | None = None
-            if judge_verdict == "partial_miss" and judge_missing_topic:
-                override_query = judge_missing_topic
-                logger.info(
-                    "hedge_judge partial_miss: overriding ensemble query "
-                    "from %r to %r", query[:80], override_query,
-                )
+    cited: list[CitedRegulation] = []
+    for c in (data.get("cited_regulations") or []):
+        if isinstance(c, dict):
+            cited.append(CitedRegulation(
+                source=c["source"],
+                section_number=c["section_number"],
+                section_title=c.get("section_title", ""),
+            ))
+        else:
+            cited.append(c)
 
-            # Sprint D6.70 — Layer-2 citation-oracle intervention. Try
-            # the web-routing → corpus-answering split BEFORE falling
-            # back to the existing web ensemble. On any failure the
-            # function returns None and we fall through to the
-            # existing _dispatch_web_fallback below.
-            if citation_oracle_enabled:
-                try:
-                    web_fallback_card = await _try_citation_oracle_intervention(
-                        query=query,
-                        conversation_id=conversation_id,
-                        user_id=user_id,
-                        pool=pool,
-                        anthropic_client=anthropic_client,
-                        top_cosine=top_cosine,
-                    )
-                except Exception as exc:
-                    logger.warning(
-                        "citation_oracle intervention failed (non-fatal): %s: %s",
-                        type(exc).__name__, str(exc)[:200],
-                    )
-                    web_fallback_card = None
+    web_fallback: WebFallbackCard | None = None
+    wf_raw = data.get("web_fallback")
+    if wf_raw:
+        web_fallback = WebFallbackCard(**wf_raw) if isinstance(wf_raw, dict) else wf_raw
 
-            if web_fallback_card is None:
-                try:
-                    web_fallback_card = await _dispatch_web_fallback(
-                        query=query,
-                        conversation_id=conversation_id,
-                        user_id=user_id,
-                        subscription_tier=subscription_tier,
-                        pool=pool,
-                        anthropic_client=anthropic_client,
-                        openai_api_key=openai_api_key,
-                        xai_api_key=xai_api_key,
-                        top_cosine=top_cosine,
-                        cosine_threshold=web_fallback_cosine_threshold,
-                        daily_cap=web_fallback_daily_cap,
-                        cascade_enabled=web_fallback_cascade_enabled,
-                        override_query=override_query,
-                        judge_verdict=judge_verdict,
-                        judge_missing_topic=judge_missing_topic,
-                    )
-                except Exception as exc:
-                    logger.warning(
-                        "web fallback failed (non-fatal): %s: %s",
-                        type(exc).__name__,
-                        str(exc)[:200],
-                    )
-        elif not should_fire_fallback:
-            # D6.97 Phase 1a — log the suppression reason so audit can
-            # distinguish verdict-driven (judge said precision_callout /
-            # false_hedge / None) from the new verified-citations gate.
-            suppress_reason = (
-                "verified_citations" if has_verified_citations
-                else f"verdict={judge_verdict}"
-            )
-            logger.info(
-                "hedge_judge suppressed fallback: %s verified_cites=%d reasoning=%r",
-                suppress_reason, len(verified_cited),
-                (judge_reasoning or "")[:200],
-            )
-
-        # 4. Sprint D6.58 Slice 2 hedge classifier — fires on every
-        # hedge regardless of judge verdict. Different from the judge:
-        # the classifier categorizes corpus failures (VOCAB / INTENT /
-        # RANKING / etc.) for sprint planning, the judge decides
-        # real-time fire/skip. Both pieces of data are useful.
-        try:
-            await _classify_and_persist_hedge(
-                pool=pool,
-                conversation_id=conversation_id,
-                user_id=user_id,
-                query=query,
-                vessel_profile=vessel_profile,
-                retrieved=chunks,
-                hedge_text=cleaned_answer,
-                anthropic_client=anthropic_client,
-                web_fallback_card=web_fallback_card,
-            )
-        except Exception as exc:
-            logger.warning(
-                "hedge audit failed (non-fatal): %s: %s",
-                type(exc).__name__, str(exc)[:200],
-            )
-
-    # Layer C — UX inversion when retrieval failed hard and web fallback
-    # got a confident answer. Rewrites cleaned_answer to lead with the
-    # web content rather than the synthesizer's hedged miss + side panel.
-    # See _apply_layer_c_inversion for the framing format and rationale.
-    layer_c_fired = False
-    if _should_apply_layer_c(judge_verdict, web_fallback_card):
-        logger.info(
-            "Layer C: inverting answer surface (verdict=%s web_confidence=%d)",
-            judge_verdict, web_fallback_card.confidence,
-        )
-        cleaned_answer = _apply_layer_c_inversion(cleaned_answer, web_fallback_card)
-        layer_c_fired = True
-
-    # Sprint D6.97 — tier_router removed (see
-    # docs/sprint-audits/tier-router-shadow-kill-2026-05-19.md).
-    # 14-day shadow audit showed the classifier would have surfaced
-    # 23/50 answers as ✓ Verified that the hedge_judge correctly
-    # flagged as precision_callout — net-negative if shipped live.
-    # The dead zone it was designed to close (Karynn/Kenan misfires)
-    # was instead closed by the D6.92 hedge_judge prompt rewrite.
-    # Keeping `tier_metadata=None` for response shape compatibility
-    # so any cached frontend code still parses ChatResponse cleanly.
-    tier_metadata = None
+    tier_metadata: TierMetadata | None = None
+    tm_raw = data.get("tier_metadata")
+    if tm_raw:
+        tier_metadata = TierMetadata(**tm_raw) if isinstance(tm_raw, dict) else tm_raw
 
     return ChatResponse(
-        answer=cleaned_answer,
-        conversation_id=conversation_id,
-        cited_regulations=verified_cited,
-        model_used=model_used,
-        input_tokens=input_tokens,
-        output_tokens=output_tokens,
-        unverified_citations=all_unverified,
-        vessel_update=vessel_update,
-        regenerated=regenerated,
-        web_fallback=web_fallback_card,
+        answer=data["answer"],
+        conversation_id=conv_id,
+        cited_regulations=cited,
+        model_used=data.get("model_used", ""),
+        input_tokens=data.get("input_tokens", 0),
+        output_tokens=data.get("output_tokens", 0),
+        unverified_citations=data.get("unverified_citations") or [],
+        vessel_update=data.get("vessel_update"),
+        regenerated=data.get("regenerated", False),
+        web_fallback=web_fallback,
         tier_metadata=tier_metadata,
     )
+
+
+# ─── PHASE 3 LITE BOUNDARY — old chat() body removed below this line ──
+# Previously: ~470 lines of pipeline duplication (route → retrieve →
+# build_context → synthesize → finalize → hedge_judge → web_fallback →
+# layer_c → assemble ChatResponse). All that logic now lives in
+# chat_with_progress(), which is the single source of truth for the
+# pipeline. chat() above is a thin event-consumer + payload-converter.
+# ──────────────────────────────────────────────────────────────────────
 
 
 async def _try_citation_oracle_intervention(
