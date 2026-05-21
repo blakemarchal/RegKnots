@@ -58,7 +58,13 @@ logger = logging.getLogger(__name__)
 
 SOURCE       = "amsa_mo"
 TITLE_NUMBER = 0
-SOURCE_DATE  = date(2026, 4, 28)  # adapter publication, not Order edition
+# D6.97 AU sprint 1a (2026-05-21) — bumped from 2026-04-28 so the
+# `--update` freshness gate re-processes after the DCV 500-series
+# entries were added. The freshness check compares this constant
+# against the DB's stored up_to_date_as_of date and skips entirely
+# if equal — that's correct behavior in steady state but blocks
+# adapter expansions like this one until the date moves.
+SOURCE_DATE  = date(2026, 5, 21)  # adapter publication, not Order edition
 
 _AMSA_BASE      = "https://www.amsa.gov.au"
 _LEGIS_BASE     = "https://www.legislation.gov.au"
@@ -74,8 +80,15 @@ _TIMEOUT       = 60.0
 # Pattern to find the legislation.gov.au series ID embedded in an AMSA
 # landing page. Series IDs look like F2016L01076 / F2024C00338 — the F
 # prefix + 4-digit year + letter + 5-digit sequence.
+#
+# D6.97 AU sprint 1a — broadened to accept legislation.gov.au's full
+# path variation: Navigation-Act-era MOs link as /<id> or /Series/<id>,
+# but DCV-era MOs (the 500-series) link via /Details/<id>. Pre-fix the
+# regex missed Details/ entirely, causing MO 50, 501, 505 to fail
+# discovery with "No legislation.gov.au series ID found" even when the
+# landing page DID contain the link.
 _LEGIS_SERIES_RE = re.compile(
-    r"https?://(?:www\.)?legislation\.gov\.au/(?:Series/)?(F\d{4}[A-Z]\d{5})",
+    r"https?://(?:www\.)?legislation\.gov\.au/(?:Series/|Details/)?(F\d{4}[A-Z]\d{5})",
     re.IGNORECASE,
 )
 
@@ -190,8 +203,11 @@ _CURATED_ORDERS: list[OrderMeta] = [
               "marine-order-501-administration-national-law", "dcv_administration"),
     OrderMeta("502", "Vessel identifiers — national law",
               "marine-order-502-vessel-identifiers-national-law", "dcv_identifiers"),
+    # MO 503's landing page sits at the site root (/marine-order-503-...)
+    # rather than under /about/regulations-and-standards/. The leading
+    # "/" tells the adapter to treat the slug as an absolute path.
     OrderMeta("503", "Certificates of survey — national law",
-              "marine-order-503-certificates-survey-national-law", "dcv_survey"),
+              "/marine-order-503-certificates-survey-national-law", "dcv_survey"),
     OrderMeta("504", "Certificates of operation — national law",
               "marine-order-504-certificates-operation", "dcv_operation"),
     OrderMeta("505", "Certificates of competency — national law",
@@ -232,8 +248,17 @@ def discover_and_download(
                     f"  Resolving Marine Order {meta.number} "
                     f"({i}/{len(_CURATED_ORDERS)})…"
                 )
-                # Step 1: AMSA landing page → series ID
-                landing_url = f"{_AMSA_BASE}/about/regulations-and-standards/{meta.amsa_slug}"
+                # Step 1: AMSA landing page → series ID.
+                #
+                # D6.97 AU sprint 1a — most MO landing pages live under
+                # /about/regulations-and-standards/<slug>, but a few
+                # (notably MO 503) sit at the site root /<slug>. If the
+                # configured amsa_slug starts with "/" treat it as an
+                # absolute path; otherwise prepend the standard prefix.
+                if meta.amsa_slug.startswith("/"):
+                    landing_url = f"{_AMSA_BASE}{meta.amsa_slug}"
+                else:
+                    landing_url = f"{_AMSA_BASE}/about/regulations-and-standards/{meta.amsa_slug}"
                 resp = client.get(landing_url, headers=_BROWSER_HEADERS)
                 resp.raise_for_status()
                 series_id = _extract_series_id(resp.text)
