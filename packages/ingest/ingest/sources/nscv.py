@@ -61,11 +61,17 @@ _TIMEOUT       = 60.0
 # Permissive NSCV PDF URL regex. AMSA's filename patterns vary by
 # edition — sometimes "NSCV-C7C-Edition-1.5-010925.pdf", sometimes
 # "nscv-f2-ed-2.7-february-2022-...pdf", sometimes "nscv-c2-draft.pdf".
-# We match any /sites/default/files/... URL containing "nscv" and
-# ending in .pdf. The landing-page heuristic then disambiguates main
-# document vs amending instrument.
+# AND landing pages href these as either relative ("/sites/default/...")
+# or absolute ("https://www.amsa.gov.au/sites/default/..."). The pattern
+# below accepts both forms. The amsa.gov.au prefix is optional; the
+# `/sites/default/files/` path is the canonical PDF hosting location.
+#
+# Also accepts the alternative `/file/<id>/download?token=...` form
+# that AMSA uses for some older NSCV documents.
 _NSCV_PDF_RE = re.compile(
-    r"(?:https?:)?//(?:www\.)?amsa\.gov\.au/sites/default/files/[^\s\"'<>]*?nscv[^\s\"'<>]*?\.pdf",
+    r"(?:https?://(?:www\.)?amsa\.gov\.au)?"
+    r"(?:/sites/default/files/[^\s\"'<>]*?nscv[^\s\"'<>]*?\.pdf"
+    r"|/file/\d+/download(?:\?token=[^\s\"'<>]*)?)",
     re.IGNORECASE,
 )
 # Amending instruments + drafts are not the main consolidated text we
