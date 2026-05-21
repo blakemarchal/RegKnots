@@ -645,6 +645,39 @@ def _source_affinity(
         # so SOLAS / MARPOL / STCW context is often relevant in parallel.
         # Same supplementary lift as the UK MCA case.
         boosts.setdefault("solas", 0.10)
+    else:
+        # Symmetric penalty when context POSITIVELY contradicts AU. NSCV
+        # is a well-written general-purpose standard whose chunks score
+        # high on cosine for generic operational queries (fire safety,
+        # crew equipment, stability). Without this penalty the 2026-05-21
+        # negative-test probe found NSCV chunks dominating top-10 for:
+        #   - US-flag "fire safety" query (NSCV C4 at #7)
+        #   - UK-flag "crew safety equipment" query (NSCV C7A at #1, #4)
+        # A flat -0.10 demotion is enough to push amsa-group below the
+        # top-10 cliff on those queries while preserving the boost when
+        # AU context is present. "Decidedly non-AU" means an explicit
+        # other-jurisdiction flag OR explicit other-jurisdiction
+        # vocabulary in the query — neutral / unknown context gets no
+        # penalty so generic IMO/SOLAS queries still see NSCV when
+        # cosine genuinely supports it.
+        _NON_AU_FLAGS = frozenset({
+            "united states", "u.s.", "us", "usa", "united states of america",
+            "united kingdom", "uk", "britain", "british",
+            "singapore", "hong kong", "norway", "norwegian",
+            "marshall islands", "rmi",
+            "liberia", "liberian",
+            "bahamas", "bahamian",
+            "panama", "panamanian",
+        })
+        flag_decidedly_non_au = flag_state in _NON_AU_FLAGS
+        query_decidedly_non_au = (
+            any(t in q for t in _MCA_TERMS) or _MCA_ABBR_RE.search(q)
+            or any(s in q for s in ("uscg", "u.s. coast guard", "us coast guard"))
+            or any(s in q for s in ("liscr", "iri marine", "rmi marine notice"))
+            or any(s in q for s in ("bma marine notice",))
+        )
+        if flag_decidedly_non_au or query_decidedly_non_au:
+            boosts["amsa"] = -0.10
 
     if "cfr" in q or "code of federal" in q:
         boosts["cfr"] = 0.15
