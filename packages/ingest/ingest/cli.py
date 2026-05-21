@@ -188,6 +188,26 @@ _PDF_SOURCE_CONFIG: dict[str, dict] = {
         "raw_dir": _DATA_RAW / "nscv",
         "adapter": "ingest.sources.nscv",
     },
+    # Sprint D6.97 class-society expansion (2026-05-21) — Bureau Veritas
+    # Marine & Offshore rules. The bv.py adapter emits Sections with TWO
+    # source keys: NR467 et al → source="bv"; NR606 → source="iacs_csr"
+    # (since NR606 is BV's distribution of the IACS Common Structural
+    # Rules — identical text to what every IACS member publishes).
+    # Both sources share this raw_dir / adapter — the source split
+    # happens at parse-time inside the adapter.
+    "bv": {
+        "raw_dir": _DATA_RAW / "bv",
+        "adapter": "ingest.sources.bv",
+    },
+    # Note: iacs_csr does NOT get its own entry — content is produced
+    # by the bv adapter above (see source_key field on NR606 entry).
+    # When users run --source iacs_csr we'd want to re-trigger BV
+    # discovery + re-parse, so adding a thin alias entry pointing to
+    # the same adapter + raw_dir.
+    "iacs_csr": {
+        "raw_dir": _DATA_RAW / "bv",
+        "adapter": "ingest.sources.bv",
+    },
     # Sprint D6.20 — Liberian (LISCR) Marine Notices. Direct PDF
     # downloads from www.liscr.com on a deterministic per-code URL.
     "liscr_mn": {
