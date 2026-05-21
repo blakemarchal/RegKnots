@@ -117,11 +117,29 @@ SOURCE_GROUPS: dict[str, tuple[str, ...]] = {
     # ABS Marine Vessel Rules. Grouped together so a classed-vessel
     # query draws from both bodies, then jurisdiction priors / chat
     # filters narrow to the relevant society at synthesis time.
-    "class_society": ("lr_lifting_code", "lr_rules", "abs_mvr"),
+    #
+    # Sprint D6.97 class-society expansion (2026-05-21) — Bureau Veritas
+    # NR467 joins the class_society group; iacs_csr (BV's NR606
+    # distribution of the IACS Common Structural Rules for Bulk Carriers
+    # and Oil Tankers) gets its own group because CSR is the international
+    # joint standard, not a single society's content — bulk-carrier and
+    # tanker queries should pull CSR independently of any one society.
+    "class_society": ("lr_lifting_code", "lr_rules", "abs_mvr", "bv"),
+    "iacs_csr":      ("iacs_csr",),
     # IMO codes share a group — they're peer instruments to SOLAS that
     # bind specific vessel types (HSC for fast craft, IGC/IBC for
     # gas/chemical tankers, Load Lines universal, CSS via SOLAS Ch.VI).
-    "imo_codes": ("imo_css", "imo_loadlines", "imo_igc", "imo_ibc", "imo_hsc"),
+    #
+    # Sprint D6.97 (2026-05-21) — LSA + FSS Codes added. LSA is referenced
+    # by SOLAS Ch.III for every lifesaving question; FSS is referenced by
+    # SOLAS Ch.II-2 for every fire safety question. Grouping them with
+    # the other IMO codes gives them per-group diversified-fetch slots
+    # so they don't get crowded out by SOLAS chunks that score higher
+    # on cosine for the topic-defining query.
+    "imo_codes": (
+        "imo_css", "imo_loadlines", "imo_igc", "imo_ibc", "imo_hsc",
+        "imo_lsa", "imo_fss",
+    ),
     # IMO reference manuals (operational guidance, not binding rule).
     "imo_ref": ("imo_iamsar",),
     # Port State Control regimes (Tokyo MOU + Paris MOU).

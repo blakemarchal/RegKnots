@@ -53,7 +53,13 @@ from datetime import date
 from pathlib import Path
 
 import httpx
-import pdfplumber
+# Sprint D6.97 (2026-05-21) — pypdf instead of pdfplumber. The BV PDFs
+# are 5-16 MB each with heavy structural diagrams; pdfplumber's
+# coordinate-aware extractor builds an expensive in-memory tree that
+# stalled the first ingest run for 60+ minutes at near-OOM (process in
+# D state, 1 GB RSS against the 1 GB MemoryHigh soft cap). pypdf's
+# text-only extractor is ~5-10x lighter for our needs.
+from pypdf import PdfReader
 
 from ingest.models import Section
 
@@ -374,16 +380,22 @@ def _extract_pdf_text(pdf_path: Path) -> str:
 
     BV PDFs have consistent headers (NR identifier + Part code) and
     page-number footers — strip those before chunking downstream.
+
+    Uses pypdf (not pdfplumber) — see module-level comment for the
+    memory-stall rationale. pypdf has slightly less precise layout
+    handling but is significantly more memory-efficient on heavy
+    structural / diagram-bearing PDFs like NR467 Parts B/C/D/F and
+    NR606 (IACS CSR), which range 5-16 MB each.
     """
     page_texts: list[str] = []
-    with pdfplumber.open(pdf_path) as pdf:
-        for page in pdf.pages:
-            t = page.extract_text() or ""
-            t = _PAGE_NUMBER_LINE.sub("", t)
-            t = _HEADER_LINE.sub("", t)
-            t = re.sub(r"[ \t]+", " ", t)
-            t = re.sub(r"\n{3,}", "\n\n", t)
-            page_texts.append(t.strip())
+    reader = PdfReader(str(pdf_path))
+    for page in reader.pages:
+        t = page.extract_text() or ""
+        t = _PAGE_NUMBER_LINE.sub("", t)
+        t = _HEADER_LINE.sub("", t)
+        t = re.sub(r"[ \t]+", " ", t)
+        t = re.sub(r"\n{3,}", "\n\n", t)
+        page_texts.append(t.strip())
     return "\n\n".join(p for p in page_texts if p)
 
 
