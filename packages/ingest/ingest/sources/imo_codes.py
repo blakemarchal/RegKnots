@@ -203,6 +203,47 @@ _CURATED_BY_CODE: dict[str, list[CodeDocMeta]] = {
     # in MEPC resolutions which ARE free. We ingest those — that's actually
     # what mariners need to comply (the Convention itself is high-level;
     # the resolutions are the implementation detail).
+
+    # Sprint D6.97 class-society expansion (2026-05-21) — LSA Code.
+    # Mandatory under SOLAS Ch.III for ALL ships. Provides the technical
+    # detail (carrying capacity, equipment specs, type approval) that
+    # SOLAS Ch.III references but does not include. The 1996 adoption
+    # plus the 2021 amendments (effective 2024) cover the current
+    # operational rule set as it actually applies to vessels today.
+    "lsa": [
+        CodeDocMeta(
+            code="MSC.48(66)",
+            title="International Life-Saving Appliance (LSA) Code — adoption",
+            pdf_url=f"{_IMO_CDN}/MSCResolutions/MSC.48(66).pdf",
+            effective_date=date(1998, 7, 1),
+            parent_label="IMO LSA Code",
+        ),
+        CodeDocMeta(
+            code="MSC.485(103)",
+            title="LSA Code amendments (2021) — lifeboat launching + towing capabilities",
+            pdf_url=f"{_IMO_CDN}/MSCResolutions/MSC.485(103).pdf",
+            effective_date=date(2024, 1, 1),
+            parent_label="IMO LSA Code",
+        ),
+    ],
+
+    # Sprint D6.97 class-society expansion (2026-05-21) — FSS Code.
+    # Mandatory under SOLAS Ch.II-2 for fire safety systems on all ships.
+    # Carries the technical specs for fire extinguishers, fixed fire
+    # detection + alarm, sample extraction smoke detection, low-location
+    # lighting, emergency fire pumps, means of escape arrangements,
+    # and other fire safety systems that SOLAS Ch.II-2 mandates by
+    # reference. The 2000 adoption is the current consolidated text.
+    "fss": [
+        CodeDocMeta(
+            code="MSC.98(73)",
+            title="International Code for Fire Safety Systems (FSS Code) — adoption",
+            pdf_url=f"{_IMO_CDN}/MSCResolutions/MSC.98(73).pdf",
+            effective_date=date(2002, 7, 1),
+            parent_label="IMO FSS Code",
+        ),
+    ],
+
     # Sprint D6.41 — STCW amendments since the 2017 Consolidated Edition.
     # The official IMO supplement PDF only includes MSC.540/541 (Jan 2025).
     # These are the additional MSC resolutions that amend STCW between 2017
@@ -355,6 +396,14 @@ _CODE_TO_SOURCE = {
     "bwm": "imo_bwm",
     "stcw_amend": "stcw_amend",
     "marpol_amend": "marpol_amend",
+    # Sprint D6.97 class-society expansion (2026-05-21) —
+    # LSA + FSS adoption + recent amendments. Heavily referenced by
+    # SOLAS Ch.III (LSA) and Ch.II-2 (FSS); the underlying codes were
+    # missing from corpus until now, forcing the synthesizer to gesture
+    # at "see SOLAS Ch.III for lifesaving" without the actual technical
+    # detail that LSA carries.
+    "lsa": "imo_lsa",
+    "fss": "imo_fss",
 }
 
 

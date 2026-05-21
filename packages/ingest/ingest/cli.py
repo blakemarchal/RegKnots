@@ -303,6 +303,20 @@ _PDF_SOURCE_CONFIG: dict[str, dict] = {
         "adapter": "ingest.sources.imo_codes",
         "imo_code": "marpol_amend",
     },
+    # Sprint D6.97 class-society expansion (2026-05-21) — LSA + FSS Codes.
+    # Both heavily referenced by SOLAS Chapters III (LSA) and II-2 (FSS)
+    # but never previously ingested. Same imo_codes adapter, just two
+    # more code keys.
+    "imo_lsa": {
+        "raw_dir": _DATA_RAW / "imo_lsa",
+        "adapter": "ingest.sources.imo_codes",
+        "imo_code": "lsa",
+    },
+    "imo_fss": {
+        "raw_dir": _DATA_RAW / "imo_fss",
+        "adapter": "ingest.sources.imo_codes",
+        "imo_code": "fss",
+    },
     "imo_iamsar": {
         "raw_dir": _DATA_RAW / "imo_iamsar",
         "adapter": "ingest.sources.imo_iamsar",
