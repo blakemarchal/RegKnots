@@ -177,6 +177,17 @@ _PDF_SOURCE_CONFIG: dict[str, dict] = {
         "raw_dir": _DATA_RAW / "amsa",
         "adapter": "ingest.sources.amsa",
     },
+    # Sprint D6.97 AU sprint 1b — AMSA National Standard for Commercial
+    # Vessels (NSCV). Two-step: AMSA landing page → discover PDF URL →
+    # fetch the PDF. The NSCV is the operational standard for DCVs;
+    # where the MO 500-series defines which certificates are needed,
+    # the NSCV defines what design/construction/equipment those
+    # certificates require (the actual ECDIS, fire-safety, stability,
+    # etc. rules).
+    "nscv": {
+        "raw_dir": _DATA_RAW / "nscv",
+        "adapter": "ingest.sources.nscv",
+    },
     # Sprint D6.20 — Liberian (LISCR) Marine Notices. Direct PDF
     # downloads from www.liscr.com on a deterministic per-code URL.
     "liscr_mn": {
