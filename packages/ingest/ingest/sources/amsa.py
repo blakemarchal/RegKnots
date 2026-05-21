@@ -169,6 +169,35 @@ _CURATED_ORDERS: list[OrderMeta] = [
               "marine-order-95-marine-pollution-prevention-garbage", "marpol"),
     OrderMeta("97", "Marine pollution prevention — air pollution",
               "marine-order-97-marine-pollution-prevention-air-pollution", "marpol"),
+
+    # ── D6.97 AU corpus sprint (2026-05-21) — DCV 500-series ─────────────
+    # The 500-series Marine Orders are AMSA's Domestic Commercial Vessel
+    # operational framework, made under the Marine Safety (DCV) National
+    # Law Act 2012 (vs. the Navigation Act 2012 surface covered by the
+    # 1-100 series above). Added after a paying-curious AU signup hit a
+    # DCV-ECDIS question and our retrieval had no DCV-specific MO to
+    # surface — only the international-voyage MOs, which led the
+    # synthesizer to hedge ("my knowledge base does not include AMSA
+    # Marine Orders 505/506").
+    #
+    # Index reference: https://www.amsa.gov.au/about/regulations-and-standards/index-marine-orders
+    # MO 506 is intentionally NOT in this list — it's been repealed; the
+    # AMSA index page (last fetched 2026-05-21) jumps 505 → 507. Any
+    # model output referring to "MO 506 (Navigation equipment)" is a
+    # hallucination — DCV nav equipment requirements come from NSCV
+    # Part C5B (separate corpus, separate adapter in phase 1b).
+    OrderMeta("501", "Administration — national law",
+              "marine-order-501-administration-national-law", "dcv_administration"),
+    OrderMeta("502", "Vessel identifiers — national law",
+              "marine-order-502-vessel-identifiers-national-law", "dcv_identifiers"),
+    OrderMeta("503", "Certificates of survey — national law",
+              "marine-order-503-certificates-survey-national-law", "dcv_survey"),
+    OrderMeta("504", "Certificates of operation — national law",
+              "marine-order-504-certificates-operation", "dcv_operation"),
+    OrderMeta("505", "Certificates of competency — national law",
+              "marine-order-505-certificates-competency-national-law", "dcv_competency"),
+    OrderMeta("507", "Load line certificates — national law",
+              "marine-order-507-load-line-certificates-national-law", "dcv_load_line"),
 ]
 
 
