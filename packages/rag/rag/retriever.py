@@ -87,10 +87,15 @@ SOURCE_GROUPS: dict[str, tuple[str, ...]] = {
     # together so any "UK" / non-US-flag / Channel-route query that surfaces
     # one type also draws candidates from the other for cross-coverage.
     "mca": ("mca_mgn", "mca_msn"),
-    # AMSA Marine Orders — Sprint D6.20. Australia's primary maritime
-    # regulatory instruments, made under the Navigation Act 2012.
-    # Tier 1 binding for AU-flagged vessels and vessels in AU waters.
-    "amsa": ("amsa_mo",),
+    # AMSA Marine Orders + NSCV — Sprint D6.20 / D6.97 AU sprint 1b.
+    # Australia's primary maritime regulatory framework. The Marine
+    # Orders (made under the Navigation Act 2012 + Marine Safety (DCV)
+    # National Law Act 2012) define WHICH certificates a vessel needs;
+    # the NSCV defines WHAT the design / construction / equipment those
+    # certificates require. Grouped together so an AU-context query
+    # draws from both bodies — the operational rule (NSCV) usually
+    # complements the framework certificate (MO).
+    "amsa": ("amsa_mo", "nscv"),
     # LISCR Marine Notices — Sprint D6.20. Liberian flag-state guidance.
     # Tier 2 — interpretive layer above the IMO instruments.
     "liscr": ("liscr_mn",),
@@ -452,6 +457,59 @@ _USCG_BULLETIN_ABBR_RE = re.compile(
 )
 
 
+# AMSA / NSCV / DCV — Sprint D6.97 AU sprint phase 2 (2026-05-21).
+# Conservative-by-design Australian regulatory affinity. The MCA boost
+# below is the reference template: vessel-flag-driven scoping is handled
+# at the system-prompt level (AUTHORITY AND APPLICABILITY block sees
+# vessel_profile.flag_state), so this boost only fires when the QUERY
+# itself names AU instruments or when the vessel is explicitly AU-flagged
+# (added below in _source_affinity's flag-state gate).
+#
+# Intentionally NARROW: a bare "Australia" mention is not enough to
+# fire — Blake's audit constraint is "don't stomp on other queries,
+# especially generic or international/flag-scoped ones." A query
+# comparing US and Australian rules would mention both, but the boost
+# only nudges amsa group from "ignored" to "included" at the same
+# magnitude as MCA's UK boost. Net effect: AU content surfaces on AU-
+# anchored queries, doesn't crowd non-AU queries.
+_AMSA_TERMS: tuple[str, ...] = (
+    # Agency
+    "amsa", "australian maritime safety authority",
+    # AU instruments
+    "marine order",            # AU citation form
+    "nscv", "national standard for commercial vessels",
+    # AU regulatory categories
+    "dcv", "domestic commercial vessel",
+    "regulated australian vessel", "rav",
+    # AU statutes (Navigation Act 2012, Marine Safety (DCV) National
+    # Law Act 2012). Hard signals — these phrases are unambiguous.
+    "navigation act 2012",
+    "marine safety (domestic commercial vessel)",
+    # Flag / waters / geography that signal AU jurisdiction
+    "australian flag", "australia flag", "au flag",
+    "australian waters",
+    "sydney harbour", "port botany", "fremantle",
+    "newcastle nsw", "great barrier reef", "torres strait",
+)
+_AMSA_ABBR_RE = re.compile(
+    # Citation form requires a number — "MO 503", "Marine Order 503",
+    # "NSCV Part C7C", "NSCV C7C". Number-mandatory anchors prevent
+    # false-firing on generic words like "MO" (Missouri shorthand) or
+    # "NSCV" alone.
+    r"\b(?:"
+    r"MO\s+\d{1,3}"
+    r"|Marine\s+Order\s+\d{1,3}"
+    r"|NSCV(?:\s+Part)?\s+[A-Z]?\d+[A-Z]?"
+    r")\b",
+    re.IGNORECASE,
+)
+# Flag-state values that signal Australian-flag vessel context. Used by
+# _source_affinity to fire the AMSA boost even when the query itself
+# doesn't name an AU instrument (e.g., an AU-flagged vessel asking a
+# generic "fire safety" question should still get NSCV C4 in the pool).
+_AMSA_FLAG_VALUES = frozenset({"australia", "australian", "au", "aus"})
+
+
 # UK Maritime and Coastguard Agency notices — Sprint D6.18. Terms that
 # anchor a query to UK-flag / EU / non-US-jurisdiction context. Country /
 # flag / route names live here; the citation-form abbreviations (MGN, MSN)
@@ -481,11 +539,19 @@ _MCA_ABBR_RE = re.compile(
 )
 
 
-def _source_affinity(query: str) -> dict[str, float]:
-    """Return a boost value per source group based on query keywords.
+def _source_affinity(
+    query: str, vessel_profile: dict | None = None,
+) -> dict[str, float]:
+    """Return a boost value per source group based on query keywords AND
+    (optionally) vessel-profile context.
 
     The diversified fetch guarantees each group has candidates — this
     function just nudges ranking when the query clearly targets a source.
+
+    Sprint D6.97 AU sprint phase 2 (2026-05-21) — accepts vessel_profile
+    so the AMSA boost can fire on AU-flag vessels even when the query
+    itself doesn't name an AU instrument. The flag check is the only
+    profile-driven boost today; query-driven boosts are unchanged.
     """
     q = query.lower()
     boosts: dict[str, float] = {}
@@ -552,6 +618,32 @@ def _source_affinity(query: str) -> dict[str, float]:
         # UK ferry queries often span MCA + IMO instruments (SOLAS, STCW,
         # ISM, MARPOL) since UK implements the IMO conventions. Modest
         # supplementary boost so the international context surfaces too.
+        boosts.setdefault("solas", 0.10)
+
+    # Sprint D6.97 AU sprint phase 2 — AMSA / NSCV / DCV boost. Two
+    # independent triggers: explicit AU-regulatory vocabulary in the
+    # query, OR vessel_profile.flag_state indicating AU registry. Either
+    # is sufficient. The boost is 0.20 (parity with MCA / SOLAS / STCW)
+    # so it lifts amsa-group content from "ignored" into the candidate
+    # pool without dominating cosine similarity entirely.
+    #
+    # Conservative-by-design — a bare "Australia" mention in passing
+    # is NOT enough to fire (see _AMSA_TERMS definition above). The
+    # 2026-05-21 retrieval audit found that NSCV Part C7C was sitting
+    # 23 chunks deep in corpus, perfectly relevant to Julius's DCV-
+    # ECDIS question, but never surfaced because cosine similarity
+    # ranked SOLAS Ch.V higher on the equipment-specific vocabulary.
+    # This boost closes that gap without affecting non-AU queries.
+    flag_state = ""
+    if vessel_profile:
+        flag_state = (vessel_profile.get("flag_state") or "").strip().lower()
+    fired_by_query = any(t in q for t in _AMSA_TERMS) or _AMSA_ABBR_RE.search(q)
+    fired_by_flag = flag_state in _AMSA_FLAG_VALUES
+    if fired_by_query or fired_by_flag:
+        boosts["amsa"] = 0.20
+        # AU implements the IMO conventions via the Navigation Act 2012,
+        # so SOLAS / MARPOL / STCW context is often relevant in parallel.
+        # Same supplementary lift as the UK MCA case.
         boosts.setdefault("solas", 0.10)
 
     if "cfr" in q or "code of federal" in q:
@@ -1865,7 +1957,9 @@ def _rerank(
     vessel_profile: dict | None,
 ) -> list[dict]:
     """Apply vessel-profile + source-affinity boosts and sort."""
-    source_boosts = _source_affinity(query)
+    # D6.97 AU sprint phase 2 — pass vessel_profile so the AMSA boost
+    # can fire on AU-flag vessels even when the query text is generic.
+    source_boosts = _source_affinity(query, vessel_profile=vessel_profile)
 
     profile_terms: list[str] = []
     if vessel_profile:
