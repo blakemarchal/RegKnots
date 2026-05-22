@@ -33,6 +33,14 @@ dependencies = [
     # DOCX parsing — Sprint D6.93 Lloyd's Register adapters
     # (LR-CO-001 / LR-RU-001 via Regs4ships exports).
     "python-docx>=1.1.0",
+    # Sprint D6.97 (2026-05-22) — Playwright for SPA-rendered sources
+    # (DNV rules.dnv.com is a 739-byte React shell; same trick will
+    # be needed for Malta / Cyprus / Panama / deep BV NRs). Chromium
+    # binary is downloaded separately via `playwright install
+    # chromium` after the package is installed. The binary lives on
+    # disk (~200 MB) and is only loaded into RAM when an ingest
+    # explicitly launches it — idle cost is zero.
+    "playwright>=1.50.0",
 ]
 
 [project.optional-dependencies]
