@@ -114,6 +114,13 @@ SOURCE_GROUPS: dict[str, tuple[str, ...]] = {
     "bma": ("bma_mn",),
     # Sprint D6.23 — Norway + Tier D international references.
     "nma": ("nma_rsv",),
+    # Sprint D6.97 flag-state expansion (2026-05-22) — Cyprus DMS
+    # circulars + Panama AMP merchant marine circulars / notices.
+    # Each its own group so a Cyprus-flag query gets its own per-group
+    # candidate slot in the diversified fetch (parallels how bma /
+    # iri / liscr each live in their own group).
+    "cy": ("cy_dms",),
+    "pa": ("pa_mmc",),
     # IACS class society in its own group so technical-class queries
     # can find UR content without crowding the IMO instrument groups.
     "iacs": ("iacs_ur",),

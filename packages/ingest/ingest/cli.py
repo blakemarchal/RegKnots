@@ -218,6 +218,18 @@ _PDF_SOURCE_CONFIG: dict[str, dict] = {
         "raw_dir": _DATA_RAW / "au_statutes",
         "adapter": "ingest.sources.au_statutes",
     },
+    # Sprint D6.97 flag-state expansion (2026-05-22) — Cyprus + Panama.
+    # Both confirmed accessible via direct httpx after the Playwright
+    # recon dismissed DNV (Veracity auth-gated) and Malta (Cloudflare
+    # on sub-pages even via headless).
+    "cy_dms": {
+        "raw_dir": _DATA_RAW / "cy_dms",
+        "adapter": "ingest.sources.cy_dms",
+    },
+    "pa_mmc": {
+        "raw_dir": _DATA_RAW / "pa_mmc",
+        "adapter": "ingest.sources.pa_mmc",
+    },
     # Sprint D6.20 — Liberian (LISCR) Marine Notices. Direct PDF
     # downloads from www.liscr.com on a deterministic per-code URL.
     "liscr_mn": {
