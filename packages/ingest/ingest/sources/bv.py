@@ -152,6 +152,54 @@ _CURATED_NRS: list[NrMeta] = [
         # under BV-specific content.
         source_key="iacs_csr",
     ),
+
+    # ── D6.97 corpus expansion follow-on (2026-05-21) — additional NRs ──
+    # Five specialty-vessel NR sets. Each is a single consolidated PDF
+    # (no Parts A-F). The recon at .tmp/bv_extra_nrs.py confirmed all
+    # five resolve cleanly with direct PDF URLs on rulesexplorer-docs.
+
+    NrMeta(
+        nr="NR396",
+        title="Rules for the Classification of High Speed Craft",
+        slug="/nr396-rules-classification-high-speed-craft",
+        parts=(NrPart("Consolidated", "Rules for High Speed Craft"),),
+        source_key="bv",
+    ),
+
+    NrMeta(
+        nr="NR490",
+        title="Rules for the Classification of Crew Boats",
+        slug="/nr490-rules-classification-crew-boat",
+        parts=(NrPart("Consolidated", "Rules for Crew Boats"),),
+        source_key="bv",
+    ),
+
+    # NR500: non-standard landing-page slug (/rules-classification-and-
+    # certification-yachts, no nr500 prefix) — adapter passes the slug
+    # through verbatim so this just works.
+    NrMeta(
+        nr="NR500",
+        title="Rules for the Classification and Certification of Yachts",
+        slug="/rules-classification-and-certification-yachts",
+        parts=(NrPart("Consolidated", "Rules for Yachts"),),
+        source_key="bv",
+    ),
+
+    NrMeta(
+        nr="NR527",
+        title="Rules for the Classification of Ships Operating in Polar Waters and Icebreakers",
+        slug="/nr527-rules-classification-ships-operating-polar-waters-and-icebreakers",
+        parts=(NrPart("Consolidated", "Rules for Polar Waters and Icebreakers"),),
+        source_key="bv",
+    ),
+
+    NrMeta(
+        nr="NR584",
+        title="Rules for the Classification of Azimuth Thrusters for Ice and Polar Class Ships and Icebreakers",
+        slug="/nr584-rules-azimuth-thrusters-ice-polar-class-ships-and-icebreakers",
+        parts=(NrPart("Consolidated", "Rules for Azimuth Thrusters (Ice/Polar)"),),
+        source_key="bv",
+    ),
 ]
 
 
