@@ -208,6 +208,16 @@ _PDF_SOURCE_CONFIG: dict[str, dict] = {
         "raw_dir": _DATA_RAW / "bv",
         "adapter": "ingest.sources.bv",
     },
+    # Sprint D6.97 AU sprint Phase 1c (2026-05-22) — AU federal statutes
+    # (Navigation Act 2012, Marine Safety (DCV) National Law Act 2012).
+    # Fetched from legislation.gov.au by series ID — same content host
+    # AMSA adapter uses; new au_statutes.py adapter rather than extending
+    # amsa.py because the discovery path is simpler (we know series IDs
+    # directly).
+    "au_statutes": {
+        "raw_dir": _DATA_RAW / "au_statutes",
+        "adapter": "ingest.sources.au_statutes",
+    },
     # Sprint D6.20 — Liberian (LISCR) Marine Notices. Direct PDF
     # downloads from www.liscr.com on a deterministic per-code URL.
     "liscr_mn": {

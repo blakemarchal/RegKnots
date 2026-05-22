@@ -87,15 +87,20 @@ SOURCE_GROUPS: dict[str, tuple[str, ...]] = {
     # together so any "UK" / non-US-flag / Channel-route query that surfaces
     # one type also draws candidates from the other for cross-coverage.
     "mca": ("mca_mgn", "mca_msn"),
-    # AMSA Marine Orders + NSCV — Sprint D6.20 / D6.97 AU sprint 1b.
-    # Australia's primary maritime regulatory framework. The Marine
-    # Orders (made under the Navigation Act 2012 + Marine Safety (DCV)
-    # National Law Act 2012) define WHICH certificates a vessel needs;
-    # the NSCV defines WHAT the design / construction / equipment those
-    # certificates require. Grouped together so an AU-context query
-    # draws from both bodies — the operational rule (NSCV) usually
-    # complements the framework certificate (MO).
-    "amsa": ("amsa_mo", "nscv"),
+    # AMSA Marine Orders + NSCV + AU statutes — Sprint D6.20 / D6.97 AU
+    # sprint 1a/1b/1c. Australia's primary maritime regulatory framework
+    # in three layers:
+    #   - au_statutes : Navigation Act 2012 + MSDCV National Law Act
+    #                   2012 (primary law, "what powers AMSA has")
+    #   - amsa_mo     : Marine Orders (subordinate instruments,
+    #                   "what certificates are required")
+    #   - nscv        : NSCV technical standards ("what those
+    #                   certificates actually demand")
+    # Grouped together so an AU-context query draws from all three —
+    # the same boost+penalty logic in _source_affinity then promotes or
+    # demotes the entire group based on whether the query / vessel flag
+    # decisively indicates AU jurisdiction.
+    "amsa": ("amsa_mo", "nscv", "au_statutes"),
     # LISCR Marine Notices — Sprint D6.20. Liberian flag-state guidance.
     # Tier 2 — interpretive layer above the IMO instruments.
     "liscr": ("liscr_mn",),

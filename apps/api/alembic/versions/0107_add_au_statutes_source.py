@@ -1,0 +1,75 @@
+"""add 'au_statutes' to regulations.source check constraint
+
+Revision ID: 0107
+Revises: 0106
+Create Date: 2026-05-22
+
+Sprint D6.97 AU sprint Phase 1c (2026-05-22) — Navigation Act 2012 +
+Marine Safety (DCV) National Law Act 2012, both fetched from
+legislation.gov.au. Both go under a single source key 'au_statutes'
+with section_numbers that distinguish them ("Navigation Act 2012",
+"Marine Safety (DCV) National Law Act 2012").
+
+Mirrors the migration pattern of 0104 / 0105 / 0106.
+"""
+from typing import Sequence, Union
+
+from alembic import op
+
+
+revision: str = "0107"
+down_revision: Union[str, None] = "0106"
+branch_labels: Union[str, Sequence[str], None] = None
+depends_on: Union[str, Sequence[str], None] = None
+
+
+_NEW_SOURCES = (
+    "abs_mvr', 'amsa_mo', 'au_statutes', 'bg_verkehr', 'bma_mn', 'bv', "
+    "'cfr_33', 'cfr_46', 'cfr_49', 'colregs', 'dgmm_es', 'erg', "
+    "'fr_transport', 'gr_ynanp', 'iacs_csr', 'iacs_pr', 'iacs_ur', "
+    "'imdg', 'imdg_supplement', 'imo_bwm', 'imo_css', 'imo_fss', "
+    "'imo_hsc', 'imo_iamsar', 'imo_ibc', 'imo_igc', 'imo_igf', "
+    "'imo_loadlines', 'imo_lsa', 'imo_polar', 'iri_mn', 'ism', "
+    "'ism_supplement', 'it_capitaneria', 'liscr_mn', 'lr_lifting_code', "
+    "'lr_rules', 'mardep_msin', 'marpol', 'marpol_amend', "
+    "'marpol_supplement', 'mca_mgn', 'mca_msn', 'mou_psc', 'mpa_sc', "
+    "'nma_rsv', 'nmc_checklist', 'nmc_exam_bank', 'nmc_policy', 'nscv', "
+    "'nvic', 'ocimf', 'solas', 'solas_supplement', 'stcw', 'stcw_amend', "
+    "'stcw_supplement', 'tc_ssb', 'usc_46', 'uscg_bulletin', "
+    "'uscg_msm', 'who_ihr"
+)
+
+_OLD_SOURCES = (
+    "abs_mvr', 'amsa_mo', 'bg_verkehr', 'bma_mn', 'bv', 'cfr_33', 'cfr_46', "
+    "'cfr_49', 'colregs', 'dgmm_es', 'erg', 'fr_transport', 'gr_ynanp', "
+    "'iacs_csr', 'iacs_pr', 'iacs_ur', 'imdg', 'imdg_supplement', "
+    "'imo_bwm', 'imo_css', 'imo_fss', 'imo_hsc', 'imo_iamsar', 'imo_ibc', "
+    "'imo_igc', 'imo_igf', 'imo_loadlines', 'imo_lsa', 'imo_polar', "
+    "'iri_mn', 'ism', 'ism_supplement', 'it_capitaneria', 'liscr_mn', "
+    "'lr_lifting_code', 'lr_rules', 'mardep_msin', 'marpol', "
+    "'marpol_amend', 'marpol_supplement', 'mca_mgn', 'mca_msn', 'mou_psc', "
+    "'mpa_sc', 'nma_rsv', 'nmc_checklist', 'nmc_exam_bank', 'nmc_policy', "
+    "'nscv', 'nvic', 'ocimf', 'solas', 'solas_supplement', 'stcw', "
+    "'stcw_amend', 'stcw_supplement', 'tc_ssb', 'usc_46', 'uscg_bulletin', "
+    "'uscg_msm', 'who_ihr"
+)
+
+
+def upgrade() -> None:
+    op.execute(
+        "ALTER TABLE regulations DROP CONSTRAINT regulations_source_check"
+    )
+    op.execute(
+        f"ALTER TABLE regulations ADD CONSTRAINT regulations_source_check "
+        f"CHECK (source IN ('{_NEW_SOURCES}'))"
+    )
+
+
+def downgrade() -> None:
+    op.execute(
+        "ALTER TABLE regulations DROP CONSTRAINT regulations_source_check"
+    )
+    op.execute(
+        f"ALTER TABLE regulations ADD CONSTRAINT regulations_source_check "
+        f"CHECK (source IN ('{_OLD_SOURCES}'))"
+    )
