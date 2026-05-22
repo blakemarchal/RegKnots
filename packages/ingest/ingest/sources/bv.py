@@ -70,7 +70,12 @@ logger = logging.getLogger(__name__)
 
 SOURCE       = "bv"
 TITLE_NUMBER = 0
-SOURCE_DATE  = date(2026, 5, 21)
+# D6.97 follow-on (2026-05-22) — bumped to force --update re-processing
+# after the 5 new NRs (NR396/490/500/527/584) were added to _CURATED_NRS.
+# The freshness gate compares this to the stored up_to_date_as_of and
+# short-circuits when equal — correct steady-state but blocks adapter
+# expansions until the date moves. Same pattern as the NSCV fix.
+SOURCE_DATE  = date(2026, 5, 22)
 
 _BV_BASE = "https://marine-offshore.bureauveritas.com"
 _USER_AGENT = (
