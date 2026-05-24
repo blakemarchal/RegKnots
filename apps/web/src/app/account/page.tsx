@@ -71,6 +71,12 @@ function AccountContent() {
   // Resolved server-side: defaults to true for cadet_student/teacher_instructor
   // personas, false for everyone else, until the user explicitly toggles.
   const [studyToolsEnabled, setStudyToolsEnabled] = useState<boolean>(false)
+  // Sprint D6.97 (C) — Precision Mode toggle. Default OFF for all
+  // users (NOT NULL boolean default false at DB level). When on,
+  // the chat engine appends a stricter synthesis posture that
+  // refuses regulatory claims it can't verify against the retrieved
+  // context, rather than hedging.
+  const [precisionModeEnabled, setPrecisionModeEnabled] = useState<boolean>(false)
   const [personaSaving, setPersonaSaving] = useState(false)
   const [personaMsg, setPersonaMsg] = useState<string | null>(null)
 
@@ -121,6 +127,7 @@ function AccountContent() {
       verbosity_preference: string | null
       theme_preference: string | null
       study_tools_enabled?: boolean
+      precision_mode_enabled?: boolean
     }>('/onboarding/persona')
       .then((r) => {
         setPersona(r.persona ?? '')
@@ -130,6 +137,7 @@ function AccountContent() {
         // Backend resolves NULL → persona-default; defensive fallback for
         // older API responses that don't include the field at all.
         setStudyToolsEnabled(r.study_tools_enabled ?? false)
+        setPrecisionModeEnabled(r.precision_mode_enabled ?? false)
       })
       .catch(() => {})
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
@@ -151,6 +159,10 @@ function AccountContent() {
           // the next persona-change because the server-side seed only
           // fires when study_tools_enabled is NULL.
           study_tools_enabled: studyToolsEnabled,
+          // D6.97 (C) — Precision Mode boolean (NOT NULL at the DB
+          // level; default false). Always sent so the COALESCE on
+          // the backend captures any flip the user just made.
+          precision_mode_enabled: precisionModeEnabled,
         }),
       })
       // Bug fix: propagate the toggle to the HamburgerMenu without
@@ -519,6 +531,47 @@ function AccountContent() {
               <p className="font-mono text-[10px] text-[#6b7594] leading-relaxed mt-1">
                 Hides &ldquo;Quizzes &amp; Guides&rdquo; from the menu when off. The page is still
                 reachable by direct link if you want it later. Defaulted on for students and teachers.
+              </p>
+            </div>
+
+            {/* Sprint D6.97 (C) — Precision Mode toggle. Available to
+                all users; defaults OFF. When on, RegKnot refuses
+                regulatory claims it can't verify against its corpus
+                rather than hedging — intended for compliance-officer
+                use where citation discipline matters more than
+                breadth of answer. */}
+            <div className="flex flex-col gap-1">
+              <label className="font-mono text-xs text-[#6b7594]">Precision Mode</label>
+              <button
+                type="button"
+                onClick={() => setPrecisionModeEnabled((v) => !v)}
+                role="switch"
+                aria-checked={precisionModeEnabled}
+                className={`flex items-center justify-between px-3 py-2 rounded-lg border transition-colors duration-150
+                  ${precisionModeEnabled
+                    ? 'border-[#2dd4bf]/40 bg-[#2dd4bf]/5'
+                    : 'border-white/10 bg-[#0d1225] hover:border-white/20'
+                  }`}
+              >
+                <span className={`font-mono text-sm ${precisionModeEnabled ? 'text-[#2dd4bf]' : 'text-[#f0ece4]/80'}`}>
+                  Precision Mode {precisionModeEnabled ? 'on' : 'off'}
+                </span>
+                <span
+                  aria-hidden="true"
+                  className={`relative inline-block w-10 h-5 rounded-full transition-colors duration-150
+                    ${precisionModeEnabled ? 'bg-[#2dd4bf]' : 'bg-white/15'}`}
+                >
+                  <span
+                    className={`absolute top-0.5 w-4 h-4 rounded-full bg-[#0a0e1a] transition-all duration-150
+                      ${precisionModeEnabled ? 'left-[1.375rem]' : 'left-0.5'}`}
+                  />
+                </span>
+              </button>
+              <p className="font-mono text-[10px] text-[#6b7594] leading-relaxed mt-1">
+                When on, RegKnot refuses to make regulatory claims it can&rsquo;t verify against its
+                corpus, rather than hedging. Tighter citation discipline at the cost of more
+                &ldquo;I don&rsquo;t have that&rdquo; answers when a specific section isn&rsquo;t in our database.
+                Intended for compliance-officer use.
               </p>
             </div>
 

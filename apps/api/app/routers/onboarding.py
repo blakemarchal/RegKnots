@@ -90,6 +90,13 @@ class PersonaRequest(BaseModel):
     # D6.83 follow-up — explicit toggle for Study Tools nav visibility.
     # Optional; passing None leaves the stored value unchanged.
     study_tools_enabled: bool | None = None
+    # D6.97 (C) — Precision Mode toggle. When true, the engine appends
+    # a stricter synthesis posture to the system prompt (refuses
+    # unverified regulatory claims rather than hedging, enforces the
+    # AUTHORITY HIERARCHY DECISION rules with a hard refusal floor).
+    # Optional; passing None leaves the stored value unchanged. Default
+    # is false (column NOT NULL default false per migration 0109).
+    precision_mode_enabled: bool | None = None
 
 
 @router.get("/status", response_model=StatusResponse)
@@ -229,14 +236,16 @@ async def update_persona(
             jurisdiction_focus = COALESCE($2, jurisdiction_focus),
             verbosity_preference = COALESCE($3, verbosity_preference),
             theme_preference = COALESCE($4, theme_preference),
-            study_tools_enabled = COALESCE($5, study_tools_enabled)
-        WHERE id = $6
+            study_tools_enabled = COALESCE($5, study_tools_enabled),
+            precision_mode_enabled = COALESCE($6, precision_mode_enabled)
+        WHERE id = $7
         """,
         body.persona,
         body.jurisdiction_focus,
         body.verbosity_preference,
         body.theme_preference,
         body.study_tools_enabled,
+        body.precision_mode_enabled,
         _uuid.UUID(user.user_id),
     )
 
@@ -269,7 +278,7 @@ async def get_persona(
     pool = await get_pool()
     row = await pool.fetchrow(
         "SELECT persona, jurisdiction_focus, verbosity_preference, theme_preference, "
-        "study_tools_enabled "
+        "study_tools_enabled, precision_mode_enabled "
         "FROM users WHERE id = $1",
         _uuid.UUID(user.user_id),
     )
@@ -282,4 +291,9 @@ async def get_persona(
         "theme_preference": row["theme_preference"] if row else None,
         # Resolved boolean for the frontend; never NULL.
         "study_tools_enabled": _resolve_study_enabled(study_stored, persona_val),
+        # D6.97 (C) — NOT NULL boolean (default false per migration 0109);
+        # no resolution needed.
+        "precision_mode_enabled": (
+            bool(row["precision_mode_enabled"]) if row else False
+        ),
     }

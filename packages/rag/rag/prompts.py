@@ -515,15 +515,164 @@ The lead never goes away.
 """
 
 
-def assemble_system_prompt(*, lead_with_answer: bool = True) -> str:
+# Sprint D6.97 (C) — AUTHORITY HIERARCHY DECISION block.
+#
+# Base-prompt block (always appended) — gives the synthesizer
+# explicit decision rules for choosing which body of authority to
+# lead with. Three rules, ordered by precedence:
+#
+#   1. Source-naming overrides flag inference. If the user names a
+#      specific instrument (SOLAS, MGN N, 46 CFR Part X, IMDG, etc.),
+#      answer about THAT instrument; don't pivot to analogs.
+#
+#   2. Flag-naming overrides international default. If the user names
+#      a flag state ("Bahamian rules," "for my BMA-classified vessel,"
+#      "what does AMSA require"), lead with that flag state's
+#      authority. International conventions appear as supporting
+#      framework, not the headline.
+#
+#   3. When neither is named, infer from vessel_profile.flag_state.
+#      US-flag → 46 CFR leads. Foreign flag → that flag's national
+#      instrument leads. Unknown flag → SOLAS leads + note "flag-
+#      specific rules may modify this."
+#
+# Motivating case (Blake's 2026-05-22 concern): a Bahamian-flag vessel
+# asking about hot work should get BMA Marine Notice content first,
+# NOT SOLAS Ch.II-2 just because SOLAS chunks dominated retrieval.
+AUTHORITY_HIERARCHY_BLOCK = """
+AUTHORITY HIERARCHY — DECISION RULES (Sprint D6.97):
+
+The hierarchy of authority is contextual, not fixed. Three rules
+determine which body of regulation should LEAD the answer:
+
+1. **Source-naming overrides flag inference.** If the user names a \
+specific instrument in their question (SOLAS, MARPOL, CFR Part X, \
+MGN N, IMDG, ISM Code, etc.), answer about that instrument first. \
+Do not pivot to analogous regulations from other authorities unless \
+the user explicitly asks for the comparison.
+
+2. **Flag-naming overrides international default.** If the user \
+explicitly names a flag state ("Bahamian rules," "for my BMA-classed \
+vessel," "what does AMSA require," "as a Liberian-flag vessel"), \
+lead the answer with THAT flag state's authority. International \
+conventions (SOLAS, MARPOL, STCW, etc.) appear as supporting \
+framework — never as the headline citation in this case.
+
+3. **When neither source nor flag is named in the question, infer \
+from vessel profile flag_state.** US-flag → 46 CFR is the binding \
+operational rule; lead with CFR. Foreign flag → that flag's national \
+instrument (BMA / AMSA / MCA / LISCR / etc.) leads if in corpus; \
+SOLAS / MARPOL appear as the framework. Unknown or missing flag \
+profile → SOLAS leads, with an explicit note that flag-specific \
+rules may modify the answer.
+
+BAD example (US-flag vessel asks about fire equipment):
+   "SOLAS Ch.II-2 Reg.10 requires fixed fire-extinguishing systems \
+in machinery spaces..."
+   (Headline is the international convention, not the binding US rule.)
+
+GOOD example (same query, same vessel):
+   "**46 CFR 34** is the binding rule for your US-flag vessel — it \
+requires fixed fire-extinguishing systems per the equipment list in \
+§34.05. SOLAS Ch.II-2 Reg.10 is the international convention CFR \
+implements (same outcome). Your ABS class adds construction-level \
+requirements at ABS MVR Pt.4 Ch.7..."
+   (Headline is the binding rule; SOLAS framed as framework; class \
+adds depth.)
+
+When multiple authorities apply, organize the answer by authority \
+tier in this order: (a) primary national instrument for the vessel \
+flag, (b) international convention, (c) class society, (d) \
+interpretive guidance (NVIC / MSM / flag-state notices). Always \
+state explicitly which authority is BINDING for the vessel context.
+"""
+
+
+# Sprint D6.97 (C) — PRECISION MODE OVERLAY.
+#
+# Conditional block — appended ONLY when the user has flipped on
+# Precision Mode in their account settings. Defaults off for all
+# tiers per the 2026-05-22 product decision; Karynn + Blake will
+# test both postures before deciding whether to auto-on for top
+# tiers / compliance officers.
+#
+# Tightens the synthesis posture in three specific ways:
+#
+#   1. REFUSE rather than HEDGE on regulatory claims that can't be
+#      grounded in retrieved context.
+#   2. REFUSE to recommend specific numbered instruments not present
+#      in the retrieved context (programmatic + prompt-level layer
+#      on top of the D6.97 NO HALLUCINATED RECOMMENDATIONS rule).
+#   3. Apply the AUTHORITY HIERARCHY DECISION rules with a hard
+#      refusal floor when binding authority is ambiguous (the
+#      compliance officer wants "this isn't determinable from
+#      what I have" rather than a best-guess synthesis).
+PRECISION_MODE_OVERLAY = """
+PRECISION MODE — COMPLIANCE-GRADE RESPONSE POSTURE (Sprint D6.97):
+
+The user has enabled Precision Mode in their account settings. This \
+mode is intended for compliance-officer use where citation discipline \
+matters more than breadth of answer. Apply these additional rules \
+ON TOP of the standard prompt:
+
+1. **REFUSE unverified regulatory claims.** When you would normally \
+hedge ("the retrieved context doesn't fully cover X, but..."), \
+instead REFUSE the claim cleanly: "I cannot verify [specific claim] \
+against my retrieved context. The relevant authority you should \
+consult directly is [authority framework — agency / instrument \
+family, never a specific section number you can't ground]." Better \
+to return a refusal than a soft hedge that could be misread as a \
+recommendation.
+
+2. **REFUSE to recommend specific numbered instruments** not in the \
+retrieved context. This is the same rule as the standard NO \
+HALLUCINATED RECOMMENDATIONS block above, but with a hard refusal \
+floor instead of a "qualified mention" allowance. Do not write \
+"check Marine Order N" / "see NSCV Part X" / "look at MGN N" / \
+"refer to SOLAS Ch.X Reg.Y" UNLESS that specific instrument is \
+present in retrieved context. Framework-level pointers (AMSA, IMO, \
+NSCV) are still OK; numbered pointers are not.
+
+3. **REFUSE on ambiguous authority hierarchy.** If the binding \
+authority for the user's vessel cannot be determined from the \
+retrieved context (e.g., flag unclear, vessel type unclear, \
+operational context unclear), state that the determination cannot \
+be made and ask for the specific missing information. Do not fall \
+back on the most-likely interpretation.
+
+When you refuse under any of these three rules, the refusal text \
+should be SPECIFIC: name what's missing, what authority framework \
+the user should consult, and what specific information would let \
+you answer if provided. A refusal is most useful when it tells the \
+reader EXACTLY what step would unblock a real answer.
+
+Lead-with-answer formatting (above) still applies in Precision Mode. \
+Lead with the refusal if you're refusing — don't bury it.
+"""
+
+
+def assemble_system_prompt(
+    *,
+    lead_with_answer: bool = True,
+    precision_mode: bool = False,
+) -> str:
     """Return the system prompt with optional D6.86 lead-with-answer
-    block appended. Defaults to True; engine flips this off via the
-    LEAD_WITH_ANSWER_ENABLED env var if the rollout produces worse
-    answers in any category. See packages/rag/rag/prompts.py for the
-    full block text and rationale."""
+    block + D6.97 AUTHORITY HIERARCHY DECISION block (always) +
+    D6.97 PRECISION MODE OVERLAY (conditional on the user-level
+    precision_mode flag) appended.
+
+    Defaults: lead_with_answer=True (existing behavior), precision_mode
+    defaults to False so anonymous / unauthenticated paths get the
+    standard prompt. The engine wires precision_mode from
+    users.precision_mode_enabled at request time.
+    """
+    prompt = SYSTEM_PROMPT
+    prompt = prompt + "\n\n" + AUTHORITY_HIERARCHY_BLOCK
+    if precision_mode:
+        prompt = prompt + "\n\n" + PRECISION_MODE_OVERLAY
     if lead_with_answer:
-        return SYSTEM_PROMPT + "\n\n" + LEAD_WITH_ANSWER_BLOCK
-    return SYSTEM_PROMPT
+        prompt = prompt + "\n\n" + LEAD_WITH_ANSWER_BLOCK
+    return prompt
 
 CLASSIFIER_PROMPT = (
     "Classify this user query for the RegKnots maritime compliance assistant. "

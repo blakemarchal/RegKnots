@@ -241,7 +241,8 @@ async def _run_chat_preflight(
     sub_row = await pool.fetchrow(
         """
         SELECT subscription_tier, trial_ends_at, message_count,
-               monthly_message_count, message_cycle_started_at, created_at
+               monthly_message_count, message_cycle_started_at, created_at,
+               precision_mode_enabled
         FROM users WHERE id = $1
         """,
         uuid.UUID(current_user.user_id),
@@ -672,11 +673,20 @@ async def _run_chat_preflight(
             type(exc).__name__, str(exc)[:200],
         )
 
+    # D6.97 (C) — Precision Mode flag. Pulled from sub_row's
+    # precision_mode_enabled column. Defaults to False on a None
+    # row defensive guard (sub_row should always exist for an
+    # authenticated user, but be safe).
+    precision_mode_enabled = bool(
+        sub_row["precision_mode_enabled"] if sub_row else False
+    )
+
     return (
         vessel_profile, conversation_id, history, is_new_conversation,
         credential_context, conversation_title, fingerprint,
         user_persona, user_jurisdiction_focus, user_verbosity,
         parsed_images,
+        precision_mode_enabled,
     )
 
 
@@ -865,6 +875,7 @@ async def chat_endpoint(
         credential_context, conversation_title, fingerprint,
         user_persona, user_jurisdiction_focus, user_verbosity,
         parsed_images,
+        precision_mode_enabled,
     ) = await _run_chat_preflight(body, current_user, pool)
 
     anthropic_client: AsyncAnthropic = request.app.state.anthropic
@@ -911,6 +922,9 @@ async def chat_endpoint(
         # Empty list when no images uploaded; engine routes to multimodal
         # Claude only when non-empty.
         images=parsed_images,
+        # D6.97 (C) — Precision Mode flag from users.precision_mode_enabled.
+        # When True, engine appends PRECISION_MODE_OVERLAY to system prompt.
+        precision_mode=precision_mode_enabled,
     )
 
     # D6.96 — current-events tier append. Best-effort; if the helper
@@ -1013,6 +1027,7 @@ async def chat_stream_endpoint(
         credential_context, conversation_title, fingerprint,
         user_persona, user_jurisdiction_focus, user_verbosity,
         parsed_images,
+        precision_mode_enabled,
     ) = await _run_chat_preflight(body, current_user, pool)
 
     anthropic_client: AsyncAnthropic = request.app.state.anthropic
@@ -1071,6 +1086,10 @@ async def chat_stream_endpoint(
                 lead_with_answer_enabled=settings.lead_with_answer_enabled,
                 # D6.97 Phase 2 — image attachments parsed by preflight.
                 images=parsed_images,
+                # D6.97 (C) — Precision Mode flag from
+                # users.precision_mode_enabled. When True, engine appends
+                # PRECISION_MODE_OVERLAY to system prompt.
+                precision_mode=precision_mode_enabled,
             ):
                 if event["event"] == "done":
                     # Capture done payload for the persist step below.
