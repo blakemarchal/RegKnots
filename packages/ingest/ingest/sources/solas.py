@@ -39,7 +39,11 @@ TITLE_NUMBER  = 0
 
 # SOLAS Consolidated Edition 2024 (amendments up to MSC.507(105))
 SOURCE_DATE      = date(2024, 7, 1)
-UP_TO_DATE_AS_OF = date(2026, 1, 1)
+# Sprint D6.97 (2026-05-22) — bumped from 2026-01-01. The parser now
+# emits per-Regulation Sections inside each Part (was: one Section
+# per Part). Bumping the freshness date forces --update to re-process
+# even though the underlying source PDFs haven't changed.
+UP_TO_DATE_AS_OF = date(2026, 5, 22)
 
 # ── Regexes ───────────────────────────────────────────────────────────────────
 
@@ -63,6 +67,32 @@ _FOOTER_LINE = re.compile(
 
 # Repeated dashes used as visual separators
 _DASH_LINE = re.compile(r"^[\-\u2013\u2014]{4,}\s*$", re.MULTILINE)
+
+
+# Sprint D6.97 (2026-05-22) \u2014 per-Regulation header detector.
+#
+# SOLAS Parts contain individual Regulations as "Regulation N <Title>"
+# lines (verified against the consolidated 2024 edition raw text). The
+# pre-D6.97 parser kept content at Part-level granularity only \u2014 so a
+# user citing "SOLAS Ch.III Reg.6" got a "not in retrieved context"
+# hedge even though Reg.6 content was inside "SOLAS Ch.III Part B".
+#
+# This regex finds the Regulation header lines so parse_source() can
+# split a Part's text into per-Regulation Sections. Anchored at line
+# start with optional leading whitespace, then "Regulation" + integer
+# + at-least-one-word title starting with uppercase (avoids matching
+# "1.1 regulation applies to..." mid-sentence prose).
+_REGULATION_HEADER = re.compile(
+    r"^[ \t]*Regulation\s+(\d{1,3})\s+([A-Z][^\n]{2,200}?)\s*$",
+    re.MULTILINE,
+)
+
+
+# Extract the chapter identifier (e.g., "III", "II-1", "II-2") from a
+# Part-level section_number like "SOLAS Ch.III Part B".
+_CHAPTER_FROM_SECTION = re.compile(
+    r"^SOLAS\s+Ch\.([IVX\-0-9]+)", re.IGNORECASE,
+)
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
@@ -123,15 +153,37 @@ def parse_source(raw_dir: Path) -> list[Section]:
             logger.warning("solas: %s is empty after cleaning — skipping", txt_path.name)
             continue
 
-        sections.append(Section(
-            source                = SOURCE,
-            title_number          = TITLE_NUMBER,
-            section_number        = meta["section_number"],
-            section_title         = meta["section_title"],
-            full_text             = text,
-            up_to_date_as_of      = UP_TO_DATE_AS_OF,
-            parent_section_number = meta["parent_section_number"],
-        ))
+        # Sprint D6.97 (2026-05-22) — per-Regulation splitting.
+        #
+        # If this file's text contains "Regulation N <Title>" header
+        # lines AND the Part is a Ch.* section (Articles / Annexes /
+        # Appendices keep Part-level granularity since they don't have
+        # Regulations), split into per-Regulation Sections. Each
+        # Regulation becomes its own Section with section_number like
+        # "SOLAS Ch.III Reg.6", parent_section_number pointing at the
+        # original Part.
+        #
+        # Karynn's 2026-05-22 audit hit the failure mode this fixes:
+        # a question about "SOLAS Ch.III Reg.6 (Communications)" got
+        # a "not in retrieved context" hedge because the parser had
+        # bundled Reg.6's content into the Part B catch-all rather
+        # than producing a per-Regulation Section.
+        reg_sections = _split_into_regulations(text, meta)
+        if reg_sections:
+            sections.extend(reg_sections)
+        else:
+            # No Regulation headers detected (or this isn't a Ch.*
+            # section — e.g., Articles, Annex, Appendix). Keep
+            # Part-level granularity.
+            sections.append(Section(
+                source                = SOURCE,
+                title_number          = TITLE_NUMBER,
+                section_number        = meta["section_number"],
+                section_title         = meta["section_title"],
+                full_text             = text,
+                up_to_date_as_of      = UP_TO_DATE_AS_OF,
+                parent_section_number = meta["parent_section_number"],
+            ))
 
     if unmatched:
         logger.warning(
@@ -361,6 +413,72 @@ def _clean_text(text: str) -> str:
 
 
 # ── CLI entry point (dry-run) ─────────────────────────────────────────────────
+
+def _split_into_regulations(text: str, meta: dict) -> list[Section]:
+    """Sprint D6.97 (2026-05-22) — split a Part's text into per-Regulation
+    Sections when "Regulation N <Title>" headers are present.
+
+    Returns an empty list when:
+      - The Part isn't a Chapter section (Articles / Annex / Appendix
+        don't have Regulations and keep Part-level granularity).
+      - The text contains no Regulation headers (defensive — would
+        also keep Part-level if a Chapter Part is somehow empty).
+
+    When splitting fires, each Regulation gets its own Section:
+      section_number        = "SOLAS Ch.<chapter> Reg.<N>"
+      section_title         = the Regulation's title line
+      parent_section_number = the original Part-level section_number
+      full_text             = text from this Regulation header to the
+                              next Regulation header (or end of file).
+
+    The pre-regulation preamble (text before "Regulation 1") is
+    dropped — it's typically just the Part-section header + boilerplate
+    that's already captured in section_title metadata. Avoids
+    double-counting content across the Part Section and the per-Reg
+    Sections.
+    """
+    section_number = meta["section_number"]
+    chap_match = _CHAPTER_FROM_SECTION.match(section_number)
+    if not chap_match:
+        # Not a Ch.* section — Articles, Annex, Appendix etc. Keep
+        # Part-level granularity (caller falls back to old path).
+        return []
+
+    chapter = chap_match.group(1).upper()
+    reg_matches = list(_REGULATION_HEADER.finditer(text))
+    if not reg_matches:
+        # No Regulation headers detected. Could be a transitional Part
+        # like "Unified interpretations for chapter II-2" that's
+        # narrative-only. Keep Part-level.
+        return []
+
+    out: list[Section] = []
+    for i, m in enumerate(reg_matches):
+        reg_num = m.group(1)
+        reg_title = m.group(2).strip().rstrip(".")
+        start = m.start()
+        end = reg_matches[i + 1].start() if i + 1 < len(reg_matches) else len(text)
+        reg_text = text[start:end].strip()
+        # Sanity floor: a real regulation has >150 chars of text past
+        # the header. Shorter than that and it's almost certainly a
+        # cross-reference, ToC entry, or false match.
+        if len(reg_text) < 150:
+            logger.debug(
+                "solas: %s Reg.%s skipped — only %d chars",
+                section_number, reg_num, len(reg_text),
+            )
+            continue
+        out.append(Section(
+            source                = SOURCE,
+            title_number          = TITLE_NUMBER,
+            section_number        = f"SOLAS Ch.{chapter} Reg.{reg_num}",
+            section_title         = reg_title,
+            full_text             = reg_text,
+            up_to_date_as_of      = UP_TO_DATE_AS_OF,
+            parent_section_number = section_number,
+        ))
+    return out
+
 
 def _main() -> None:
     parser = argparse.ArgumentParser(
