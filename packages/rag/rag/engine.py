@@ -1587,6 +1587,10 @@ async def chat(
     # re-included on follow-up turns; only the current turn's images
     # are sent to the LLM.
     images: list | None = None,
+    # Sprint D6.97 (C) — Precision Mode flag. Threaded to
+    # chat_with_progress and from there into assemble_system_prompt.
+    # Default False.
+    precision_mode: bool = False,
 ) -> ChatResponse:
     """Run the full RAG pipeline and return a ChatResponse.
 
@@ -1648,6 +1652,7 @@ async def chat(
         judge_on_cited_enabled=judge_on_cited_enabled,
         lead_with_answer_enabled=lead_with_answer_enabled,
         images=images,
+        precision_mode=precision_mode,
     ):
         # Discard status/delta/delta_reset — non-streaming caller only
         # needs the terminal payload. Every chat_with_progress path
@@ -2516,6 +2521,13 @@ async def chat_with_progress(
     # path consumes images identically; the only difference is the
     # synthesis call uses messages.stream() instead of messages.create().
     images: list | None = None,
+    # Sprint D6.97 (C) — Precision Mode flag pulled from
+    # users.precision_mode_enabled by the chat router preflight.
+    # When True, the synthesis prompt gets the PRECISION_MODE_OVERLAY
+    # appended — stricter refusal posture for unverified regulatory
+    # claims. Default False (everyone gets the standard prompt unless
+    # they've toggled the account-page switch).
+    precision_mode: bool = False,
 ) -> AsyncIterator[dict]:
     """Same RAG pipeline as chat() but yields lightweight progress events.
 
@@ -2546,8 +2558,14 @@ async def chat_with_progress(
 
     # Sprint D6.86 — assemble synthesis system prompt with optional
     # lead-with-answer block. See chat() for rationale.
+    #
+    # Sprint D6.97 (C) — also pass the precision_mode flag pulled from
+    # users.precision_mode_enabled by the chat router preflight. When
+    # True, assemble_system_prompt appends the PRECISION_MODE_OVERLAY
+    # which tightens refusal posture for unverified regulatory claims.
     effective_system_prompt = assemble_system_prompt(
         lead_with_answer=lead_with_answer_enabled,
+        precision_mode=precision_mode,
     )
 
     # D6.58 — off-topic short-circuit (streaming path). Same gate as
