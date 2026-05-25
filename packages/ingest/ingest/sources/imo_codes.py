@@ -48,7 +48,10 @@ logger = logging.getLogger(__name__)
 
 
 TITLE_NUMBER = 0
-SOURCE_DATE  = date(2026, 4, 28)
+# Bumped 2026-05-25 (Sprint D6.97 #47) — paragraph-aware splitter added
+# for IBC / CSS / Load Lines so single-section sources break into
+# per-Chapter sections. Re-ingest required.
+SOURCE_DATE  = date(2026, 5, 25)
 
 _USER_AGENT = "RegKnots/1.0 (+https://regknots.com; contact: hello@regknots.com)"
 _BROWSER_HEADERS = {
@@ -506,9 +509,25 @@ def parse_source(raw_dir: Path, imo_code: str) -> list[Section]:
             )
             continue
 
-        # Fallback: no chapter structure detected (e.g. amendment-only docs
-        # like MEPC.318(74) for IBC which are a partial product list, not
-        # a chaptered code). Emit the document as a single Section.
+        # Sprint D6.97 #47 (2026-05-25) — fall back to paragraph-aware
+        # splitting for amendment-form / older IMO docs whose body uses
+        # `N.N.N Title` numbered paragraphs instead of `CHAPTER N — TITLE`
+        # headings (IBC MEPC.318(74), CSS A.714(17), Load Lines 1966).
+        # These were landing as single-section megachunks (1 section /
+        # 50-274 chunks) — citation lookups for "IBC Ch.17" couldn't
+        # structured-match because there was no "Ch.17" section_number
+        # in the corpus.
+        paragraph_sections = _split_by_paragraph_chapter(text, meta, source_code)
+        if paragraph_sections:
+            sections.extend(paragraph_sections)
+            logger.info(
+                "IMO %s: split %s into %d paragraph-derived chapter sections",
+                imo_code, meta.section_number, len(paragraph_sections),
+            )
+            continue
+
+        # Fallback: no chapter or paragraph structure detected. Emit the
+        # document as a single Section.
         sections.append(Section(
             source=source_code, title_number=TITLE_NUMBER,
             section_number=meta.section_number,
@@ -598,6 +617,130 @@ def _split_into_chapters(
             full_text=body,
             up_to_date_as_of=SOURCE_DATE,
             parent_section_number=meta.section_number,  # parent is the resolution
+            published_date=meta.effective_date,
+        ))
+
+    return sections
+
+
+# ── Paragraph-aware splitting (Sprint D6.97 #47) ───────────────────────
+#
+# IBC, CSS, and Load Lines use `N.N.N Title` numbered-paragraph structure
+# rather than the `CHAPTER N — TITLE` headings that the FSS / LSA / HSC
+# / IGC adopt-edition PDFs use. Pre-D6.97 those landed as one section /
+# many chunks (IBC: 1/274, CSS: 1/54, Load Lines: 1/4).
+#
+# Strategy: scan for `^N(\.N){0,2} Title` lines, group by the leading
+# digit (= chapter number), emit one Section per chapter detected.
+# Falls back to nothing if no clear paragraph structure exists, letting
+# the caller emit a single-section fallback.
+
+# Match a numbered-paragraph header on its own line. Examples:
+#   "1.3.6 Cargo area is..."
+#   "1.1 Application"
+#   "3 Engineering specifications"
+# Required: line starts with a digit, followed by 0-2 decimal sub-numbers,
+# then whitespace + a title-cased word + ≥3 more chars of title-line
+# content. Anchored to line start/end via MULTILINE to avoid false-firing
+# on inline mentions like "see paragraph 1.3.6 for details".
+_PARAGRAPH_HEADER_RE = re.compile(
+    r"^[ \t]*(\d{1,2})(?:\.(\d{1,3})){0,2}\s+([A-Z][^\n]{3,200}?)\s*$",
+    re.MULTILINE,
+)
+
+
+def _split_by_paragraph_chapter(
+    text: str,
+    meta: "CodeDocMeta",
+    source_code: str,
+) -> list[Section]:
+    """Split a paragraph-numbered IMO doc into per-Chapter Sections.
+
+    Algorithm:
+      1. Find all `N.N.N Title` paragraph headers.
+      2. Group consecutive paragraphs by leading digit (= chapter).
+      3. For each detected chapter, emit a Section spanning the byte
+         range from the first paragraph of that chapter to just before
+         the first paragraph of the next chapter.
+      4. Skip chapters whose detected body is too short (<400 chars) —
+         likely a TOC entry or a 1-paragraph chapter not worth its own
+         section.
+      5. Require at least 2 distinct chapter numbers — otherwise the
+         doc is genuinely single-chapter (CSS appendices, Load Lines
+         protocol-only).
+    """
+    matches = list(_PARAGRAPH_HEADER_RE.finditer(text))
+    if len(matches) < 6:
+        # Not enough numbered structure to be worth splitting.
+        return []
+
+    # IMO docs open with a RESOLUTION clause block — bare `N TitleText`
+    # paragraphs like "2 DETERMINES, in accordance with...", "5 REQUESTS
+    # the Secretary-General to transmit...". These match the same regex
+    # as chapter paragraphs but are NOT chapter content.
+    #
+    # Filter: require each chapter number to have at least one `N.X`
+    # SUB-paragraph (multi-level numbering) to count as real. A genuine
+    # chapter will have paragraphs like "17.1", "17.2", etc.; a preamble
+    # clause is just a bare top-level number.
+    chapter_subpara_count: dict[str, int] = {}
+    chapter_first_subpara_offset: dict[str, int] = {}
+    chapter_first_subpara_title: dict[str, str] = {}
+    chapter_last_offset: dict[str, int] = {}
+    for m in matches:
+        ch = m.group(1)
+        has_sub = m.group(2) is not None
+        if has_sub:
+            chapter_subpara_count[ch] = chapter_subpara_count.get(ch, 0) + 1
+            if ch not in chapter_first_subpara_offset:
+                chapter_first_subpara_offset[ch] = m.start()
+                # Strip the leading number+space from the title for cleanliness.
+                chapter_first_subpara_title[ch] = m.group(3)[:100].rstrip(".,;:")
+        chapter_last_offset[ch] = m.end()
+
+    # Keep only chapters with multi-level sub-numbering — these are
+    # confirmed chapters, not resolution-preamble clauses. Also require
+    # ≥2 sub-paragraphs so a one-off "1.1" reference inside an
+    # otherwise-preamble chapter doesn't false-confirm.
+    confirmed_chapters = {
+        ch for ch, n in chapter_subpara_count.items() if n >= 2
+    }
+    if len(confirmed_chapters) < 2:
+        # Doc doesn't have a confirmable multi-chapter structure.
+        return []
+
+    # Sort confirmed chapters by their first-sub-paragraph offset so we
+    # can slice body ranges in document order.
+    sorted_chapters = sorted(
+        confirmed_chapters,
+        key=lambda ch: chapter_first_subpara_offset[ch],
+    )
+
+    sections: list[Section] = []
+    for i, ch_num in enumerate(sorted_chapters):
+        start = chapter_first_subpara_offset[ch_num]
+        if i + 1 < len(sorted_chapters):
+            end = chapter_first_subpara_offset[sorted_chapters[i + 1]]
+        else:
+            end = len(text)
+        body = text[start:end].strip()
+        if len(body) < 400:
+            continue
+        chapter_title_hint = chapter_first_subpara_title.get(
+            ch_num, f"Chapter {ch_num}",
+        )
+        section_number = f"{meta.section_number} Ch.{ch_num}"
+        section_title = (
+            f"{meta.parent_label} Chapter {ch_num} — {chapter_title_hint}"
+        )
+        sections.append(Section(
+            source=source_code,
+            title_number=TITLE_NUMBER,
+            section_number=section_number,
+            section_title=section_title,
+            full_text=body,
+            up_to_date_as_of=SOURCE_DATE,
+            parent_section_number=meta.section_number,
             published_date=meta.effective_date,
         ))
 
