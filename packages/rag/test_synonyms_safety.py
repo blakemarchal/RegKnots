@@ -117,6 +117,119 @@ def test_coastwise_expansion_targets_are_not_synonym_keys() -> None:
 # ── Other unrelated maritime queries that share words with NVIC ──────────
 
 
+# ── Sprint D6.97 follow-up: FF / IMO-sticker synonyms ────────────────────
+#
+# Karynn's 2026-05-23 case: "Are IMO stickers only required for LSA
+# equipment or are they also required for FF equipment?" returned all
+# LSA-side hits and zero FF-side hits. Adding "ff" / "imo sticker" /
+# "imo symbol" / "imo label" to SYNONYM_DICT bridges the embedding gap.
+# These tests lock in (a) the new synonyms fire when present and
+# (b) they don't bleed into unrelated queries that share vocabulary.
+
+FF_FORMAL_PHRASES = (
+    "fire-fighting",
+    "fire-fighting equipment",
+    "fire-fighting appliance",
+)
+
+FF_MARKING_PHRASES = (
+    "graphical symbol",
+    "fire control plan",
+    "safety sign",
+)
+
+
+def test_ff_keyword_pulls_fire_fighting_vocab() -> None:
+    """Positive case: 'ff' in keywords expands to formal fire-fighting
+    vocabulary. This is the Karynn fix — without it, her query
+    surfaced zero SOLAS Ch.II-2 / FSS Code chunks."""
+    expanded, synonym_map = expand_keywords(["ff", "equipment", "marking"])
+    expanded_lower = [k.lower() for k in expanded]
+    for phrase in FF_FORMAL_PHRASES:
+        assert phrase in expanded_lower, (
+            f"'ff' keyword must expand to {phrase!r}. "
+            f"Got expanded={expanded}, synonym_map={synonym_map}"
+        )
+    assert "ff" in synonym_map
+
+
+def test_imo_sticker_keyword_pulls_marking_vocab() -> None:
+    """Positive case: 'imo sticker' (multi-word) in keywords expands
+    to formal graphical-symbol / fire-control-plan vocabulary."""
+    expanded, synonym_map = expand_keywords(["imo sticker", "ff", "equipment"])
+    expanded_lower = [k.lower() for k in expanded]
+    for phrase in FF_MARKING_PHRASES:
+        assert phrase in expanded_lower, (
+            f"'imo sticker' keyword must expand to {phrase!r}. "
+            f"Got expanded={expanded}, synonym_map={synonym_map}"
+        )
+
+
+def test_off_token_does_not_match_ff_synonym() -> None:
+    """Defensive: 'off' shares the 'ff' letters but as a substring,
+    not a token. The keyword matcher operates on full tokens, so
+    'off' must NOT trigger the FF expansion. If this test ever fails,
+    the matching has been weakened (substring instead of token equality)."""
+    expanded, synonym_map = expand_keywords(["off", "the", "coast"])
+    expanded_lower = [k.lower() for k in expanded]
+    for phrase in FF_FORMAL_PHRASES:
+        assert phrase not in expanded_lower, (
+            f"REGRESSION: 'off' keyword expanded to {phrase!r}. "
+            f"The 'ff' synonym must match only the exact token 'ff', "
+            f"not be a substring search. Got expanded={expanded}."
+        )
+
+
+# ── FF marking intent matcher ───────────────────────────────────────────
+
+
+def test_ff_marking_intent_fires_on_karynn_query() -> None:
+    """Karynn's exact case shape: marking-verb signal (sticker) +
+    fire-equipment signal (FF) should append canonical FF-marking
+    vocab via the intent matcher."""
+    from rag.synonyms import expand_intent
+    query = "Are IMO stickers only required for LSA equipment or are they also required for FF equipment?"
+    keywords = ["imo", "stickers", "required", "lsa", "equipment", "ff"]
+    expanded, intent_added = expand_intent(query, keywords)
+    expanded_lower = [k.lower() for k in expanded]
+    # The FF-marking intent should fire — both signals present.
+    assert "graphical symbol" in expanded_lower, (
+        f"FF-marking intent did not fire on Karynn's exact query. "
+        f"Expanded={expanded}, intent_added={intent_added}"
+    )
+    assert "fire control plan" in expanded_lower
+
+
+def test_ff_marking_intent_does_not_fire_on_pollution_query() -> None:
+    """Negative case: a pollution-discharge query has no marking-verb
+    AND no fire-equipment signal, so the FF-marking intent must NOT
+    fire. (Even if 'discharge' shares letters with 'extinguish' it's
+    not in _FIRE_EQUIPMENT_TOKENS.)"""
+    from rag.synonyms import expand_intent
+    query = "What are the MARPOL Annex I oil discharge limits"
+    keywords = ["marpol", "oil", "discharge", "limits", "annex"]
+    expanded, intent_added = expand_intent(query, keywords)
+    expanded_lower = [k.lower() for k in expanded]
+    assert "graphical symbol" not in expanded_lower
+    assert "fire control plan" not in expanded_lower
+
+
+def test_unrelated_query_does_not_pull_ff_synonyms() -> None:
+    """Negative case: a non-FF maritime query (e.g. cargo/MARPOL) must
+    not get FF vocab appended. The 'ff' synonym is keyword-keyed —
+    only fires when 'ff' is in the extracted keywords."""
+    expanded, synonym_map = expand_keywords(
+        ["bilge", "discharge", "marpol", "annex"],
+    )
+    expanded_lower = [k.lower() for k in expanded]
+    for phrase in FF_FORMAL_PHRASES + FF_MARKING_PHRASES:
+        assert phrase not in expanded_lower, (
+            f"REGRESSION: pollution query expanded to include FF "
+            f"vocabulary {phrase!r}. Got expanded={expanded}, "
+            f"synonym_map={synonym_map}"
+        )
+
+
 def test_jones_act_coastwise_trade_not_polluted() -> None:
     """'coastwise trade' (Jones Act, 46 USC 55102) is a different
     regulatory domain from 'shipping articles voyage description'.

@@ -131,6 +131,50 @@ SYNONYM_DICT: dict[str, tuple[str, ...]] = {
     "coastwise":   ("voyage description", "particulars of engagement", "shipping articles"),
     "stenciled":   ("clearly legible", "block capital letters", "marked with the name"),
     "stenciling":  ("clearly legible", "block capital letters", "marked with the name"),
+    # Sprint D6.97 follow-up — added on documented evidence:
+    # Karynn Marchal (Maersk Seletar, M/V containership), 2026-05-23,
+    # asked "Are IMO stickers only required for LSA equipment or are
+    # they also required for FF equipment?" Retrieval returned 33 CFR
+    # 174.15 (rec-boat validation stickers), MSM Ch.4, 49 CFR 393.60
+    # (truck glazing), ERG CBRN, then 7× LSA-side 46 CFR marking
+    # sections. Zero hits from SOLAS Ch.II-2 or the FSS Code — both
+    # in corpus, just not retrievable by Karynn's vocabulary.
+    #
+    # Root cause:
+    #   "FF"           — embedder treats as generic two-letter token,
+    #                    not maritime "fire-fighting"
+    #   "IMO stickers" — drifts to DMV validation stickers, not
+    #                    "graphical symbols on fire control plans"
+    #
+    # Frequency-checked 2026-05-25 (corpus chunk counts):
+    #   fire-fighting              ample (verified via 188-chunk
+    #                                "fire-fighting equipment")
+    #   fire-fighting equipment   188 chunks  (SOLAS II-2, 46 CFR, FSS)
+    #   fire-fighting appliance    55 chunks  (FSS Code Ch.4, 46 CFR 78)
+    #   graphical symbol           29 chunks  (SOLAS II-2 + FSS Code)
+    #   fire control plan         160 chunks  (SOLAS II-2 Reg.15, 16, +
+    #                                          46 CFR 78.47 family)
+    #   safety sign                32 chunks  (CFR + ISM Code)
+    #
+    # All formal-side targets are narrow enough not to flood retrieval.
+    # Bare "ff" is a 2-char token but the keyword extractor treats it
+    # as a discrete token (won't fire on "off the coast" — "off" is
+    # the token there, not "ff"). Same risk profile as the existing
+    # "dr" / "dg" / "gps" 2-char entries in maritime_glossary.py.
+    #
+    # Intentionally NOT added:
+    #   - bare "sticker"  — too generic (matches any sticker query,
+    #                       including unrelated 33 CFR 174.15 rec-boat
+    #                       validation stickers we don't want to pull)
+    #   - bare "symbol"   — too generic (chart symbols, ECDIS symbols,
+    #                       mathematical symbols all collide)
+    "ff":          ("fire-fighting", "fire-fighting equipment", "fire-fighting appliance"),
+    "imo sticker":  ("graphical symbol", "fire control plan", "safety sign"),
+    "imo stickers": ("graphical symbol", "fire control plan", "safety sign"),
+    "imo symbol":  ("graphical symbol", "fire control plan", "safety sign"),
+    "imo symbols": ("graphical symbol", "fire control plan", "safety sign"),
+    "imo label":   ("graphical symbol", "fire control plan", "safety sign"),
+    "imo labels":  ("graphical symbol", "fire control plan", "safety sign"),
 }
 
 
@@ -402,6 +446,67 @@ _MARKING_INTENT_VOCAB: tuple[str, ...] = (
 )
 
 
+# ── Fire-equipment-marking intent (Sprint D6.97 follow-up) ──────────────
+#
+# Parallel to _equipment_marking_intent but gated on FIRE-FIGHTING
+# equipment instead of life-saving. Karynn's 2026-05-23 IMO-sticker
+# case: she asked "are IMO stickers required on FF equipment" and
+# retrieval missed SOLAS Ch.II-2 Reg.15/16 + 46 CFR 78.47 (fire control
+# plans) because her vocabulary ("stickers", "FF") doesn't lexically
+# match the corpus vocabulary ("graphical symbols", "fire control plan").
+#
+# Dual-signal gate: marking-verb token AND fire-equipment token must
+# both fire. Single-signal queries fall through to standard retrieval.
+#
+# Frequency-checked 2026-05-25:
+#   graphical symbol          29 chunks  (SOLAS II-2 + FSS Code)
+#   fire control plan        160 chunks  (SOLAS II-2 + 46 CFR 78)
+#   fire control station     101 chunks  (46 CFR + SOLAS II-2)
+#   pictogram                 31 chunks  (ISM + LSA Code references)
+
+_FIRE_EQUIPMENT_TOKENS: frozenset[str] = frozenset({
+    # Tokens (post-stopword extraction) that signal fire-fighting
+    # equipment whose marking rule lives in a marking-specific section
+    # (fire control plan, FSS Ch.4 type approval, 46 CFR 78.47).
+    "extinguisher", "extinguishers",
+    "ff", "ffe", "ffa",
+    "fireman", "firefighter", "fire-fighter",
+    "scba", "ba", "eebd",
+    "fcp",
+    "hydrant", "hydrants",
+    "hose", "hoses",
+    "sprinkler", "sprinklers",
+})
+
+_FIRE_EQUIPMENT_PHRASES: tuple[str, ...] = (
+    # Multi-word phrases. Each is narrow enough to identify FF context
+    # without false-positives on general fire-safety language.
+    "fire extinguisher",
+    "fire station",
+    "fire control",
+    "fire-fighting equipment", "fire fighting equipment",
+    "fire-fighting appliance", "fire fighting appliance",
+    "fireman's outfit", "fire-fighter's outfit",
+    "fire alarm",
+    "fire pump",
+    "fire main",
+    "fixed gas",
+    "fixed foam",
+    "co2 system",
+    "fire control plan",
+    "fire control station",
+    "fire detection",
+)
+
+# Canonical FF-marking vocabulary appended when dual-signal fires.
+_FF_MARKING_INTENT_VOCAB: tuple[str, ...] = (
+    "graphical symbol",
+    "fire control plan",
+    "fire control station",
+    "safety sign",
+)
+
+
 def _drill_frequency_intent(
     query_lower: str, keyword_set: set[str],
 ) -> tuple[str, ...]:
@@ -441,6 +546,39 @@ def _equipment_marking_intent(
     return _MARKING_INTENT_VOCAB
 
 
+def _fire_equipment_marking_intent(
+    query_lower: str, keyword_set: set[str],
+) -> tuple[str, ...]:
+    """Return canonical FF-marking vocab if (marking-verb × fire-
+    equipment) dual-signal fires. Sprint D6.97 follow-up — sibling of
+    _equipment_marking_intent gated on FF instead of LSA equipment.
+
+    Karynn's 2026-05-23 case: "Are IMO stickers required on FF
+    equipment?" — marking-verb signal fires (sticker), fire-equipment
+    signal fires (FF). Without this matcher, neither SOLAS Ch.II-2
+    Reg.15/16 nor 46 CFR 78.47 (fire control plans) get pulled in
+    because their corpus vocabulary ("graphical symbols", "fire
+    control plan") never lexically intersects the user query.
+    """
+    has_mark_token = any(k in _MARKING_TOKENS for k in keyword_set)
+    has_mark_phrase = any(p in query_lower for p in _MARKING_PHRASES)
+    # Also trigger on the imo-sticker phrasings even when the user
+    # doesn't independently say "marking" — "IMO sticker" itself
+    # is the marking signal.
+    imo_label_phrases = (
+        "imo sticker", "imo stickers", "imo symbol", "imo symbols",
+        "imo label", "imo labels", "imo sign", "imo signs",
+    )
+    has_imo_label = any(p in query_lower for p in imo_label_phrases)
+    if not (has_mark_token or has_mark_phrase or has_imo_label):
+        return ()
+    has_eq_token = any(k in _FIRE_EQUIPMENT_TOKENS for k in keyword_set)
+    has_eq_phrase = any(p in query_lower for p in _FIRE_EQUIPMENT_PHRASES)
+    if not (has_eq_token or has_eq_phrase):
+        return ()
+    return _FF_MARKING_INTENT_VOCAB
+
+
 def expand_intent(
     query: str, keywords: list[str],
 ) -> tuple[list[str], list[str]]:
@@ -472,6 +610,7 @@ def expand_intent(
     matchers = (
         _drill_frequency_intent,
         _equipment_marking_intent,
+        _fire_equipment_marking_intent,
     )
     additions: list[str] = []
     for matcher in matchers:

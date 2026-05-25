@@ -613,6 +613,132 @@ GLOSSARY: tuple[GlossaryEntry, ...] = (
         confidence=1,
     ),
 
+    # ── Fire-fighting abbreviations (Sprint D6.97 follow-up) ─────────
+    #
+    # Karynn's 2026-05-23 IMO-sticker-for-FF case exposed a class of
+    # maritime fire-fighting acronyms the embedder doesn't bridge.
+    # Adding the common ones used in compliance-officer vocabulary:
+    # FFE, FFA, EEBD, SCBA, BA, FCP. All formal equivalents were
+    # frequency-verified against the corpus on 2026-05-25:
+    #   self-contained breathing apparatus  254 chunks
+    #   emergency escape breathing device    69 chunks
+    #   fire control plan                   160 chunks
+    #   fire-fighting equipment             188 chunks
+    #   fire-fighting appliance              55 chunks
+    GlossaryEntry(
+        slang="ffe",
+        formal_equivalents=(
+            "fire-fighting equipment",
+            "fire-fighting appliance",
+        ),
+        citations=("SOLAS II-2 Reg.10", "FSS Code Ch.4", "46 CFR 78.47"),
+        vessel_types=("all",),
+        context=(
+            "Maritime shorthand for fire-fighting equipment as a class — "
+            "extinguishers, hoses, hydrants, fixed systems, fireman's "
+            "outfits, EEBDs. PSC checklists and compliance-officer audits "
+            "use FFE pervasively."
+        ),
+        confidence=1,
+    ),
+    GlossaryEntry(
+        slang="ffa",
+        formal_equivalents=(
+            "fire-fighting appliance",
+            "fire-fighting equipment",
+        ),
+        citations=("SOLAS II-2 Reg.10", "FSS Code Ch.4"),
+        vessel_types=("all",),
+        context=(
+            "Same domain as FFE; some operators/inspectors prefer 'FFA' "
+            "(appliance) as it's the SOLAS Ch.II-2 term. Functionally "
+            "interchangeable in retrieval."
+        ),
+        confidence=1,
+    ),
+    GlossaryEntry(
+        slang="eebd",
+        formal_equivalents=(
+            "emergency escape breathing device",
+            "escape breathing",
+        ),
+        citations=("SOLAS II-2 Reg.13", "FSS Code Ch.3", "46 CFR 108.213"),
+        vessel_types=("all",),
+        context=(
+            "10-minute breathing apparatus for escape from smoke-filled "
+            "spaces. SOLAS II-2 Reg.13 sets the carriage requirement; "
+            "FSS Code Ch.3 the performance standard. Distinct from SCBA "
+            "(which is for fire-fighting entry, not escape)."
+        ),
+        confidence=1,
+    ),
+    GlossaryEntry(
+        slang="scba",
+        formal_equivalents=(
+            "self-contained breathing apparatus",
+            "breathing apparatus",
+        ),
+        citations=("FSS Code Ch.3", "46 CFR 108.213", "NFPA 1981"),
+        vessel_types=("all",),
+        context=(
+            "Pressure-demand breathing apparatus worn by fire-fighters "
+            "entering smoke/toxic atmospheres. Distinct from EEBD: "
+            "SCBA has ~30-min duration, certified for entry; EEBD is "
+            "10-min, escape-only. Each fireman's outfit must include "
+            "one SCBA per SOLAS Ch.II-2 / FSS Ch.3."
+        ),
+        confidence=1,
+    ),
+    GlossaryEntry(
+        slang="ba",
+        formal_equivalents=(
+            "breathing apparatus",
+            "self-contained breathing apparatus",
+        ),
+        citations=("FSS Code Ch.3", "46 CFR 108.213"),
+        vessel_types=("all",),
+        context=(
+            "Generic abbreviation for breathing apparatus, typically "
+            "meaning SCBA in maritime fire-fighting context. UK/IMO "
+            "convention favors 'BA' where US convention uses 'SCBA'."
+        ),
+        confidence=1,
+    ),
+    GlossaryEntry(
+        slang="fcp",
+        formal_equivalents=(
+            "fire control plan",
+            "fire control station",
+        ),
+        citations=("SOLAS II-2 Reg.15.2.4", "46 CFR 78.47", "IMO Res A.952(23)"),
+        vessel_types=("all",),
+        context=(
+            "Diagrammatic plan showing fire-fighting equipment locations, "
+            "structural fire protection, alarms, and means of escape. "
+            "Required to be posted permanently; symbols per IMO Res "
+            "A.952(23) graphical-symbols standard. 'FCP' usage common in "
+            "PSC checklists."
+        ),
+        confidence=1,
+    ),
+    GlossaryEntry(
+        slang="fireman's outfit",
+        formal_equivalents=(
+            "firefighter's outfit",
+            "fire-fighter's outfit",
+            "fireman outfit",
+        ),
+        citations=("SOLAS II-2 Reg.10.10", "FSS Code Ch.3", "46 CFR 108.213"),
+        vessel_types=("all",),
+        context=(
+            "Combined personal protective equipment for fire-fighters: "
+            "protective clothing, boots/gloves, rigid helmet, electric "
+            "safety lamp, axe, and one SCBA. SOLAS II-2 Reg.10.10 sets "
+            "carriage; minimum 2 sets on most ships, more on tankers."
+        ),
+        confidence=1,
+    ),
+
     # ── Navigation / watch ──────────────────────────────────────────
     GlossaryEntry(
         slang="dr",
