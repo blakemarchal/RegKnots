@@ -496,6 +496,14 @@ _FIRE_EQUIPMENT_PHRASES: tuple[str, ...] = (
     "fire control plan",
     "fire control station",
     "fire detection",
+    # Sprint D6.97 follow-up — Karynn-vocab patterns. "ff equipment"
+    # and friends are how compliance-officer / mariner speech actually
+    # phrases fire-fighting equipment. Bare "ff" stays out of the
+    # phrase list (too ambiguous in prose); the SYNONYM_DICT["ff"]
+    # entry + the _extract_keywords short-token exception together
+    # carry the standalone case.
+    "ff equipment", "ff system", "ff appliance", "ff gear",
+    "ffe ", "ffa ",
 )
 
 # Canonical FF-marking vocabulary appended when dual-signal fires.
