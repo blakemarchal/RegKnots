@@ -47,6 +47,11 @@ SOURCE_TO_JURISDICTIONS: dict[str, list[str]] = {
     "nvic":             ["us"],
     "nmc_policy":       ["us"],
     "nmc_checklist":    ["us"],
+    # USCG NMC exam bank (Sprint D6.83 — backfilled D6.97 follow-up).
+    # The exam bank is US-only content for USCG merchant-mariner
+    # credentialing; a non-US-flag mariner's compliance query should
+    # not be answered out of US license-exam material.
+    "nmc_exam_bank":    ["us"],
     "uscg_msm":         ["us"],
     "uscg_bulletin":    ["us"],
     # UK national
@@ -54,6 +59,12 @@ SOURCE_TO_JURISDICTIONS: dict[str, list[str]] = {
     "mca_msn":          ["uk"],
     # Australian national
     "amsa_mo":          ["au"],
+    # Australian statutes — Navigation Act 2012, Marine Safety (DCV)
+    # National Law Act 2012 (Sprint D6.97 AU phase 1c — backfilled).
+    "au_statutes":      ["au"],
+    # NSCV — National Standard for Commercial Vessels (Australian DCV
+    # standard, Sprint D6.97 AU phase 1b — backfilled).
+    "nscv":             ["au"],
     # Liberian (LISCR) national
     "liscr_mn":         ["lr"],
     # Marshall Islands (IRI) national
@@ -62,6 +73,10 @@ SOURCE_TO_JURISDICTIONS: dict[str, list[str]] = {
     "mpa_sc":           ["sg"],
     # Hong Kong (Sprint D6.22)
     "mardep_msin":      ["hk"],
+    # Cyprus national (Sprint D6.43 — backfilled D6.97 follow-up)
+    "cy_dms":           ["cy"],
+    # Panama national (Sprint D6.44 — backfilled D6.97 follow-up)
+    "pa_mmc":           ["pa"],
     # Canada (Sprint D6.22)
     "tc_ssb":           ["ca"],
     # Bahamas (Sprint D6.22)
@@ -161,6 +176,7 @@ _FLAG_ALIASES: dict[str, list[str]] = {
     "cn": ["china", "chinese"],
     "kr": ["korea", "korean"],
     "hk": ["hong kong"],
+    "cy": ["cyprus", "cypriot"],
 }
 
 
