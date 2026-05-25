@@ -214,6 +214,45 @@ def test_ff_marking_intent_does_not_fire_on_pollution_query() -> None:
     assert "fire control plan" not in expanded_lower
 
 
+def test_short_maritime_abbreviations_survive_extraction() -> None:
+    """KARYNN-VOCAB-MISMATCH: short maritime abbreviations (ff, mob, dr,
+    dg, gps, ais, etc.) must survive _extract_keywords even though
+    they're under the standard _MIN_KEYWORD_LEN. Otherwise every
+    SYNONYM_DICT entry keyed on a short token is dead code.
+
+    Locks in the carve-out added 2026-05-25: tokens that are keys in
+    SYNONYM_DICT bypass the length filter."""
+    from rag.retriever import _extract_keywords
+    # Karynn's query: "FF equipment" — the "ff" token must survive
+    kw = _extract_keywords(
+        "Are IMO stickers also required for FF equipment"
+    )
+    assert "ff" in kw, (
+        f"'ff' was dropped from keywords by the 4-char minimum. "
+        f"The SYNONYM_DICT carve-out in _extract_keywords is not "
+        f"firing. Got keywords={kw}"
+    )
+    # Other short abbreviations should also survive
+    kw_mob = _extract_keywords("How often should we run MOB drills")
+    assert "mob" in kw_mob, f"'mob' dropped from {kw_mob}"
+
+
+def test_short_token_not_in_synonym_dict_still_dropped() -> None:
+    """Negative case: a short token that ISN'T in SYNONYM_DICT (e.g.
+    'do', 'is', 'it') must still be dropped. The carve-out is
+    targeted, not a blanket relaxation of the length filter."""
+    from rag.retriever import _extract_keywords
+    kw = _extract_keywords("Is it required to do an inspection")
+    # 'is', 'it', 'to', 'do', 'an' are all stopwords OR sub-4-char +
+    # not in SYNONYM_DICT — they must all be filtered out.
+    short_non_synonyms = {"is", "it", "to", "do", "an"}
+    for t in short_non_synonyms:
+        assert t not in kw, (
+            f"Token {t!r} should have been filtered (stopword OR "
+            f"too short + not a synonym key). Got keywords={kw}"
+        )
+
+
 def test_unrelated_query_does_not_pull_ff_synonyms() -> None:
     """Negative case: a non-FF maritime query (e.g. cargo/MARPOL) must
     not get FF vocab appended. The 'ff' synonym is keyword-keyed —

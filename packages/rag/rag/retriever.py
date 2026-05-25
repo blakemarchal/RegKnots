@@ -1037,15 +1037,30 @@ _MAX_SYNONYM_FREQ = 800
 def _extract_keywords(query: str) -> list[str]:
     """Extract substantive search terms from query after stripping stopwords.
 
-    Returns up to _MAX_KEYWORD_TERMS keywords, longest first (longer words
-    are more specific). Only words with _MIN_KEYWORD_LEN+ characters are
-    kept.
+    Returns up to _MAX_KEYWORD_TERMS keywords. Words with
+    _MIN_KEYWORD_LEN+ characters are kept by default; synonym-key
+    tokens (e.g. ff, mob, imo) are kept regardless of length.
+
+    Sprint D6.97 follow-up — exception for short maritime abbreviations
+    that ARE keys in the synonym/glossary dict. Without this carve-out,
+    every 2-3 char slang term (ff, mob, dr, dg, ba, gps, ais, psc,
+    cic, orb, coi, cog, imo) silently fails to fire its synonym
+    expansion, even though the entries exist. AND because the final
+    list is truncated to _MAX_KEYWORD_TERMS=4 longest-first, short
+    synonym keys would otherwise be pushed off the end by longer
+    surrounding nouns. Synonym keys now bypass both the length filter
+    and the truncation. The KARYNN-VOCAB-MISMATCH tests in
+    test_synonyms_safety.py lock in this behavior.
     """
     # Tokenize: keep only alphabetic words (drop numbers, punctuation)
     words = re.findall(r"[a-zA-Z]+", query.lower())
+    # Lazy-import so synonyms.py can import from retriever and vice versa
+    # without a circular hard-dependency at module load time.
+    from .synonyms import SYNONYM_DICT
     keywords = [
         w for w in words
-        if len(w) >= _MIN_KEYWORD_LEN and w not in _STOPWORDS
+        if w not in _STOPWORDS
+        and (len(w) >= _MIN_KEYWORD_LEN or w in SYNONYM_DICT)
     ]
     # Deduplicate preserving order
     seen: set[str] = set()
@@ -1054,9 +1069,14 @@ def _extract_keywords(query: str) -> list[str]:
         if w not in seen:
             seen.add(w)
             unique.append(w)
-    # Take longest first — more specific, fewer false positives
-    unique.sort(key=len, reverse=True)
-    return unique[:_MAX_KEYWORD_TERMS]
+    # Partition: synonym keys are always-kept (highest signal — the
+    # user gave us a specific maritime abbreviation). Other tokens go
+    # through the standard longest-first cap.
+    synonym_tokens = [w for w in unique if w in SYNONYM_DICT]
+    other_tokens = [w for w in unique if w not in SYNONYM_DICT]
+    other_tokens.sort(key=len, reverse=True)
+    remaining = max(0, _MAX_KEYWORD_TERMS - len(synonym_tokens))
+    return synonym_tokens + other_tokens[:remaining]
 
 
 # ── Query embedding ──────────────────────────────────────────────────────────
