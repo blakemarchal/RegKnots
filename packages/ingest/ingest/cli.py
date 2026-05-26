@@ -339,6 +339,14 @@ _PDF_SOURCE_CONFIG: dict[str, dict] = {
         "adapter": "ingest.sources.imo_codes",
         "imo_code": "fss",
     },
+    # Sprint D6.97 #48 (2026-05-25) — IMO graphical-symbol Assembly
+    # resolutions (A.952(23) FCP symbols, A.760(18) + A.1116(30) LSA
+    # symbols). Same imo_codes adapter, new code key.
+    "imo_symbols": {
+        "raw_dir": _DATA_RAW / "imo_symbols",
+        "adapter": "ingest.sources.imo_codes",
+        "imo_code": "symbols",
+    },
     "imo_iamsar": {
         "raw_dir": _DATA_RAW / "imo_iamsar",
         "adapter": "ingest.sources.imo_iamsar",
