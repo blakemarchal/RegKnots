@@ -113,6 +113,9 @@ SOURCE_TO_JURISDICTIONS: dict[str, list[str]] = {
     "imo_ibc":          ["intl"],
     "imo_hsc":          ["intl"],
     "imo_iamsar":       ["intl"],
+    # Sprint D6.97 #48 — IMO graphical-symbol Assembly resolutions
+    # (A.952(23) FCP symbols, A.760(18) + A.1116(30) LSA symbols).
+    "imo_symbols":      ["intl"],
     "mou_psc":          ["intl"],
     # International (universal — bind every flag on intl voyages)
     "solas":            ["intl"],

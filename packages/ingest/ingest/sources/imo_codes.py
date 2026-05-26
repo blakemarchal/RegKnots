@@ -247,6 +247,42 @@ _CURATED_BY_CODE: dict[str, list[CodeDocMeta]] = {
         ),
     ],
 
+    # Sprint D6.97 #48 (2026-05-25) — IMO graphical-symbol Assembly
+    # resolutions. These are the authoritative source for symbols used
+    # on fire control plans, lifesaving appliances, escape signage, and
+    # safety equipment markings — referenced by SOLAS Ch.II-2 Reg.15.2.4
+    # (FCP), SOLAS Ch.III (LSA stowage signs), LSA Code 2.2.1.6 (PFD
+    # markings). Karynn's 2026-05-23 IMO-sticker-for-FF question hedged
+    # because these resolutions weren't in corpus — the engine could name
+    # them by number but had no chunk to cite.
+    #
+    # A.760(18) is superseded by A.1116(30) but kept for historical
+    # citations (lots of vessels carry pre-2018 LSA equipment still
+    # marked per A.760).
+    "symbols": [
+        CodeDocMeta(
+            code="A.952(23)",
+            title="Graphical Symbols for Shipboard Fire Control Plans",
+            pdf_url=f"{_IMO_CDN}/AssemblyDocuments/A.952(23).pdf",
+            effective_date=date(2003, 12, 5),
+            parent_label="IMO Symbols",
+        ),
+        CodeDocMeta(
+            code="A.760(18)",
+            title="Symbols Related to Life-Saving Appliances and Arrangements (superseded by A.1116)",
+            pdf_url=f"{_IMO_CDN}/AssemblyDocuments/A.760(18).pdf",
+            effective_date=date(1993, 11, 17),
+            parent_label="IMO Symbols",
+        ),
+        CodeDocMeta(
+            code="A.1116(30)",
+            title="Escape Route Signs and Equipment Location Markings (revised LSA symbols)",
+            pdf_url=f"{_IMO_CDN}/AssemblyDocuments/A.1116(30).pdf",
+            effective_date=date(2018, 1, 1),
+            parent_label="IMO Symbols",
+        ),
+    ],
+
     # Sprint D6.41 — STCW amendments since the 2017 Consolidated Edition.
     # The official IMO supplement PDF only includes MSC.540/541 (Jan 2025).
     # These are the additional MSC resolutions that amend STCW between 2017
@@ -407,6 +443,8 @@ _CODE_TO_SOURCE = {
     # detail that LSA carries.
     "lsa": "imo_lsa",
     "fss": "imo_fss",
+    # Sprint D6.97 #48 — IMO graphical-symbol resolutions
+    "symbols": "imo_symbols",
 }
 
 
