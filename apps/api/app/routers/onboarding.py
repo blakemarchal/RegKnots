@@ -97,6 +97,12 @@ class PersonaRequest(BaseModel):
     # Optional; passing None leaves the stored value unchanged. Default
     # is false (column NOT NULL default false per migration 0109).
     precision_mode_enabled: bool | None = None
+    # D6.97 #56 (2026-05-27) — opt-in GPS persistence. When true, the
+    # whale-zones page (and future surfaces) will POST the user's
+    # current position to /users/me/location and the server stores
+    # the most-recent coordinates on the users row. When toggled
+    # OFF the API nulls the last_known_* columns on save.
+    location_tracking_enabled: bool | None = None
 
 
 @router.get("/status", response_model=StatusResponse)
@@ -237,8 +243,9 @@ async def update_persona(
             verbosity_preference = COALESCE($3, verbosity_preference),
             theme_preference = COALESCE($4, theme_preference),
             study_tools_enabled = COALESCE($5, study_tools_enabled),
-            precision_mode_enabled = COALESCE($6, precision_mode_enabled)
-        WHERE id = $7
+            precision_mode_enabled = COALESCE($6, precision_mode_enabled),
+            location_tracking_enabled = COALESCE($7, location_tracking_enabled)
+        WHERE id = $8
         """,
         body.persona,
         body.jurisdiction_focus,
@@ -246,8 +253,29 @@ async def update_persona(
         body.theme_preference,
         body.study_tools_enabled,
         body.precision_mode_enabled,
+        body.location_tracking_enabled,
         _uuid.UUID(user.user_id),
     )
+
+    # D6.97 #56 — when the user EXPLICITLY toggles location_tracking
+    # OFF, also null out any stored coordinates. The toggle is the
+    # consent gate; turning it off withdraws consent and the data
+    # shouldn't linger. (Toggling ON does NOT auto-populate — the
+    # whale-zones page POSTs to /users/me/location separately when
+    # the user actually shares position.)
+    if body.location_tracking_enabled is False:
+        await pool.execute(
+            """
+            UPDATE users
+            SET last_known_lat = NULL,
+                last_known_lon = NULL,
+                last_known_accuracy_m = NULL,
+                last_known_at = NULL,
+                last_known_source = NULL
+            WHERE id = $1
+            """,
+            _uuid.UUID(user.user_id),
+        )
 
     # Seed the Study Tools default the first time a user picks a persona.
     # If study_tools_enabled is still NULL after the COALESCE above
@@ -278,7 +306,9 @@ async def get_persona(
     pool = await get_pool()
     row = await pool.fetchrow(
         "SELECT persona, jurisdiction_focus, verbosity_preference, theme_preference, "
-        "study_tools_enabled, precision_mode_enabled "
+        "study_tools_enabled, precision_mode_enabled, "
+        "location_tracking_enabled, last_known_lat, last_known_lon, "
+        "last_known_accuracy_m, last_known_at, last_known_source "
         "FROM users WHERE id = $1",
         _uuid.UUID(user.user_id),
     )
@@ -296,4 +326,18 @@ async def get_persona(
         "precision_mode_enabled": (
             bool(row["precision_mode_enabled"]) if row else False
         ),
+        # D6.97 #56 — opt-in GPS tracking. NOT NULL boolean
+        # (default false per migration 0112). last_known_* fields
+        # echo the most recent persisted position (or null when
+        # never shared / when toggle was just turned off).
+        "location_tracking_enabled": (
+            bool(row["location_tracking_enabled"]) if row else False
+        ),
+        "last_known_lat": row["last_known_lat"] if row else None,
+        "last_known_lon": row["last_known_lon"] if row else None,
+        "last_known_accuracy_m": row["last_known_accuracy_m"] if row else None,
+        "last_known_at": (
+            row["last_known_at"].isoformat() if row and row["last_known_at"] else None
+        ),
+        "last_known_source": row["last_known_source"] if row else None,
     }

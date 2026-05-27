@@ -77,6 +77,17 @@ function AccountContent() {
   // refuses regulatory claims it can't verify against the retrieved
   // context, rather than hedging.
   const [precisionModeEnabled, setPrecisionModeEnabled] = useState<boolean>(false)
+  // Sprint D6.97 #56 — opt-in GPS persistence. Defaults off; user
+  // must toggle on to allow the whale-zones page (and future surfaces)
+  // to POST their position to /me/location. When toggled off, the
+  // server nulls any stored last_known_* coordinates.
+  const [locationTrackingEnabled, setLocationTrackingEnabled] = useState<boolean>(false)
+  const [lastKnownLocation, setLastKnownLocation] = useState<{
+    lat: number | null
+    lon: number | null
+    at: string | null
+    source: string | null
+  }>({ lat: null, lon: null, at: null, source: null })
   const [personaSaving, setPersonaSaving] = useState(false)
   const [personaMsg, setPersonaMsg] = useState<string | null>(null)
 
@@ -128,6 +139,11 @@ function AccountContent() {
       theme_preference: string | null
       study_tools_enabled?: boolean
       precision_mode_enabled?: boolean
+      location_tracking_enabled?: boolean
+      last_known_lat?: number | null
+      last_known_lon?: number | null
+      last_known_at?: string | null
+      last_known_source?: string | null
     }>('/onboarding/persona')
       .then((r) => {
         setPersona(r.persona ?? '')
@@ -138,6 +154,13 @@ function AccountContent() {
         // older API responses that don't include the field at all.
         setStudyToolsEnabled(r.study_tools_enabled ?? false)
         setPrecisionModeEnabled(r.precision_mode_enabled ?? false)
+        setLocationTrackingEnabled(r.location_tracking_enabled ?? false)
+        setLastKnownLocation({
+          lat: r.last_known_lat ?? null,
+          lon: r.last_known_lon ?? null,
+          at: r.last_known_at ?? null,
+          source: r.last_known_source ?? null,
+        })
       })
       .catch(() => {})
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
@@ -163,6 +186,8 @@ function AccountContent() {
           // level; default false). Always sent so the COALESCE on
           // the backend captures any flip the user just made.
           precision_mode_enabled: precisionModeEnabled,
+          // D6.97 #56 — opt-in GPS persistence.
+          location_tracking_enabled: locationTrackingEnabled,
         }),
       })
       // Bug fix: propagate the toggle to the HamburgerMenu without
@@ -573,6 +598,55 @@ function AccountContent() {
                 &ldquo;I don&rsquo;t have that&rdquo; answers when a specific section isn&rsquo;t in our database.
                 Intended for compliance-officer use.
               </p>
+            </div>
+
+            {/* Sprint D6.97 #56 — opt-in GPS persistence. Defaults
+                OFF. When on, the whale-zones page (and future
+                surfaces) stores your most recent position so RegKnot
+                can later tailor chat responses + send active-zone
+                alerts. No history is kept — only the most recent
+                position. Toggling off nulls the stored coordinates. */}
+            <div className="flex flex-col gap-1">
+              <label className="font-mono text-xs text-[#6b7594]">Location tracking</label>
+              <button
+                type="button"
+                onClick={() => setLocationTrackingEnabled((v) => !v)}
+                role="switch"
+                aria-checked={locationTrackingEnabled}
+                className={`flex items-center justify-between px-3 py-2 rounded-lg border transition-colors duration-150
+                  ${locationTrackingEnabled
+                    ? 'border-[#22d3ee]/40 bg-[#22d3ee]/5'
+                    : 'border-white/10 bg-[#0d1225] hover:border-white/20'
+                  }`}
+              >
+                <span className={`font-mono text-sm ${locationTrackingEnabled ? 'text-[#22d3ee]' : 'text-[#f0ece4]/80'}`}>
+                  Location tracking {locationTrackingEnabled ? 'on' : 'off'}
+                </span>
+                <span
+                  aria-hidden="true"
+                  className={`relative inline-block w-10 h-5 rounded-full transition-colors duration-150
+                    ${locationTrackingEnabled ? 'bg-[#22d3ee]' : 'bg-white/15'}`}
+                >
+                  <span
+                    className={`absolute top-0.5 w-4 h-4 rounded-full bg-[#0a0e1a] transition-all duration-150
+                      ${locationTrackingEnabled ? 'left-[1.375rem]' : 'left-0.5'}`}
+                  />
+                </span>
+              </button>
+              <p className="font-mono text-[10px] text-[#6b7594] leading-relaxed mt-1">
+                Opt-in. When on, RegKnot stores your most recent GPS position when you share it
+                (e.g. on the Whale Zones map). Used for personalized chat responses and active-zone
+                alerts in upcoming releases. We keep only your latest coordinates &mdash; no history.
+                Turning this off immediately erases any stored position.
+              </p>
+              {locationTrackingEnabled && lastKnownLocation.at && (
+                <div className="font-mono text-[10px] text-[#22d3ee]/80 bg-[#22d3ee]/5
+                  border border-[#22d3ee]/20 rounded px-2 py-1.5 mt-1">
+                  Last position: {lastKnownLocation.lat?.toFixed(4)}, {lastKnownLocation.lon?.toFixed(4)}
+                  <br />
+                  Recorded {new Date(lastKnownLocation.at).toLocaleString()} via {lastKnownLocation.source}
+                </div>
+              )}
             </div>
 
             <div className="flex items-center gap-3">
