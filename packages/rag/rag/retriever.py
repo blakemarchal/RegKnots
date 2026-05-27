@@ -86,7 +86,13 @@ SOURCE_GROUPS: dict[str, tuple[str, ...]] = {
     # statutory instruments (Tier 1, parallels CFR section text). Grouped
     # together so any "UK" / non-US-flag / Channel-route query that surfaces
     # one type also draws candidates from the other for cross-coverage.
-    "mca": ("mca_mgn", "mca_msn"),
+    # Sprint D6.97 #55 (2026-05-27) — COSWP joins the MCA group.
+    # COSWP is the UK MCA's operational health-and-safety reference and
+    # is referenced in the same retrieval scenarios as MGN/MSN. Grouping
+    # it under "mca" means the MCA query-affinity boost (UK flag, MGN/
+    # MSN citations, "MCA" mentions, "COSWP" mentions) lifts COSWP into
+    # the candidate pool alongside MGN/MSN.
+    "mca": ("mca_mgn", "mca_msn", "coswp"),
     # AMSA Marine Orders + NSCV + AU statutes — Sprint D6.20 / D6.97 AU
     # sprint 1a/1b/1c. Australia's primary maritime regulatory framework
     # in three layers:
@@ -559,6 +565,13 @@ _MCA_TERMS: tuple[str, ...] = (
     "uk territorial waters", "uk waters",
     # Common UK-flag operational queries
     "mlc 2006 uk", "stcw uk implementation",
+    # Sprint D6.97 #55 (2026-05-27) — COSWP triggers MCA-group affinity
+    # boost so the 660 COSWP chunks aren't out-ranked by USCG MSM /
+    # NMC / IACS UR under generic US-flag profiles. Pairs with the
+    # 2026-05-27 jurisdiction-pattern change adding "COSWP" to the UK
+    # query signal — that change unlocks UK jurisdiction at the SQL
+    # filter level; this change boosts COSWP at the rerank stage.
+    "coswp", "code of safe working practices",
 )
 _MCA_ABBR_RE = re.compile(
     # Citation form: "MGN 71", "MGN 71 (M+F)", "MSN 1676 Amendment 4".
