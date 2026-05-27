@@ -20,8 +20,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import dynamic from 'next/dynamic'
-import Link from 'next/link'
 import 'leaflet/dist/leaflet.css'
+import { AppHeader } from '@/components/AppHeader'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'
 
@@ -289,9 +289,30 @@ export default function WhaleZonesPage() {
     return distanceNm(userLocation, center)
   }, [userLocation, selectedBounds])
 
+  // Active-zone badge rendered in the AppHeader's trailing slot so
+  // users keep the count visible whether the drawer is open or not.
+  const activeBadge = data ? (
+    <span
+      className={`ml-2 inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] ${
+        activeCount > 0
+          ? 'bg-red-950/60 text-red-300 ring-1 ring-red-700/40'
+          : 'bg-slate-900/60 text-slate-400 ring-1 ring-slate-700/40'
+      }`}
+    >
+      <span className={`h-1.5 w-1.5 rounded-full ${
+        activeCount > 0 ? 'bg-red-400 animate-pulse' : 'bg-slate-500'
+      }`} />
+      {activeCount} active {isToday ? 'today' : `on ${dateISO}`}
+    </span>
+  ) : null
+
   return (
-    <div className="fixed inset-0 overflow-hidden bg-slate-950 text-slate-100">
-      {/* ── Full-bleed map ─────────────────────────────────────────────── */}
+    <div className="flex h-screen flex-col overflow-hidden bg-slate-950 text-slate-100">
+      {/* ── Global header (logo + page title + hamburger nav) ─────────── */}
+      <AppHeader title="Whale Zones" trailing={activeBadge} />
+
+      {/* ── Map + drawer fill the remainder of the viewport ───────────── */}
+      <div className="relative flex-1 overflow-hidden">
       {data && (
         <MapContainer
           center={[36.5, -75.5]}
@@ -327,59 +348,24 @@ export default function WhaleZonesPage() {
         </MapContainer>
       )}
 
-      {/* ── Top bar (translucent) ───────────────────────────────────────── */}
-      <header
-        className="pointer-events-none absolute inset-x-0 top-0 z-[400] flex items-center
-          justify-between gap-3 px-4 py-3 sm:px-6"
-      >
-        <div className="pointer-events-auto flex items-center gap-3 rounded-lg
-          border border-slate-800/60 bg-slate-950/85 px-3 py-2 backdrop-blur">
-          <Link
-            href="/"
-            className="font-display text-sm font-semibold tracking-wide text-emerald-300
-              hover:text-emerald-200"
-            aria-label="Back to RegKnots home"
-          >
-            RegKnots
-          </Link>
-          <span className="text-slate-700">/</span>
-          <span className="font-mono text-xs uppercase tracking-widest text-slate-400">
-            Whale Zones
-          </span>
-          {data && (
-            <span
-              className={`ml-2 inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs ${
-                activeCount > 0
-                  ? 'bg-red-950/60 text-red-300 ring-1 ring-red-700/40'
-                  : 'bg-slate-900/60 text-slate-400 ring-1 ring-slate-700/40'
-              }`}
-            >
-              <span className={`h-1.5 w-1.5 rounded-full ${
-                activeCount > 0 ? 'bg-red-400 animate-pulse' : 'bg-slate-500'
-              }`} />
-              {activeCount} active {isToday ? 'today' : `on ${dateISO}`}
-            </span>
-          )}
-        </div>
-
-        {!drawerOpen && (
-          <button
-            onClick={() => setDrawerOpen(true)}
-            className="pointer-events-auto flex items-center gap-2 rounded-lg
-              border border-slate-800/60 bg-slate-950/85 px-3 py-2 text-sm
-              text-slate-200 backdrop-blur hover:bg-slate-900"
-            aria-label="Open filters and zone list"
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
-              stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="3" y1="6" x2="21" y2="6" />
-              <line x1="3" y1="12" x2="21" y2="12" />
-              <line x1="3" y1="18" x2="21" y2="18" />
-            </svg>
-            <span className="hidden sm:inline">Filters &amp; zones</span>
-          </button>
-        )}
-      </header>
+      {/* ── Floating filters toggle (when drawer collapsed) ─────────────── */}
+      {!drawerOpen && (
+        <button
+          onClick={() => setDrawerOpen(true)}
+          className="absolute right-4 top-4 z-[400] flex items-center gap-2 rounded-lg
+            border border-slate-800/60 bg-slate-950/85 px-3 py-2 text-sm text-slate-200
+            backdrop-blur hover:bg-slate-900"
+          aria-label="Open filters and zone list"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <line x1="3" y1="6" x2="21" y2="6" />
+            <line x1="3" y1="12" x2="21" y2="12" />
+            <line x1="3" y1="18" x2="21" y2="18" />
+          </svg>
+          <span className="hidden sm:inline">Filters &amp; zones</span>
+        </button>
+      )}
 
       {/* ── Loading / error overlay ─────────────────────────────────────── */}
       {loading && !data && (
@@ -734,6 +720,7 @@ export default function WhaleZonesPage() {
           aria-label="Close drawer"
         />
       )}
+      </div>
     </div>
   )
 }
