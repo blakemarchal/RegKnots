@@ -66,6 +66,11 @@ const MENU_SECTIONS: MenuSection[] = [
     items: [
       { icon: '\u270E', label: 'Compliance Log', action: 'log', path: '/log' },
       { icon: '\u2611', label: 'PSC Checklist', action: 'psc-checklist', path: '/psc-checklist' },
+      // Sprint D6.97 #49 follow-up (2026-05-27) \u2014 NOAA right whale
+      // SMA map. Public route, no auth required, but lives in nav as a
+      // compliance tool because route-awareness is the compliance use
+      // case (10-knot speed limit when transiting active SMAs).
+      { icon: '\u2316', label: 'Whale Zones', action: 'whale-zones', path: '/whale-zones' },
     ],
   },
   {
