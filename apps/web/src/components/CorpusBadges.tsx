@@ -83,6 +83,25 @@ const CORPUS: CorpusSource[] = [
     full: 'Code of Safe Practice for Cargo Stowage and Securing',
     category: 'international',
   },
+  // Sprint D6.97 #54 (2026-05-27) — LSA + FSS + IMO Symbols added
+  // following the corpus expansion for the shore-side compliance pivot.
+  {
+    short: 'LSA Code',
+    full: 'International Life-Saving Appliance (LSA) Code — MSC.48(66) adoption + MSC.485(103) 2021 amendments. Mandatory under SOLAS Ch.III.',
+    category: 'international',
+    url: 'https://www.imo.org/en/OurWork/Safety/Pages/LSA.aspx',
+  },
+  {
+    short: 'FSS Code',
+    full: 'International Code for Fire Safety Systems (FSS Code) — MSC.98(73) adoption. Mandatory under SOLAS Ch.II-2; covers fire extinguishers, fixed gas/foam/water-mist systems, fire detection, fireman’s outfits, EEBDs.',
+    category: 'international',
+    url: 'https://www.imo.org/en/OurWork/Safety/Pages/FSS.aspx',
+  },
+  {
+    short: 'IMO Symbols',
+    full: 'IMO Assembly graphical-symbol resolutions: A.952(23) shipboard fire control plan symbols, A.760(18) and A.1116(30) life-saving appliance and escape route signs.',
+    category: 'international',
+  },
   // Sprint D6.41 — three IMO instruments added per the post-D6.36 corpus
   // gap audit. BWM Convention is paywalled at the IMO consolidated text
   // level, but the operational MEPC resolutions (D-1/D-2 standards, BWMS
@@ -140,6 +159,20 @@ const CORPUS: CorpusSource[] = [
     category: 'international',
     url: 'https://www.lr.org/en/rules-and-regulations/',
   },
+  // Sprint D6.97 (BV adapter sprint) — Bureau Veritas NR467 + IACS CSR
+  // (Common Structural Rules for bulkers & tankers, distributed via BV).
+  {
+    short: 'BV NR467',
+    full: 'Bureau Veritas — Rules for the Classification of Steel Ships (NR467), covering structural design, machinery & electrical, vessel-type service notations, and additional class notations.',
+    category: 'international',
+    url: 'https://erules.veristar.com/dy/app/bvrules/index.html',
+  },
+  {
+    short: 'IACS CSR',
+    full: 'IACS Common Structural Rules for Bulk Carriers and Oil Tankers — harmonized structural design requirements adopted by all IACS member societies.',
+    category: 'international',
+    url: 'https://iacs.org.uk/resolutions/common-structural-rules/',
+  },
 
   // ── Non-U.S. flag-state regulators ────────────────────────────────────
   // Sprint D6.26 — flagCC drives a small flag chip rendered inside each
@@ -151,9 +184,18 @@ const CORPUS: CorpusSource[] = [
     flagCC: 'gb',
     url: 'https://www.gov.uk/government/organisations/maritime-and-coastguard-agency',
   },
+  // Sprint D6.97 #54 (2026-05-27) — COSWP 2025 added by Karynn for the
+  // shore-side compliance officer pivot. Crown Copyright OGL v3.
+  {
+    short: 'COSWP 2025',
+    full: 'UK MCA Code of Safe Working Practices for Merchant Seafarers, 2025 Edition — operational health-and-safety reference for UK-flag (and broadly Red Ensign Group) ships. Covers PPE, enclosed-space entry, permit-to-work, hot work, lifting, hazardous substances, and more.',
+    category: 'flag_state',
+    flagCC: 'gb',
+    url: 'https://www.gov.uk/government/publications/code-of-safe-working-practices-for-merchant-seafarers',
+  },
   {
     short: 'AMSA',
-    full: 'Australian Maritime Safety Authority — Marine Orders',
+    full: 'Australian Maritime Safety Authority — Marine Orders, Navigation Act 2012, Marine Safety (DCV) National Law Act, plus the National Standard for Commercial Vessels (NSCV)',
     category: 'flag_state',
     flagCC: 'au',
     url: 'https://www.amsa.gov.au/about/regulations-and-standards/marine-orders',
@@ -199,6 +241,21 @@ const CORPUS: CorpusSource[] = [
     category: 'flag_state',
     flagCC: 'bs',
     url: 'https://www.bahamasmaritime.com/',
+  },
+  // Sprint D6.97 (Cyprus + Panama adapters, late May 2026).
+  {
+    short: 'Cyprus DMS',
+    full: 'Cyprus Shipping Deputy Ministry — Cyprus Marine Circulars (CMC) and Cyprus Registry Circulars. Major Mediterranean flag of registration.',
+    category: 'flag_state',
+    flagCC: 'cy',
+    url: 'https://www.dms.gov.cy/',
+  },
+  {
+    short: 'Panama MMC',
+    full: 'Panama Maritime Authority (AMP) — Merchant Marine Circulars (MMC) and Merchant Marine Notices (MMN). World’s largest ship registry.',
+    category: 'flag_state',
+    flagCC: 'pa',
+    url: 'https://amp.gob.pa/',
   },
   {
     short: 'France',
@@ -262,7 +319,7 @@ const CORPUS: CorpusSource[] = [
   },
   {
     short: 'NMC',
-    full: 'National Maritime Center policy letters and inspection checklists',
+    full: 'National Maritime Center policy letters, inspection checklists, and (D6.83) the USCG NMC merchant-mariner examination bank used by the Study Tools feature',
     category: 'us_federal',
     url: 'https://www.dco.uscg.mil/national_maritime_center/',
   },
@@ -438,13 +495,24 @@ function CategorizedView({ heading, subhead, className }: Pick<Props, 'heading' 
  * other paragraphs where chips would be too heavy.
  */
 export function corpusInlineString(): string {
+  // Sprint D6.97 #54 (2026-05-27) — updated for the shore-side
+  // compliance officer pivot. Net additions since the last refresh:
+  // LSA Code, FSS Code, IMO graphical-symbol resolutions, COSWP 2025
+  // (UK MCA), AMSA Nav Act + NSCV, Cyprus DMS, Panama MMC, BV NR467,
+  // IACS CSR. ABS Rules and LR Rules continue to anchor class-society
+  // coverage.
   return (
     'the IMO conventions (SOLAS, MARPOL, IMDG, COLREGs, STCW, ISM, '
-    + 'plus HSC/IGC/IBC/CSS/Load Lines and IACS class standards), '
-    + 'U.S. CFR 33/46/49 + 46 USC + USCG guidance, '
-    + 'and flag-state regulations from the UK, Australia, Singapore, '
-    + 'Hong Kong, Norway, Liberia, Marshall Islands, and Bahamas, '
-    + 'plus ERG and WHO IHR'
+    + 'plus HSC/IGC/IBC/CSS/LSA/FSS/BWM/Polar/IGF codes and IMO '
+    + 'graphical-symbol resolutions), class-society standards from '
+    + 'ABS, Lloyd’s Register, Bureau Veritas, and the IACS UR/PR/CSR '
+    + 'series, U.S. CFR 33/46/49 + 46 USC + USCG guidance and the NMC '
+    + 'examination bank, the UK MCA Code of Safe Working Practices '
+    + '(COSWP 2025), and flag-state regulations from the UK, Australia '
+    + '(incl. NSCV + Navigation Act 2012), Singapore, Hong Kong, '
+    + 'Norway, Liberia, Marshall Islands, Bahamas, Cyprus, Panama, '
+    + 'France, Germany, Spain, and Italy, plus OCIMF SIRE, ERG, and '
+    + 'WHO IHR'
   )
 }
 
