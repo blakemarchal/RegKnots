@@ -57,6 +57,11 @@ SOURCE_TO_JURISDICTIONS: dict[str, list[str]] = {
     # UK national
     "mca_mgn":          ["uk"],
     "mca_msn":          ["uk"],
+    # UK MCA Code of Safe Working Practices for Merchant Seafarers
+    # (COSWP) — Sprint D6.97 #54 (2026-05-27). Primarily authored for
+    # UK-registered ships but widely referenced across UK-influenced
+    # flag operations (Bermuda, Cayman, Isle of Man Red Ensign Group).
+    "coswp":            ["uk"],
     # Australian national
     "amsa_mo":          ["au"],
     # Australian statutes — Navigation Act 2012, Marine Safety (DCV)
@@ -236,7 +241,13 @@ _QUERY_JURISDICTION_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
         r"|\bBritish[-\s]flag\b"
         r"|\bUnited\s+Kingdom\s+flag\b"
         r"|\bRed\s+Ensign\b"
-        r"|\bMaritime\s+(?:and\s+)?Coastguard\s+Agency\b",
+        r"|\bMaritime\s+(?:and\s+)?Coastguard\s+Agency\b"
+        # Sprint D6.97 #54 — COSWP unlocks UK jurisdiction when
+        # explicitly invoked. A US-flag user asking "what does
+        # COSWP say about enclosed-space entry" expects to retrieve
+        # the UK MCA Code of Safe Working Practices.
+        r"|\bCOSWP\b"
+        r"|\bCode\s+of\s+Safe\s+Working\s+Practices\b",
         re.IGNORECASE,
     )),
     # Australia
