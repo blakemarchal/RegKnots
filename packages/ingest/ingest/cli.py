@@ -437,6 +437,13 @@ _PDF_SOURCE_CONFIG: dict[str, dict] = {
         "raw_dir": _DATA_RAW / "abs",
         "adapter": "ingest.sources.abs_mvr",
     },
+    # Sprint D6.97 #54 (2026-05-27) — UK MCA Code of Safe Working
+    # Practices for Merchant Seafarers, 2025 Edition. Crown Copyright
+    # OGL v3. Karynn provided the PDF for the compliance-officer pivot.
+    "coswp": {
+        "raw_dir": _DATA_RAW / "coswp",
+        "adapter": "ingest.sources.coswp",
+    },
 }
 
 _DATA_FAILED = Path(__file__).resolve().parents[3] / "data" / "failed"
