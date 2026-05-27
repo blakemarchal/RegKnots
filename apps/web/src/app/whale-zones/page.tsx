@@ -1,18 +1,20 @@
 /**
- * Whale Zones map page — Sprint D6.97 #49 / refresh #55-follow-up.
+ * Whale Zones map page — Sprint D6.97 #49 + 4-feature follow-up.
  *
  * Full-screen Leaflet map of NOAA Fisheries North Atlantic Right Whale
- * Seasonal Management Areas (SMAs). Filters and zone-detail live in
- * a collapsible right-side drawer so the map is the hero.
+ * Seasonal Management Areas (SMAs) with collapsible right drawer.
+ *
+ * Features (2026-05-27):
+ *   1. Zone-type filter (SMA today, DMA placeholder for when the
+ *      NOAA WhaleAlert dynamic-area feed lands)
+ *   2. Date scrubber — recomputes active-now client-side for any date
+ *      so users can answer "was zone X active when we transited?"
+ *   3. Auto-pan/fit on selection — flies to the selected polygon
+ *   4. Vessel-position pin via opt-in browser Geolocation
  *
  * Public route, no auth required (zones are public regulatory data
- * under 50 CFR 224.105).
- *
- * The map dynamically imports `react-leaflet` because Leaflet itself
- * references `window` at module load and breaks Next.js SSR.
- *
- * Data source: GET /whale-zones/sma — returns a GeoJSON FeatureCollection
- * computed server-side from `apps/api/app/data/whale_sma_zones.py`.
+ * under 50 CFR 224.105). GPS is strictly browser-prompted; we never
+ * persist coordinates server-side.
  */
 'use client'
 
@@ -36,12 +38,22 @@ const GeoJSON = dynamic(
   () => import('react-leaflet').then((m) => m.GeoJSON),
   { ssr: false },
 )
+const CircleMarker = dynamic(
+  () => import('react-leaflet').then((m) => m.CircleMarker),
+  { ssr: false },
+)
+// MapController uses the useMap hook → must be a hook-aware component
+// that itself runs only client-side. Wrap it via dynamic import too.
+const MapController = dynamic(
+  () => import('./MapController').then((m) => m.MapController),
+  { ssr: false },
+)
 
 // ── Types ────────────────────────────────────────────────────────────────
 interface ZoneProps {
   name: string
-  season_start: string
-  season_end: string
+  season_start: string  // "MM-DD"
+  season_end: string    // "MM-DD"
   speed_limit_knots: number
   vessel_threshold_ft: number
   description: string
@@ -72,6 +84,74 @@ interface ZoneCollection {
   }
 }
 
+// ── Pure helpers ────────────────────────────────────────────────────────
+
+/** True when (month, day) of `date` falls inside the season window. Handles
+ *  wrap-around windows like Nov 1 – Apr 30 that cross year boundary.
+ *  Mirrors `_is_active` in apps/api/app/routers/whale_zones.py. */
+function dateIsActive(
+  dateISO: string,         // "YYYY-MM-DD"
+  seasonStart: string,     // "MM-DD"
+  seasonEnd: string,       // "MM-DD"
+): boolean {
+  const [, mStr, dStr] = dateISO.split('-')
+  const today: [number, number] = [Number(mStr), Number(dStr)]
+  const start: [number, number] =
+    seasonStart.split('-').map(Number) as [number, number]
+  const end: [number, number] =
+    seasonEnd.split('-').map(Number) as [number, number]
+  const leq = (a: [number, number], b: [number, number]) =>
+    a[0] < b[0] || (a[0] === b[0] && a[1] <= b[1])
+  if (leq(start, end)) {
+    return leq(start, today) && leq(today, end)
+  }
+  // Wrap-around window (Nov-Apr) — active if today ≥ start OR today ≤ end
+  return leq(start, today) || leq(today, end)
+}
+
+/** Format YYYY-MM-DD for an HTML date input from today's date. */
+function todayISO(): string {
+  const d = new Date()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${d.getFullYear()}-${m}-${day}`
+}
+
+/** Compute the polygon's bounding box as [[south,west],[north,east]]
+ *  in Leaflet lat/lng order. GeoJSON stores lon-first. */
+function bboxLatLng(
+  coords: number[][][],
+): [[number, number], [number, number]] {
+  let minLat = +Infinity, maxLat = -Infinity
+  let minLon = +Infinity, maxLon = -Infinity
+  for (const ring of coords) {
+    for (const [lon, lat] of ring) {
+      if (lat < minLat) minLat = lat
+      if (lat > maxLat) maxLat = lat
+      if (lon < minLon) minLon = lon
+      if (lon > maxLon) maxLon = lon
+    }
+  }
+  return [
+    [minLat, minLon],
+    [maxLat, maxLon],
+  ]
+}
+
+/** Haversine distance in nautical miles between two [lat,lon] points. */
+function distanceNm(a: [number, number], b: [number, number]): number {
+  const R = 3440.065 // Earth radius in nm
+  const toRad = (x: number) => (x * Math.PI) / 180
+  const dLat = toRad(b[0] - a[0])
+  const dLon = toRad(b[1] - a[1])
+  const lat1 = toRad(a[0])
+  const lat2 = toRad(b[0])
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2
+  return 2 * R * Math.asin(Math.sqrt(h))
+}
+
 // ── Page ─────────────────────────────────────────────────────────────────
 export default function WhaleZonesPage() {
   const [data, setData] = useState<ZoneCollection | null>(null)
@@ -79,14 +159,24 @@ export default function WhaleZonesPage() {
   const [error, setError] = useState<string | null>(null)
   const [showActiveOnly, setShowActiveOnly] = useState(false)
   const [selected, setSelected] = useState<ZoneFeature | null>(null)
-  // Drawer is open by default on first render so users see the filters
-  // and zone list without having to discover the toggle. Setting to
-  // false collapses it; persists for the session via useState (we
-  // intentionally don't localStorage-persist — refresh resets to open
-  // so first-time UI surface stays predictable).
   const [drawerOpen, setDrawerOpen] = useState(true)
-  // Mobile-aware default: on small screens start drawer closed so the
-  // map gets the full viewport. Detection runs once on mount.
+
+  // Feature 1: zone-type filter. SMA today; DMA placeholder for when
+  // the WhaleAlert dynamic-area feed lands.
+  const [showSMA] = useState(true)
+
+  // Feature 2: date scrubber. Default to today; user can pick any date
+  // and zones recompute active/inactive client-side.
+  const [dateISO, setDateISO] = useState(todayISO())
+  const isToday = dateISO === todayISO()
+
+  // Feature 4: user-opted-in geolocation. Pin only renders after
+  // explicit click → browser permission grant. NEVER auto-prompts on
+  // page load and NEVER persists server-side.
+  const [userLocation, setUserLocation] = useState<[number, number] | null>(null)
+  const [locStatus, setLocStatus] = useState<'idle' | 'requesting' | 'denied' | 'unavailable' | 'ok'>('idle')
+
+  // Mobile default: drawer closed on <768px so map gets full viewport.
   useEffect(() => {
     if (typeof window !== 'undefined' && window.innerWidth < 768) {
       setDrawerOpen(false)
@@ -104,16 +194,38 @@ export default function WhaleZonesPage() {
       .finally(() => setLoading(false))
   }, [])
 
-  const displayedFeatures = useMemo(() => {
+  // Compute active state per zone for the selected date. Falls back to
+  // server-computed active_now when the date is today (consistent with
+  // server's idea of "now").
+  const featuresWithActive: ZoneFeature[] = useMemo(() => {
     if (!data) return []
-    return showActiveOnly
-      ? data.features.filter((f) => f.properties.active_now)
-      : data.features
-  }, [data, showActiveOnly])
+    if (isToday) return data.features
+    return data.features.map((f) => ({
+      ...f,
+      properties: {
+        ...f.properties,
+        active_now: dateIsActive(
+          dateISO,
+          f.properties.season_start,
+          f.properties.season_end,
+        ),
+      },
+    }))
+  }, [data, dateISO, isToday])
+
+  const displayedFeatures = useMemo(
+    () =>
+      featuresWithActive.filter((f) => {
+        if (!showSMA && f.properties.zone_type === 'SMA') return false
+        if (showActiveOnly && !f.properties.active_now) return false
+        return true
+      }),
+    [featuresWithActive, showSMA, showActiveOnly],
+  )
 
   const activeCount = useMemo(
-    () => (data?.features ?? []).filter((f) => f.properties.active_now).length,
-    [data],
+    () => featuresWithActive.filter((f) => f.properties.active_now).length,
+    [featuresWithActive],
   )
 
   // Style each feature by active / selected / inactive status.
@@ -124,7 +236,7 @@ export default function WhaleZonesPage() {
       const isSelected = selected?.id === feature.id
       const baseColor = active ? '#dc2626' : '#64748b'
       return {
-        color: isSelected ? '#fbbf24' : baseColor, // amber-400 selected outline
+        color: isSelected ? '#fbbf24' : baseColor,
         weight: isSelected ? 3 : 2,
         fillColor: active ? '#dc2626' : '#94a3b8',
         fillOpacity: active ? 0.4 : 0.15,
@@ -140,6 +252,42 @@ export default function WhaleZonesPage() {
     },
     [],
   )
+
+  // Feature 4 handler: user clicks "Show my location" → request browser
+  // geolocation. Privacy: the browser's own prompt is the consent flow.
+  const requestUserLocation = useCallback(() => {
+    if (typeof navigator === 'undefined' || !navigator.geolocation) {
+      setLocStatus('unavailable')
+      return
+    }
+    setLocStatus('requesting')
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setUserLocation([pos.coords.latitude, pos.coords.longitude])
+        setLocStatus('ok')
+      },
+      (err) => {
+        setLocStatus(err.code === err.PERMISSION_DENIED ? 'denied' : 'unavailable')
+      },
+      { enableHighAccuracy: false, timeout: 10_000, maximumAge: 60_000 },
+    )
+  }, [])
+
+  // Selected-zone bounds for the auto-pan controller.
+  const selectedBounds = useMemo(
+    () => (selected ? bboxLatLng(selected.geometry.coordinates) : null),
+    [selected],
+  )
+
+  // Distance from user to selected zone (if both available).
+  const userDistanceToSelected = useMemo(() => {
+    if (!userLocation || !selectedBounds) return null
+    const center: [number, number] = [
+      (selectedBounds[0][0] + selectedBounds[1][0]) / 2,
+      (selectedBounds[0][1] + selectedBounds[1][1]) / 2,
+    ]
+    return distanceNm(userLocation, center)
+  }, [userLocation, selectedBounds])
 
   return (
     <div className="fixed inset-0 overflow-hidden bg-slate-950 text-slate-100">
@@ -157,12 +305,25 @@ export default function WhaleZonesPage() {
           />
           {displayedFeatures.map((feature) => (
             <GeoJSON
-              key={`${feature.id}-${selected?.id === feature.id ? 'sel' : 'unsel'}`}
+              key={`${feature.id}-${selected?.id === feature.id ? 'sel' : 'unsel'}-${feature.properties.active_now ? 'on' : 'off'}`}
               data={feature}
               style={() => zoneStyle(feature)}
               onEachFeature={onEachZone}
             />
           ))}
+          {userLocation && (
+            <CircleMarker
+              center={userLocation}
+              radius={7}
+              pathOptions={{
+                color: '#22d3ee',          // cyan-400
+                fillColor: '#22d3ee',
+                fillOpacity: 0.8,
+                weight: 2,
+              }}
+            />
+          )}
+          <MapController selectedBounds={selectedBounds} userLocation={userLocation} />
         </MapContainer>
       )}
 
@@ -196,7 +357,7 @@ export default function WhaleZonesPage() {
               <span className={`h-1.5 w-1.5 rounded-full ${
                 activeCount > 0 ? 'bg-red-400 animate-pulse' : 'bg-slate-500'
               }`} />
-              {activeCount} active today
+              {activeCount} active {isToday ? 'today' : `on ${dateISO}`}
             </span>
           )}
         </div>
@@ -238,7 +399,7 @@ export default function WhaleZonesPage() {
 
       {/* ── Drawer ─────────────────────────────────────────────────────── */}
       <aside
-        className={`absolute right-0 top-0 z-[450] flex h-full w-full max-w-[400px]
+        className={`absolute right-0 top-0 z-[450] flex h-full w-full max-w-[420px]
           flex-col border-l border-slate-800/60 bg-slate-950/95 shadow-2xl
           backdrop-blur transition-transform duration-300 ease-out ${
             drawerOpen ? 'translate-x-0' : 'translate-x-full'
@@ -270,14 +431,79 @@ export default function WhaleZonesPage() {
           </button>
         </div>
 
-        {/* Drawer body — scrolls when content overflows */}
+        {/* Drawer body */}
         <div className="flex-1 overflow-y-auto px-4 py-4 space-y-5">
-          {/* Filters */}
+          {/* Date scrubber */}
           <section>
             <h3 className="mb-2 font-mono text-[10px] uppercase tracking-widest
               text-slate-500">
-              Filters
+              Date
             </h3>
+            <div className="flex items-center gap-2">
+              <input
+                type="date"
+                value={dateISO}
+                onChange={(e) => setDateISO(e.target.value)}
+                className="flex-1 rounded-md border border-slate-700 bg-slate-900 px-2 py-1.5
+                  text-sm text-slate-100 focus:border-emerald-500 focus:outline-none"
+              />
+              {!isToday && (
+                <button
+                  onClick={() => setDateISO(todayISO())}
+                  className="rounded-md border border-slate-700 bg-slate-900 px-2 py-1.5
+                    text-xs text-slate-300 hover:bg-slate-800"
+                >
+                  Today
+                </button>
+              )}
+            </div>
+            <p className="mt-1.5 text-[11px] leading-relaxed text-slate-500">
+              Pick a date to see which zones were/are/will be active.
+              Useful for transit-audit lookups.
+            </p>
+          </section>
+
+          {/* Zone-type filter */}
+          <section>
+            <h3 className="mb-2 font-mono text-[10px] uppercase tracking-widest
+              text-slate-500">
+              Zone types
+            </h3>
+            <ul className="space-y-1.5 text-sm">
+              <li className="flex items-center justify-between gap-2 text-slate-200">
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={showSMA}
+                    readOnly
+                    className="h-4 w-4 rounded border-slate-600 bg-slate-800
+                      text-emerald-500 focus:ring-emerald-500"
+                  />
+                  <span>SMA — Seasonal (mandatory)</span>
+                </label>
+                <span className="font-mono text-[10px] text-slate-500">
+                  {data?.features.length ?? 0}
+                </span>
+              </li>
+              <li className="flex items-center justify-between gap-2 text-slate-500">
+                <label className="flex items-center gap-2 opacity-60">
+                  <input
+                    type="checkbox"
+                    disabled
+                    className="h-4 w-4 rounded border-slate-700 bg-slate-800"
+                  />
+                  <span>DMA — Dynamic (voluntary)</span>
+                </label>
+                <span className="rounded bg-slate-800 px-1.5 py-0.5 font-mono text-[9px]
+                  uppercase tracking-wider text-slate-400">
+                  Soon
+                </span>
+              </li>
+            </ul>
+          </section>
+
+          {/* Active-only toggle */}
+          <section>
             <label className="flex items-center gap-2 text-sm text-slate-200">
               <input
                 type="checkbox"
@@ -286,8 +512,69 @@ export default function WhaleZonesPage() {
                 className="h-4 w-4 rounded border-slate-600 bg-slate-800
                   text-emerald-500 focus:ring-emerald-500 focus:ring-offset-slate-950"
               />
-              <span>Show active zones only</span>
+              <span>Show only zones active on {isToday ? 'today' : dateISO}</span>
             </label>
+          </section>
+
+          {/* My location (GPS opt-in) */}
+          <section>
+            <h3 className="mb-2 font-mono text-[10px] uppercase tracking-widest
+              text-slate-500">
+              My position
+            </h3>
+            {!userLocation && (
+              <button
+                onClick={requestUserLocation}
+                disabled={locStatus === 'requesting'}
+                className="flex w-full items-center justify-between gap-2 rounded-md
+                  border border-cyan-700/60 bg-cyan-950/40 px-3 py-2 text-sm text-cyan-200
+                  hover:bg-cyan-900/40 disabled:opacity-50"
+              >
+                <span>
+                  {locStatus === 'requesting' ? 'Requesting…' : 'Show my location'}
+                </span>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+                  stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="3" />
+                  <line x1="12" y1="2" x2="12" y2="5" />
+                  <line x1="12" y1="19" x2="12" y2="22" />
+                  <line x1="2" y1="12" x2="5" y2="12" />
+                  <line x1="19" y1="12" x2="22" y2="12" />
+                </svg>
+              </button>
+            )}
+            {userLocation && (
+              <div className="rounded-md border border-cyan-700/60 bg-cyan-950/30 p-2.5
+                text-xs text-cyan-200">
+                <p className="font-mono">
+                  {userLocation[0].toFixed(4)}, {userLocation[1].toFixed(4)}
+                </p>
+                <button
+                  onClick={() => {
+                    setUserLocation(null)
+                    setLocStatus('idle')
+                  }}
+                  className="mt-1 text-[11px] text-cyan-300/70 underline-offset-2 hover:underline"
+                >
+                  Hide my location
+                </button>
+              </div>
+            )}
+            {locStatus === 'denied' && !userLocation && (
+              <p className="mt-1.5 text-[11px] text-amber-300/80">
+                Permission denied. Enable location in your browser to retry.
+              </p>
+            )}
+            {locStatus === 'unavailable' && !userLocation && (
+              <p className="mt-1.5 text-[11px] text-amber-300/80">
+                Location unavailable from this browser/device.
+              </p>
+            )}
+            {!userLocation && locStatus !== 'requesting' && locStatus !== 'denied' && locStatus !== 'unavailable' && (
+              <p className="mt-1.5 text-[11px] leading-relaxed text-slate-500">
+                Optional. Your browser will prompt. We never store your position.
+              </p>
+            )}
           </section>
 
           {/* Legend */}
@@ -300,7 +587,7 @@ export default function WhaleZonesPage() {
               <li className="flex items-center gap-2 text-slate-200">
                 <span className="inline-block h-3 w-3 rounded-sm border border-red-600
                   bg-red-600/40" />
-                <span>Active today — 10 kt limit in force</span>
+                <span>Active — 10 kt limit in force</span>
               </li>
               <li className="flex items-center gap-2 text-slate-200">
                 <span className="inline-block h-3 w-3 rounded-sm border border-slate-500
@@ -311,6 +598,13 @@ export default function WhaleZonesPage() {
                 <span className="inline-block h-3 w-3 rounded-sm border-2 border-amber-400" />
                 <span>Selected</span>
               </li>
+              {userLocation && (
+                <li className="flex items-center gap-2 text-slate-200">
+                  <span className="inline-block h-3 w-3 rounded-full border-2 border-cyan-400
+                    bg-cyan-400/60" />
+                  <span>You</span>
+                </li>
+              )}
             </ul>
           </section>
 
@@ -324,12 +618,16 @@ export default function WhaleZonesPage() {
                 <span
                   className={`shrink-0 rounded px-2 py-0.5 text-[10px] font-medium uppercase
                     tracking-wider ${
-                      selected.properties.active_now
+                      // Reflect the DATE-SCRUBBER computed state, not the
+                      // server's frozen active_now (which is "today" only).
+                      featuresWithActive.find((f) => f.id === selected.id)?.properties.active_now
                         ? 'bg-red-950/60 text-red-300'
                         : 'bg-slate-800/60 text-slate-400'
                     }`}
                 >
-                  {selected.properties.active_now ? 'Active' : 'Inactive'}
+                  {featuresWithActive.find((f) => f.id === selected.id)?.properties.active_now
+                    ? 'Active'
+                    : 'Inactive'}
                 </span>
               </div>
               <p className="mt-2 text-sm leading-relaxed text-slate-300">
@@ -360,6 +658,17 @@ export default function WhaleZonesPage() {
                     {selected.properties.authority}
                   </dd>
                 </div>
+                {userDistanceToSelected !== null && (
+                  <div className="col-span-2 mt-1 rounded bg-cyan-950/30
+                    px-2 py-1.5 ring-1 ring-cyan-800/40">
+                    <dt className="text-cyan-400/80 text-[10px] uppercase tracking-wider">
+                      Distance from you
+                    </dt>
+                    <dd className="text-cyan-200">
+                      ~{userDistanceToSelected.toFixed(1)} nm to centroid
+                    </dd>
+                  </div>
+                )}
               </dl>
             </section>
           )}
@@ -417,7 +726,7 @@ export default function WhaleZonesPage() {
         </div>
       </aside>
 
-      {/* ── Backdrop on mobile when drawer is open ─────────────────────── */}
+      {/* ── Mobile backdrop when drawer is open ────────────────────────── */}
       {drawerOpen && (
         <button
           onClick={() => setDrawerOpen(false)}
