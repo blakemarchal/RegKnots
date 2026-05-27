@@ -311,7 +311,12 @@ export function HamburgerMenu({ open, onClose, onNewChat, onOpenVessels, onOpenS
     : filteredSections
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end">
+    // z-[1100] (was z-50) — Leaflet creates internal map panes up to
+    // z-1000 (tile=200, overlay=400, marker=600, popup=700, control=
+    // 800-1000). On pages embedding a Leaflet map (e.g. /whale-zones),
+    // z-50 means the map paints over the open menu and traps the user.
+    // z-[1100] stays above Leaflet's highest control plane.
+    <div className="fixed inset-0 z-[1100] flex justify-end">
       {/* Backdrop */}
       <div
         className={`absolute inset-0 bg-[#0a0e1a]/70 backdrop-blur-sm transition-opacity duration-200 ${
