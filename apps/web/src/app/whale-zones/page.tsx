@@ -171,10 +171,15 @@ export default function WhaleZonesPage() {
   const isToday = dateISO === todayISO()
 
   // Feature 4: user-opted-in geolocation. Pin only renders after
-  // explicit click → browser permission grant. NEVER auto-prompts on
-  // page load and NEVER persists server-side.
+  // explicit click → browser permission grant. Server-side persistence
+  // is gated by the separate account-page toggle
+  // (`users.location_tracking_enabled`). When that toggle is OFF, the
+  // pin is browser-session only. When ON, the page POSTs to
+  // /me/location on initial share and again every 5 min while mounted.
   const [userLocation, setUserLocation] = useState<[number, number] | null>(null)
   const [locStatus, setLocStatus] = useState<'idle' | 'requesting' | 'denied' | 'unavailable' | 'ok'>('idle')
+  const [serverTrackingEnabled, setServerTrackingEnabled] = useState<boolean>(false)
+  const [lastPersistedAt, setLastPersistedAt] = useState<string | null>(null)
 
   // Mobile default: drawer closed on <768px so map gets full viewport.
   useEffect(() => {
@@ -193,6 +198,68 @@ export default function WhaleZonesPage() {
       .catch((e) => setError(String(e)))
       .finally(() => setLoading(false))
   }, [])
+
+  // Sprint D6.97 #56 — check whether the user has the account-page
+  // toggle on for opt-in GPS persistence. Determines whether
+  // "Show my location" POSTs to /me/location or stays browser-only.
+  // 401 (unauthenticated public visitor) is expected and silent.
+  useEffect(() => {
+    fetch(`${API_URL}/onboarding/persona`, { credentials: 'include' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => {
+        if (j && typeof j.location_tracking_enabled === 'boolean') {
+          setServerTrackingEnabled(j.location_tracking_enabled)
+        }
+      })
+      .catch(() => {})
+  }, [])
+
+  // Helper: POST current position to the server if the user has
+  // opted-in via /account. Silent on 401/403 (unauthed or toggle-off).
+  const persistLocation = useCallback(
+    (lat: number, lon: number, accuracy?: number) => {
+      if (!serverTrackingEnabled) return
+      fetch(`${API_URL}/me/location`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          lat,
+          lon,
+          accuracy_m: accuracy ?? null,
+          source: 'whale_zones',
+        }),
+      })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((j) => {
+          if (j?.stored_at) setLastPersistedAt(j.stored_at)
+        })
+        .catch(() => {})
+    },
+    [serverTrackingEnabled],
+  )
+
+  // Periodic refresh: if the user has GPS on AND the account toggle
+  // is on, re-request position every 5 minutes while the page is
+  // mounted so the stored position stays warm. Stops if either flag
+  // turns off or the page unmounts. We use silent permission (user
+  // already granted; getCurrentPosition won't re-prompt).
+  useEffect(() => {
+    if (!userLocation || !serverTrackingEnabled) return
+    const REFRESH_MS = 5 * 60 * 1000  // 5 min
+    const interval = setInterval(() => {
+      if (typeof navigator === 'undefined' || !navigator.geolocation) return
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          setUserLocation([pos.coords.latitude, pos.coords.longitude])
+          persistLocation(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy)
+        },
+        () => {}, // silent fail; user revoked permission or no signal
+        { enableHighAccuracy: false, timeout: 10_000, maximumAge: 60_000 },
+      )
+    }, REFRESH_MS)
+    return () => clearInterval(interval)
+  }, [userLocation, serverTrackingEnabled, persistLocation])
 
   // Compute active state per zone for the selected date. Falls back to
   // server-computed active_now when the date is today (consistent with
@@ -254,7 +321,10 @@ export default function WhaleZonesPage() {
   )
 
   // Feature 4 handler: user clicks "Show my location" → request browser
-  // geolocation. Privacy: the browser's own prompt is the consent flow.
+  // geolocation. Privacy: the browser's own prompt is the consent flow
+  // for sharing on-screen. Server-side persistence has a SEPARATE
+  // consent gate (account-page toggle); persistLocation() is silent
+  // when that toggle is off.
   const requestUserLocation = useCallback(() => {
     if (typeof navigator === 'undefined' || !navigator.geolocation) {
       setLocStatus('unavailable')
@@ -265,13 +335,14 @@ export default function WhaleZonesPage() {
       (pos) => {
         setUserLocation([pos.coords.latitude, pos.coords.longitude])
         setLocStatus('ok')
+        persistLocation(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy)
       },
       (err) => {
         setLocStatus(err.code === err.PERMISSION_DENIED ? 'denied' : 'unavailable')
       },
       { enableHighAccuracy: false, timeout: 10_000, maximumAge: 60_000 },
     )
-  }, [])
+  }, [persistLocation])
 
   // Selected-zone bounds for the auto-pan controller.
   const selectedBounds = useMemo(
@@ -558,7 +629,15 @@ export default function WhaleZonesPage() {
             )}
             {!userLocation && locStatus !== 'requesting' && locStatus !== 'denied' && locStatus !== 'unavailable' && (
               <p className="mt-1.5 text-[11px] leading-relaxed text-slate-500">
-                Optional. Your browser will prompt. We never store your position.
+                Optional. Your browser will prompt for permission.
+                {serverTrackingEnabled
+                  ? ' Your last position will be saved to your account for personalized chat responses (enable/disable on /account).'
+                  : ' Position stays in this browser session only. Enable location tracking on /account to use it for personalized chat responses.'}
+              </p>
+            )}
+            {userLocation && serverTrackingEnabled && lastPersistedAt && (
+              <p className="mt-1.5 text-[11px] leading-relaxed text-cyan-300/70">
+                Saved to your account · refreshes every 5 min while this page is open
               </p>
             )}
           </section>

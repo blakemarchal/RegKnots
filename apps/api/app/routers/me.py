@@ -1430,3 +1430,92 @@ def _salvage_truncated_json(text: str) -> Optional[dict]:
         except json.JSONDecodeError:
             continue
     return None
+
+
+# ── /me/location — opt-in GPS position storage (D6.97 #56) ────────────────
+
+
+class LocationUpdateRequest(BaseModel):
+    """Body shape for POST /me/location."""
+
+    lat: float
+    lon: float
+    accuracy_m: Optional[float] = None
+    # Source tag so we can attribute / debug. Today only the whale-zones
+    # page POSTs. Future surfaces (chat, background) may add their own.
+    source: str = "whale_zones"
+
+
+class LocationUpdateResponse(BaseModel):
+    stored_at: str  # ISO 8601
+
+
+@router.post("/location", response_model=LocationUpdateResponse)
+async def update_my_location(
+    body: LocationUpdateRequest,
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+) -> LocationUpdateResponse:
+    """Persist the user's most recent GPS position.
+
+    Sprint D6.97 #56 (2026-05-27) — opt-in storage.
+
+    Gate: users.location_tracking_enabled must be true. The toggle is
+    the consent boundary; the whale-zones page only POSTs after the
+    user explicitly opts in via /account. A user who turns the toggle
+    off and tries to POST anyway gets 403 — the route does NOT
+    silently no-op.
+
+    Scope: ONE row per user, most-recent position only. No history.
+    """
+    from datetime import datetime as _dt, timezone as _tz
+
+    pool = await get_pool()
+    user_id = _uuid.UUID(current_user.user_id)
+
+    row = await pool.fetchrow(
+        "SELECT location_tracking_enabled FROM users WHERE id = $1",
+        user_id,
+    )
+    if not row or not row["location_tracking_enabled"]:
+        from fastapi import HTTPException, status as http_status
+        raise HTTPException(
+            status_code=http_status.HTTP_403_FORBIDDEN,
+            detail=(
+                "Location tracking is not enabled for this account. "
+                "Toggle it on at /account before sharing position."
+            ),
+        )
+
+    # Lightweight sanity check — reject obviously bad coords. Latitude
+    # must be in [-90, 90], longitude in [-180, 180]. We don't
+    # otherwise validate (e.g. don't check "this point is on water")
+    # because users can legitimately be at a port / dry-dock.
+    if not (-90.0 <= body.lat <= 90.0):
+        from fastapi import HTTPException, status as http_status
+        raise HTTPException(
+            status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="lat must be in [-90, 90]",
+        )
+    if not (-180.0 <= body.lon <= 180.0):
+        from fastapi import HTTPException, status as http_status
+        raise HTTPException(
+            status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="lon must be in [-180, 180]",
+        )
+
+    now = _dt.now(_tz.utc)
+    await pool.execute(
+        """
+        UPDATE users
+        SET last_known_lat = $1,
+            last_known_lon = $2,
+            last_known_accuracy_m = $3,
+            last_known_at = $4,
+            last_known_source = $5
+        WHERE id = $6
+        """,
+        body.lat, body.lon, body.accuracy_m, now, body.source, user_id,
+    )
+
+    return LocationUpdateResponse(stored_at=now.isoformat())
+
