@@ -339,7 +339,7 @@ const CORPUS: CorpusSource[] = [
   // ── Reference & emergency ────────────────────────────────────────────
   {
     short: 'OCIMF SIRE 2.0',
-    full: 'OCIMF — SIRE 2.0 program documents, Information Papers, TMSA fast facts, and operational guidance (publicly-downloadable layer only; full Question Library beyond Part 1, ISGOTT 6th, MEG-4, and similar member-only publications require an OCIMF subscription)',
+    full: 'OCIMF — SIRE 2.0 Question Library (Parts 1 & 2, all 12 chapters), programme guidance, pre-inspection questionnaire, conditions of participation, OVIQ/BIQ questionnaires, and Information Papers (publicly-downloadable layer; the SIRE 2.0 inspection platform, vessel-specific inspection reports, and book publications like ISGOTT 6th / MEG-4 require an OCIMF subscription)',
     category: 'reference',
     url: 'https://www.ocimf.org/programmes/sire-2-0',
   },
