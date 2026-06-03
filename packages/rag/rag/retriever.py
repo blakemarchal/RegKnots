@@ -46,7 +46,12 @@ SOURCE_GROUPS: dict[str, tuple[str, ...]] = {
     # much larger CFR corpus during per-group diversification. Sprint D5.1.
     "usc": ("usc_46",),
     "colregs": ("colregs",),
-    "solas": ("solas", "solas_supplement"),
+    # Sprint D6.97 #53/#57 (2026-06-03) — imo_msc joins the solas group.
+    # MSC + Assembly safety/operational resolutions (PSPC coatings,
+    # LSA servicing, enclosed-space entry, safe manning) are peer
+    # safety instruments to SOLAS; grouping them here gives them the
+    # SOLAS query-affinity boost and shared diversified-fetch slots.
+    "solas": ("solas", "solas_supplement", "imo_msc"),
     "nvic": ("nvic",),
     "stcw": ("stcw", "stcw_supplement"),
     "ism": ("ism", "ism_supplement"),
@@ -55,7 +60,15 @@ SOURCE_GROUPS: dict[str, tuple[str, ...]] = {
     # discharge / IOPP / sewage / garbage / Annex VI air-emissions
     # queries reliably surface MARPOL convention text alongside the U.S.
     # CFR domestic implementation in 33 CFR Subchapter O.
-    "marpol": ("marpol", "marpol_supplement"),
+    # Sprint D6.97 #53/#57 (2026-06-03) — imo_mepc joins the marpol
+    # group. MEPC numbered resolutions (15ppm bilge alarm / OCM spec
+    # MEPC.107(49)+276(70), ODME MEPC.108(49)+240(65), EGCS/scrubber
+    # guidelines) are the technical-specification layer under MARPOL
+    # Annex I/VI; grouping them here gives them the MARPOL query-
+    # affinity boost. Nirmal Chopra's (Maersk) 15ppm-OCM UTC question
+    # 2026-06-03 motivated this — we referenced MEPC.107(49) but had
+    # no chunk of the resolution text to cite.
+    "marpol": ("marpol", "marpol_supplement", "imo_mepc"),
     # IMDG Code (International Maritime Dangerous Goods Code) — Sprint
     # D6.12. Distinct group so dangerous-goods classification, packing,
     # consignment, segregation, and stowage queries reliably surface

@@ -347,6 +347,19 @@ _PDF_SOURCE_CONFIG: dict[str, dict] = {
         "adapter": "ingest.sources.imo_codes",
         "imo_code": "symbols",
     },
+    # Sprint D6.97 #53/#57 (2026-06-03) — IMO numbered-resolution
+    # harvest Phase 1. MEPC pollution-equipment + MSC/Assembly safety
+    # resolutions. Same imo_codes adapter, two new code keys.
+    "imo_mepc": {
+        "raw_dir": _DATA_RAW / "imo_mepc",
+        "adapter": "ingest.sources.imo_codes",
+        "imo_code": "mepc_res",
+    },
+    "imo_msc": {
+        "raw_dir": _DATA_RAW / "imo_msc",
+        "adapter": "ingest.sources.imo_codes",
+        "imo_code": "msc_res",
+    },
     "imo_iamsar": {
         "raw_dir": _DATA_RAW / "imo_iamsar",
         "adapter": "ingest.sources.imo_iamsar",

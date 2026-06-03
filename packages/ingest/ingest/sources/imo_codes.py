@@ -283,6 +283,115 @@ _CURATED_BY_CODE: dict[str, list[CodeDocMeta]] = {
         ),
     ],
 
+    # Sprint D6.97 #53/#57 (2026-06-03) — IMO numbered-resolution
+    # harvest, Phase 1. Curated high-value MEPC + MSC/Assembly
+    # resolutions that compliance officers cite and that the corpus
+    # previously only REFERENCED (no standalone text to quote).
+    # Nirmal Chopra (Maersk) 15ppm-OCM UTC question 2026-06-03 anchored
+    # the MEPC pollution-equipment cluster. The Circulars (MSC.1/Circ,
+    # MEPC.1/Circ unified interpretations) are NOT on this CDN path
+    # (404) and are deferred to a later phase with separate sourcing.
+    #
+    # Two source buckets keyed by committee → affinity intent:
+    #   mepc_res → imo_mepc  (pollution; rides MARPOL affinity boost)
+    #   msc_res  → imo_msc   (safety; rides SOLAS affinity boost; also
+    #                          holds the 2 Assembly safety resolutions —
+    #                          section_number carries "A.xxxx" so
+    #                          citations stay accurate)
+    "mepc_res": [
+        # Pollution-prevention equipment — the Nirmal cluster.
+        CodeDocMeta(
+            code="MEPC.107(49)",
+            title="Revised Guidelines and Specifications for Pollution Prevention Equipment for Machinery Space Bilges (15 ppm bilge alarm / oil content meter)",
+            pdf_url=f"{_IMO_CDN}/MEPCDocuments/MEPC.107(49).pdf",
+            effective_date=date(2005, 1, 1),
+            parent_label="IMO MEPC Resolution",
+        ),
+        CodeDocMeta(
+            code="MEPC.276(70)",
+            title="2016 Amendments to MEPC.107(49) — tamper-proof data recording device for 15 ppm bilge alarms",
+            pdf_url=f"{_IMO_CDN}/MEPCDocuments/MEPC.276(70).pdf",
+            effective_date=date(2018, 1, 1),
+            parent_label="IMO MEPC Resolution",
+        ),
+        CodeDocMeta(
+            code="MEPC.108(49)",
+            title="Revised Guidelines and Specifications for Oil Discharge Monitoring and Control Systems (ODME) for Oil Tankers",
+            pdf_url=f"{_IMO_CDN}/MEPCDocuments/MEPC.108(49).pdf",
+            effective_date=date(2005, 1, 1),
+            parent_label="IMO MEPC Resolution",
+        ),
+        CodeDocMeta(
+            code="MEPC.240(65)",
+            title="Amendments to the ODME Guidelines (MEPC.108(49))",
+            pdf_url=f"{_IMO_CDN}/MEPCDocuments/MEPC.240(65).pdf",
+            effective_date=date(2014, 10, 1),
+            parent_label="IMO MEPC Resolution",
+        ),
+        # Exhaust Gas Cleaning Systems (scrubbers) — Maersk-relevant.
+        CodeDocMeta(
+            code="MEPC.259(68)",
+            title="2015 Guidelines for Exhaust Gas Cleaning Systems (EGCS / scrubbers)",
+            pdf_url=f"{_IMO_CDN}/MEPCDocuments/MEPC.259(68).pdf",
+            effective_date=date(2015, 5, 15),
+            parent_label="IMO MEPC Resolution",
+        ),
+        CodeDocMeta(
+            code="MEPC.184(59)",
+            title="2009 Guidelines for Exhaust Gas Cleaning Systems (predecessor to MEPC.259(68))",
+            pdf_url=f"{_IMO_CDN}/MEPCDocuments/MEPC.184(59).pdf",
+            effective_date=date(2009, 7, 17),
+            parent_label="IMO MEPC Resolution",
+        ),
+        CodeDocMeta(
+            code="MEPC.305(73)",
+            title="2018 Amendments to MARPOL Annex VI (EGCS / fuel-oil-related)",
+            pdf_url=f"{_IMO_CDN}/MEPCDocuments/MEPC.305(73).pdf",
+            effective_date=date(2020, 1, 1),
+            parent_label="IMO MEPC Resolution",
+        ),
+    ],
+
+    "msc_res": [
+        # Protective coatings (PSPC) — ballast & cargo-oil tanks.
+        CodeDocMeta(
+            code="MSC.215(82)",
+            title="Performance Standard for Protective Coatings (PSPC) for Dedicated Seawater Ballast Tanks",
+            pdf_url=f"{_IMO_CDN}/MSCResolutions/MSC.215(82).pdf",
+            effective_date=date(2006, 12, 8),
+            parent_label="IMO MSC Resolution",
+        ),
+        CodeDocMeta(
+            code="MSC.288(87)",
+            title="Performance Standard for Protective Coatings (PSPC) for Cargo Oil Tanks of Crude Oil Tankers",
+            pdf_url=f"{_IMO_CDN}/MSCResolutions/MSC.288(87).pdf",
+            effective_date=date(2012, 1, 1),
+            parent_label="IMO MSC Resolution",
+        ),
+        CodeDocMeta(
+            code="MSC.402(96)",
+            title="Requirements for Maintenance, Thorough Examination, Operational Testing, Overhaul and Repair of Lifeboats and Rescue Boats, Launching Appliances and Release Gear",
+            pdf_url=f"{_IMO_CDN}/MSCResolutions/MSC.402(96).pdf",
+            effective_date=date(2020, 1, 1),
+            parent_label="IMO MSC Resolution",
+        ),
+        # Assembly safety/operational resolutions (high SIRE/PSC value).
+        CodeDocMeta(
+            code="A.1050(27)",
+            title="Revised Recommendations for Entering Enclosed Spaces Aboard Ships",
+            pdf_url=f"{_IMO_CDN}/AssemblyDocuments/A.1050(27).pdf",
+            effective_date=date(2011, 11, 30),
+            parent_label="IMO Assembly Resolution",
+        ),
+        CodeDocMeta(
+            code="A.1047(27)",
+            title="Principles of Minimum Safe Manning",
+            pdf_url=f"{_IMO_CDN}/AssemblyDocuments/A.1047(27).pdf",
+            effective_date=date(2011, 11, 30),
+            parent_label="IMO Assembly Resolution",
+        ),
+    ],
+
     # Sprint D6.41 — STCW amendments since the 2017 Consolidated Edition.
     # The official IMO supplement PDF only includes MSC.540/541 (Jan 2025).
     # These are the additional MSC resolutions that amend STCW between 2017
@@ -445,6 +554,9 @@ _CODE_TO_SOURCE = {
     "fss": "imo_fss",
     # Sprint D6.97 #48 — IMO graphical-symbol resolutions
     "symbols": "imo_symbols",
+    # Sprint D6.97 #53/#57 — IMO numbered-resolution harvest Phase 1.
+    "mepc_res": "imo_mepc",
+    "msc_res": "imo_msc",
 }
 
 

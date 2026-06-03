@@ -121,6 +121,11 @@ SOURCE_TO_JURISDICTIONS: dict[str, list[str]] = {
     # Sprint D6.97 #48 — IMO graphical-symbol Assembly resolutions
     # (A.952(23) FCP symbols, A.760(18) + A.1116(30) LSA symbols).
     "imo_symbols":      ["intl"],
+    # Sprint D6.97 #53/#57 — IMO numbered-resolution harvest Phase 1.
+    # MEPC pollution-equipment + MSC/Assembly safety resolutions. All
+    # bind every flag that has adopted the underlying IMO instruments.
+    "imo_mepc":         ["intl"],
+    "imo_msc":          ["intl"],
     "mou_psc":          ["intl"],
     # International (universal — bind every flag on intl voyages)
     "solas":            ["intl"],
