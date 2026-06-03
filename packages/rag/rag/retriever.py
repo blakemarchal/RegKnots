@@ -171,6 +171,16 @@ SOURCE_GROUPS: dict[str, tuple[str, ...]] = {
         "imo_css", "imo_loadlines", "imo_igc", "imo_ibc", "imo_hsc",
         "imo_lsa", "imo_fss",
     ),
+    # OCIMF — SIRE 2.0 vetting question library + procedural suite,
+    # OVIQ/BIQ questionnaires, Information Papers. Sprint D6.97 #58
+    # (2026-06-03): given its own group so the SIRE corpus (929 + 767
+    # Q-Library chunks + the rest) gets a guaranteed diversified-fetch
+    # slot. Previously ungrouped → no slot, no affinity boost → SIRE
+    # chunks lost the unfiltered ranking to NVIC/COSWP/BV even though
+    # source-filtered they score 0.74 on vetting queries. The
+    # _OCIMF_TERMS affinity boost below lifts the group on SIRE /
+    # vetting / inspection-questionnaire queries.
+    "ocimf": ("ocimf",),
     # IMO reference manuals (operational guidance, not binding rule).
     "imo_ref": ("imo_iamsar",),
     # Port State Control regimes (Tokyo MOU + Paris MOU).
@@ -595,6 +605,33 @@ _MCA_ABBR_RE = re.compile(
 )
 
 
+# OCIMF / SIRE 2.0 vetting affinity — Sprint D6.97 #58 (2026-06-03).
+# The SIRE 2.0 Question Library IS the question bank a vetting inspector
+# works from, so a "what will a SIRE inspector check" / "vetting" /
+# "VIQ" query should surface the OCIMF corpus over the generic
+# inspection guidance (NVIC / COSWP / class rules). Terms are kept
+# SIRE/vetting-specific — bare "inspection" is intentionally excluded
+# (it would over-fire on PSC / USCG / class-survey queries that have
+# their own groups).
+_OCIMF_TERMS: tuple[str, ...] = (
+    "sire", "sire 2.0", "ocimf",
+    "vetting", "vetting inspection", "tanker vetting",
+    "viq", "vessel inspection questionnaire",
+    "oviq", "barge inspection questionnaire", "biq",
+    "pre-inspection questionnaire", "pre inspection questionnaire",
+    "tmsa", "tanker management self assessment",
+    "isgott",  # referenced throughout SIRE even though the book is paywalled
+    "negative observation", "inspection observation",
+)
+_OCIMF_ABBR_RE = re.compile(
+    # Question-attribute codes are SIRE-distinctive. "VIQ7", "OVIQ4",
+    # "BIQ5" appear in our section_numbers; recognising them lets a
+    # user citing a questionnaire version pull the right corpus.
+    r"\b(?:VIQ|OVIQ|BIQ)\s*\d?\b|\bSIRE\s*2\.0\b",
+    re.IGNORECASE,
+)
+
+
 def _source_affinity(
     query: str, vessel_profile: dict | None = None,
 ) -> dict[str, float]:
@@ -675,6 +712,12 @@ def _source_affinity(
         # ISM, MARPOL) since UK implements the IMO conventions. Modest
         # supplementary boost so the international context surfaces too.
         boosts.setdefault("solas", 0.10)
+
+    # Sprint D6.97 #58 — OCIMF / SIRE 2.0 vetting boost. A query about
+    # SIRE / vetting / VIQ / pre-inspection-questionnaire content should
+    # surface the OCIMF question bank over generic inspection guidance.
+    if any(t in q for t in _OCIMF_TERMS) or _OCIMF_ABBR_RE.search(q):
+        boosts["ocimf"] = 0.20
 
     # Sprint D6.97 AU sprint phase 2 — AMSA / NSCV / DCV boost. Two
     # independent triggers: explicit AU-regulatory vocabulary in the
