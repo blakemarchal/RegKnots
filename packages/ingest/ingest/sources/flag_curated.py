@@ -250,6 +250,13 @@ _OCIMF_DOCS: list[CuratedDoc] = [
     CuratedDoc("OCIMF SIRE 2.0 Q Library Pt1",
                "SIRE 2.0 Question Library Part 1 — Chapters 1 to 7 v1.0 (Jan 2022)",
                "https://www.ocimf.org/document-libary/630-sire-2-0-question-library-part-1-chapters-1-to-7-version-1-0-january-2022/file"),
+    # Sprint D6.97 #58 (2026-06-03) — Part 2 completes the SIRE 2.0
+    # question bank. Freely downloadable (the earlier "members-only
+    # beyond Part 1" assumption was wrong). OCIMF library id 631;
+    # confirmed 200 / 3.2 MB from the prod IP.
+    CuratedDoc("OCIMF SIRE 2.0 Q Library Pt2",
+               "SIRE 2.0 Question Library Part 2 — Chapters 8 to 12 v1.0 (Jan 2022)",
+               "https://www.ocimf.org/document-libary/631-sire-2-0-question-library-part-2-chapters-8-to-12-version-1-0-january-2022/file"),
     CuratedDoc("OCIMF SIRE 2.0 Pre-Inspection Q",
                "SIRE 2.0 Instructions for Completing the Pre-Inspection Questionnaire v1.0",
                "https://www.ocimf.org/document-libary/664-sire-2-0-instructions-for-completing-the-pre-inspection-questionnaire-version-1-0/file"),
