@@ -308,8 +308,16 @@ _CURATED_BY_CODE: dict[str, list[CodeDocMeta]] = {
             parent_label="IMO MEPC Resolution",
         ),
         CodeDocMeta(
+            # NOTE (2026-06-03 audit): the ingested text confirms this is
+            # GENERAL "Amendments to the Annex of MARPOL (Annex I)" adopted
+            # at MEPC 70 (28 Oct 2016) — NOT specifically the 15 ppm bilge
+            # alarm tamper-proof recording amendment that the #57 task
+            # assumed. Title corrected to avoid mis-citation. The actual
+            # data-recording-device requirement lives in MEPC.107(49)
+            # itself (Ch.4/Ch.6), which states date/time recording + 18-
+            # month retention but NO UTC clock-sync tolerance.
             code="MEPC.276(70)",
-            title="2016 Amendments to MEPC.107(49) — tamper-proof data recording device for 15 ppm bilge alarms",
+            title="2016 Amendments to MARPOL Annex I (adopted MEPC 70, 28 Oct 2016)",
             pdf_url=f"{_IMO_CDN}/MEPCDocuments/MEPC.276(70).pdf",
             effective_date=date(2018, 1, 1),
             parent_label="IMO MEPC Resolution",
