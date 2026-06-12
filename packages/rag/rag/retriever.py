@@ -628,6 +628,13 @@ _MLC_TERMS: tuple[str, ...] = (
     "dmlc", "seafarer welfare", "food and catering",
     "ship's cook", "ships' cook", "seafarer wages", "wages of seafarers",
     "minimum age", "accommodation and recreational",
+    # Food/catering-distinctive terms (Reg 3.2 / Std A3.2) — Nirmal's
+    # "expiry of provisions / best before" question used none of the
+    # above. These are food-specific enough not to over-fire.
+    "best before", "catering", "victualling", "ship's provisions",
+    "ships' provisions", "food provisions", "drinking water quality",
+    # Stem variant — "repatriate" as well as "repatriation".
+    "repatriate",
 )
 _MLC_ABBR_RE = re.compile(
     r"\bStandard\s+A\d+(?:\.\d+){1,2}\b"
