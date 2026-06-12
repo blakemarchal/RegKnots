@@ -30,7 +30,7 @@ from anthropic import (
 
 from rag.context import build_context
 from rag.fallback import FALLBACK_MODEL_ID, fallback_chat
-from rag.followup import compose_followup_query, detect_followup
+from rag.followup import compose_followup_query, compose_reason, detect_followup
 from rag.hedge import detect_hedge
 from rag.query_distill import LENGTH_THRESHOLD_CHARS
 from rag.models import ChatMessage, ChatResponse, CitedRegulation
@@ -2582,18 +2582,28 @@ async def chat_with_progress(
             yield event
         return
 
-    # Sprint D6.4 — same followup detection + escalation as chat().
+    # Sprint D6.4 — followup detection. NARROW pattern match
+    # (followup_match) drives the Opus model escalation below. Sprint
+    # D6.97 audit (2026-06) — the BROADER compose_reason additionally
+    # composes the retrieval query for any SHORT mid-thread message, not
+    # just pattern-matched pushback. This fixes the Nirmal 2026-06-04
+    # provisions thread: clarifications that match no pushback pattern
+    # ("The question is about USCG best before date rule") were
+    # retrieving on bare words with no topical context → complete miss.
+    # Composition is cheap (changes only what we embed); model escalation
+    # stays gated on the narrow signal so cost doesn't balloon.
     followup_match = detect_followup(query)
+    compose = compose_reason(query, len(conversation_history))
     retrieval_query = query
-    if followup_match:
+    if compose:
         prior_user_msg = next(
             (m.content for m in reversed(conversation_history) if m.role == "user"),
             None,
         )
         retrieval_query = compose_followup_query(prior_user_msg, query)
         logger.info(
-            "Followup detected (pattern=%r); routing to %s with combined retrieval query",
-            followup_match, REGENERATION_MODEL,
+            "Followup composition (%s); model_escalate=%s; combined retrieval query",
+            compose, bool(followup_match),
         )
     elif (
         len(conversation_history) == 0

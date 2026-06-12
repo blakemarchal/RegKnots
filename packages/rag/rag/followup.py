@@ -71,6 +71,10 @@ _FOLLOWUP_RE = re.compile(
 def detect_followup(query: str) -> str | None:
     """Return the matched follow-up phrase, or None.
 
+    NARROW pattern signal — drives BOTH the Opus model escalation and
+    (via compose_reason) retrieval-query composition. Genuine pushback
+    ("you said X", "are you sure") earns the smarter synthesis model.
+
     Returns the actual matched substring (truncated to 120 chars) so the
     engine can log what triggered the detection — useful for tuning the
     pattern list against real user data over time.
@@ -84,6 +88,47 @@ def detect_followup(query: str) -> str | None:
     if match is None:
         return None
     return match.group(0)[:120]
+
+
+# Sprint D6.97 audit (2026-06) — a short message mid-thread is almost
+# always a clarification or continuation whose embedding lacks the
+# thread's topical anchor. Nirmal's 2026-06-04 provisions thread is the
+# canonical failure: his clarifications "The question is about USCG best
+# before date rule" (47ch) and "I am talking about General provisions
+# for daily consumption" (58ch) matched NONE of the FOLLOWUP_PATTERNS,
+# so retrieval ran on the bare words with no topical context → a
+# complete miss. Pattern-matching can't keep up with the infinite ways a
+# user phrases a clarification; message length is the robust signal.
+_SHORT_FOLLOWUP_CHARS = 140
+
+
+def compose_reason(query: str, history_len: int) -> str | None:
+    """Return a short reason string when the retrieval query should be
+    COMPOSED with the prior user message, else None.
+
+    BROAD signal — drives retrieval-query composition only (cheap: it
+    just changes what we embed). Deliberately decoupled from
+    detect_followup, which ALSO gates the expensive Opus escalation:
+    composition should be generous, model-escalation should not.
+
+    Two triggers, both requiring a non-empty conversation history:
+      1. A pushback/clarification PATTERN matched (detect_followup).
+      2. The message is SHORT (< _SHORT_FOLLOWUP_CHARS). Short mid-thread
+         messages overwhelmingly continue the established topic; the
+         prior user message restores the context the short query drops.
+
+    First-turn queries (history_len == 0) never compose — there is no
+    prior message and verbose first turns go through query distillation
+    instead (see engine.py).
+    """
+    if history_len <= 0:
+        return None
+    pattern = detect_followup(query)
+    if pattern:
+        return f"pattern:{pattern}"
+    if len((query or "").strip()) < _SHORT_FOLLOWUP_CHARS:
+        return f"short:{len((query or '').strip())}ch"
+    return None
 
 
 def compose_followup_query(
