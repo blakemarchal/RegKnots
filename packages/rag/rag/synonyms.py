@@ -175,6 +175,15 @@ SYNONYM_DICT: dict[str, tuple[str, ...]] = {
     "imo symbols": ("graphical symbol", "fire control plan", "safety sign"),
     "imo label":   ("graphical symbol", "fire control plan", "safety sign"),
     "imo labels":  ("graphical symbol", "fire control plan", "safety sign"),
+    # Sprint D6.97 audit (2026-06) — Nirmal Chopra (Maersk), 2026-06-04:
+    # "expiry of provisions / best before date" retrieved BMA/STCW/MARPOL
+    # but never MLC Standard A3.2 (Food and catering), the controlling
+    # standard. Mariners say "provisions" / "victuals"; MLC says "food
+    # and drinking water" / "food and catering". Bridge the vocab so the
+    # trigram lane pulls the MLC food sections. Narrow multi-word targets
+    # keep the candidate pool focused; bare "food" stays out.
+    "provisions":  ("food and drinking water", "food and catering"),
+    "victuals":    ("food and drinking water", "food and catering"),
 }
 
 
