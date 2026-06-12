@@ -848,7 +848,32 @@ _IDENTIFIER_PATTERNS: list[tuple[str, re.Pattern]] = [
     # S-X for spill schedules. Distinctive enough to anchor on as an
     # identifier without ambiguity.
     ("imdg_ems",     re.compile(r"\bEmS\s*([FS]-[A-Z])\b", re.IGNORECASE)),
+    # Sprint D6.97 audit (2026-06) — USCG forms (CG-NNN[X]). Karynn's
+    # 2026-06-04 "self reported 835 for sailing short" got "there is no
+    # Form 835 in the verified regulations" — a false non-existence
+    # claim — because the keyword tokenizer (`[a-zA-Z]+`) drops digits
+    # and there was no form identifier pattern, so the 55 CG-835 chunks
+    # were unreachable. This catches the explicit "CG-835" / "CG 835" /
+    # "CG835" form; bare numbers in form context are handled separately
+    # below (_detect_cg_form_numbers). Common forms: CG-835 (deficiency),
+    # CG-719B/C/K (medical), CG-2692 (casualty report), CG-1258.
+    ("cg_form",      re.compile(r"\bCG[-\s]?(\d{2,4}[A-Za-z]?)\b", re.IGNORECASE)),
 ]
+
+
+# Form-context words that, when present alongside a bare 3-4 digit
+# number, license treating that number as a USCG form reference (search
+# the corpus for the CG-prefixed form). Searching "CG-835" for a spurious
+# number is self-correcting — no "CG-<n>" in corpus → zero rows, harmless.
+_FORM_CONTEXT_RE = re.compile(
+    r"\b(?:form|forms|report|reported|reporting|self[-\s]?report|submit|"
+    r"submitted|submission|file|filing|filed|cg[-\s]?form)\b",
+    re.IGNORECASE,
+)
+# Bare 3-4 digit number (optional single-letter suffix), used only when
+# a form-context word is also present. 3-digit minimum avoids matching
+# "12 hours", "2 copies", etc.
+_BARE_FORM_NUMBER_RE = re.compile(r"\b(\d{3,4}[A-Za-z]?)\b")
 
 
 # Sprint D6.24 — implicit MARPOL Annex inference.
@@ -1025,6 +1050,17 @@ def _extract_identifiers(query: str) -> list[dict]:
                     "value": f"EmS {code}",
                     "pattern": code,
                 })
+            elif id_type == "cg_form":
+                # Search for the CG-prefixed form across hyphen/space/none
+                # storage variants, case-insensitively on the CG prefix.
+                # \m...\M word-bounds are added by _identifier_search.
+                num = m.group(1).upper()
+                identifiers.append({
+                    "type": id_type,
+                    "value": f"CG-{num}",
+                    "pattern": f"[Cc][Gg][- ]?{num}",
+                    "regex": True,
+                })
             elif id_type == "packing_instr":
                 num = m.group(1)
                 # CFR storage: "PI 510" — substring match is safe.
@@ -1067,6 +1103,31 @@ def _extract_identifiers(query: str) -> list[dict]:
             "regex": True,
             "source_filter": ("marpol", "marpol_supplement"),
         })
+
+    # Sprint D6.97 audit (2026-06) — bare form numbers in form context.
+    # "self reported 835 for sailing short" has no "CG" prefix, so the
+    # explicit cg_form pattern misses it. When the query carries a
+    # form-context word (form/report/submit/file/...) AND a standalone
+    # 3-4 digit number, search the corpus for the CG-prefixed form. This
+    # is self-correcting: a spurious number (e.g. "12" from "12 hours")
+    # searches "CG-12", finds nothing, and is silently dropped.
+    if _FORM_CONTEXT_RE.search(query):
+        already_cg = {
+            i["value"].replace("CG-", "").upper()
+            for i in identifiers if i.get("type") == "cg_form"
+        }
+        for m in _BARE_FORM_NUMBER_RE.finditer(query):
+            num = m.group(1).upper()
+            if num in already_cg:
+                continue
+            already_cg.add(num)
+            identifiers.append({
+                "type": "cg_form_bare",
+                "value": f"CG-{num}",
+                "pattern": f"[Cc][Gg][- ]?{num}",
+                "regex": True,
+            })
+
     return identifiers
 
 
