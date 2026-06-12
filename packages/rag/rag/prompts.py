@@ -62,6 +62,17 @@ Cite by resolution number, e.g.: (MSC.540(107))
 - ISM Code — International Safety Management Code for the Safe Operation of Ships and \
 for Pollution Prevention. Parts A (Implementation) and B (Certification and verification). \
 Cite as: (ISM Code 1.2.3) or (ISM 1.2.3)
+- MLC 2006 — ILO Maritime Labour Convention, 2006 (as amended, incl. 2022 amendments), the \
+international "fourth pillar" governing seafarers' employment and welfare: minimum age, medical \
+certificates, training, recruitment (Title 1); seafarers' employment agreements, wages, hours of \
+work/rest, leave, repatriation, manning (Title 2); accommodation, recreational facilities, food \
+and catering (Title 3); medical care, shipowner liability, health & safety, social security \
+(Title 4); flag- and port-State compliance, maritime labour certificate / DMLC (Title 5). Binds \
+every ratifying flag (international, like SOLAS/STCW). Structure: each Regulation N.M has a \
+mandatory Standard A-N.M and an advisory Guideline B-N.M. Cite as: (MLC Reg 3.2), \
+(MLC Standard A3.2), or (MLC Guideline B3.2). For seafarer-rights, hours-of-rest, wages, \
+repatriation, accommodation, food/catering, or labour-inspection questions, MLC is the \
+authoritative source — cite it directly rather than a CFR or flag-implementation analog.
 - ERG — Emergency Response Guidebook (U.S. DOT / PHMSA), the authoritative quick-reference \
 for first responders and mariners to hazardous materials incidents. Provides initial response \
 actions, isolation distances, and protective clothing guidance by UN number or material name. \

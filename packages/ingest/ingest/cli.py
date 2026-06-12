@@ -457,6 +457,16 @@ _PDF_SOURCE_CONFIG: dict[str, dict] = {
         "raw_dir": _DATA_RAW / "coswp",
         "adapter": "ingest.sources.coswp",
     },
+    # Sprint D6.97 audit (2026-06) — ILO Maritime Labour Convention 2006
+    # (as amended, incl. 2022). The labour "fourth pillar" — seafarer
+    # employment, wages, hours, accommodation, food/catering (Reg 3.2 /
+    # Std A3.2 — Nirmal's provisions question), medical care, Title 5
+    # compliance. ilo.org WAF-blocks the prod IP, so the PDF is manually
+    # placed in data/raw/mlc/ (same pattern as ABS / COSWP / Lloyd's).
+    "mlc": {
+        "raw_dir": _DATA_RAW / "mlc",
+        "adapter": "ingest.sources.mlc",
+    },
 }
 
 _DATA_FAILED = Path(__file__).resolve().parents[3] / "data" / "failed"

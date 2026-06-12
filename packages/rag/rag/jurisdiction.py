@@ -128,6 +128,10 @@ SOURCE_TO_JURISDICTIONS: dict[str, list[str]] = {
     "imo_msc":          ["intl"],
     "mou_psc":          ["intl"],
     # International (universal — bind every flag on intl voyages)
+    # Sprint D6.97 audit (2026-06) — ILO Maritime Labour Convention
+    # 2006. The labour "fourth pillar"; binds every ratifying flag,
+    # so 'intl' like SOLAS/STCW/MARPOL.
+    "mlc":              ["intl"],
     "solas":            ["intl"],
     "solas_supplement": ["intl"],
     "colregs":          ["intl"],

@@ -56,6 +56,12 @@ const CORPUS: CorpusSource[] = [
     url: 'https://www.imo.org/en/OurWork/HumanElement/Pages/STCW-Convention.aspx',
   },
   {
+    short: 'MLC 2006',
+    full: 'ILO Maritime Labour Convention, 2006 (as amended, incl. 2022) — the international “fourth pillar”: seafarers’ employment agreements, wages, hours of work/rest, leave, repatriation, manning, accommodation, food & catering, medical care, shipowner liability, social security, and flag/port-State labour compliance (Titles 1–5, with mandatory Standards A and advisory Guidelines B).',
+    category: 'international',
+    url: 'https://www.ilo.org/international-labour-standards/maritime-labour-convention-2006',
+  },
+  {
     short: 'ISM Code',
     full: 'International Safety Management Code',
     category: 'international',
