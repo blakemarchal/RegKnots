@@ -55,6 +55,13 @@ SOURCE_GROUPS: dict[str, tuple[str, ...]] = {
     "nvic": ("nvic",),
     "stcw": ("stcw", "stcw_supplement"),
     "ism": ("ism", "ism_supplement"),
+    # ILO Maritime Labour Convention 2006 — Sprint D6.97 audit (2026-06).
+    # The labour "fourth pillar" (seafarer employment, wages, hours of
+    # work/rest, accommodation, food & catering, medical care, Title 5
+    # compliance). Own group so it gets a diversified-fetch slot and
+    # isn't crowded out by the German/Liberian MLC *implementations*
+    # (bg_verkehr, liscr_mn) that previously were the only MLC content.
+    "mlc": ("mlc",),
     # MARPOL (International Convention for the Prevention of Pollution
     # from Ships) — Sprint D6.11. Distinct group so pollution / oil
     # discharge / IOPP / sewage / garbage / Annex VI air-emissions
@@ -605,6 +612,31 @@ _MCA_ABBR_RE = re.compile(
 )
 
 
+# ILO Maritime Labour Convention 2006 affinity — Sprint D6.97 audit
+# (2026-06). A seafarer-rights / labour / crew-welfare query should
+# surface the MLC convention over the national implementations
+# (bg_verkehr, liscr_mn) that share the "MLC" string. Terms are
+# MLC-distinctive; "Standard A<n.m>" and "Guideline B<n.m>" citation
+# forms (the A/B Code-part prefix) are unambiguously MLC.
+_MLC_TERMS: tuple[str, ...] = (
+    "mlc", "maritime labour convention", "maritime labor convention",
+    "seafarer employment agreement", "seafarers' employment agreement",
+    "seafarer's employment agreement", "repatriation",
+    "hours of rest", "hours of work and rest",
+    "shipowner liability", "shipowners' liability",
+    "maritime labour certificate", "declaration of maritime labour compliance",
+    "dmlc", "seafarer welfare", "food and catering",
+    "ship's cook", "ships' cook", "seafarer wages", "wages of seafarers",
+    "minimum age", "accommodation and recreational",
+)
+_MLC_ABBR_RE = re.compile(
+    r"\bStandard\s+A\d+(?:\.\d+){1,2}\b"
+    r"|\bGuideline\s+B\d+(?:\.\d+){1,2}\b"
+    r"|\bDMLC\b|\bMLC\s*,?\s*2006\b",
+    re.IGNORECASE,
+)
+
+
 # OCIMF / SIRE 2.0 vetting affinity — Sprint D6.97 #58 (2026-06-03).
 # The SIRE 2.0 Question Library IS the question bank a vetting inspector
 # works from, so a "what will a SIRE inspector check" / "vetting" /
@@ -718,6 +750,12 @@ def _source_affinity(
     # surface the OCIMF question bank over generic inspection guidance.
     if any(t in q for t in _OCIMF_TERMS) or _OCIMF_ABBR_RE.search(q):
         boosts["ocimf"] = 0.20
+
+    # Sprint D6.97 audit (2026-06) — MLC 2006 boost. Seafarer-rights /
+    # labour / crew-welfare queries surface the convention over the
+    # national implementations that share the "MLC" string.
+    if any(t in q for t in _MLC_TERMS) or _MLC_ABBR_RE.search(q):
+        boosts["mlc"] = 0.20
 
     # Sprint D6.97 AU sprint phase 2 — AMSA / NSCV / DCV boost. Two
     # independent triggers: explicit AU-regulatory vocabulary in the
