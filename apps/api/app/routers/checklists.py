@@ -506,7 +506,7 @@ async def generate_psc_checklist(
     try:
         anthropic_client: AsyncAnthropic = request.app.state.anthropic
         response = await anthropic_client.messages.create(
-            model="claude-sonnet-4-6",
+            model="claude-sonnet-5",
             max_tokens=8192,
             system=_PSC_SYSTEM_PROMPT,
             messages=[{

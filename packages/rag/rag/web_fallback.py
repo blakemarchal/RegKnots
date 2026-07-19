@@ -574,7 +574,7 @@ async def attempt_web_fallback(
     *,
     query: str,
     anthropic_client,
-    model: str = "claude-sonnet-4-6",
+    model: str = "claude-sonnet-5",
     min_confidence_verified: int = 4,
     min_confidence_reference: int = 2,
 ) -> FallbackResult:
@@ -753,7 +753,7 @@ async def attempt_news_fallback(
     query: str,
     markers_matched: list[str],
     anthropic_client,
-    model: str = "claude-sonnet-4-6",
+    model: str = "claude-sonnet-5",
     max_age_days: int = 180,
 ) -> NewsFallbackResult:
     """Run the maritime current-events news fallback. Returns a

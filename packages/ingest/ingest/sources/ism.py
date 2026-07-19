@@ -212,7 +212,7 @@ async def extract_images(raw_dir: Path, force: bool = False) -> None:
 
         try:
             resp = await client.messages.create(
-                model="claude-sonnet-4-20250514",
+                model="claude-sonnet-5",
                 max_tokens=8192,
                 system=_VISION_SYSTEM_PROMPT,
                 messages=[{"role": "user", "content": content}],

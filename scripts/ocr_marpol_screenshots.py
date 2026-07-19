@@ -58,7 +58,7 @@ MANIFEST_PATH = SCREENSHOT_DIR / "extracted" / "_manifest.json"
 
 # Claude Sonnet 4.6 — same model the NMC OCR script uses. Image input is
 # straightforward transcription, no need for Opus.
-_VISION_MODEL = "claude-sonnet-4-6"
+_VISION_MODEL = "claude-sonnet-5"
 
 # Max parallel Vision calls. Anthropic rate limits at our tier comfortably
 # permit 5; higher would blow latency budgets without saving wall time.

@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 
 _ENCODER = tiktoken.get_encoding("cl100k_base")
 _MAX_TOKENS = 512
-_MODEL = "claude-sonnet-4-20250514"
+_MODEL = "claude-sonnet-5"
 _BATCH_SIZE = 20  # chunks per API batch — kept as the per-batch
                   # window so we can checkpoint the cache between
                   # batches and recover from interruptions.

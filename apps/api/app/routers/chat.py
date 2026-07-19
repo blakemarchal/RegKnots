@@ -43,31 +43,40 @@ router = APIRouter(prefix="/chat", tags=["chat"])
 # swaps over to OpenAI GPT-4o.
 _MODEL_ALIAS: dict[str, str] = {
     "claude-haiku-4-5-20251001": "haiku",
-    "claude-sonnet-4-6": "sonnet",
-    # Sprint D6.73 — Sprint D4 upgraded the Opus version from 4-6 to 4-7
-    # in router.MODEL_MAP, but this alias map was missed. Result: every
+    # 2026-07-18 model refresh — Sonnet 5 / Opus 4.8 are the live IDs.
+    "claude-sonnet-5": "sonnet",
+    "claude-opus-4-8": "opus",
+    # Sprint D6.73 lesson — Sprint D4 upgraded the Opus version in
+    # router.MODEL_MAP but this alias map was missed. Result: every
     # Opus answer was persisted with model_used = NULL because dict.get
-    # returned None. Both keys retained so historic stale data with
-    # the old version string still maps correctly during any backfill.
+    # returned None. Superseded keys are retained below so historic
+    # rows with old version strings still map correctly during any
+    # backfill. NEVER remove old keys; ALWAYS add the new ones.
+    "claude-sonnet-4-6": "sonnet",
     "claude-opus-4-7": "opus",
     "claude-opus-4-6": "opus",
     "fallback:gpt-4o": "fallback_gpt4o",
 }
 
-# Regulation sources we don't currently cover. Used by missing-source detection.
+# Regulation sources we GENUINELY don't cover yet. Used by missing-source
+# detection: on a zero-citation answer whose query mentions one of these,
+# we append _MISSING_NOTE ("not yet in the RegKnot database").
+#
+# 2026-07-18 audit fix — this dict had rotted badly: it still listed
+# MARPOL, MLC, IMDG, IGC, IBC, CSS, BWM, and the Polar Code as missing,
+# ALL of which have long since been ingested (marpol D6.11, imdg D6.12,
+# igc/ibc/css D6.23, bwm/polar D6.41, mlc D6.97-audit). Any zero-citation
+# answer on those topics got a server-side footer flatly telling the user
+# we don't have the source — the exact false-non-existence trust-killer
+# the D6.97 prompt rule prohibits, hardcoded where the prompt can't stop
+# it. Keep this list SHORT and audit it whenever a new source ships.
 _MISSING_SOURCES: dict[str, str] = {
-    "marpol": "MARPOL (Marine Pollution)",
-    "mlc": "MLC (Maritime Labour Convention)",
-    "imdg": "IMDG Code (Dangerous Goods)",
     "imsbc": "IMSBC Code (Solid Bulk Cargoes)",
-    "igc": "IGC Code (Gas Carriers)",
-    "ibc": "IBC Code (Chemical Carriers)",
-    "css": "CSS Code (Safe Stowage)",
     "grain": "International Grain Code",
-    "bnwas": "BNWAS Regulations",
-    "ballast": "BWM Convention (Ballast Water)",
-    "polar code": "Polar Code",
     "llmc": "LLMC (Limitation of Liability)",
+    # BNWAS carriage is SOLAS V/19 (in corpus); the standalone
+    # performance standard MSC.128(75) is what we lack.
+    "bnwas": "BNWAS Performance Standard (MSC.128(75))",
 }
 
 _MISSING_NOTE = (

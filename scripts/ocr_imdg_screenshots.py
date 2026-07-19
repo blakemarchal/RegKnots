@@ -50,7 +50,7 @@ SCREENSHOT_DIR = Path("/opt/RegKnots/data/raw/imdg")
 EXTRACTED_DIR = SCREENSHOT_DIR / "extracted" / "raw"
 MANIFEST_PATH = SCREENSHOT_DIR / "extracted" / "_manifest.json"
 
-_VISION_MODEL = "claude-sonnet-4-6"
+_VISION_MODEL = "claude-sonnet-5"
 # Concurrency 5 worked well for MARPOL's 207 screenshots; for 481 we
 # bump to 8 to keep wall time bounded — still well under our tier's
 # anthropic rate limit.

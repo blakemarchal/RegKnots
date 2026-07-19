@@ -178,7 +178,7 @@ async def generate_one(client: AsyncAnthropic, topic: dict, vessel_code: str) ->
         vessel_label=VESSEL_LABELS.get(vessel_code, vessel_code),
     )
     resp = await client.messages.create(
-        model="claude-sonnet-4-6",
+        model="claude-sonnet-5",
         max_tokens=400,
         messages=[{"role": "user", "content": prompt}],
     )
