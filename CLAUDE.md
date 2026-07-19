@@ -77,6 +77,18 @@ If a doc says "alembic head is 0045" but `alembic current` says `0092`, the doc 
 
 - 2026-06 (audit sprint): quality audit of live user questions shipped: follow-up retrieval composition (short mid-thread messages), CG-form identifier retrieval (Karynn's "835"), never-assert-non-existence prompt rule, **MLC 2006 ingested** (140 sections — the labour fourth pillar; Nirmal's provisions gap), IMO MEPC/MSC resolution harvest Phase 1 (12 resolutions, `imo_mepc`/`imo_msc`), SIRE 2.0 Q Library completed (Pt2, + `ocimf` affinity group it never had), whale-zones nav + 4-feature polish + opt-in GPS persistence (migration 0112).
 - **2026-07-18 model refresh (Fable audit session):** all Sonnet call sites → `claude-sonnet-5`, Opus → `claude-opus-4-8` (router MODEL_MAP, REGENERATION_MODEL, engine, web_fallback, checklists, study, documents, me, credentials, enricher, stcw/ism Vision). IDs live-validated against the prod key pre-ship. `chat.py _MODEL_ALIAS` got the new keys ADDED (old keys kept — D6.73 NULL-model_used lesson). Also fixed badly-rotted `chat.py _MISSING_SOURCES` that was telling users MARPOL/MLC/IMDG/IGC/IBC/CSS/BWM/Polar were "not in the database" (all long since ingested).
+- **2026-07-19 "Wk1-4" mega-wave (Blake greenlit the full 30-day plan):**
+  - **Hybrid verdict — DO NOT FLIP.** New `scripts/eval_retrieval.py` (retrieval-only recall@k/MRR, imports the eval_rag_baseline gold set). Dense 0.790 strong-recall@8 / 0.627 MRR vs hybrid RRF 0.548 / 0.416 — hybrid loses 16 pairs, gains 1 (lexical lane vetoes dense's correct hits via rank-blind RRF). ⛔ MEASURED comment on the config flag; evidence in `data/eval/retrieval/`; verdict doc `docs/hybrid-retrieval-verdict-2026-07-19.md`. ef_search 100 measured zero effect — not shipped. **Any retrieval change now runs this harness first; baseline to beat: 0.790/0.627.**
+  - **Per-ingest REINDEX removed** (held ACCESS EXCLUSIVE during live traffic); weekly `REINDEX CONCURRENTLY` + VACUUM + backup-staleness gate via `regknots-db-maintenance.timer` (installed, first run green: 245s reindex, no locks). Opt-in per-run: `REGKNOTS_REINDEX_AFTER_INGEST=1`.
+  - **Backups proven restorable** — first restore test in project history: 762MB dump → clean pgvector/pg16 container, 421s, 0 errors, embeddings + alembic head verified. Runbook `docs/runbooks/db-restore.md`. Offsite scaffolding installed (rclone script + disabled timer) — **awaiting Blake's 5-min DO Spaces bucket+keys step**. `smoke.sh` now probes backup age every deploy.
+  - **Citation trust pack:** chips amber→teal (amber now = caution only), "Corpus-verified · N citations" badge, message timestamps, aria-live streaming, pinch-zoom unlock, prefers-reduced-motion.
+  - **Per-answer exports:** copy-with-citations + print-to-PDF (letterhead artifact) on every completed answer (`lib/answerExport.ts`).
+  - **Persona-aware nav + starters:** shore_side_compliance/legal_consultant get Compliance Tools promoted, "Fleet"/"Credentials" labels, sea-time tools hidden, compliance-register starter prompts; cadets get Study-first. Ordering/visibility only, never capability.
+  - **Fleet Audit Readiness LIVE:** `/me/audit-readiness?workspace_id` fan-out implemented (was stubbed) — workspace vessels + ≤12 members' records, fleet-framed findings, card on workspace page + dated PDF report export.
+  - **Live-context chat injectors** (`rag/live_context.py`): "what changed in the regs this month?" → auto-injected recent-ingest summary (window parsed from query); "which whale zones are active?" → chat.py computes today's SMA status. Fail-open, append-only. 18 unit tests.
+  - **Team audit log:** `GET /workspaces/{id}/audit-log` (JSON/CSV) + workspace-page section + `apiDownload()` — who asked what, when, with citations.
+  - **Maersk demo script:** `docs/maersk-demo-script.md` (15-min arc, all shipped features).
+  - Fixed 8 pre-existing "Cassandra" slips in code/docs. **Purchases (paywalled IMO data) remain DEFERRED per Blake.**
 
 See `docs/PROJECT_STATE.md` for a fuller operational snapshot and `docs/roadmap.md` for the prioritized backlog.
 
@@ -91,10 +103,11 @@ Status re-verified 2026-07-18 (Fable full audit):
 
 - ~~JWT signing key~~ — **FIXED.** `.env` now uses `REGKNOTS_JWT_SECRET_KEY` (matches `env_prefix="REGKNOTS_"`); runtime-verified not the dev default (64-char secret).
 - ~~`.env` permissions~~ — **FIXED.** 600.
-- ~~Zero DB backups~~ — **MOSTLY FIXED.** `regknots-backup.timer` runs nightly pg_dump (762 MB gz, 14-day retention) — but dumps live on the SAME disk as the DB. Remaining: offsite copy + one documented restore test (queued task).
-- ~~refresh-weekly dead~~ — **FIXED.** Weekly/monthly/quarterly/nmc refresh timers all active.
-- Test coverage: ~86 unit tests now exist for retrieval plumbing (synonyms, identifiers, follow-up, hedge triggers) — but NO retrieval-quality eval gate; last committed eval run is 2026-04-20 (queued task).
+- ~~Zero DB backups~~ — **FIXED (2026-07-19).** Nightly pg_dump + **restore-verified** (runbook `docs/runbooks/db-restore.md`) + staleness gates in smoke.sh and the weekly maintenance unit. Offsite sync scaffolded and installed; **only Blake's DO Spaces bucket+keys step remains** (5 min; header of `scripts/backup_offsite.sh`).
+- ~~refresh-weekly dead~~ — **FIXED.** Weekly/monthly/quarterly/nmc refresh timers all active (+ new db-maintenance timer, Sundays 04:30 UTC).
+- ~~No retrieval eval gate~~ — **FIXED (2026-07-19).** `scripts/eval_retrieval.py`; 124 unit tests green; baseline to beat: strong-recall@8 0.790 / MRR 0.627.
 - LLM-helper boilerplate copy-pasted 6× in `apps/api/app/routers/me.py` — still open.
+- Dense retrieval's own 13/62 missed gold pairs = the next tuning target (per-pair dumps in `data/eval/retrieval/`).
 
 Full audit report (models, retrieval, UX, product packaging): see the 2026-07-18 session; actionable items queued as tasks (paywalled-data acquisition, offsite backups, eval harness + hybrid flip, fleet audit-readiness, citation trust UX pack).
 
@@ -110,4 +123,4 @@ Full audit report (models, retrieval, UX, product packaging): see the 2026-07-18
 
 ---
 
-*Last updated 2026-05-09 (post-D6.84 Sprint A — tier router shadow). When this drifts from reality, fix it — that's the rule.*
+*Last updated 2026-07-19 (post Wk1-4 mega-wave — eval harness/hybrid verdict, backups proven, trust pack, persona nav, fleet audit, live-context chat, team audit log). When this drifts from reality, fix it — that's the rule.*
