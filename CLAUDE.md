@@ -75,6 +75,9 @@ If a doc says "alembic head is 0045" but `alembic current` says `0092`, the doc 
 - 2026-05-25 D6.97 Sprint #49: **Whale zones map** at `/whale-zones`. Public Leaflet page rendering 11 NOAA Fisheries North Atlantic Right Whale Seasonal Management Areas (50 CFR 224.105). Maersk-demo asset; sets up later AIS / vessel-proximity warning if GPS opt-in.
 - 2026-05-27 D6.97 Sprint #54: **COSWP 2025 ingested** — UK MCA Code of Safe Working Practices for Merchant Seafarers, 2025 Edition. Karynn provided the 544-page Open Government Licence v3 PDF as the priority for the shore-side compliance officer pivot. Parser splits at `N.N` section headers, yields 357 sections across 34 chapters. New source: `coswp`, tagged `['uk']`, UK query-signal pattern recognizes "COSWP" or "Code of Safe Working Practices" so non-UK users can invoke it. **`CorpusBadges.tsx` + `docs/corpus-status.md` updated to reflect post-pivot corpus.**
 
+- 2026-06 (audit sprint): quality audit of live user questions shipped: follow-up retrieval composition (short mid-thread messages), CG-form identifier retrieval (Karynn's "835"), never-assert-non-existence prompt rule, **MLC 2006 ingested** (140 sections — the labour fourth pillar; Nirmal's provisions gap), IMO MEPC/MSC resolution harvest Phase 1 (12 resolutions, `imo_mepc`/`imo_msc`), SIRE 2.0 Q Library completed (Pt2, + `ocimf` affinity group it never had), whale-zones nav + 4-feature polish + opt-in GPS persistence (migration 0112).
+- **2026-07-18 model refresh (Fable audit session):** all Sonnet call sites → `claude-sonnet-5`, Opus → `claude-opus-4-8` (router MODEL_MAP, REGENERATION_MODEL, engine, web_fallback, checklists, study, documents, me, credentials, enricher, stcw/ism Vision). IDs live-validated against the prod key pre-ship. `chat.py _MODEL_ALIAS` got the new keys ADDED (old keys kept — D6.73 NULL-model_used lesson). Also fixed badly-rotted `chat.py _MISSING_SOURCES` that was telling users MARPOL/MLC/IMDG/IGC/IBC/CSS/BWM/Polar were "not in the database" (all long since ingested).
+
 See `docs/PROJECT_STATE.md` for a fuller operational snapshot and `docs/roadmap.md` for the prioritized backlog.
 
 ## Known issues (2026-05-08)
@@ -84,14 +87,16 @@ The audit caught two memory items as **stale** — both are actually resolved:
 - **Vocab mismatch** (memory said: "no fix yet"): SHIPPED. `packages/rag/rag/synonyms.py` has lifejacket→lifesaving-appliance, log→logbook, mob, stability, stencil/stenciled/stenciling. `packages/rag/rag/query_rewrite.py` produces 2-3 reformulations every chat (default ON). Two intent expanders fire on dual-signal gates.
 - **`ism_supplement` migration drift** (memory said: "added live, not in migration files"): RESOLVED. Migration `0090_add_nmc_exam_bank_source.py` defines the canonical source list including `ism_supplement`.
 
-Real open items (see audit + roadmap for the full list):
+Status re-verified 2026-07-18 (Fable full audit):
 
-- JWT signing key — VPS `.env` has wrong env var name; falls back to default. **Pre-marketing fix.**
-- `.env` permissions on prod are 0644. **Pre-marketing fix.**
-- Zero DB backups exist. **Pre-marketing fix.**
-- `regknots-refresh-weekly.service` failed 2026-05-03 with exit 203 (EXEC). 5 days dead.
-- Zero test coverage anywhere.
-- LLM-helper boilerplate copy-pasted 6× in `apps/api/app/routers/me.py`.
+- ~~JWT signing key~~ — **FIXED.** `.env` now uses `REGKNOTS_JWT_SECRET_KEY` (matches `env_prefix="REGKNOTS_"`); runtime-verified not the dev default (64-char secret).
+- ~~`.env` permissions~~ — **FIXED.** 600.
+- ~~Zero DB backups~~ — **MOSTLY FIXED.** `regknots-backup.timer` runs nightly pg_dump (762 MB gz, 14-day retention) — but dumps live on the SAME disk as the DB. Remaining: offsite copy + one documented restore test (queued task).
+- ~~refresh-weekly dead~~ — **FIXED.** Weekly/monthly/quarterly/nmc refresh timers all active.
+- Test coverage: ~86 unit tests now exist for retrieval plumbing (synonyms, identifiers, follow-up, hedge triggers) — but NO retrieval-quality eval gate; last committed eval run is 2026-04-20 (queued task).
+- LLM-helper boilerplate copy-pasted 6× in `apps/api/app/routers/me.py` — still open.
+
+Full audit report (models, retrieval, UX, product packaging): see the 2026-07-18 session; actionable items queued as tasks (paywalled-data acquisition, offsite backups, eval harness + hybrid flip, fleet audit-readiness, citation trust UX pack).
 
 ## Pointers
 
