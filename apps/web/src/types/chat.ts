@@ -74,6 +74,10 @@ export interface Message {
   citations: CitedRegulation[]
   web_fallback?: WebFallbackCard | null
   tier_metadata?: TierMetadata | null
+  // 2026-07-19 trust pack — when this message was produced (ISO 8601).
+  // Client-stamped at construction; renders as a subtle timestamp so a
+  // compliance officer can defend "what did the reg say on date X."
+  created_at?: string
   // Sprint D6.85 Fix C — user-cancelled assistant message marker.
   // Renders distinctly (italic + "Stopped" hint) and the content
   // includes the partial text that was streamed before the abort.

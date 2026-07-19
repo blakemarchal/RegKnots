@@ -627,6 +627,7 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
       content: query,
       citations: [],
       image_attachments: imageAttachmentsForMsg,
+      created_at: new Date().toISOString(),
     }
     setMessages(prev => [...prev, userMsg])
     setInput('')
@@ -704,6 +705,7 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
               citations: data.cited_regulations,
               web_fallback: data.web_fallback ?? null,
               tier_metadata: data.tier_metadata ?? null,
+              created_at: new Date().toISOString(),
             }
             setMessages(prev => [...prev, assistantMsg])
           }
@@ -736,6 +738,7 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
               role: 'assistant',
               content: chunk,
               citations: [],
+              created_at: new Date().toISOString(),
             }
             setMessages(prev => [...prev, initial])
             // Streaming is now happening — clear the spinner status so
@@ -938,6 +941,7 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
               citations: data.cited_regulations,
               web_fallback: data.web_fallback ?? null,
               tier_metadata: data.tier_metadata ?? null,
+              created_at: new Date().toISOString(),
             }
             setMessages(prev => [...prev, assistantMsg])
           }

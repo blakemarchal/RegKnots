@@ -91,8 +91,16 @@ export function ChatThread({
         <EmptyState onPrompt={onPrompt} isNewConversation={isNewConversation} vessel={vessel} />
       ) : (
         <div className="flex flex-col py-3 gap-0.5">
-          {messages.map(msg => (
-            <ChatMessage key={msg.id} message={msg} onCitationTap={onCitationTap} />
+          {messages.map((msg, i) => (
+            <ChatMessage
+              key={msg.id}
+              message={msg}
+              onCitationTap={onCitationTap}
+              // 2026-07-19 trust pack — the last assistant message while a
+              // request is in flight is the streaming one: aria-live for
+              // screen readers + verified badge held until completion.
+              isStreaming={loading && msg.role === 'assistant' && i === messages.length - 1}
+            />
           ))}
           {/* Sprint D6.88 Phase 3 — inline web-fallback indicator.
               Sits in the user's reading flow (just below the streamed
