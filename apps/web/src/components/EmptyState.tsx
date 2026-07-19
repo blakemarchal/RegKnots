@@ -59,32 +59,57 @@ function buildMarinerPrompts(ctx: MariniarContextLight | null): string[] {
   return out.slice(0, 3)
 }
 
+// 2026-07-19 persona-aware starters (Wk2 shore-side pivot). The default
+// starter set speaks captain ("my vessel", credential renewals). A
+// compliance officer or maritime lawyer opens with fleet/audit/vetting
+// questions — show them starters in their own register. All four are
+// grounded in corpus the retriever demonstrably covers (PSC, CFR
+// currency, SIRE 2.0, MLC 2006).
+const SHORE_STARTERS = [
+  'What are the most common PSC detainable deficiencies for fire safety?',
+  'What does SIRE 2.0 ask about mooring equipment?',
+  'MLC 2006: what are the minimum rest-hour requirements?',
+  'What are the U.S. requirements for a Certificate of Inspection?',
+]
+const SHORE_PERSONA_SET = new Set(['shore_side_compliance', 'legal_consultant'])
+
 export function EmptyState({ onPrompt, isNewConversation, vessel = null }: Props) {
   const { prompts: vesselPrompts, tailored } = getTailoredPrompts(vessel)
   const [marinerCtx, setMarinerCtx] = useState<MariniarContextLight | null>(null)
+  const [persona, setPersona] = useState<string | null>(null)
 
   // D6.63 — fire a best-effort /me/context fetch on mount. If it
   // succeeds we can offer mariner-aware starters; if it fails we
   // silently fall back to the existing vessel-only suggestions.
+  // 2026-07-19 — persona fetched alongside; both are best-effort.
   useEffect(() => {
     let cancelled = false
     apiRequest<MariniarContextLight>('/me/context')
       .then((data) => { if (!cancelled) setMarinerCtx(data) })
       .catch(() => { /* unauthenticated or no data — silent */ })
+    apiRequest<{ persona?: string | null }>('/onboarding/persona')
+      .then((r) => { if (!cancelled) setPersona(r.persona ?? null) })
+      .catch(() => { /* silent */ })
     return () => { cancelled = true }
   }, [])
 
-  const marinerPrompts = buildMarinerPrompts(marinerCtx)
+  const isShorePersona = persona !== null && SHORE_PERSONA_SET.has(persona)
+  const marinerPrompts = isShorePersona ? [] : buildMarinerPrompts(marinerCtx)
   const personalized = marinerPrompts.length > 0
   // Mariner prompts go first when present — they're the strongest
   // conversion signal (the user can immediately see the chat reasons
-  // about their actual record).
-  const merged = personalized
-    ? [...marinerPrompts, ...vesselPrompts].slice(0, 4)
-    : vesselPrompts
-  const headlineLabel = personalized
-    ? 'Tailored to your record'
-    : (tailored && vessel ? `Tailored for ${vessel.name}` : null)
+  // about their actual record). Shore personas skip the career-record
+  // starters entirely and get the compliance-register set.
+  const merged = isShorePersona
+    ? SHORE_STARTERS
+    : personalized
+      ? [...marinerPrompts, ...vesselPrompts].slice(0, 4)
+      : vesselPrompts
+  const headlineLabel = isShorePersona
+    ? 'For compliance teams'
+    : personalized
+      ? 'Tailored to your record'
+      : (tailored && vessel ? `Tailored for ${vessel.name}` : null)
 
   return (
     // Sprint D6.80 — mobile compaction. The header (compass + wordmark

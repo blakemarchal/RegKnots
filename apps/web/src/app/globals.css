@@ -403,3 +403,21 @@ body {
 .chat-thread code {
   overflow-x: auto;
 }
+
+/* ── Reduced motion (2026-07-19 trust pack) ────────────────────────────────
+   WCAG 2.3.3 — users with vestibular disorders or "reduce motion" set at
+   the OS level get instant transitions instead of slides/fades. Animations
+   here are decorative (fadeSlideIn, pulses, spinners on non-blocking
+   surfaces); collapsing them to near-zero duration preserves layout and
+   final state. Spinner-style animations keep a minimal duration so
+   "loading" remains perceivable without the spin being aggressive. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

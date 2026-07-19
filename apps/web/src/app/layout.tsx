@@ -40,7 +40,10 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
-  maximumScale: 1,
+  // 2026-07-19 trust pack — maximumScale:1 removed. Pinch-zoom lockout
+  // is a WCAG 1.4.4 failure and hostile to anyone reading dense reg
+  // text on a phone. iOS input-focus auto-zoom (the usual reason for
+  // the lock) is already prevented by 16px+ input font sizes.
   themeColor: '#0a0e1a',
 }
 

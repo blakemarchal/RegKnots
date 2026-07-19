@@ -209,6 +209,18 @@ class Settings(BaseSettings):
     # index but no app code references it until this flag flips. When
     # off, behavior is bit-for-bit identical to the pre-D6.71 path.
     #
+    # ⛔ MEASURED 2026-07-19 — DO NOT FLIP AS BUILT. Head-to-head on the
+    # 62-pair curated gold set (scripts/eval_retrieval.py):
+    #   dense  strong-recall@8 0.790 / MRR 0.627
+    #   hybrid strong-recall@8 0.548 / MRR 0.416  (loses 16 pairs, gains 1)
+    # Failure mode: RRF's rank-based fusion gives lexically-matching but
+    # topically-wrong chunks from small sources (COLREGS, WHO IHR, flag
+    # notices) equal footing with dense's correct hits — answers dense
+    # ranked #1 got pushed out of the top-8 entirely. The lexical lane
+    # needs to be a weighted supplement (or reranker-pool feeder), not an
+    # equal RRF partner, before this is a candidate again. Re-run the
+    # eval before any future flip. Evidence: data/eval/retrieval/.
+    #
     # See packages/rag/rag/retriever.py::retrieve_hybrid().
     hybrid_retrieval_enabled: bool = Field(
         default=False, validation_alias="HYBRID_RETRIEVAL_ENABLED",

@@ -1,0 +1,23 @@
+# deploy/systemd/regknots-backup-offsite.service
+# 2026-07-19 — offsite replication of nightly Postgres dumps. Needs the
+# one-time rclone remote setup documented in scripts/backup_offsite.sh
+# (DO Spaces keys — account owner action). Fails loudly (exit 5) until
+# then; safe to install early.
+[Unit]
+Description=RegKnots offsite backup sync (rclone → DO Spaces)
+Documentation=https://github.com/blakemarchal/RegKnots
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/opt/RegKnots
+ExecStart=/opt/RegKnots/scripts/backup_offsite.sh
+# 762MB/day upload on a DO droplet uplink — give it room.
+TimeoutStartSec=1800
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

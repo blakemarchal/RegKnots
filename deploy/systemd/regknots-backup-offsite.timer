@@ -1,0 +1,16 @@
+# deploy/systemd/regknots-backup-offsite.timer
+[Unit]
+Description=Daily RegKnots offsite backup sync
+Documentation=https://github.com/blakemarchal/RegKnots
+Requires=regknots-backup-offsite.service
+
+[Timer]
+# 03:45 UTC — 45 min after the 03:00 local dump starts; current dumps
+# finish in ~3-5 min, so the newest file is always complete by now.
+OnCalendar=*-*-* 03:45:00
+Persistent=true
+RandomizedDelaySec=300
+Unit=regknots-backup-offsite.service
+
+[Install]
+WantedBy=timers.target

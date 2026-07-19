@@ -95,6 +95,23 @@ if [[ "$api_health" != "200" ]]; then
     fail=1
 fi
 
+# Backup-freshness probe (2026-07-19) — the nightly dump timer can fail
+# silently for days (audit finding: refresh unit once sat dead 5 days).
+# Smoke runs from the laptop after every deploy, so piggyback: SSH in
+# and assert the newest dump is <26h old. Skippable for local runs with
+# SMOKE_SKIP_BACKUP=1 (e.g. no SSH key on this machine).
+if [[ "${SMOKE_SKIP_BACKUP:-0}" != "1" && "$BASE_URL" == "https://regknots.com" ]]; then
+    printf "  %-15s " "backup-age"
+    newest=$(ssh -o ConnectTimeout=10 -o BatchMode=yes root@68.183.130.3 \
+        "find /var/backups/regknots -maxdepth 1 -name 'regknots-*.sql.gz' -mmin -1560 | head -1" 2>/dev/null || true)
+    if [[ -z "$newest" ]]; then
+        echo "FAIL: no dump newer than 26h (or SSH unreachable) — check regknots-backup.timer"
+        fail=1
+    else
+        echo "ok ($(basename "$newest"))"
+    fi
+fi
+
 if [[ "$fail" -eq 0 ]]; then
     echo ""
     echo "smoke OK"

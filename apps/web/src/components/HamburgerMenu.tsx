@@ -98,6 +98,54 @@ const MENU_SECTIONS: MenuSection[] = [
 
 const ADMIN_ITEM: MenuItem = { icon: '\u2318', label: 'Admin', action: 'admin', path: '/admin' }
 
+// 2026-07-19 persona-aware nav (Wk2 of the shore-side pivot). The menu
+// was built mariner-first: career tools (Sea-Time Log, Sea Service
+// Letter) rank above Compliance Tools, and section labels use the
+// possessive "My \u2026" \u2014 the voice of a captain managing their own boat.
+// A shore-side compliance officer or maritime lawyer manages OTHER
+// people's vessels: compliance surfaces are their daily drivers and
+// shipboard career tools are noise. Persona (from GET /onboarding/
+// persona, already fetched on drawer-open) drives:
+//   shore_side_compliance / legal_consultant \u2192
+//     Compliance Tools promoted to 2nd, "My Fleet"\u2192"Fleet",
+//     "My Credentials"\u2192"Credentials", personal sea-time tools hidden.
+//   cadet_student / teacher_instructor \u2192 Study Tools promoted to 2nd.
+//   mariner_shipboard / other / null \u2192 unchanged.
+// Persona changes ordering/visibility ONLY \u2014 never capability. Every
+// route stays reachable for every persona that hasn't hidden it via
+// its own toggle (Study Tools).
+const SHORE_PERSONAS = new Set(['shore_side_compliance', 'legal_consultant'])
+const STUDY_PERSONAS = new Set(['cadet_student', 'teacher_instructor'])
+const SHORE_HIDDEN_ACTIONS = new Set(['sea-time', 'sea-service-letter'])
+const SHORE_SECTION_ORDER = ['Chat', 'Compliance Tools', 'My Fleet', 'My Credentials', 'Study Tools', 'Help & Account']
+const STUDY_SECTION_ORDER = ['Chat', 'Study Tools', 'My Credentials', 'My Fleet', 'Compliance Tools', 'Help & Account']
+const SHORE_SECTION_RELABEL: Record<string, string> = {
+  'My Fleet': 'Fleet',
+  'My Credentials': 'Credentials',
+}
+
+function applyPersona(sections: MenuSection[], persona: string | null): MenuSection[] {
+  if (!persona) return sections
+  if (SHORE_PERSONAS.has(persona)) {
+    const reordered = [...sections].sort(
+      (a, b) => SHORE_SECTION_ORDER.indexOf(a.label ?? '') - SHORE_SECTION_ORDER.indexOf(b.label ?? ''),
+    )
+    return reordered
+      .map((s) => ({
+        ...s,
+        label: s.label ? (SHORE_SECTION_RELABEL[s.label] ?? s.label) : s.label,
+        items: s.items.filter((it) => !SHORE_HIDDEN_ACTIONS.has(it.action)),
+      }))
+      .filter((s) => s.items.length > 0)
+  }
+  if (STUDY_PERSONAS.has(persona)) {
+    return [...sections].sort(
+      (a, b) => STUDY_SECTION_ORDER.indexOf(a.label ?? '') - STUDY_SECTION_ORDER.indexOf(b.label ?? ''),
+    )
+  }
+  return sections
+}
+
 // D6.55 \u2014 actions hidden from wheelhouse_only users.
 //
 // Boundary: workspace owns vessel-context tools (vessel particulars,
@@ -159,15 +207,21 @@ export function HamburgerMenu({ open, onClose, onNewChat, onOpenVessels, onOpenS
   // user had to refresh the page to see toggle changes reflected.
   // Removed.
   const [studyToolsEnabled, setStudyToolsEnabled] = useState<boolean>(false)
+  // 2026-07-19 — persona rides the same response; drives section
+  // ordering/labels (see applyPersona above). Null until first fetch =
+  // default mariner ordering, which is also the correct fallback.
+  const [persona, setPersona] = useState<string | null>(null)
 
   // Fetch on every drawer-open. State stays put while the fetch runs,
   // so the menu doesn't flash if the value is unchanged.
   useEffect(() => {
     if (!open) return
     let cancelled = false
-    apiRequest<{ study_tools_enabled?: boolean }>('/onboarding/persona')
+    apiRequest<{ study_tools_enabled?: boolean; persona?: string | null }>('/onboarding/persona')
       .then((r) => {
-        if (!cancelled) setStudyToolsEnabled(r.study_tools_enabled === true)
+        if (cancelled) return
+        setStudyToolsEnabled(r.study_tools_enabled === true)
+        setPersona(r.persona ?? null)
       })
       .catch(() => { /* silent — keep prior value on transient failure */ })
     return () => { cancelled = true }
@@ -292,17 +346,20 @@ export function HamburgerMenu({ open, onClose, onNewChat, onOpenVessels, onOpenS
   // user has it toggled off. We hide the row, not the whole section,
   // and the empty-section filter at the end drops the "Study Tools"
   // header automatically once the only entry is gone.
-  const filteredSections: MenuSection[] = MENU_SECTIONS
-    .map((s) => ({
-      ...s,
-      items: s.items
-        .filter(
-          (it) =>
-            !isWheelhouseOnly || !WHEELHOUSE_ONLY_HIDDEN_ACTIONS.has(it.action),
-        )
-        .filter((it) => it.action !== 'study' || studyToolsEnabled),
-    }))
-    .filter((s) => s.items.length > 0)
+  const filteredSections: MenuSection[] = applyPersona(
+    MENU_SECTIONS
+      .map((s) => ({
+        ...s,
+        items: s.items
+          .filter(
+            (it) =>
+              !isWheelhouseOnly || !WHEELHOUSE_ONLY_HIDDEN_ACTIONS.has(it.action),
+          )
+          .filter((it) => it.action !== 'study' || studyToolsEnabled),
+      }))
+      .filter((s) => s.items.length > 0),
+    persona,
+  )
 
   // Append the admin item as its own section so it gets the same visual
   // treatment as the rest of the menu when present.

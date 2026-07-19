@@ -140,6 +140,11 @@ function CopyMessageButton({ content }: { content: string }) {
 interface Props {
   message: Message
   onCitationTap: (source: string, sectionNumber: string, sectionTitle: string) => void
+  // 2026-07-19 trust pack — true only for the assistant message that is
+  // actively streaming. Drives aria-live (screen readers hear the answer
+  // as it arrives) and suppresses the verified badge until the citation
+  // verifier has actually run (badge appears when streaming completes).
+  isStreaming?: boolean
 }
 
 // ── Inline citation injection ──────────────────────────────────────────────────
@@ -656,7 +661,24 @@ function makeComponents(
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export function ChatMessage({ message, onCitationTap }: Props) {
+// 2026-07-19 trust pack — compact HH:MM timestamp with full date on
+// hover. Rendered in the action-bar row of both message kinds.
+function MessageTime({ iso }: { iso?: string }) {
+  if (!iso) return null
+  const d = new Date(iso)
+  if (isNaN(d.getTime())) return null
+  return (
+    <time
+      dateTime={iso}
+      title={d.toLocaleString()}
+      className="text-[11px] text-[#8a94ad] tabular-nums select-none"
+    >
+      {d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+    </time>
+  )
+}
+
+export function ChatMessage({ message, onCitationTap, isStreaming = false }: Props) {
   const isUser = message.role === 'user'
 
   if (isUser) {
@@ -718,7 +740,14 @@ export function ChatMessage({ message, onCitationTap }: Props) {
   const footerCitations = extractFooterCitations(message.content, citationMapForFooter)
 
   return (
-    <div className="flex items-start gap-3 px-4 py-3 animate-[fadeSlideIn_0.2s_ease-out]">
+    <div
+      className="flex items-start gap-3 px-4 py-3 animate-[fadeSlideIn_0.2s_ease-out]"
+      // 2026-07-19 trust pack — announce the streaming answer to screen
+      // readers. Only the actively-streaming message is live; historical
+      // messages render silent so loading a conversation doesn't shout.
+      aria-live={isStreaming ? 'polite' : undefined}
+      aria-busy={isStreaming || undefined}
+    >
       {/* Teal accent bar */}
       <div className="w-0.5 self-stretch bg-teal/40 rounded-full flex-shrink-0 mt-0.5" />
 
@@ -751,16 +780,38 @@ export function ChatMessage({ message, onCitationTap }: Props) {
             source/title; the rendered set is the union of all
             inline-cited regulations, deduplicated. */}
         {footerCitations.length > 0 && (
-          <div className="mt-3 pt-3 border-t border-white/5 flex flex-wrap gap-1.5">
-            {footerCitations.map(c => (
-              <CitationChip
-                key={c.sectionNumber}
-                sectionNumber={c.sectionNumber}
-                sectionTitle={c.title}
-                source={c.source}
-                onTap={onCitationTap}
-              />
-            ))}
+          <div className="mt-3 pt-3 border-t border-white/5">
+            {/* 2026-07-19 trust pack — verification badge. Honest by
+                construction: the engine's citation verifier resolves
+                every citation against the corpus and STRIPS the ones
+                that fail before the answer ships, so the chips below
+                are corpus-verified by definition. Green lane = trust;
+                the amber lane is reserved for web-fallback cautions. */}
+            {!message.cancelled && !isStreaming && (
+              <div className="mb-2">
+                <span
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium
+                    bg-emerald-950/60 text-emerald-300 border border-emerald-800/50"
+                  title="Each citation below was resolved against the primary-source text in the RegKnots corpus before this answer was shown."
+                >
+                  <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M20 6L9 17l-5-5" />
+                  </svg>
+                  Corpus-verified · {footerCitations.length} citation{footerCitations.length === 1 ? '' : 's'}
+                </span>
+              </div>
+            )}
+            <div className="flex flex-wrap gap-1.5">
+              {footerCitations.map(c => (
+                <CitationChip
+                  key={c.sectionNumber}
+                  sectionNumber={c.sectionNumber}
+                  sectionTitle={c.title}
+                  source={c.source}
+                  onTap={onCitationTap}
+                />
+              ))}
+            </div>
           </div>
         )}
 
@@ -772,9 +823,10 @@ export function ChatMessage({ message, onCitationTap }: Props) {
           <WebFallbackCardView card={message.web_fallback} />
         )}
 
-        {/* Action bar — copy plain-text version of the message */}
-        <div className="mt-1 -ml-2.5 flex justify-start">
+        {/* Action bar — copy + timestamp (2026-07-19 trust pack) */}
+        <div className="mt-1 -ml-2.5 flex items-center justify-between gap-2">
           <CopyMessageButton content={message.content} />
+          <MessageTime iso={message.created_at} />
         </div>
       </div>
     </div>

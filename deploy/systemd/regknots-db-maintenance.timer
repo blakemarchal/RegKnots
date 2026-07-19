@@ -1,0 +1,17 @@
+# deploy/systemd/regknots-db-maintenance.timer
+[Unit]
+Description=Weekly RegKnots DB maintenance
+Documentation=https://github.com/blakemarchal/RegKnots
+Requires=regknots-db-maintenance.service
+
+[Timer]
+# Sundays 04:30 UTC — after the 03:00 daily backup and the ~03:36 weekly
+# corpus refresh, so the reindex compacts whatever the refresh churned
+# and the staleness gate checks a dump that should be 90 minutes old.
+OnCalendar=Sun *-*-* 04:30:00
+Persistent=true
+RandomizedDelaySec=300
+Unit=regknots-db-maintenance.service
+
+[Install]
+WantedBy=timers.target
