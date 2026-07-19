@@ -5,6 +5,8 @@ import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import AuthGuard from '@/components/AuthGuard'
 import { AppHeader } from '@/components/AppHeader'
+import { AuditReadinessCard } from '@/components/AuditReadinessCard'
+import { WorkspaceAuditLog } from '@/components/WorkspaceAuditLog'
 import { apiRequest, ApiError } from '@/lib/api'
 
 // ── Types (mirror routers/workspaces.py) ────────────────────────────────────
@@ -318,6 +320,20 @@ function DetailContent() {
           )}
         </div>
       )}
+
+      {/* 2026-07-19 Wk3 — Fleet Audit Readiness. One assessment across
+          the workspace's vessels + every member's record, exportable as
+          a dated PDF report. Hidden while the workspace is read-only
+          (archived/canceled) since the underlying data is frozen. */}
+      {ws.status !== 'archived' && ws.status !== 'canceled' && (
+        <div className="mb-6">
+          <AuditReadinessCard workspaceId={ws.id} workspaceName={ws.name} />
+        </div>
+      )}
+
+      {/* 2026-07-19 Wk4 — team audit log (renders only when the
+          workspace has chat activity; fails silent otherwise). */}
+      <WorkspaceAuditLog workspaceId={ws.id} />
 
       {/* D6.54 — Manage Billing for active subscriptions (Owner only). */}
       {ws.status === 'active' && ws.my_role === 'owner' && (

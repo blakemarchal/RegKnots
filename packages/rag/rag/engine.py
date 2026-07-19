@@ -918,6 +918,10 @@ def _build_chat_messages(
     user_jurisdiction_focus: str | None = None,
     user_verbosity: str | None = None,
     images: list | None = None,
+    # 2026-07-19 Wk3 — pre-joined live-data blocks (recent corpus
+    # changes / active whale zones). Rendered between the style blocks
+    # and the retrieval context; each block carries its own usage NOTE.
+    live_data_str: str = "",
 ) -> list[dict]:
     """Construct the Claude API message list for a chat turn.
 
@@ -1085,6 +1089,7 @@ def _build_chat_messages(
         f"{credential_block}"
         f"{soft_context_block}"
         f"{verbosity_block}"
+        f"{live_data_str}"
         f"Regulation context:\n{context_str}\n\n"
         f"Question: {query}"
     )
@@ -1591,6 +1596,9 @@ async def chat(
     # chat_with_progress and from there into assemble_system_prompt.
     # Default False.
     precision_mode: bool = False,
+    # 2026-07-19 Wk3 — caller-supplied live-data block; see
+    # chat_with_progress for the contract.
+    live_context_block: str | None = None,
 ) -> ChatResponse:
     """Run the full RAG pipeline and return a ChatResponse.
 
@@ -1653,6 +1661,7 @@ async def chat(
         lead_with_answer_enabled=lead_with_answer_enabled,
         images=images,
         precision_mode=precision_mode,
+        live_context_block=live_context_block,
     ):
         # Discard status/delta/delta_reset — non-streaming caller only
         # needs the terminal payload. Every chat_with_progress path
@@ -2528,6 +2537,13 @@ async def chat_with_progress(
     # claims. Default False (everyone gets the standard prompt unless
     # they've toggled the account-page switch).
     precision_mode: bool = False,
+    # 2026-07-19 Wk3 — caller-supplied live-data block (e.g. active
+    # whale-zone SMAs computed by the API layer). Appended to the
+    # synthesis prompt alongside retrieval context. The engine ALSO
+    # auto-injects a recent-corpus-changes block when the query has
+    # reg-change intent (see rag/live_context.py) — that one needs only
+    # the pool, so no caller involvement.
+    live_context_block: str | None = None,
 ) -> AsyncIterator[dict]:
     """Same RAG pipeline as chat() but yields lightweight progress events.
 
@@ -2651,6 +2667,22 @@ async def chat_with_progress(
     # Stage 3: Build context
     context_str, cited = build_context(chunks)
 
+    # 2026-07-19 Wk3 — live-context injection. Reg-change intent pulls a
+    # recent-ingest summary (auto, engine-side); whale-zone and other
+    # API-layer blocks arrive via live_context_block. Both APPEND to the
+    # retrieval context — never replace it — and a build failure never
+    # breaks the turn.
+    from rag.live_context import build_reg_changes_block, detect_live_context
+    _live_blocks: list[str] = []
+    if live_context_block:
+        _live_blocks.append(live_context_block)
+    if detect_live_context(query) == "reg_changes":
+        _reg_block = await build_reg_changes_block(pool, query)
+        if _reg_block:
+            _live_blocks.append(_reg_block)
+            logger.info("live-context: injected reg-changes block")
+    live_data_str = ("\n\n".join(_live_blocks) + "\n\n") if _live_blocks else ""
+
     found_sources = _summarize_found_sources(chunks)
     if found_sources:
         yield {
@@ -2674,6 +2706,8 @@ async def chat_with_progress(
         # D6.97 Phase 2 — pass through image attachments. When non-empty
         # the final user message becomes a multimodal block list.
         images=images,
+        # 2026-07-19 Wk3 — live-data blocks (reg changes / whale zones).
+        live_data_str=live_data_str,
     )
 
     yield {"event": "status", "data": "Consulting compliance engine…"}

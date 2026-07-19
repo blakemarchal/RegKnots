@@ -1403,3 +1403,139 @@ async def auto_claim_invites_for_user(
     except Exception as exc:
         logger.warning("auto_claim_invites_for_user failed: %s", exc)
     return workspace_ids
+
+
+# ── Team audit log (2026-07-19 Wk4 — enterprise scaffolding) ─────────────
+# "Who asked what, when, and what did the system answer" — the record an
+# enterprise compliance department needs both for internal QA and for
+# demonstrating diligence to an auditor. Data already existed (workspace
+# conversations + messages); this endpoint gives it a queryable, exportable
+# shape. Any workspace member may read it — workspace chats are already
+# shared-visible to members, so this reveals nothing new; it organizes it.
+
+
+class AuditLogEntry(BaseModel):
+    conversation_id: str
+    conversation_title: str | None
+    asked_by: str
+    asked_at: datetime
+    question: str
+    answer_preview: str | None
+    citations: list[str]
+
+
+class AuditLogDTO(BaseModel):
+    workspace_id: str
+    total: int
+    limit: int
+    offset: int
+    entries: list[AuditLogEntry]
+
+
+_AUDIT_LOG_SQL = """
+    SELECT c.id AS conversation_id, c.title, u.full_name, u.email,
+           m.created_at AS asked_at, m.content AS question,
+           a.content AS answer,
+           COALESCE(
+             (SELECT array_agg(r.section_number ORDER BY r.section_number)
+              FROM regulations r WHERE r.id = ANY(a.cited_regulation_ids)),
+             '{}'
+           ) AS citations
+    FROM messages m
+    JOIN conversations c ON c.id = m.conversation_id
+    JOIN users u ON u.id = c.user_id
+    LEFT JOIN LATERAL (
+        SELECT m2.content, m2.cited_regulation_ids
+        FROM messages m2
+        WHERE m2.conversation_id = m.conversation_id
+          AND m2.role = 'assistant'
+          AND m2.created_at > m.created_at
+        ORDER BY m2.created_at
+        LIMIT 1
+    ) a ON TRUE
+    WHERE c.workspace_id = $1 AND m.role = 'user'
+    ORDER BY m.created_at DESC
+    LIMIT $2 OFFSET $3
+"""
+
+
+@router.get("/{workspace_id}/audit-log")
+async def get_workspace_audit_log(
+    workspace_id: UUID,
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    limit: int = 50,
+    offset: int = 0,
+    format: Literal["json", "csv"] = "json",
+):
+    """Chronological Q&A record for a workspace, JSON or CSV.
+
+    CSV is the auditor-handoff format — one row per question with the
+    answering citations joined. Attribution is the conversation owner
+    (workspace conversations are per-member-owned, shared-visible).
+    """
+    _ensure_feature_enabled()
+    pool = await get_pool()
+    await _require_workspace_role(
+        pool, workspace_id, UUID(current_user.user_id),
+        ("owner", "admin", "member"),
+    )
+    limit = max(1, min(limit, 500))
+    offset = max(0, offset)
+
+    total = await pool.fetchval(
+        "SELECT COUNT(*) FROM messages m "
+        "JOIN conversations c ON c.id = m.conversation_id "
+        "WHERE c.workspace_id = $1 AND m.role = 'user'",
+        workspace_id,
+    )
+    rows = await pool.fetch(_AUDIT_LOG_SQL, workspace_id, limit, offset)
+
+    if format == "csv":
+        import csv
+        import io
+
+        from fastapi.responses import PlainTextResponse
+
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+        writer.writerow(
+            ["asked_at_utc", "asked_by", "question", "answer", "citations",
+             "conversation_id", "conversation_title"],
+        )
+        for r in rows:
+            writer.writerow([
+                r["asked_at"].isoformat(),
+                r["full_name"] or r["email"],
+                r["question"],
+                (r["answer"] or "")[:2000],
+                "; ".join(r["citations"] or []),
+                str(r["conversation_id"]),
+                r["title"] or "",
+            ])
+        return PlainTextResponse(
+            buf.getvalue(),
+            media_type="text/csv",
+            headers={
+                "Content-Disposition":
+                    f'attachment; filename="regknots-audit-log-{workspace_id}.csv"',
+            },
+        )
+
+    return AuditLogDTO(
+        workspace_id=str(workspace_id),
+        total=int(total or 0),
+        limit=limit,
+        offset=offset,
+        entries=[
+            AuditLogEntry(
+                conversation_id=str(r["conversation_id"]),
+                conversation_title=r["title"],
+                asked_by=r["full_name"] or r["email"],
+                asked_at=r["asked_at"],
+                question=r["question"],
+                answer_preview=(r["answer"] or "")[:400] or None,
+                citations=list(r["citations"] or []),
+            )
+            for r in rows
+        ],
+    )
