@@ -143,7 +143,7 @@ Then sort.
 
 **What doesn't:** vessel-profile boost is +0.05 per term. The term has to literally appear in chunk full_text. "Containership" probably DOES appear in Subchapter I chunks. But a chunk that says "The master shall ensure" is just as likely to score well — the vessel-profile boost is giving a small nudge, not a structural filter.
 
-**The missing piece:** no vessel-type × CFR-Part applicability filter. This is what the Cassandra audit surfaced as the #1 issue.
+**The missing piece:** no vessel-type × CFR-Part applicability filter. This is what the Karynn audit surfaced as the #1 issue.
 
 **Proposed re-ranking stage (new):**
 ```
@@ -312,7 +312,7 @@ These are not urgent but are worth queueing:
 
 ## 6. The bottom line
 
-The RAG pipeline is **fundamentally sound**. Baseline numbers (92.9% A or A−) reflect that. The Cassandra single-point Q1 error was a real issue but it's not representative — the majority of the system is working.
+The RAG pipeline is **fundamentally sound**. Baseline numbers (92.9% A or A−) reflect that. The Karynn single-point Q1 error was a real issue but it's not representative — the majority of the system is working.
 
 The path to A− at worst is **two small structural changes** (Priorities 1 and 2), plus disciplined regression evaluation on every change. Not a rewrite, not new retrieval infrastructure, not new embedding models.
 

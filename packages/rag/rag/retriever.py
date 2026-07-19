@@ -2112,7 +2112,7 @@ _VESSEL_TYPE_CFR_APPLICABILITY: dict[str, dict[str, frozenset[str]]] = {
     "research vessel": {
         "applicable": frozenset({
             # Subchapter U — Oceanographic Research (primary; the ONE place
-            # where Part 195 actually applies — Cassandra's case in reverse)
+            # where Part 195 actually applies — Karynn's case in reverse)
             "188", "189", "190", "191", "192", "193", "194", "195",
         }),
         "forbidden": frozenset({

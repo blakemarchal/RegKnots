@@ -18,7 +18,7 @@ Grading (deterministic):
   A  — expected Part / section_number cited prominently, no wrong-subchapter
        citations present
   B  — expected source cited AND a wrong-subchapter citation also present
-       (contamination case — Cassandra Q1 pattern)
+       (contamination case — Karynn Q1 pattern)
   C  — expected source NOT cited, a wrong-subchapter citation IS the top or
        second citation (the retrieval-to-wrong-Subchapter failure)
   F  — expected source NOT cited AND no wrong-subchapter cited either
@@ -124,7 +124,7 @@ VESSELS: dict[str, VesselProfile] = {
 #   expected:    regex patterns that should appear in cited section_numbers
 #                for an A grade. Any match counts.
 #   wrong_sub:   regex patterns for section_numbers that would indicate
-#                the Subchapter-mismatch failure mode (Cassandra Q1).
+#                the Subchapter-mismatch failure mode (Karynn Q1).
 #                Hitting one of these in the top-2 citations = B or C.
 
 @dataclass
