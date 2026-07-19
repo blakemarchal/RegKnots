@@ -918,10 +918,6 @@ def _build_chat_messages(
     user_jurisdiction_focus: str | None = None,
     user_verbosity: str | None = None,
     images: list | None = None,
-    # 2026-07-19 Wk3 — pre-joined live-data blocks (recent corpus
-    # changes / active whale zones). Rendered between the style blocks
-    # and the retrieval context; each block carries its own usage NOTE.
-    live_data_str: str = "",
 ) -> list[dict]:
     """Construct the Claude API message list for a chat turn.
 
@@ -1089,7 +1085,6 @@ def _build_chat_messages(
         f"{credential_block}"
         f"{soft_context_block}"
         f"{verbosity_block}"
-        f"{live_data_str}"
         f"Regulation context:\n{context_str}\n\n"
         f"Question: {query}"
     )
@@ -2672,6 +2667,15 @@ async def chat_with_progress(
     # API-layer blocks arrive via live_context_block. Both APPEND to the
     # retrieval context — never replace it — and a build failure never
     # breaks the turn.
+    #
+    # CRITICAL (learned live 2026-07-19): the block must be folded INTO
+    # context_str, not threaded as a separate prompt param. The hedge
+    # judge, citation verifier, and _regenerate_answer all reason over
+    # context_str — with the live data outside it, the judge flagged the
+    # (correct) live-data answer as unsupported, regeneration re-ran
+    # WITHOUT the live block, and a stale-2023-ALCOAST hedge replaced a
+    # perfect answer. One context string, every layer sees the same
+    # world.
     from rag.live_context import build_reg_changes_block, detect_live_context
     _live_blocks: list[str] = []
     if live_context_block:
@@ -2681,7 +2685,8 @@ async def chat_with_progress(
         if _reg_block:
             _live_blocks.append(_reg_block)
             logger.info("live-context: injected reg-changes block")
-    live_data_str = ("\n\n".join(_live_blocks) + "\n\n") if _live_blocks else ""
+    if _live_blocks:
+        context_str = "\n\n".join(_live_blocks) + "\n\n" + context_str
 
     found_sources = _summarize_found_sources(chunks)
     if found_sources:
@@ -2706,8 +2711,6 @@ async def chat_with_progress(
         # D6.97 Phase 2 — pass through image attachments. When non-empty
         # the final user message becomes a multimodal block list.
         images=images,
-        # 2026-07-19 Wk3 — live-data blocks (reg changes / whale zones).
-        live_data_str=live_data_str,
     )
 
     yield {"event": "status", "data": "Consulting compliance engine…"}
