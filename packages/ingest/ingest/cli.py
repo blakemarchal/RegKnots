@@ -12,6 +12,7 @@ Usage:
 import argparse
 import asyncio
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -711,14 +712,29 @@ async def _run(
                     f"{result.new_or_modified_chunks} new/modified chunks"
                 )
 
-        # Rebuild the HNSW vector index after ingest to prevent stale results
+        # 2026-07-19 — per-ingest REINDEX removed. pgvector maintains the
+        # HNSW graph incrementally on insert/update; a full REINDEX here
+        # took an ACCESS EXCLUSIVE lock (blocking every live chat query
+        # for the duration) and rebuilt a 200k-row index to freshen a few
+        # hundred chunks. Measured 2026-07-19: recall is identical with
+        # and without (ef_search sweep showed the graph isn't the
+        # bottleneck). Graph-quality upkeep now runs weekly out-of-band
+        # via scripts/db_maintenance.sh (REINDEX CONCURRENTLY — no lock).
+        # Opt back in for one run with REGKNOTS_REINDEX_AFTER_INGEST=1
+        # (e.g. after a massive delete/re-embed where you want immediate
+        # graph compaction).
         total_upserts = sum(r.upserts for r in all_results)
-        if total_upserts > 0:
+        if total_upserts > 0 and os.environ.get("REGKNOTS_REINDEX_AFTER_INGEST") == "1":
             console.print()
-            console.print("[cyan]Rebuilding HNSW vector index...[/cyan]")
+            console.print("[cyan]Rebuilding HNSW vector index (opt-in)...[/cyan]")
             async with pool.acquire() as conn:
                 await conn.execute("REINDEX INDEX idx_regulations_embedding")
             console.print("[green]HNSW index rebuilt successfully.[/green]")
+        elif total_upserts > 0:
+            console.print(
+                "  [dim]HNSW reindex skipped (incremental maintenance; "
+                "weekly REINDEX CONCURRENTLY handles graph upkeep)[/dim]"
+            )
     finally:
         await pool.close()
 

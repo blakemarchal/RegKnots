@@ -1,0 +1,2622 @@
+{
+ "summary": {
+  "arm": "dense",
+  "ef_search": 0,
+  "limit": 8,
+  "ran_at": "2026-07-19T05:08:49.327595+00:00",
+  "pairs": 62,
+  "errors": 0,
+  "strong_recall_at_k": 0.7903,
+  "weak_recall_at_k": 0.9032,
+  "mrr_strong": 0.6267,
+  "pairs_with_wrong_sub": 0,
+  "latency_ms_p50": 550.0,
+  "latency_ms_p95": 1563
+ },
+ "rows": [
+  {
+   "qid": "F1",
+   "vessel": "V1",
+   "strong_rank": 1,
+   "weak_rank": 1,
+   "wrong_hits": 0,
+   "top": [
+    {
+     "source": "solas",
+     "section": "SOLAS Ch.II-2 Reg.10"
+    },
+    {
+     "source": "erg",
+     "section": "ERG Guide 111"
+    },
+    {
+     "source": "liscr_mn",
+     "section": "LISCR FIR-001"
+    },
+    {
+     "source": "iri_mn",
+     "section": "RMI MN-2-011-14"
+    },
+    {
+     "source": "imo_igc",
+     "section": "IMO IGC Code MSC.370(93) Ch.11"
+    },
+    {
+     "source": "imo_hsc",
+     "section": "IMO HSC Code MSC.97(73) Ch.7"
+    },
+    {
+     "source": "imo_fss",
+     "section": "IMO FSS Code MSC.98(73) Ch.3"
+    },
+    {
+     "source": "amsa_mo",
+     "section": "Marine Order 15"
+    }
+   ],
+   "latency_ms": 2848
+  },
+  {
+   "qid": "F1",
+   "vessel": "V2",
+   "strong_rank": null,
+   "weak_rank": null,
+   "wrong_hits": 0,
+   "top": [
+    {
+     "source": "stcw",
+     "section": "STCW Code A-V/1-1"
+    },
+    {
+     "source": "stcw",
+     "section": "STCW Ch.V"
+    },
+    {
+     "source": "stcw",
+     "section": "STCW Code A-V/1-1"
+    },
+    {
+     "source": "abs_mvr",
+     "section": "ABS MVR Pt.5C2 Ch.9 Sec.14"
+    },
+    {
+     "source": "imo_fss",
+     "section": "IMO FSS Code MSC.98(73) Ch.3"
+    },
+    {
+     "source": "ocimf",
+     "section": "OCIMF SIRE VIQ7"
+    },
+    {
+     "source": "ocimf",
+     "section": "OCIMF SIRE 2.0 Q Library Pt1"
+    },
+    {
+     "source": "abs_mvr",
+     "section": "ABS MVR Pt.4 Ch.7 Sec.3"
+    }
+   ],
+   "latency_ms": 1111
+  },
+  {
+   "qid": "F1",
+   "vessel": "V5",
+   "strong_rank": null,
+   "weak_rank": null,
+   "wrong_hits": 0,
+   "top": [
+    {
+     "source": "imdg",
+     "section": "IMDG 7.1.4.5"
+    },
+    {
+     "source": "solas",
+     "section": "SOLAS Ch.II"
+    },
+    {
+     "source": "solas",
+     "section": "SOLAS Ch.II Reg.10"
+    },
+    {
+     "source": "stcw",
+     "section": "STCW Code A-V/1-1"
+    },
+    {
+     "source": "stcw",
+     "section": "STCW Ch.V"
+    },
+    {
+     "source": "stcw",
+     "section": "STCW Code A-V/1-1"
+    },
+    {
+     "source": "erg",
+     "section": "ERG IED Safe Standoff Distances"
+    },
+    {
+     "source": "erg",
+     "section": "ERG IED Safe Standoff Distances"
+    }
+   ],
+   "latency_ms": 978
+  },
+  {
+   "qid": "F2",
+   "vessel": "V1",
+   "strong_rank": 1,
+   "weak_rank": 1,
+   "wrong_hits": 0,
+   "top": [
+    {
+     "source": "solas",
+     "section": "SOLAS Ch.II-2 Reg.10"
+    },
+    {
+     "source": "cfr_33",
+     "section": "33 CFR 149.411"
+    },
+    {
+     "source": "nvic",
+     "section": "NVIC 06-01 \u00a73"
+    },
+    {
+     "source": "erg",
+     "section": "ERG Guide 111"
+    },
+    {
+     "source": "imo_igc",
+     "section": "IMO IGC Code MSC.370(93) Ch.11"
+    },
+    {
+     "source": "imo_fss",
+     "section": "IMO FSS Code MSC.98(73) Ch.3"
+    },
+    {
+     "source": "cfr_46",
+     "section": "46 CFR 96.35-10"
+    },
+    {
+     "source": "solas",
+     "section": "SOLAS Ch.II Reg.10"
+    }
+   ],
+   "latency_ms": 1146
+  },
+  {
+   "qid": "F2",
+   "vessel": "V2",
+   "strong_rank": 2,
+   "weak_rank": 2,
+   "wrong_hits": 0,
+   "top": [
+    {
+     "source": "solas",
+     "section": "SOLAS Ch.II Reg.10"
+    },
+    {
+     "source": "solas",
+     "section": "SOLAS Ch.II-2 Part C"
+    },
+    {
+     "source": "solas",
+     "section": "SOLAS Ch.II"
+    },
+    {
+     "source": "mca_msn",
+     "section": "MSN 1901 (M)"
+    },
+    {
+     "source": "abs_mvr",
+     "section": "ABS MVR Pt.4 Ch.7 Sec.3"
+    },
+    {
+     "source": "imo_fss",
+     "section": "IMO FSS Code MSC.98(73) Ch.3"
+    },
+    {
+     "source": "ocimf",
+     "section": "OCIMF SIRE VIQ7"
+    },
+    {
+     "source": "ocimf",
+     "section": "OCIMF SIRE 2.0 Q Library Pt1"
+    }
+   ],
+   "latency_ms": 966
+  },
+  {
+   "qid": "F5",
+   "vessel": "V1",
+   "strong_rank": null,
+   "weak_rank": null,
+   "wrong_hits": 0,
+   "top": [
+    {
+     "source": "cfr_46",
+     "section": "46 CFR 95.05-10"
+    },
+    {
+     "source": "iri_mn",
+     "section": "RMI MN-2-013-12"
+    },
+    {
+     "source": "imo_igc",
+     "section": "IMO IGC Code MSC.370(93) Ch.17"
+    },
+    {
+     "source": "imo_hsc",
+     "section": "IMO HSC Code MSC.97(73) Ch.7"
+    },
+    {
+     "source": "imo_fss",
+     "section": "IMO FSS Code MSC.98(73) Ch.5"
+    },
+    {
+     "source": "bv",
+     "section": "BV NR467 Pt.C"
+    },
+    {
+     "source": "bv",
+     "section": "BV NR467 Pt.C"
+    },
+    {
+     "source": "cfr_46",
+     "section": "46 CFR 95.05-10"
+    }
+   ],
+   "latency_ms": 564
+  },
+  {
+   "qid": "F5",
+   "vessel": "V5",
+   "strong_rank": null,
+   "weak_rank": null,
+   "wrong_hits": 0,
+   "top": [
+    {
+     "source": "bv",
+     "section": "BV NR467 Pt.C"
+    },
+    {
+     "source": "bv",
+     "section": "BV NR467 Pt.C"
+    },
+    {
+     "source": "nvic",
+     "section": "NVIC 06-72 \u00a74"
+    },
+    {
+     "source": "imo_igc",
+     "section": "IMO IGC Code MSC.370(93) Ch.17"
+    },
+    {
+     "source": "bv",
+     "section": "BV NR467 Pt.A"
+    },
+    {
+     "source": "nvic",
+     "section": "NVIC 06-72 \u00a74"
+    },
+    {
+     "source": "liscr_mn",
+     "section": "LISCR FIR-001"
+    },
+    {
+     "source": "imo_fss",
+     "section": "IMO FSS Code MSC.98(73) Ch.15"
+    }
+   ],
+   "latency_ms": 449
+  },
+  {
+   "qid": "F7",
+   "vessel": "V1",
+   "strong_rank": 1,
+   "weak_rank": 1,
+   "wrong_hits": 0,
+   "top": [
+    {
+     "source": "uscg_bulletin",
+     "section": "USCG ALCOAST_OPERATIONAL 2022-01-14 [305ad80]"
+    },
+    {
+     "source": "uscg_bulletin",
+     "section": "USCG ALCOAST_OPERATIONAL 2018-02-09 [1d9a568]"
+    },
+    {
+     "source": "uscg_bulletin",
+     "section": "USCG ALCOAST_OPERATIONAL 2018-02-09 [1d9a568]"
+    },
+    {
+     "source": "uscg_bulletin",
+     "section": "USCG ALCOAST_OPERATIONAL 2022-01-14 [305ad80]"
+    },
+    {
+     "source": "mca_mgn",
+     "section": "MGN 667 (M)"
+    },
+    {
+     "source": "bma_mn",
+     "section": "BMA bma-safety-alert-22-02-safe-handling-of-condemned-fire-extinguishers"
+    },
+    {
+     "source": "nvic",
+     "section": "NVIC 10-99 \u00a75"
+    },
+    {
+     "source": "bma_mn",
+     "section": "BMA bma-safety-alert-22-02-safe-handling-of-condemned-fire-extinguishers"
+    }
+   ],
+   "latency_ms": 548
+  },
+  {
+   "qid": "F7",
+   "vessel": "V3",
+   "strong_rank": 1,
+   "weak_rank": 1,
+   "wrong_hits": 0,
+   "top": [
+    {
+     "source": "uscg_bulletin",
+     "section": "USCG ALCOAST_OPERATIONAL 2022-01-14 [305ad80]"
+    },
+    {
+     "source": "uscg_bulletin",
+     "section": "USCG ALCOAST_OPERATIONAL 2018-02-09 [1d9a568]"
+    },
+    {
+     "source": "uscg_bulletin",
+     "section": "USCG ALCOAST_OPERATIONAL 2018-02-09 [1d9a568]"
+    },
+    {
+     "source": "uscg_bulletin",
+     "section": "USCG ALCOAST_OPERATIONAL 2022-01-14 [305ad80]"
+    },
+    {
+     "source": "bma_mn",
+     "section": "BMA bma-safety-alert-22-02-safe-handling-of-condemned-fire-extinguishers"
+    },
+    {
+     "source": "bma_mn",
+     "section": "BMA bma-safety-alert-22-02-safe-handling-of-condemned-fire-extinguishers"
+    },
+    {
+     "source": "coswp",
+     "section": "COSWP 2025 Ch.9 \u00a79.8"
+    },
+    {
+     "source": "nvic",
+     "section": "NVIC 07-70 \u00a72"
+    }
+   ],
+   "latency_ms": 476
+  },
+  {
+   "qid": "C1",
+   "vessel": "V1",
+   "strong_rank": 1,
+   "weak_rank": 1,
+   "wrong_hits": 0,
+   "top": [
+    {
+     "source": "nmc_checklist",
+     "section": "MCP-FM-NMC5-01"
+    },
+    {
+     "source": "nmc_checklist",
+     "section": "MCP-FM-NMC5-01"
+    },
+    {
+     "source": "nmc_checklist",
+     "section": "NMC Application Acceptance Checklist"
+    },
+    {
+     "source": "nmc_policy",
+     "section": "NMC MMC App Submission Guidelines"
+    },
+    {
+     "source": "nmc_policy",
+     "section": "CG-MMC PL 01-25"
+    },
+    {
+     "source": "cfr_46",
+     "section": "46 CFR 10.205"
+    },
+    {
+     "source": "cfr_46",
+     "section": "46 CFR 10.225"
+    },
+    {
+     "source": "cfr_33",
+     "section": "33 CFR 164.13"
+    }
+   ],
+   "latency_ms": 617
+  },
+  {
+   "qid": "C1",
+   "vessel": "V3",
+   "strong_rank": 1,
+   "weak_rank": 1,
+   "wrong_hits": 0,
+   "top": [
+    {
+     "source": "nmc_checklist",
+     "section": "MCP-FM-NMC5-01"
+    },
+    {
+     "source": "nmc_checklist",
+     "section": "MCP-FM-NMC5-01"
+    },
+    {
+     "source": "nmc_checklist",
+     "section": "NMC Application Acceptance Checklist"
+    },
+    {
+     "source": "nmc_policy",
+     "section": "NMC MMC App Submission Guidelines"
+    },
+    {
+     "source": "nmc_policy",
+     "section": "CG-MMC PL 01-25"
+    },
+    {
+     "source": "cfr_46",
+     "section": "46 CFR 10.205"
+    },
+    {
+     "source": "cfr_46",
+     "section": "46 CFR 10.225"
+    },
+    {
+     "source": "cfr_33",
+     "section": "33 CFR 164.13"
+    }
+   ],
+   "latency_ms": 591
+  },
+  {
+   "qid": "C1",
+   "vessel": "V5",
+   "strong_rank": 1,
+   "weak_rank": 1,
+   "wrong_hits": 0,
+   "top": [
+    {
+     "source": "nmc_checklist",
+     "section": "MCP-FM-NMC5-01"
+    },
+    {
+     "source": "nmc_checklist",
+     "section": "MCP-FM-NMC5-01"
+    },
+    {
+     "source": "nmc_checklist",
+     "section": "NMC Application Acceptance Checklist"
+    },
+    {
+     "source": "nmc_policy",
+     "section": "NMC MMC App Submission Guidelines"
+    },
+    {
+     "source": "nmc_policy",
+     "section": "CG-MMC PL 01-25"
+    },
+    {
+     "source": "cfr_46",
+     "section": "46 CFR 10.205"
+    },
+    {
+     "source": "cfr_46",
+     "section": "46 CFR 10.225"
+    },
+    {
+     "source": "cfr_33",
+     "section": "33 CFR 164.13"
+    }
+   ],
+   "latency_ms": 659
+  },
+  {
+   "qid": "C2",
+   "vessel": "V1",
+   "strong_rank": 1,
+   "weak_rank": 1,
+   "wrong_hits": 0,
+   "top": [
+    {
+     "source": "nmc_policy",
+     "section": "NMC Military Sea Service Crediting"
+    },
+    {
+     "source": "nmc_policy",
+     "section": "NMC Military Sea Service Crediting"
+    },
+    {
+     "source": "nmc_policy",
+     "section": "CG-MMC PL 01-25"
+    },
+    {
+     "source": "cfr_46",
+     "section": "46 CFR 10.201"
+    },
+    {
+     "source": "cfr_33",
+     "section": "33 CFR 162.5"
+    },
+    {
+     "source": "cfr_33",
+     "section": "33 CFR 163.03"
+    },
+    {
+     "source": "cfr_33",
+     "section": "33 CFR 164.13"
+    },
+    {
+     "source": "stcw",
+     "section": "STCW Code B-I/2"
+    }
+   ],
+   "latency_ms": 642
+  },
+  {
+   "qid": "C2",
+   "vessel": "V3",
+   "strong_rank": 1,
+   "weak_rank": 1,
+   "wrong_hits": 0,
+   "top": [
+    {
+     "source": "nmc_policy",
+     "section": "NMC Military Sea Service Crediting"
+    },
+    {
+     "source": "nmc_policy",
+     "section": "NMC Military Sea Service Crediting"
+    },
+    {
+     "source": "nmc_policy",
+     "section": "CG-MMC PL 01-25"
+    },
+    {
+     "source": "cfr_46",
+     "section": "46 CFR 10.201"
+    },
+    {
+     "source": "cfr_33",
+     "section": "33 CFR 162.5"
+    },
+    {
+     "source": "cfr_33",
+     "section": "33 CFR 163.03"
+    },
+    {
+     "source": "cfr_33",
+     "section": "33 CFR 164.13"
+    },
+    {
+     "source": "uscg_bulletin",
+     "section": "NMC Announcement 2021-04-19"
+    }
+   ],
+   "latency_ms": 601
+  },
+  {
+   "qid": "C3",
+   "vessel": "V1",
+   "strong_rank": 7,
+   "weak_rank": 7,
+   "wrong_hits": 0,
+   "top": [
+    {
+     "source": "nmc_policy",
+     "section": "NMC Top 10 Medical Conditions"
+    },
+    {
+     "source": "bma_mn",
+     "section": "BMA MN028"
+    },
+    {
+     "source": "cfr_49",
+     "section": "49 CFR 391.46"
+    },
+    {
+     "source": "uscg_msm",
+     "section": "USCG MSM 16000.8B Ch.17"
+    },
+    {
+     "source": "nma_rsv",
+     "section": "NMA MISC helseundersokelse-av-arbeidstakere-pa-norske-skip-og-flyttba"
+    },
+    {
+     "source": "dgmm_es",
+     "section": "DGMM RD 875/2014"
+    },
+    {
+     "source": "nvic",
+     "section": "NVIC 04-08 Ch-2 \u00a74"
+    },
+    {
+     "source": "mlc",
+     "section": "MLC 2006 Standard A1.2"
+    }
+   ],
+   "latency_ms": 784
+  },
+  {
+   "qid": "C3",
+   "vessel": "V3",
+   "strong_rank": 7,
+   "weak_rank": 7,
+   "wrong_hits": 0,
+   "top": [
+    {
+     "source": "nmc_policy",
+     "section": "NMC Top 10 Medical Conditions"
+    },
+    {
+     "source": "bma_mn",
+     "section": "BMA MN028"
+    },
+    {
+     "source": "cfr_49",
+     "section": "49 CFR 391.46"
+    },
+    {
+     "source": "uscg_msm",
+     "section": "USCG MSM 16000.8B Ch.17"
+    },
+    {
+     "source": "nma_rsv",
+     "section": "NMA MISC helseundersokelse-av-arbeidstakere-pa-norske-skip-og-flyttba"
+    },
+    {
+     "source": "dgmm_es",
+     "section": "DGMM RD 875/2014"
+    },
+    {
+     "source": "nvic",
+     "section": "NVIC 04-08 Ch-2 \u00a74"
+    },
+    {
+     "source": "stcw",
+     "section": "STCW Code B-I/9"
+    }
+   ],
+   "latency_ms": 502
+  },
+  {
+   "qid": "C3",
+   "vessel": "V5",
+   "strong_rank": 7,
+   "weak_rank": 7,
+   "wrong_hits": 0,
+   "top": [
+    {
+     "source": "nmc_policy",
+     "section": "NMC Top 10 Medical Conditions"
+    },
+    {
+     "source": "bma_mn",
+     "section": "BMA MN028"
+    },
+    {
+     "source": "cfr_49",
+     "section": "49 CFR 391.46"
+    },
+    {
+     "source": "uscg_msm",
+     "section": "USCG MSM 16000.8B Ch.17"
+    },
+    {
+     "source": "nma_rsv",
+     "section": "NMA MISC helseundersokelse-av-arbeidstakere-pa-norske-skip-og-flyttba"
+    },
+    {
+     "source": "dgmm_es",
+     "section": "DGMM RD 875/2014"
+    },
+    {
+     "source": "nvic",
+     "section": "NVIC 04-08 Ch-2 \u00a74"
+    },
+    {
+     "source": "stcw",
+     "section": "STCW Code B-I/9"
+    }
+   ],
+   "latency_ms": 507
+  },
+  {
+   "qid": "C4",
+   "vessel": "V3",
+   "strong_rank": 1,
+   "weak_rank": 1,
+   "wrong_hits": 0,
+   "top": [
+    {
+     "source": "nmc_policy",
+     "section": "CG-MMC PL 01-16"
+    },
+    {
+     "source": "nmc_policy",
+     "section": "CG-MMC PL 01-16"
+    },
+    {
+     "source": "cfr_46",
+     "section": "46 CFR 11.467"
+    },
+    {
+     "source": "cfr_46",
+     "section": "46 CFR 11.467"
+    },
+    {
+     "source": "cfr_46",
+     "section": "46 CFR 11.903"
+    },
+    {
+     "source": "cfr_46",
+     "section": "46 CFR 11.465"
+    },
+    {
+     "source": "cfr_46",
+     "section": "46 CFR 11.466"
+    },
+    {
+     "source": "cfr_46",
+     "section": "46 CFR 11.465"
+    }
+   ],
+   "latency_ms": 453
+  },
+  {
+   "qid": "E1",
+   "vessel": "V1",
+   "strong_rank": 2,
+   "weak_rank": 2,
+   "wrong_hits": 0,
+   "top": [
+    {
+     "source": "abs_mvr",
+     "section": "ABS MVR Pt.5D Ch.7 Sec.5"
+    },
+    {
+     "source": "cfr_46",
+     "section": "46 CFR 160.156-7"
+    },
+    {
+     "source": "cfr_46",
+     "section": "46 CFR 160.156-7"
+    },
+    {
+     "source": "cfr_46",
+     "section": "46 CFR 160.056-1"
+    },
+    {
+     "source": "mca_msn",
+     "section": "MSN 1676 (M) Amendment 2"
+    },
+    {
+     "source": "cfr_46",
+     "section": "46 CFR 199.202"
+    },
+    {
+     "source": "uscg_msm",
+     "section": "USCG MSM 16000.76 Ch.6"
+    },
+    {
+     "source": "cfr_46",
+     "section": "46 CFR 160.056-3"
+    }
+   ],
+   "latency_ms": 506
+  },
+  {
+   "qid": "E1",
+   "vessel": "V5",
+   "strong_rank": 1,
+   "weak_rank": 1,
+   "wrong_hits": 0,
+   "top": [
+    {
+     "source": "cfr_46",
+     "section": "46 CFR 160.156-7"
+    },
+    {
+     "source": "cfr_46",
+     "section": "46 CFR 160.156-7"
+    },
+    {
+     "source": "cfr_46",
+     "section": "46 CFR 160.056-1"
+    },
+    {
+     "source": "mca_msn",
+     "section": "MSN 1676 (M) Amendment 2"
+    },
+    {
+     "source": "cfr_46",
+     "section": "46 CFR 199.202"
+    },
+    {
+     "source": "abs_mvr",
+     "section": "ABS MVR Pt.5D Ch.7 Sec.5"
+    },
+    {
+     "source": "uscg_msm",
+     "section": "USCG MSM 16000.76 Ch.6"
+    },
+    {
+     "source": "cfr_46",
+     "section": "46 CFR 160.056-3"
+    }
+   ],
+   "latency_ms": 496
+  },
+  {
+   "qid": "P1",
+   "vessel": "V5",
+   "strong_rank": null,
+   "weak_rank": 1,
+   "wrong_hits": 0,
+   "top": [
+    {
+     "source": "uscg_bulletin",
+     "section": "USCG MSIB 2023-09-12 [36fe8dd]"
+    },
+    {
+     "source": "uscg_bulletin",
+     "section": "USCG MSIB 2023-11-08 [37a0a37]"
+    },
+    {
+     "source": "uscg_bulletin",
+     "section": "USCG MSIB 2023-11-09 [37a301a]"
+    },
+    {
+     "source": "uscg_bulletin",
+     "section": "USCG MSIB 2023-09-13 [37024f9]"
+    },
+    {
+     "source": "uscg_bulletin",
+     "section": "USCG MSIB 2023-09-12 [36ffc70]"
+    },
+    {
+     "source": "uscg_bulletin",
+     "section": "USCG MSIB 2023-11-08 [37a0a37]"
+    },
+    {
+     "source": "cfr_33",
+     "section": "33 CFR 162.80"
+    },
+    {
+     "source": "cfr_33",
+     "section": "33 CFR 110.195"
+    }
+   ],
+   "latency_ms": 681
+  },
+  {
+   "qid": "P3",
+   "vessel": "V1",
+   "strong_rank": 1,
+   "weak_rank": 1,
+   "wrong_hits": 0,
+   "top": [
+    {
+     "source": "cfr_33",
+     "section": "33 CFR 334.290"
+    },
+    {
+     "source": "cfr_33",
+     "section": "33 CFR 334.290"
+    },
+    {
+     "source": "cfr_33",
+     "section": "33 CFR 110.72aa"
+    },
+    {
+     "source": "cfr_33",
+     "section": "33 CFR 334.296"
+    },
+    {
+     "source": "cfr_33",
+     "section": "33 CFR 334.293"
+    },
+    {
+     "source": "uscg_bulletin",
+     "section": "MSIB 641-23"
+    },
+    {
+     "source": "uscg_bulletin",
+     "section": "MSIB 168-22"
+    },
+    {
+     "source": "uscg_bulletin",
+     "section": "MSIB 168-22"
+    }
+   ],
+   "latency_ms": 551
+  },
+  {
+   "qid": "N1",
+   "vessel": "V1",
+   "strong_rank": 1,
+   "weak_rank": 1,
+   "wrong_hits": 0,
+   "top": [
+    {
+     "source": "colregs",
+     "section": "COLREGS Rule 13"
+    },
+    {
+     "source": "colregs",
+     "section": "COLREGS Rule 14"
+    },
+    {
+     "source": "colregs",
+     "section": "COLREGS Rule 9"
+    },
+    {
+     "source": "colregs",
+     "section": "COLREGS Rules 15-16"
+    },
+    {
+     "source": "colregs",
+     "section": "COLREGS Rule 17"
+    },
+    {
+     "source": "colregs",
+     "section": "COLREGS Rule 18"
+    },
+    {
+     "source": "nvic",
+     "section": "NVIC 07-98 \u00a718"
+    },
+    {
+     "source": "nmc_exam_bank",
+     "section": "NMC Q301"
+    }
+   ],
+   "latency_ms": 2750
+  },
+  {
+   "qid": "N1",
+   "vessel": "V5",
+   "strong_rank": 1,
+   "weak_rank": 1,
+   "wrong_hits": 0,
+   "top": [
+    {
+     "source": "colregs",
+     "section": "COLREGS Rule 13"
+    },
+    {
+     "source": "colregs",
+     "section": "COLREGS Rule 14"
+    },
+    {
+     "source": "colregs",
+     "section": "COLREGS Rule 9"
+    },
+    {
+     "source": "colregs",
+     "section": "COLREGS Rules 15-16"
+    },
+    {
+     "source": "colregs",
+     "section": "COLREGS Rule 17"
+    },
+    {
+     "source": "colregs",
+     "section": "COLREGS Rule 18"
+    },
+    {
+     "source": "nmc_exam_bank",
+     "section": "NMC Q301"
+    },
+    {
+     "source": "nvic",
+     "section": "NVIC 07-98 \u00a718"
+    }
+   ],
+   "latency_ms": 456
+  },
+  {
+   "qid": "V1q",
+   "vessel": "V1",
+   "strong_rank": 1,
+   "weak_rank": 1,
+   "wrong_hits": 0,
+   "top": [
+    {
+     "source": "cfr_33",
+     "section": "33 CFR 151.1510"
+    },
+    {
+     "source": "bv",
+     "section": "BV NR467 Pt.F"
+    },
+    {
+     "source": "cfr_33",
+     "section": "33 CFR 151.2060"
+    },
+    {
+     "source": "nvic",
+     "section": "NVIC 01-18 \u00a71"
+    },
+    {
+     "source": "cfr_33",
+     "section": "33 CFR 151.1510"
+    },
+    {
+     "source": "liscr_mn",
+     "section": "LISCR POL-005"
+    },
+    {
+     "source": "cfr_33",
+     "section": "33 CFR 151.2050"
+    },
+    {
+     "source": "nvic",
+     "section": "NVIC 01-18 \u00a71"
+    }
+   ],
+   "latency_ms": 398
+  },
+  {
+   "qid": "V3q",
+   "vessel": "V2",
+   "strong_rank": 1,
+   "weak_rank": 1,
+   "wrong_hits": 0,
+   "top": [
+    {
+     "source": "marpol",
+     "section": "MARPOL Annex I App.III"
+    },
+    {
+     "source": "marpol",
+     "section": "MARPOL Annex I App.III"
+    },
+    {
+     "source": "cfr_33",
+     "section": "33 CFR 151.25"
+    },
+    {
+     "source": "nvic",
+     "section": "NVIC 08-83 \u00a74"
+    },
+    {
+     "source": "nvic",
+     "section": "NVIC 08-83 \u00a73"
+    },
+    {
+     "source": "cfr_33",
+     "section": "33 CFR 151.25"
+    },
+    {
+     "source": "amsa_mo",
+     "section": "Marine Order 91"
+    },
+    {
+     "source": "pa_mmc",
+     "section": "Panama MMC-215"
+    }
+   ],
+   "latency_ms": 467
+  },
+  {
+   "qid": "U-1",
+   "vessel": "V1",
+   "strong_rank": 1,
+   "weak_rank": 1,
+   "wrong_hits": 0,
+   "top": [
+    {
+     "source": "usc_46",
+     "section": "46 USC 11103"
+    },
+    {
+     "source": "usc_46",
+     "section": "46 USC 11102"
+    },
+    {
+     "source": "bma_mn",
+     "section": "BMA MN075"
+    },
+    {
+     "source": "nmc_exam_bank",
+     "section": "NMC Q512"
+    },
+    {
+     "source": "bv",
+     "section": "BV NR467 Pt.F"
+    },
+    {
+     "source": "abs_mvr",
+     "section": "ABS MVR Pt.5D Ch.4 Sec.3"
+    },
+    {
+     "source": "uscg_msm",
+     "section": "USCG MSM 16000.71 Ch.3"
+    },
+    {
+     "source": "uscg_msm",
+     "section": "USCG MSM 16000.71 Ch.6"
+    }
+   ],
+   "latency_ms": 1035
+  },
+  {
+   "qid": "U-2",
+   "vessel": "V1",
+   "strong_rank": 1,
+   "weak_rank": 1,
+   "wrong_hits": 0,
+   "top": [
+    {
+     "source": "cfr_46",
+     "section": "46 CFR 14.201"
+    },
+    {
+     "source": "cfr_46",
+     "section": "46 CFR 2.01-13"
+    },
+    {
+     "source": "usc_46",
+     "section": "46 USC 9101"
+    },
+    {
+     "source": "cfr_46",
+     "section": "46 CFR 14.211"
+    },
+    {
+     "source": "uscg_msm",
+     "section": "USCG MSM 16000.73 Ch.7"
+    },
+    {
+     "source": "cfr_46",
+     "section": "46 CFR 14.207"
+    },
+    {
+     "source": "cfr_46",
+     "section": "46 CFR 154.1802"
+    },
+    {
+     "source": "cfr_46",
+     "section": "46 CFR 50.05-15"
+    }
+   ],
+   "latency_ms": 554
+  },
+  {
+   "qid": "U-3",
+   "vessel": "V1",
+   "strong_rank": 7,
+   "weak_rank": 1,
+   "wrong_hits": 0,
+   "top": [
+    {
+     "source": "usc_46",
+     "section": "46 USC 11106"
+    },
+    {
+     "source": "uscg_msm",
+     "section": "USCG MSM 16000.8B Ch.17"
+    },
+    {
+     "source": "bma_mn",
+     "section": "BMA MN034"
+    },
+    {
+     "source": "cfr_49",
+     "section": "49 CFR 24.208"
+    },
+    {
+     "source": "cfr_33",
+     "section": "33 CFR 110.179"
+    },
+    {
+     "source": "usc_46",
+     "section": "46 USC 8106"
+    },
+    {
+     "source": "usc_46",
+     "section": "46 USC 10906"
+    },
+    {
+     "source": "usc_46",
+     "section": "46 USC 11105"
+    }
+   ],
+   "latency_ms": 436
+  },
+  {
+   "qid": "M-1",
+   "vessel": "V1",
+   "strong_rank": 1,
+   "weak_rank": 1,
+   "wrong_hits": 0,
+   "top": [
+    {
+     "source": "uscg_msm",
+     "section": "USCG MSM 16000.73 Ch.1"
+    },
+    {
+     "source": "uscg_msm",
+     "section": "USCG MSM 16000.73 Ch.7"
+    },
+    {
+     "source": "uscg_msm",
+     "section": "USCG MSM 16000.73 Ch.7"
+    },
+    {
+     "source": "uscg_msm",
+     "section": "USCG MSM 16000.73 Ch.5"
+    },
+    {
+     "source": "uscg_msm",
+     "section": "USCG MSM 16000.73 Ch.5"
+    },
+    {
+     "source": "cfr_46",
+     "section": "46 CFR 154.151"
+    },
+    {
+     "source": "cfr_46",
+     "section": "46 CFR 153.809"
+    },
+    {
+     "source": "usc_46",
+     "section": "46 USC 3714"
+    }
+   ],
+   "latency_ms": 1485
+  },
+  {
+   "qid": "M-2",
+   "vessel": "V1",
+   "strong_rank": 1,
+   "weak_rank": 1,
+   "wrong_hits": 0,
+   "top": [
+    {
+     "source": "uscg_msm",
+     "section": "USCG MSM 16000.73 Ch.5"
+    },
+    {
+     "source": "uscg_msm",
+     "section": "USCG MSM 16000.73 Ch.2"
+    },
+    {
+     "source": "uscg_msm",
+     "section": "USCG MSM 16000.71 Ch.7"
+    },
+    {
+     "source": "uscg_msm",
+     "section": "USCG MSM 16000.73 Ch.1"
+    },
+    {
+     "source": "uscg_msm",
+     "section": "USCG MSM 16000.73 Ch.2"
+    },
+    {
+     "source": "uscg_msm",
+     "section": "USCG MSM 16000.70 Ch.2"
+    },
+    {
+     "source": "nvic",
+     "section": "NVIC 01-13 \u00a716"
+    },
+    {
+     "source": "mlc",
+     "section": "MLC 2006 Standard A5.1.4"
+    }
+   ],
+   "latency_ms": 2419
+  },
+  {
+   "qid": "W-1",
+   "vessel": "V1",
+   "strong_rank": 1,
+   "weak_rank": 1,
+   "wrong_hits": 0,
+   "top": [
+    {
+     "source": "who_ihr",
+     "section": "WHO IHR Annex 2"
+    },
+    {
+     "source": "who_ihr",
+     "section": "WHO IHR Annex 8"
+    },
+    {
+     "source": "who_ihr",
+     "section": "WHO IHR Annex 4"
+    },
+    {
+     "source": "pa_mmc",
+     "section": "Panama MMN-11/2020"
+    },
+    {
+     "source": "who_ihr",
+     "section": "WHO IHR Article 39"
+    },
+    {
+     "source": "who_ihr",
+     "section": "WHO IHR Annex 2"
+    },
+    {
+     "source": "cfr_49",
+     "section": "49 CFR 229.137"
+    },
+    {
+     "source": "nmc_exam_bank",
+     "section": "NMC Q511"
+    }
+   ],
+   "latency_ms": 605
+  },
+  {
+   "qid": "W-2",
+   "vessel": "V1",
+   "strong_rank": 1,
+   "weak_rank": 1,
+   "wrong_hits": 0,
+   "top": [
+    {
+     "source": "who_ihr",
+     "section": "WHO IHR Article 28"
+    },
+    {
+     "source": "who_ihr",
+     "section": "WHO IHR Article 37"
+    },
+    {
+     "source": "who_ihr",
+     "section": "WHO IHR Article 25"
+    },
+    {
+     "source": "who_ihr",
+     "section": "WHO IHR Article 22"
+    },
+    {
+     "source": "who_ihr",
+     "section": "WHO IHR Article 28"
+    },
+    {
+     "source": "who_ihr",
+     "section": "WHO IHR Article 27"
+    },
+    {
+     "source": "solas",
+     "section": "SOLAS Ch.XI Reg.9"
+    },
+    {
+     "source": "pa_mmc",
+     "section": "Panama MMC-367"
+    }
+   ],
+   "latency_ms": 519
+  },
+  {
+   "qid": "X4",
+   "vessel": "V1",
+   "strong_rank": null,
+   "weak_rank": 2,
+   "wrong_hits": 0,
+   "top": [
+    {
+     "source": "nvic",
+     "section": "NVIC 11-84 \u00a75"
+    },
+    {
+     "source": "nvic",
+     "section": "NVIC 09-97 \u00a79"
+    },
+    {
+     "source": "bv",
+     "section": "BV NR467 Pt.F"
+    },
+    {
+     "source": "bv",
+     "section": "BV NR467 Pt.C"
+    },
+    {
+     "source": "nvic",
+     "section": "NVIC 11-84 \u00a75"
+    },
+    {
+     "source": "cfr_46",
+     "section": "46 CFR 111.108-3"
+    },
+    {
+     "source": "nvic",
+     "section": "NVIC 10-81 \u00a75"
+    },
+    {
+     "source": "pa_mmc",
+     "section": "Panama MMC-281"
+    }
+   ],
+   "latency_ms": 406
+  },
+  {
+   "qid": "N-C1",
+   "vessel": "V5",
+   "strong_rank": null,
+   "weak_rank": 6,
+   "wrong_hits": 0,
+   "top": [
+    {
+     "source": "uscg_msm",
+     "section": "USCG MSM 16000.8B Ch.17"
+    },
+    {
+     "source": "nvic",
+     "section": "NVIC 14-81 \u00a74"
+    },
+    {
+     "source": "uscg_msm",
+     "section": "USCG MSM 16000.10A Ch.5"
+    },
+    {
+     "source": "cy_dms",
+     "section": "Cyprus DMS Circular 30/2021"
+    },
+    {
+     "source": "pa_mmc",
+     "section": "Panama MMN-18/2021"
+    },
+    {
+     "source": "uscg_msm",
+     "section": "USCG MSM 16000.10A Ch.3"
+    },
+    {
+     "source": "nma_rsv",
+     "section": "NMA RSV 4-2022"
+    },
+    {
+     "source": "abs_mvr",
+     "section": "ABS MVR Pt.4 Ch.6 Sec.4"
+    }
+   ],
+   "latency_ms": 535
+  },
+  {
+   "qid": "N-C1",
+   "vessel": "V0",
+   "strong_rank": null,
+   "weak_rank": 6,
+   "wrong_hits": 0,
+   "top": [
+    {
+     "source": "cfr_33",
+     "section": "33 CFR 165.813"
+    },
+    {
+     "source": "nvic",
+     "section": "NVIC 14-81 \u00a74"
+    },
+    {
+     "source": "uscg_msm",
+     "section": "USCG MSM 16000.10A Ch.5"
+    },
+    {
+     "source": "cy_dms",
+     "section": "Cyprus DMS Circular 30/2021"
+    },
+    {
+     "source": "pa_mmc",
+     "section": "Panama MMN-18/2021"
+    },
+    {
+     "source": "uscg_msm",
+     "section": "USCG MSM 16000.10A Ch.3"
+    },
+    {
+     "source": "nma_rsv",
+     "section": "NMA RSV 4-2022"
+    },
+    {
+     "source": "abs_mvr",
+     "section": "ABS MVR Pt.4 Ch.6 Sec.4"
+    }
+   ],
+   "latency_ms": 598
+  },
+  {
+   "qid": "N-C2",
+   "vessel": "V5",
+   "strong_rank": 6,
+   "weak_rank": 1,
+   "wrong_hits": 0,
+   "top": [
+    {
+     "source": "uscg_msm",
+     "section": "USCG MSM 16000.8B Ch.17"
+    },
+    {
+     "source": "uscg_msm",
+     "section": "USCG MSM 16000.8B Ch.17"
+    },
+    {
+     "source": "iri_mn",
+     "section": "RMI MN-7-038-2"
+    },
+    {
+     "source": "nvic",
+     "section": "NVIC 01-91 \u00a71"
+    },
+    {
+     "source": "cfr_33",
+     "section": "33 CFR 207.275"
+    },
+    {
+     "source": "cfr_46",
+     "section": "46 CFR 11.462"
+    },
+    {
+     "source": "nmc_checklist",
+     "section": "MCP-FM-NMC5-27"
+    },
+    {
+     "source": "stcw",
+     "section": "STCW Ch.II"
+    }
+   ],
+   "latency_ms": 458
+  },
+  {
+   "qid": "N-C3",
+   "vessel": "V1",
+   "strong_rank": 7,
+   "weak_rank": 1,
+   "wrong_hits": 0,
+   "top": [
+    {
+     "source": "nmc_policy",
+     "section": "NMC Announcement 2026-03-19"
+    },
+    {
+     "source": "nmc_policy",
+     "section": "NMC Announcement 2026-04-22 (Corrected)"
+    },
+    {
+     "source": "nmc_policy",
+     "section": "NMC Credential FAQ"
+    },
+    {
+     "source": "nmc_policy",
+     "section": "NMC Medical Certificate FAQ"
+    },
+    {
+     "source": "nmc_checklist",
+     "section": "MCP-FM-NMC5-01"
+    },
+    {
+     "source": "nmc_policy",
+     "section": "NMC Announcement 2026-04-22 (Corrected)"
+    },
+    {
+     "source": "nmc_policy",
+     "section": "CG-MMC PL 01-25"
+    },
+    {
+     "source": "cfr_46",
+     "section": "46 CFR 10.205"
+    }
+   ],
+   "latency_ms": 611
+  },
+  {
+   "qid": "N-C3",
+   "vessel": "V5",
+   "strong_rank": 7,
+   "weak_rank": 1,
+   "wrong_hits": 0,
+   "top": [
+    {
+     "source": "nmc_policy",
+     "section": "NMC Credential FAQ"
+    },
+    {
+     "source": "nmc_policy",
+     "section": "NMC Announcement 2026-03-19"
+    },
+    {
+     "source": "nmc_policy",
+     "section": "NMC Medical Certificate FAQ"
+    },
+    {
+     "source": "nmc_checklist",
+     "section": "MCP-FM-NMC5-01"
+    },
+    {
+     "source": "nmc_policy",
+     "section": "NMC Announcement 2026-04-22 (Corrected)"
+    },
+    {
+     "source": "nmc_policy",
+     "section": "NMC Announcement 2026-04-22 (Corrected)"
+    },
+    {
+     "source": "nmc_policy",
+     "section": "CG-MMC PL 01-25"
+    },
+    {
+     "source": "cfr_46",
+     "section": "46 CFR 10.205"
+    }
+   ],
+   "latency_ms": 610
+  },
+  {
+   "qid": "N-C4",
+   "vessel": "V1",
+   "strong_rank": 1,
+   "weak_rank": 1,
+   "wrong_hits": 0,
+   "top": [
+    {
+     "source": "nmc_policy",
+     "section": "NMC Military Sea Service Crediting"
+    },
+    {
+     "source": "nmc_policy",
+     "section": "NMC Military Sea Service Crediting"
+    },
+    {
+     "source": "nmc_policy",
+     "section": "CG-MMC PL 01-25"
+    },
+    {
+     "source": "nmc_checklist",
+     "section": "MCP-FM-NMC5-209"
+    },
+    {
+     "source": "cfr_46",
+     "section": "46 CFR 10.201"
+    },
+    {
+     "source": "cfr_46",
+     "section": "46 CFR 11.406"
+    },
+    {
+     "source": "cfr_33",
+     "section": "33 CFR 162.5"
+    },
+    {
+     "source": "cfr_33",
+     "section": "33 CFR 164.13"
+    }
+   ],
+   "latency_ms": 666
+  },
+  {
+   "qid": "N-E1",
+   "vessel": "V1",
+   "strong_rank": 1,
+   "weak_rank": 1,
+   "wrong_hits": 0,
+   "top": [
+    {
+     "source": "erg",
+     "section": "ERG Guide 124"
+    },
+    {
+     "source": "erg",
+     "section": "ERG Guide 124"
+    },
+    {
+     "source": "erg",
+     "section": "ERG Guide 119"
+    },
+    {
+     "source": "erg",
+     "section": "ERG Guide 160"
+    },
+    {
+     "source": "imo_igc",
+     "section": "IMO IGC Code MSC.370(93) Ch.17"
+    },
+    {
+     "source": "imo_igc",
+     "section": "IMO IGC Code MSC.370(93) Ch.19"
+    },
+    {
+     "source": "liscr_mn",
+     "section": "LISCR SAF-003"
+    },
+    {
+     "source": "liscr_mn",
+     "section": "LISCR SAF-003"
+    }
+   ],
+   "latency_ms": 381
+  },
+  {
+   "qid": "N-E1",
+   "vessel": "V2",
+   "strong_rank": 1,
+   "weak_rank": 1,
+   "wrong_hits": 0,
+   "top": [
+    {
+     "source": "erg",
+     "section": "ERG Guide 124"
+    },
+    {
+     "source": "erg",
+     "section": "ERG Guide 124"
+    },
+    {
+     "source": "erg",
+     "section": "ERG Guide 119"
+    },
+    {
+     "source": "erg",
+     "section": "ERG Guide 160"
+    },
+    {
+     "source": "imo_igc",
+     "section": "IMO IGC Code MSC.370(93) Ch.19"
+    },
+    {
+     "source": "imo_ibc",
+     "section": "IMO IBC Code MEPC.318(74) Ch.15"
+    },
+    {
+     "source": "stcw",
+     "section": "STCW Ch.V"
+    },
+    {
+     "source": "liscr_mn",
+     "section": "LISCR SAF-003"
+    }
+   ],
+   "latency_ms": 387
+  },
+  {
+   "qid": "N-E2",
+   "vessel": "V1",
+   "strong_rank": 2,
+   "weak_rank": 2,
+   "wrong_hits": 0,
+   "top": [
+    {
+     "source": "erg",
+     "section": "ERG Guide 118"
+    },
+    {
+     "source": "erg",
+     "section": "ERG Guide 125"
+    },
+    {
+     "source": "erg",
+     "section": "ERG Guide 132"
+    },
+    {
+     "source": "erg",
+     "section": "ERG Guide 171"
+    },
+    {
+     "source": "erg",
+     "section": "ERG Guide 125"
+    },
+    {
+     "source": "erg",
+     "section": "ERG Guide 118"
+    },
+    {
+     "source": "abs_mvr",
+     "section": "ABS MVR Pt.5C2 Ch.18 Sec.6"
+    },
+    {
+     "source": "nvic",
+     "section": "NVIC 05-86 \u00a73"
+    }
+   ],
+   "latency_ms": 428
+  },
+  {
+   "qid": "N-E2",
+   "vessel": "V2",
+   "strong_rank": 1,
+   "weak_rank": 1,
+   "wrong_hits": 0,
+   "top": [
+    {
+     "source": "erg",
+     "section": "ERG Guide 125"
+    },
+    {
+     "source": "erg",
+     "section": "ERG Guide 118"
+    },
+    {
+     "source": "erg",
+     "section": "ERG Guide 125"
+    },
+    {
+     "source": "erg",
+     "section": "ERG Guide 118"
+    },
+    {
+     "source": "erg",
+     "section": "ERG Guide 132"
+    },
+    {
+     "source": "erg",
+     "section": "ERG Guide 171"
+    },
+    {
+     "source": "abs_mvr",
+     "section": "ABS MVR Pt.5C2 Ch.18 Sec.6"
+    },
+    {
+     "source": "nvic",
+     "section": "NVIC 05-86 \u00a73"
+    }
+   ],
+   "latency_ms": 509
+  },
+  {
+   "qid": "N-E3",
+   "vessel": "V1",
+   "strong_rank": 1,
+   "weak_rank": 1,
+   "wrong_hits": 0,
+   "top": [
+    {
+     "source": "erg",
+     "section": "ERG Guide 129"
+    },
+    {
+     "source": "erg",
+     "section": "ERG Shipping Papers"
+    },
+    {
+     "source": "erg",
+     "section": "ERG Blue Block 28"
+    },
+    {
+     "source": "erg",
+     "section": "ERG Table 1 UN1790-UN2978"
+    },
+    {
+     "source": "erg",
+     "section": "ERG Table 1 UN1790-UN2978"
+    },
+    {
+     "source": "erg",
+     "section": "ERG Table 1 UN1717-UN1717"
+    },
+    {
+     "source": "erg",
+     "section": "ERG Table 1 UN1716-UN2031"
+    },
+    {
+     "source": "cfr_49",
+     "section": "49 CFR 173.4b"
+    }
+   ],
+   "latency_ms": 375
+  },
+  {
+   "qid": "N-E4",
+   "vessel": "V1",
+   "strong_rank": 1,
+   "weak_rank": 1,
+   "wrong_hits": 0,
+   "top": [
+    {
+     "source": "erg",
+     "section": "ERG Guide 145"
+    },
+    {
+     "source": "erg",
+     "section": "ERG Guide 145"
+    },
+    {
+     "source": "erg",
+     "section": "ERG Guide 146"
+    },
+    {
+     "source": "erg",
+     "section": "ERG Guide 148"
+    },
+    {
+     "source": "erg",
+     "section": "ERG Guide 143"
+    },
+    {
+     "source": "erg",
+     "section": "ERG Guide 148"
+    },
+    {
+     "source": "imdg",
+     "section": "IMDG 3.2 UN 2014 (manual)"
+    },
+    {
+     "source": "imdg",
+     "section": "IMDG 2.5"
+    }
+   ],
+   "latency_ms": 795
+  },
+  {
+   "qid": "N-S1",
+   "vessel": "V1",
+   "strong_rank": null,
+   "weak_rank": 7,
+   "wrong_hits": 0,
+   "top": [
+    {
+     "source": "solas",
+     "section": "SOLAS Ch.IV Reg.15"
+    },
+    {
+     "source": "solas",
+     "section": "SOLAS Ch.IV Reg.18"
+    },
+    {
+     "source": "solas",
+     "section": "SOLAS Ch.IV"
+    },
+    {
+     "source": "solas",
+     "section": "SOLAS Ch.IV"
+    },
+    {
+     "source": "solas",
+     "section": "SOLAS Ch.IV Part C"
+    },
+    {
+     "source": "solas",
+     "section": "SOLAS Ch.IV Reg.12"
+    },
+    {
+     "source": "pa_mmc",
+     "section": "Panama MMC-161"
+    },
+    {
+     "source": "imo_hsc",
+     "section": "IMO HSC Code MSC.97(73) Ch.14"
+    }
+   ],
+   "latency_ms": 397
+  },
+  {
+   "qid": "N-S2",
+   "vessel": "V1",
+   "strong_rank": 3,
+   "weak_rank": 1,
+   "wrong_hits": 0,
+   "top": [
+    {
+     "source": "bma_mn",
+     "section": "BMA MN079"
+    },
+    {
+     "source": "liscr_mn",
+     "section": "LISCR FIR-001"
+    },
+    {
+     "source": "imo_fss",
+     "section": "IMO FSS Code MSC.98(73) Ch.12"
+    },
+    {
+     "source": "cfr_33",
+     "section": "33 CFR 150.514"
+    },
+    {
+     "source": "pa_mmc",
+     "section": "Panama MMC-281"
+    },
+    {
+     "source": "cfr_46",
+     "section": "46 CFR 61.40-6"
+    },
+    {
+     "source": "bma_mn",
+     "section": "BMA IN014"
+    },
+    {
+     "source": "cfr_46",
+     "section": "46 CFR 199.190"
+    }
+   ],
+   "latency_ms": 460
+  },
+  {
+   "qid": "N-S2",
+   "vessel": "V2",
+   "strong_rank": 1,
+   "weak_rank": 1,
+   "wrong_hits": 0,
+   "top": [
+    {
+     "source": "cfr_33",
+     "section": "33 CFR 150.514"
+    },
+    {
+     "source": "pa_mmc",
+     "section": "Panama MMC-281"
+    },
+    {
+     "source": "cfr_46",
+     "section": "46 CFR 61.40-6"
+    },
+    {
+     "source": "iri_mn",
+     "section": "RMI MN-2-011-14"
+    },
+    {
+     "source": "bma_mn",
+     "section": "BMA IN014"
+    },
+    {
+     "source": "cfr_46",
+     "section": "46 CFR 199.190"
+    },
+    {
+     "source": "bma_mn",
+     "section": "BMA IN014"
+    },
+    {
+     "source": "iri_mn",
+     "section": "RMI MN-2-011-14"
+    }
+   ],
+   "latency_ms": 402
+  },
+  {
+   "qid": "N-S3",
+   "vessel": "V1",
+   "strong_rank": null,
+   "weak_rank": 2,
+   "wrong_hits": 0,
+   "top": [
+    {
+     "source": "mlc",
+     "section": "MLC 2006 Standard A2.3"
+    },
+    {
+     "source": "coswp",
+     "section": "COSWP 2025 Ch.4 \u00a74.1"
+    },
+    {
+     "source": "iri_mn",
+     "section": "RMI MN-2-011-14"
+    },
+    {
+     "source": "bma_mn",
+     "section": "BMA MN091"
+    },
+    {
+     "source": "abs_mvr",
+     "section": "ABS MVR Pt.5C2 Ch.13 Sec.17"
+    },
+    {
+     "source": "imo_igf",
+     "section": "IMO IGF Code MSC.391(95) Ch.1"
+    },
+    {
+     "source": "pa_mmc",
+     "section": "Panama MMC-395"
+    },
+    {
+     "source": "amsa_mo",
+     "section": "Marine Order 51"
+    }
+   ],
+   "latency_ms": 1563
+  },
+  {
+   "qid": "N-M1",
+   "vessel": "V1",
+   "strong_rank": null,
+   "weak_rank": null,
+   "wrong_hits": 0,
+   "top": [
+    {
+     "source": "cfr_49",
+     "section": "49 CFR 173.1"
+    },
+    {
+     "source": "pa_mmc",
+     "section": "Panama MMN-14/2021"
+    },
+    {
+     "source": "uscg_bulletin",
+     "section": "USCG MSIB 2024-08-07 [3ad4b39]"
+    },
+    {
+     "source": "who_ihr",
+     "section": "WHO IHR Article 32"
+    },
+    {
+     "source": "who_ihr",
+     "section": "WHO IHR Article 25"
+    },
+    {
+     "source": "who_ihr",
+     "section": "WHO IHR Article 33"
+    },
+    {
+     "source": "cfr_49",
+     "section": "49 CFR 171.1"
+    },
+    {
+     "source": "who_ihr",
+     "section": "WHO IHR Article 35"
+    }
+   ],
+   "latency_ms": 483
+  },
+  {
+   "qid": "N-M2",
+   "vessel": "V1",
+   "strong_rank": 4,
+   "weak_rank": 4,
+   "wrong_hits": 0,
+   "top": [
+    {
+     "source": "imdg",
+     "section": "IMDG 7.9"
+    },
+    {
+     "source": "imdg",
+     "section": "IMDG 7.9.3"
+    },
+    {
+     "source": "marpol",
+     "section": "MARPOL Additional Information 1"
+    },
+    {
+     "source": "iri_mn",
+     "section": "RMI MN-2-011-39"
+    },
+    {
+     "source": "iri_mn",
+     "section": "RMI MN-2-011-39"
+    },
+    {
+     "source": "pa_mmc",
+     "section": "Panama MMC-230"
+    },
+    {
+     "source": "cy_dms",
+     "section": "Cyprus DMS Circular 19/2022"
+    },
+    {
+     "source": "who_ihr",
+     "section": "WHO IHR Annex 9"
+    }
+   ],
+   "latency_ms": 549
+  },
+  {
+   "qid": "N-V1",
+   "vessel": "V1",
+   "strong_rank": null,
+   "weak_rank": 5,
+   "wrong_hits": 0,
+   "top": [
+    {
+     "source": "imo_hsc",
+     "section": "IMO HSC Code MSC.97(73) Ch.19"
+    },
+    {
+     "source": "imo_bwm",
+     "section": "IMO BWM Convention MEPC.174(58) Ch.8"
+    },
+    {
+     "source": "nvic",
+     "section": "NVIC 10-81 \u00a75"
+    },
+    {
+     "source": "ism",
+     "section": "ISM 11"
+    },
+    {
+     "source": "ism",
+     "section": "ISM 16"
+    },
+    {
+     "source": "cfr_49",
+     "section": "49 CFR 171.6"
+    },
+    {
+     "source": "cfr_46",
+     "section": "46 CFR 540.91"
+    },
+    {
+     "source": "cfr_33",
+     "section": "33 CFR 4.01"
+    }
+   ],
+   "latency_ms": 532
+  },
+  {
+   "qid": "N-V2",
+   "vessel": "V1",
+   "strong_rank": null,
+   "weak_rank": null,
+   "wrong_hits": 0,
+   "top": [
+    {
+     "source": "marpol",
+     "section": "MARPOL Annex VI Reg.24"
+    },
+    {
+     "source": "imdg",
+     "section": "IMDG 7.4"
+    },
+    {
+     "source": "abs_mvr",
+     "section": "ABS MVR Pt.5C1 Ch.6 Sec.2"
+    },
+    {
+     "source": "lr_rules",
+     "section": "LR-RU-001 Pt.3 Ch.9 Sec.10"
+    },
+    {
+     "source": "mpa_sc",
+     "section": "MPA SC 11/2025"
+    },
+    {
+     "source": "solas",
+     "section": "SOLAS Annex 1"
+    },
+    {
+     "source": "pa_mmc",
+     "section": "Panama MMC-71"
+    },
+    {
+     "source": "cy_dms",
+     "section": "Cyprus DMS Circular 15/2023"
+    }
+   ],
+   "latency_ms": 477
+  },
+  {
+   "qid": "N-V3",
+   "vessel": "V1",
+   "strong_rank": 1,
+   "weak_rank": 1,
+   "wrong_hits": 0,
+   "top": [
+    {
+     "source": "nmc_policy",
+     "section": "NMC Medical Certificate FAQ"
+    },
+    {
+     "source": "nmc_policy",
+     "section": "NMC Announcement 2026-04-22 (Corrected)"
+    },
+    {
+     "source": "nmc_policy",
+     "section": "NMC Announcement 2026-03-19"
+    },
+    {
+     "source": "nmc_policy",
+     "section": "NMC Medical Certificate FAQ"
+    },
+    {
+     "source": "nmc_checklist",
+     "section": "NMC Application Acceptance Checklist"
+    },
+    {
+     "source": "nmc_policy",
+     "section": "NMC E-Medical Cert Guidance 2026-04-08"
+    },
+    {
+     "source": "cfr_46",
+     "section": "46 CFR 10.301"
+    },
+    {
+     "source": "cfr_49",
+     "section": "49 CFR 390.109"
+    }
+   ],
+   "latency_ms": 415
+  },
+  {
+   "qid": "N-V3",
+   "vessel": "V5",
+   "strong_rank": 1,
+   "weak_rank": 1,
+   "wrong_hits": 0,
+   "top": [
+    {
+     "source": "nmc_policy",
+     "section": "NMC Medical Certificate FAQ"
+    },
+    {
+     "source": "nmc_policy",
+     "section": "NMC Medical Certificate FAQ"
+    },
+    {
+     "source": "nmc_policy",
+     "section": "NMC Announcement 2026-04-22 (Corrected)"
+    },
+    {
+     "source": "nmc_policy",
+     "section": "NMC Announcement 2026-03-19"
+    },
+    {
+     "source": "nmc_checklist",
+     "section": "NMC Application Acceptance Checklist"
+    },
+    {
+     "source": "nmc_policy",
+     "section": "NMC E-Medical Cert Guidance 2026-04-08"
+    },
+    {
+     "source": "cfr_46",
+     "section": "46 CFR 10.301"
+    },
+    {
+     "source": "cfr_49",
+     "section": "49 CFR 390.109"
+    }
+   ],
+   "latency_ms": 416
+  },
+  {
+   "qid": "N-F1",
+   "vessel": "V1",
+   "strong_rank": 2,
+   "weak_rank": 2,
+   "wrong_hits": 0,
+   "top": [
+    {
+     "source": "abs_mvr",
+     "section": "ABS MVR Pt.4 Ch.7 Sec.3"
+    },
+    {
+     "source": "solas",
+     "section": "SOLAS Ch.II-2 Part C"
+    },
+    {
+     "source": "abs_mvr",
+     "section": "ABS MVR Pt.5C2 Ch.13 Sec.11"
+    },
+    {
+     "source": "solas",
+     "section": "SOLAS Ch.II Reg.10"
+    },
+    {
+     "source": "solas",
+     "section": "SOLAS Ch.II-2 Part C"
+    },
+    {
+     "source": "solas",
+     "section": "SOLAS Ch.II"
+    },
+    {
+     "source": "solas",
+     "section": "SOLAS Ch.II"
+    },
+    {
+     "source": "imo_hsc",
+     "section": "IMO HSC Code MSC.97(73) Ch.7"
+    }
+   ],
+   "latency_ms": 681
+  },
+  {
+   "qid": "N-F1",
+   "vessel": "V5",
+   "strong_rank": 1,
+   "weak_rank": 1,
+   "wrong_hits": 0,
+   "top": [
+    {
+     "source": "solas",
+     "section": "SOLAS Ch.II-2 Part C"
+    },
+    {
+     "source": "abs_mvr",
+     "section": "ABS MVR Pt.5C2 Ch.13 Sec.11"
+    },
+    {
+     "source": "solas",
+     "section": "SOLAS Ch.II Reg.10"
+    },
+    {
+     "source": "solas",
+     "section": "SOLAS Ch.II-2 Part C"
+    },
+    {
+     "source": "solas",
+     "section": "SOLAS Ch.II"
+    },
+    {
+     "source": "solas",
+     "section": "SOLAS Ch.II"
+    },
+    {
+     "source": "abs_mvr",
+     "section": "ABS MVR Pt.4 Ch.7 Sec.3"
+    },
+    {
+     "source": "abs_mvr",
+     "section": "ABS MVR Pt.4 Ch.7 Sec.2"
+    }
+   ],
+   "latency_ms": 569
+  },
+  {
+   "qid": "N-F2",
+   "vessel": "V1",
+   "strong_rank": 4,
+   "weak_rank": 3,
+   "wrong_hits": 0,
+   "top": [
+    {
+     "source": "bma_mn",
+     "section": "BMA MN035"
+    },
+    {
+     "source": "imo_hsc",
+     "section": "IMO HSC Code MSC.97(73) Ch.8"
+    },
+    {
+     "source": "nvic",
+     "section": "NVIC 02-63 \u00a74"
+    },
+    {
+     "source": "cfr_46",
+     "section": "46 CFR 199.190"
+    },
+    {
+     "source": "solas",
+     "section": "SOLAS Ch.III Reg.20"
+    },
+    {
+     "source": "solas",
+     "section": "SOLAS Ch.III Reg.20"
+    },
+    {
+     "source": "au_statutes",
+     "section": "Navigation Act 2012"
+    },
+    {
+     "source": "mca_mgn",
+     "section": "MGN 71 (M+F) Amendment 1"
+    }
+   ],
+   "latency_ms": 1929
+  },
+  {
+   "qid": "N-O1",
+   "vessel": "V2",
+   "strong_rank": 1,
+   "weak_rank": 1,
+   "wrong_hits": 0,
+   "top": [
+    {
+     "source": "marpol",
+     "section": "MARPOL Annex I Reg.17"
+    },
+    {
+     "source": "marpol",
+     "section": "MARPOL Annex V Reg.10"
+    },
+    {
+     "source": "marpol",
+     "section": "MARPOL Annex I App.III"
+    },
+    {
+     "source": "marpol",
+     "section": "MARPOL Annex I App.III"
+    },
+    {
+     "source": "ocimf",
+     "section": "OCIMF SIRE 2.0 Q Library Pt1"
+    },
+    {
+     "source": "uscg_msm",
+     "section": "USCG MSM 16000.10A Ch.12"
+    },
+    {
+     "source": "cfr_33",
+     "section": "33 CFR 157.435"
+    },
+    {
+     "source": "cfr_33",
+     "section": "33 CFR 151.25"
+    }
+   ],
+   "latency_ms": 654
+  },
+  {
+   "qid": "N-AUTH1",
+   "vessel": "V1",
+   "strong_rank": 1,
+   "weak_rank": 1,
+   "wrong_hits": 0,
+   "top": [
+    {
+     "source": "cfr_49",
+     "section": "49 CFR 173.4b"
+    },
+    {
+     "source": "imo_ibc",
+     "section": "IMO IBC Code MEPC.318(74) Ch.19"
+    },
+    {
+     "source": "imo_igf",
+     "section": "IMO IGF Code MSC.391(95) Ch.19"
+    },
+    {
+     "source": "lr_rules",
+     "section": "LR-RU-001 Pt.5 Ch.26 Sec.6"
+    },
+    {
+     "source": "cfr_49",
+     "section": "49 CFR 172.101"
+    },
+    {
+     "source": "erg",
+     "section": "ERG Guide 129"
+    },
+    {
+     "source": "erg",
+     "section": "ERG Shipping Papers"
+    },
+    {
+     "source": "imdg",
+     "section": "IMDG Index"
+    }
+   ],
+   "latency_ms": 444
+  },
+  {
+   "qid": "N-AUTH2",
+   "vessel": "V1",
+   "strong_rank": 1,
+   "weak_rank": 1,
+   "wrong_hits": 0,
+   "top": [
+    {
+     "source": "solas",
+     "section": "SOLAS Ch.II-2 Part G"
+    },
+    {
+     "source": "abs_mvr",
+     "section": "ABS MVR Pt.3 Ch.4"
+    },
+    {
+     "source": "solas",
+     "section": "SOLAS Ch.II-2 Part A"
+    },
+    {
+     "source": "solas",
+     "section": "SOLAS Ch.II-2 Part E"
+    },
+    {
+     "source": "bv",
+     "section": "BV NR467 Pt.C"
+    },
+    {
+     "source": "solas",
+     "section": "SOLAS Ch.II-2 Part E"
+    },
+    {
+     "source": "lr_rules",
+     "section": "LR-RU-001 Pt.6 Ch.4 Sec.1"
+    },
+    {
+     "source": "abs_mvr",
+     "section": "ABS MVR Pt.3 Ch.4"
+    }
+   ],
+   "latency_ms": 577
+  }
+ ]
+}

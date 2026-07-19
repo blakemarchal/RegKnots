@@ -50,6 +50,9 @@ data/raw/uscg_bulletins/*
 # Eval summary files (not full jsonl dumps)
 !data/eval/
 data/eval/*/
+# 2026-07-19 — retrieval-eval evidence runs are the committed record
+# behind retrieval decisions (hybrid verdict). Keep them versioned.
+!data/eval/retrieval/
 !data/eval/*/summary.md
 !data/eval/*/summary.json
 packages/ingest/data/
