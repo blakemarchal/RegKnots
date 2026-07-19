@@ -1,0 +1,26 @@
+# deploy/systemd/regknots-db-maintenance.service
+# 2026-07-19 — weekly HNSW REINDEX CONCURRENTLY + VACUUM ANALYZE +
+# backup-staleness gate. Replaces the per-ingest full REINDEX that held
+# an ACCESS EXCLUSIVE lock during live traffic.
+# Install: sudo cp deploy/systemd/regknots-db-maintenance.{service,timer} /etc/systemd/system/
+#          sudo systemctl daemon-reload
+#          sudo systemctl enable --now regknots-db-maintenance.timer
+[Unit]
+Description=RegKnots weekly DB maintenance (HNSW reindex, vacuum, backup gate)
+Documentation=https://github.com/blakemarchal/RegKnots
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/opt/RegKnots
+ExecStart=/opt/RegKnots/scripts/db_maintenance.sh
+# REINDEX CONCURRENTLY on a ~200k-row HNSW index can take a while on a
+# small box; give it room but don't let a wedged run linger forever.
+TimeoutStartSec=3600
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
