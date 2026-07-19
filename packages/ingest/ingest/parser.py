@@ -108,6 +108,26 @@ def _extract_section(
     if not full_text.strip():
         return None
 
+    # 2026-07-19 — eCFR placeholder guard. The Office of the Federal
+    # Register renders "xxx" as the HEAD text for a section whose
+    # redesignation/insertion has been directed but not yet finalized —
+    # e.g. 46 CFR 4.03-0, ingested 2026-07-05, whose only body content
+    # was a bare forwarding pointer ("Link to an amendment published at
+    # 91 FR 39485..."). This is a genuine upstream editorial stub, not a
+    # parser bug: there is no real regulatory text yet, so citing it
+    # ("§ 4.03-0 — xxx") actively damages user trust. Skip it; the
+    # eventual finalized text will ingest normally as a fresh HEAD once
+    # OFR assigns it — the current full-refresh cadence recovers this
+    # automatically. Anchored on an exact title match (case-insensitive)
+    # rather than a length/pattern heuristic so legitimate short entries
+    # (e.g. IMDG index rows) are never touched.
+    if section_title.strip().lower() == "xxx":
+        logger.warning(
+            "Skipping %s — eCFR placeholder stub (HEAD='xxx', not yet finalized)",
+            section_number,
+        )
+        return None
+
     parent_section_number = _get_parent_section_number(el, parent_map, title_number)
 
     return Section(
