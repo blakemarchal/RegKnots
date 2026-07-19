@@ -60,7 +60,7 @@ router = APIRouter(prefix="/study", tags=["study"])
 # reasoning depth. Guides default Haiku for cost, Sonnet on deep_dive.
 _QUIZ_MODEL = "claude-haiku-4-5-20251001"
 _GUIDE_MODEL_FAST = "claude-haiku-4-5-20251001"
-_GUIDE_MODEL_DEEP = "claude-sonnet-4-6"
+_GUIDE_MODEL_DEEP = "claude-sonnet-5"
 
 # Per-month generation caps by tier. Captain is unlimited (None).
 _MATE_STUDY_CAP_PER_MONTH = 200

@@ -58,7 +58,7 @@ router = APIRouter(prefix="/me", tags=["me"])
 # Model choices — Sonnet for narrative-quality reasoning, Haiku for
 # context-only fetches. Keeping these explicit (vs imported from a
 # central config) so per-endpoint tuning is clear in this file.
-_REASONING_MODEL = "claude-sonnet-4-6"
+_REASONING_MODEL = "claude-sonnet-5"
 
 
 # ── /me/context — structured user context ─────────────────────────────────

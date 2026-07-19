@@ -57,7 +57,7 @@ TARGETS = [
 ]
 
 # Claude Sonnet is plenty for OCR-style transcription. Opus would be overkill.
-_VISION_MODEL = "claude-sonnet-4-6"
+_VISION_MODEL = "claude-sonnet-5"
 _DPI = 200  # matches the DPI used by apps/api/app/routers/documents.py Vision path
 
 _TRANSCRIBE_PROMPT = """\

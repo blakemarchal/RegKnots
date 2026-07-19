@@ -1838,7 +1838,7 @@ async def _try_citation_oracle_intervention(
     )
     try:
         response = await anthropic_client.messages.create(
-            model="claude-sonnet-4-6",
+            model="claude-sonnet-5",
             max_tokens=1500,
             system=synthesis_prompt,
             messages=[{"role": "user", "content": user_payload}],
@@ -2550,7 +2550,7 @@ async def chat_with_progress(
     # bearing query, negligible at current volume.
     if images and "haiku" in (route.model or "").lower():
         original_model = route.model
-        route.model = "claude-sonnet-4-6"
+        route.model = "claude-sonnet-5"
         logger.info(
             "image upload: model upgrade %s → %s (images=%d)",
             original_model, route.model, len(images),

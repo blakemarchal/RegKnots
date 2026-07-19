@@ -687,7 +687,7 @@ async def extract_credential_from_photo(
     try:
         anthropic_client: AsyncAnthropic = request.app.state.anthropic
         response = await anthropic_client.messages.create(
-            model="claude-sonnet-4-6",
+            model="claude-sonnet-5",
             max_tokens=1024,
             messages=[{"role": "user", "content": content_blocks}],
         )

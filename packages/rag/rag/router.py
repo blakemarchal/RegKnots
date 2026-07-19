@@ -27,16 +27,20 @@ MODEL_MAP: dict[int, str] = {
     # the abuse-cost gate.
     0: "",
     1: "claude-haiku-4-5-20251001",
-    2: "claude-sonnet-4-6",
-    3: "claude-opus-4-7",  # Sprint D4 — Opus 4.6 → 4.7 (better reasoning, 1M ctx)
+    # 2026-07-18 model refresh — Sonnet 4.6 → Sonnet 5, Opus 4.7 → 4.8.
+    # IDs validated against the prod API key before shipping. REMINDER:
+    # any change here must ALSO add the new ID to chat.py _MODEL_ALIAS,
+    # or model_used persists as NULL (bit us in D6.73).
+    2: "claude-sonnet-5",
+    3: "claude-opus-4-8",
 }
 
-# Sprint D4 — regeneration pass always uses Opus 4.7 regardless of the
-# initial routed model. Fires only when the citation verifier catches an
+# Regeneration pass always uses the top model regardless of the initial
+# routed model. Fires only when the citation verifier catches an
 # unverified cite or the initial answer hedged (i.e., bad answer already
 # happened). Cheap second chance: costs Opus only on failures, not on
 # every call. Engine imports this and passes it to the second-try path.
-REGENERATION_MODEL: str = "claude-opus-4-7"
+REGENERATION_MODEL: str = "claude-opus-4-8"
 
 _DEFAULT_SCORE = 2
 

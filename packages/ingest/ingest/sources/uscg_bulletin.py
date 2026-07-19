@@ -335,7 +335,7 @@ def _pass1_match(
 
 # ── Pass 2: Claude Haiku LLM classifier ─────────────────────────────────
 
-_LLM_MODEL = "claude-haiku-4-5"
+_LLM_MODEL = "claude-haiku-4-5-20251001"
 _LLM_MAX_CONCURRENCY = 10
 _LLM_CONFIDENCE_THRESHOLD = 0.7
 _LLM_TIMEOUT = 30.0
