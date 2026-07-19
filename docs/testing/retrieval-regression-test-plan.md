@@ -9,7 +9,7 @@
 3. For each answer, record: which sources it cited, whether you judge it A / B / C / F, what was wrong or missing.
 4. Send results back in any format (text, sheet, screenshots) — even 10 graded answers is valuable.
 
-Grading scale (calibrated off the Cassandra audit):
+Grading scale (calibrated off the Karynn audit):
 - **A** — direct, correctly cited, vessel-specific, nothing notable missing.
 - **A−** — correct answer, minor omissions or slightly wordy, no credibility issues.
 - **B** — right domain, cited something applicable, missed a material element.
@@ -29,7 +29,7 @@ Pick one before testing. Each setup matches a real-world profile we should handl
 - Route: International
 - Cargo: Containers
 - Expected strong subchapters: 46 CFR Subchapter I (Parts 90–105), SOLAS Ch. II / II-2 / III / IV / V, ISM Code, STCW.
-- Cassandra's profile.
+- Karynn's profile.
 
 ### V2 — Tanker, U.S. coastal
 - Name: any US-flag petroleum tanker
@@ -216,7 +216,7 @@ Blake will compile these into `data/eval/real_queries.jsonl` and wire them into 
 
 1. Every graded question becomes a **persistent regression test** — runs against retriever + synthesizer after every ingest or retriever change.
 2. Any C or F grade triggers a diagnostic run of `scripts/debug_retrieval.py` to show exactly which chunks the retriever pulled.
-3. Patterns across C/F answers reveal either (a) retrieval quality gaps (the Subchapter mirror-text issue for Cassandra's Q1) or (b) corpus gaps (NFPA 1981, etc.) or (c) synthesis prompt issues.
+3. Patterns across C/F answers reveal either (a) retrieval quality gaps (the Subchapter mirror-text issue for Karynn's Q1) or (b) corpus gaps (NFPA 1981, etc.) or (c) synthesis prompt issues.
 4. Regression pass rate becomes the headline quality metric — "92% A/A− on our test set" is a real number that can go in marketing.
 
 ## §5 — Honest target
