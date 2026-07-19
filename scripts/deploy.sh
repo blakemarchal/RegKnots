@@ -101,8 +101,13 @@ echo ""
 echo "[systemd] restart api / web / worker"
 systemctl restart regknots-api regknots-web regknots-worker
 
-# brief settle window before smoke probes hit the new binary
-sleep 4
+# 2026-07-19 — `systemctl is-active` only proves the process forked;
+# regknots-web is Type=simple, so systemd marks it active the instant
+# `pnpm start` launches, before Next.js finishes loading its build
+# manifest into memory. Caught live: a request landing in that gap got
+# served with no CSS (stale/incomplete manifest), self-healed a few
+# seconds later on its own. Poll the app's OWN HTTP port for a real,
+# content-bearing response instead of trusting systemd's process state.
 for u in regknots-api regknots-web regknots-worker; do
     state=$(systemctl is-active "$u")
     printf "  %-20s %s\n" "$u" "$state"
@@ -111,6 +116,39 @@ for u in regknots-api regknots-web regknots-worker; do
         exit 2
     fi
 done
+
+echo ""
+echo "[readiness] waiting for regknots-web to serve a real build (CSS present)..."
+web_ready=0
+for i in $(seq 1 20); do
+    html=$(curl -s --max-time 5 http://localhost:3000/login || true)
+    if echo "$html" | grep -q '/_next/static/css/'; then
+        echo "  ready after ${i}x1.5s"
+        web_ready=1
+        break
+    fi
+    sleep 1.5
+done
+if [[ "$web_ready" != "1" ]]; then
+    echo "ERROR: regknots-web never served CSS-bearing HTML within 30s"
+    exit 2
+fi
+
+echo "[readiness] waiting for regknots-api /health..."
+api_ready=0
+for i in $(seq 1 20); do
+    code=$(curl -s --max-time 5 -o /dev/null -w '%{http_code}' http://localhost:8000/health || true)
+    if [[ "$code" == "200" ]]; then
+        echo "  ready after ${i}x1.5s"
+        api_ready=1
+        break
+    fi
+    sleep 1.5
+done
+if [[ "$api_ready" != "1" ]]; then
+    echo "ERROR: regknots-api /health never returned 200 within 30s"
+    exit 2
+fi
 REMOTE
 
 # ── Smoke probes (run from the laptop, hits the public URL) ───────────
