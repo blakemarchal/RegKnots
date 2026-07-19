@@ -1,10 +1,16 @@
 'use client'
 
 // Sprint D6.64 — audit readiness assessment.
+// 2026-07-19 Wk3 — fleet mode: when workspaceId is set the backend now
+// fans out across the workspace's vessels + every member's record
+// (me.py fan-out shipped same day), so the card copy speaks fleet and
+// the result exports as a dated PDF report — the artifact a DPA hands
+// to management or an auditor.
 
 import { useState } from 'react'
 import { AILoadingState } from './AILoadingState'
 import { apiRequest } from '@/lib/api'
+import { exportAuditToPdf } from '@/lib/answerExport'
 
 interface Finding {
   severity: 'critical' | 'warning' | 'info'
@@ -33,9 +39,12 @@ const SEV_INFO: Record<Finding['severity'], { label: string; class: string; bar:
 
 interface Props {
   workspaceId?: string | null
+  // Display name for the workspace when in fleet mode — used in the
+  // card copy and stamped into the exported PDF's scope line.
+  workspaceName?: string | null
 }
 
-export function AuditReadinessCard({ workspaceId }: Props) {
+export function AuditReadinessCard({ workspaceId, workspaceName }: Props) {
   const [analysis, setAnalysis] = useState<Audit | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -73,14 +82,15 @@ export function AuditReadinessCard({ workspaceId }: Props) {
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
           <p className="font-mono text-[10px] text-[#2dd4bf] uppercase tracking-[0.25em] mb-1">
-            Audit Readiness
+            {workspaceId ? 'Fleet Audit Readiness' : 'Audit Readiness'}
           </p>
           <p className="font-display font-bold text-[#f0ece4] text-base">
-            Where do you stand right now?
+            {workspaceId ? 'Where does this fleet stand right now?' : 'Where do you stand right now?'}
           </p>
           <p className="font-mono text-xs text-[#6b7594] mt-1 max-w-md">
-            We assess your stored credentials, vessel docs, and sea-time against
-            the regulatory bar. Score, gaps, and what to fix first.
+            {workspaceId
+              ? 'One assessment across every vessel and crew member in this workspace — score, gaps, who and what to fix first. Exportable as a dated report.'
+              : 'We assess your stored credentials, vessel docs, and sea-time against the regulatory bar. Score, gaps, and what to fix first.'}
           </p>
         </div>
         {!analysis && !loading && (
@@ -99,12 +109,21 @@ export function AuditReadinessCard({ workspaceId }: Props) {
       {loading && (
         <AILoadingState
           variant="card"
-          messages={[
-            'Pulling your credentials + vessel docs + sea-time…',
-            'Cross-checking expirations and missing supporting docs…',
-            'Scoring against the regulatory bar…',
-            'Drafting the assessment…',
-          ]}
+          messages={
+            workspaceId
+              ? [
+                  'Pulling every crew record + workspace vessels…',
+                  'Cross-checking expirations across the fleet…',
+                  'Scoring against the regulatory bar…',
+                  'Drafting the fleet assessment…',
+                ]
+              : [
+                  'Pulling your credentials + vessel docs + sea-time…',
+                  'Cross-checking expirations and missing supporting docs…',
+                  'Scoring against the regulatory bar…',
+                  'Drafting the assessment…',
+                ]
+          }
         />
       )}
 
@@ -197,12 +216,34 @@ export function AuditReadinessCard({ workspaceId }: Props) {
             </div>
           )}
 
-          <button
-            onClick={() => { setAnalysis(null); setError(null) }}
-            className="font-mono text-[10px] text-[#6b7594] hover:text-[#2dd4bf] self-start"
-          >
-            ↻ Re-assess
-          </button>
+          <div className="flex items-center gap-4">
+            <button
+              onClick={() => { setAnalysis(null); setError(null) }}
+              className="font-mono text-[10px] text-[#6b7594] hover:text-[#2dd4bf]"
+            >
+              ↻ Re-assess
+            </button>
+            {/* 2026-07-19 Wk3 — dated PDF report via the browser's
+                native print dialog. The report is the deliverable a
+                compliance officer files or forwards. */}
+            <button
+              onClick={() =>
+                exportAuditToPdf({
+                  scopeLabel: workspaceId
+                    ? `Fleet: ${workspaceName ?? 'workspace'}`
+                    : 'Personal record',
+                  scorePercent: analysis.score_percent,
+                  scoreLabel: analysis.score_label,
+                  narrative: analysis.narrative,
+                  findings: analysis.findings,
+                  counts: analysis.counts,
+                })
+              }
+              className="font-mono text-[10px] text-[#6b7594] hover:text-[#2dd4bf]"
+            >
+              ⤓ Export report (PDF)
+            </button>
+          </div>
         </>
       )}
     </div>

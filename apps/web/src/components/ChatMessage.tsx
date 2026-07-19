@@ -6,6 +6,8 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { Message, CitedRegulation } from '@/types/chat'
 import { CitationChip } from './CitationChip'
+// 2026-07-19 Wk2 — per-answer export (copy-with-citations + print-to-PDF)
+import { buildAnswerClipboardText, exportAnswerToPdf } from '@/lib/answerExport'
 // D6.97 — TierChip + TierWebDisclaimer no longer imported; tier_router
 // was removed and tier_metadata is always null. Component file stays
 // in tree (unused) until Track B does the broader pipeline cleanup.
@@ -145,6 +147,98 @@ interface Props {
   // as it arrives) and suppresses the verified badge until the citation
   // verifier has actually run (badge appears when streaming completes).
   isStreaming?: boolean
+  // 2026-07-19 Wk2 — the user question this assistant message answers
+  // (nearest preceding user message). Gives the copy/PDF exports their
+  // Q context. Undefined for user messages / unknown.
+  precedingUserContent?: string | null
+  // Active vessel name, stamped into export artifacts.
+  vesselName?: string | null
+}
+
+// ── Export buttons (2026-07-19 Wk2) ───────────────────────────────────────────
+// A compliance officer's endgame for a good answer is getting it into an
+// audit file or an email. Copy-with-citations and print-to-PDF sit beside
+// the plain copy button on every completed assistant answer.
+
+function DownloadIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M12 3v12" />
+      <polyline points="7 11 12 16 17 11" />
+      <path d="M5 21h14" />
+    </svg>
+  )
+}
+
+function CopyCitedIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+      <path d="M13 14h5M13 17h5" />
+    </svg>
+  )
+}
+
+function AnswerExportButtons({ message, question, vesselName }: {
+  message: Message
+  question?: string | null
+  vesselName?: string | null
+}) {
+  const [copiedCited, setCopiedCited] = useState(false)
+
+  async function handleCopyCited() {
+    const text = buildAnswerClipboardText({
+      question,
+      answer: stripMarkdown(message.content),
+      citations: message.citations,
+      createdAt: message.created_at,
+      vesselName,
+    })
+    const ok = await copyTextToClipboard(text)
+    if (!ok) return
+    setCopiedCited(true)
+    setTimeout(() => setCopiedCited(false), 2000)
+  }
+
+  function handleExportPdf() {
+    exportAnswerToPdf({
+      question,
+      answer: message.content,
+      citations: message.citations,
+      createdAt: message.created_at,
+      vesselName,
+    })
+  }
+
+  const btnCls = (active: boolean) => `w-11 h-11 flex items-center justify-center rounded-lg
+    transition-colors duration-150
+    ${active ? 'text-[#2dd4bf]' : 'text-[#6b7594] hover:text-[#2dd4bf] hover:bg-white/5 active:bg-white/10'}`
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={handleCopyCited}
+        aria-label={copiedCited ? 'Copied with citations' : 'Copy with citations'}
+        title={copiedCited ? 'Copied!' : 'Copy with citations'}
+        className={btnCls(copiedCited)}
+      >
+        {copiedCited ? <CheckIcon /> : <CopyCitedIcon />}
+      </button>
+      <button
+        type="button"
+        onClick={handleExportPdf}
+        aria-label="Export answer as PDF"
+        title="Export answer as PDF"
+        className={btnCls(false)}
+      >
+        <DownloadIcon />
+      </button>
+    </>
+  )
 }
 
 // ── Inline citation injection ──────────────────────────────────────────────────
@@ -678,7 +772,10 @@ function MessageTime({ iso }: { iso?: string }) {
   )
 }
 
-export function ChatMessage({ message, onCitationTap, isStreaming = false }: Props) {
+export function ChatMessage({
+  message, onCitationTap, isStreaming = false,
+  precedingUserContent = null, vesselName = null,
+}: Props) {
   const isUser = message.role === 'user'
 
   if (isUser) {
@@ -823,9 +920,19 @@ export function ChatMessage({ message, onCitationTap, isStreaming = false }: Pro
           <WebFallbackCardView card={message.web_fallback} />
         )}
 
-        {/* Action bar — copy + timestamp (2026-07-19 trust pack) */}
+        {/* Action bar — copy / copy-with-citations / export-PDF + timestamp
+            (2026-07-19 trust pack + Wk2 export) */}
         <div className="mt-1 -ml-2.5 flex items-center justify-between gap-2">
-          <CopyMessageButton content={message.content} />
+          <div className="flex items-center">
+            <CopyMessageButton content={message.content} />
+            {!message.cancelled && !isStreaming && message.content && (
+              <AnswerExportButtons
+                message={message}
+                question={precedingUserContent}
+                vesselName={vesselName}
+              />
+            )}
+          </div>
           <MessageTime iso={message.created_at} />
         </div>
       </div>

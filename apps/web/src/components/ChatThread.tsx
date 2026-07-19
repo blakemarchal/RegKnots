@@ -100,6 +100,14 @@ export function ChatThread({
               // request is in flight is the streaming one: aria-live for
               // screen readers + verified badge held until completion.
               isStreaming={loading && msg.role === 'assistant' && i === messages.length - 1}
+              // 2026-07-19 Wk2 — nearest preceding user message gives the
+              // export artifacts their Q context; vessel name stamps them.
+              precedingUserContent={
+                msg.role === 'assistant'
+                  ? [...messages.slice(0, i)].reverse().find((m) => m.role === 'user')?.content ?? null
+                  : null
+              }
+              vesselName={vessel?.name ?? null}
             />
           ))}
           {/* Sprint D6.88 Phase 3 — inline web-fallback indicator.

@@ -934,6 +934,8 @@ async def chat_endpoint(
         # D6.97 (C) — Precision Mode flag from users.precision_mode_enabled.
         # When True, engine appends PRECISION_MODE_OVERLAY to system prompt.
         precision_mode=precision_mode_enabled,
+        # 2026-07-19 Wk3 — API-layer live data (active whale-zone SMAs).
+        live_context_block=_build_whale_live_block(body.query),
     )
 
     # D6.96 — current-events tier append. Best-effort; if the helper
@@ -1099,6 +1101,9 @@ async def chat_stream_endpoint(
                 # users.precision_mode_enabled. When True, engine appends
                 # PRECISION_MODE_OVERLAY to system prompt.
                 precision_mode=precision_mode_enabled,
+                # 2026-07-19 Wk3 — API-layer live data (active whale-zone
+                # SMAs). None unless the query has whale-zone intent.
+                live_context_block=_build_whale_live_block(body.query),
             ):
                 if event["event"] == "done":
                     # Capture done payload for the persist step below.
@@ -1325,6 +1330,65 @@ async def _apply_vessel_update(pool: asyncpg.Pool, vessel_id: uuid.UUID, update:
         query = f"UPDATE vessels SET {', '.join(sets)} WHERE id = ${idx}"
         await pool.execute(query, *params)
         logger.info("Updated vessel profile %s with: %s", vessel_id, list(update.keys()))
+
+
+def _build_whale_live_block(message: str) -> str | None:
+    """2026-07-19 Wk3 — live whale-zone context for chat.
+
+    When the query has whale-zone intent (shared detector in
+    rag/live_context.py), compute which NOAA Right Whale SMAs are active
+    TODAY from the same calendar data the /whale-zones map uses, and
+    return a compact prompt block. The engine appends it alongside
+    retrieval context so "which whale zones are active right now?" gets
+    a dated, correct answer in chat instead of a hedge.
+
+    Returns None on no-intent or any error — injection is optional and
+    must never break the turn.
+    """
+    try:
+        from rag.live_context import detect_live_context
+        if detect_live_context(message) != "whale_zones":
+            return None
+        from datetime import date as _date
+
+        from app.data.whale_sma_zones import get_sma_features
+        from app.routers.whale_zones import _is_active
+
+        today = _date.today()
+        active: list[dict] = []
+        inactive_count = 0
+        for feature in get_sma_features():
+            props = feature["properties"]
+            if _is_active(today, props["season_start"], props["season_end"]):
+                active.append(props)
+            else:
+                inactive_count += 1
+
+        lines = [
+            f"LIVE WHALE ZONE DATA (NOAA North Atlantic Right Whale Seasonal "
+            f"Management Areas, 50 CFR 224.105; computed {today.isoformat()}):",
+        ]
+        if active:
+            lines.append(f"ACTIVE TODAY ({len(active)}):")
+            for p in active:
+                lines.append(
+                    f"  • {p['name']} — season {p['season_start']} through {p['season_end']} (MM-DD)"
+                )
+        else:
+            lines.append("No SMAs are in their seasonal window today.")
+        if inactive_count:
+            lines.append(f"Not currently active: {inactive_count} zone(s).")
+        lines.append(
+            "NOTE: Vessels 65 ft (19.8 m) or longer must transit ACTIVE SMAs "
+            "at 10 knots or less (50 CFR 224.105). Answer from this computed "
+            "data — it is authoritative for TODAY's active/inactive status — "
+            "cite 50 CFR 224.105, and point the user to the interactive map "
+            "at regknots.com/whale-zones."
+        )
+        return "\n".join(lines) + "\n"
+    except Exception as exc:  # noqa: BLE001 — never break the chat turn
+        logger.warning("whale live-context build failed: %s", exc)
+        return None
 
 
 def _enrich_missing_source_note(query: str, payload: dict) -> dict:

@@ -52,6 +52,31 @@ async function doFetch(
 }
 
 /**
+ * 2026-07-19 Wk4 — authenticated file download. Fetches `path` with the
+ * Bearer token and triggers a browser download of the response body.
+ * For endpoints that stream CSV/PDF (e.g. the workspace audit log).
+ * No refresh-retry: a stale token surfaces as an ApiError and the next
+ * apiRequest interaction heals the session.
+ */
+export async function apiDownload(path: string, filename: string): Promise<void> {
+  const token = useAuthStore.getState().accessToken
+  const res = await doFetch(path, { method: 'GET' }, token)
+  if (!res.ok) {
+    const text = await res.text()
+    throw new ApiError(res.status, text, null)
+  }
+  const blob = await res.blob()
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  setTimeout(() => URL.revokeObjectURL(url), 100)
+}
+
+/**
  * Centralized API client.
  * - Attaches Bearer token from auth store
  * - On 401: calls POST /auth/refresh, retries once

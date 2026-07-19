@@ -1236,17 +1236,9 @@ async def get_audit_readiness(
     """
     pool = await get_pool()
     user_uuid = _uuid.UUID(current_user.user_id)
-
-    # For v1 we focus on the calling user. Workspace fan-out is a
-    # straightforward extension once Wheelhouse customers actually
-    # exercise it; the prompt already accepts a fleet-shaped input.
     from rag.user_context import build_user_context
-    user_ctx = await build_user_context(pool=pool, user_id=user_uuid)
 
-    # Vessel summary
-    vessels_block = ""
-    vessel_rows = await pool.fetch(
-        """
+    _VESSEL_SQL = """
         SELECT v.id, v.name, v.vessel_type, v.gross_tonnage, v.subchapter,
                (
                  SELECT COUNT(*) FROM vessel_documents vd
@@ -1257,24 +1249,88 @@ async def get_audit_readiness(
                  WHERE vd.vessel_id = v.id AND vd.extraction_status = 'pending'
                ) AS pending_docs
         FROM vessels v
-        WHERE v.user_id = $1 AND v.workspace_id IS NULL
-        """,
-        user_uuid,
-    )
-    if vessel_rows:
-        vessels_block = "VESSELS:\n" + "\n".join(
+    """
+
+    def _vessels_block(rows, label: str) -> str:
+        if not rows:
+            return ""
+        return f"{label}:\n" + "\n".join(
             f"- {v['name']} ({v['vessel_type']}, {v['gross_tonnage']} GT, "
             f"Subchapter {v['subchapter']}). Confirmed docs: {v['confirmed_docs']}, "
             f"pending: {v['pending_docs']}"
-            for v in vessel_rows
+            for v in rows
         )
 
-    user_payload = (
-        f"USER RECORD:\n{user_ctx.as_prompt_block() or '(no record)'}\n\n"
-        f"{vessels_block}\n\n"
-        f"Produce the audit-readiness JSON. Anchor every finding to "
-        f"specific data above. Don't fabricate."
-    )
+    if workspace_id is not None:
+        # 2026-07-19 Wk3 — Wheelhouse fleet fan-out (was stubbed to the
+        # calling user since D6.x). Assess the WORKSPACE: its vessels +
+        # every member's record. Membership gate mirrors chat.py's.
+        try:
+            ws_uuid = _uuid.UUID(workspace_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid workspace_id.")
+        member_role = await pool.fetchval(
+            "SELECT role FROM workspace_members "
+            "WHERE workspace_id = $1 AND user_id = $2",
+            ws_uuid, user_uuid,
+        )
+        if member_role is None:
+            raise HTTPException(
+                status_code=403, detail="You are not a member of that workspace.",
+            )
+        ws_name = await pool.fetchval(
+            "SELECT name FROM workspaces WHERE id = $1", ws_uuid,
+        )
+
+        vessel_rows = await pool.fetch(
+            _VESSEL_SQL + " WHERE v.workspace_id = $1", ws_uuid,
+        )
+
+        # Every member's credential/sea-time record. Capped to bound the
+        # prompt: seat_cap is small (crew workspaces), but belt-and-
+        # suspenders at 12 members / the LLM context stays sane.
+        member_rows = await pool.fetch(
+            """
+            SELECT wm.user_id, wm.role, u.full_name, u.email
+            FROM workspace_members wm
+            JOIN users u ON u.id = wm.user_id
+            WHERE wm.workspace_id = $1
+            ORDER BY (wm.role = 'owner') DESC, u.full_name
+            LIMIT 12
+            """,
+            ws_uuid,
+        )
+        member_blocks: list[str] = []
+        for m in member_rows:
+            m_ctx = await build_user_context(pool=pool, user_id=m["user_id"])
+            m_name = m["full_name"] or m["email"]
+            member_blocks.append(
+                f"CREW MEMBER — {m_name} (workspace role: {m['role']}):\n"
+                f"{m_ctx.as_prompt_block() or '(no credential/sea-time record on file)'}"
+            )
+
+        user_payload = (
+            f"FLEET WORKSPACE: {ws_name} "
+            f"({len(vessel_rows)} vessel(s), {len(member_rows)} member(s))\n\n"
+            f"{_vessels_block(vessel_rows, 'WORKSPACE VESSELS')}\n\n"
+            + "\n\n".join(member_blocks)
+            + "\n\nProduce the audit-readiness JSON for the FLEET AS A WHOLE. "
+            f"Findings must name the affected vessel or crew member. "
+            f"Anchor every finding to specific data above. Don't fabricate."
+        )
+    else:
+        # Personal mode — the calling user + their personal vessels.
+        user_ctx = await build_user_context(pool=pool, user_id=user_uuid)
+        vessel_rows = await pool.fetch(
+            _VESSEL_SQL + " WHERE v.user_id = $1 AND v.workspace_id IS NULL",
+            user_uuid,
+        )
+        user_payload = (
+            f"USER RECORD:\n{user_ctx.as_prompt_block() or '(no record)'}\n\n"
+            f"{_vessels_block(vessel_rows, 'VESSELS')}\n\n"
+            f"Produce the audit-readiness JSON. Anchor every finding to "
+            f"specific data above. Don't fabricate."
+        )
 
     anthropic_client: AsyncAnthropic = request.app.state.anthropic
     try:
