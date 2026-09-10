@@ -12,6 +12,11 @@ logger = logging.getLogger(__name__)
 
 # packages/ingest/ relative to the repo root (apps/api/../../packages/ingest)
 _INGEST_DIR = Path(__file__).resolve().parents[3] / "packages" / "ingest"
+# 2026-09-10 audit — scheduled ingest goes through the same memory-capped
+# transient unit as ad-hoc ingest (scripts/run_ingest.sh: regknots-ingest
+# slice, MemoryMax=1.5G). Before this it ran as a bare `uv run` inside
+# this worker's 1 GB cgroup — the OOM class the 2026-05-08 audit named.
+_RUN_INGEST = Path(__file__).resolve().parents[3] / "scripts" / "run_ingest.sh"
 
 # Sources that can actually run unattended (fetch from public APIs / scrapers).
 # Sources NOT in this list (colregs, solas, solas_supplement, stcw,
@@ -63,8 +68,11 @@ def update_regulations(self):
     for source in _AUTOMATABLE_SOURCES:
         logger.info("Running ingest for source=%s", source)
         try:
+            # run_ingest.sh picks --pipe (not --pty) when stdout is not a
+            # TTY, so stdout/stderr are still captured below and the
+            # transient unit's exit code is forwarded by systemd-run --wait.
             result = subprocess.run(
-                ["uv", "run", "python", "-m", "ingest.cli", "--source", source, "--update"],
+                [str(_RUN_INGEST), "--source", source, "--update"],
                 cwd=_INGEST_DIR,
                 capture_output=True,
                 text=True,
@@ -148,28 +156,11 @@ async def _send_trial_reminders_async():
         await conn.close()
 
 
-@celery.task(name="app.tasks.reindex_vector_embeddings", bind=True, max_retries=1)
-def reindex_vector_embeddings(self):
-    """Rebuild the HNSW vector index to prevent stale results after bulk inserts."""
-    logger.info("Starting HNSW index rebuild")
-    try:
-        _run_async(_reindex_async())
-        logger.info("HNSW index rebuild complete")
-    except Exception as exc:
-        logger.exception("HNSW index rebuild failed: %s", exc)
-        raise self.retry(exc=exc, countdown=600)
-
-
-async def _reindex_async():
-    import asyncpg
-    from app.config import settings
-
-    dsn = settings.database_url.replace("postgresql+asyncpg://", "postgresql://")
-    conn = await asyncpg.connect(dsn)
-    try:
-        await conn.execute("REINDEX INDEX idx_regulations_embedding")
-    finally:
-        await conn.close()
+# reindex_vector_embeddings removed 2026-09-10. It ran a plain (non-
+# concurrent) `REINDEX INDEX idx_regulations_embedding` on the 1st of
+# the month — 271 s of ACCESS EXCLUSIVE on 2026-09-01 — duplicating the
+# weekly `REINDEX CONCURRENTLY` in regknots-db-maintenance.timer that
+# replaced the per-ingest reindex on 2026-07-19 for exactly that reason.
 
 
 @celery.task(name="app.tasks.check_solas_supplements")

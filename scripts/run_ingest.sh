@@ -51,11 +51,17 @@ fi
 #
 # Why `--pty`: lets the ingest's interactive progress bar render in the
 # terminal even though it's now running in a transient unit context.
+# 2026-09-10 — --pty requires a controlling terminal. When invoked from
+# the Celery worker (app.tasks.update_regulations) there is none, so use
+# --pipe: stdout/stderr are forwarded to the caller and the exit code is
+# still propagated by --wait.
+if [ -t 1 ]; then TTY_FLAG="--pty"; else TTY_FLAG="--pipe"; fi
+
 exec systemd-run \
     --unit="${UNIT}" \
     --slice=regknots-ingest.slice \
     --wait \
-    --pty \
+    "${TTY_FLAG}" \
     --collect \
     --working-directory="${REPO}/packages/ingest" \
     --property=MemoryHigh=1G \

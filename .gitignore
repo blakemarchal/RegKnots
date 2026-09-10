@@ -71,3 +71,8 @@ apps/web/public/swe-worker-*.js
 ".env.txt" 
 ".env.txt" 
 .claude/scheduled_tasks.lock
+
+# Celery beat runtime state (apps/api/celerybeat-schedule)
+celerybeat-schedule
+celerybeat-schedule.*
+celerybeat.pid
