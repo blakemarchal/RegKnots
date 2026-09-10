@@ -1,6 +1,6 @@
 # Corpus Status
 
-_Last updated: 2026-05-27 (Sprint D6.97 — shore-side compliance pivot: COSWP 2025, IMO graphical symbols, per-Reg IMO codes, jurisdiction backfill)_
+_Last updated: 2026-09-10 (counts re-verified live; IMO acquisition plan — free vs purchase per instrument — moved to `docs/roadmap.md` §IMO)_
 
 This document is the engineering counterpart to the user-facing
 [/coverage](https://regknots.com/coverage) page. It tracks what's
@@ -20,7 +20,7 @@ vague about it"). This document is for engineering planning.
 | 46 CFR | `cfr_46` | 1 | Full | Continuous |
 | 49 CFR | `cfr_49` | 1 | Full + per-row hazmat table chunking (D6.16b) | Continuous |
 | 46 USC Subtitle II | `usc_46` | 1 | Full | Continuous |
-| NVIC | `nvic` | 2 | Full set | Manual; weekly cadence target |
+| NVIC | `nvic` | 2 | Full set — 1,638 sections / 4,202 chunks | Weekly via Celery `update_regulations` (last 2026-09-06) |
 | NMC Policy | `nmc_policy` | 2 | Full | Manual |
 | NMC Checklist | `nmc_checklist` | 2 | Full | Manual |
 | USCG MSM | `uscg_msm` | 2 | All current chapters | Manual |
@@ -39,8 +39,8 @@ vague about it"). This document is for engineering planning.
 | Bureau Veritas NR467 | `bv` | 1 | Rules for the Classification of Steel Ships — Parts A/B/C/D/E. 7,213 chunks. (D6.97) | Manual |
 | IACS Common Structural Rules | `iacs_csr` | 1 | CSR for Bulk Carriers and Oil Tankers (harmonized structural design, all IACS members). 1,000 chunks. (D6.97) | Manual |
 | COSWP 2025 | `coswp` | 1 | UK MCA Code of Safe Working Practices for Merchant Seafarers, 2025 Edition. 357 sections per-§ granularity across 34 chapters. Crown Copyright OGL v3. (D6.97 #54) | Manual |
-| IMO LSA Code | `imo_lsa` | 1 | MSC.48(66) adoption + MSC.485(103) 2021 amendments. Per-Chapter. (D6.97) | Manual |
-| IMO FSS Code | `imo_fss` | 1 | MSC.98(73) — fire safety systems. Per-Chapter. (D6.97) | Manual |
+| IMO LSA Code | `imo_lsa` | 1 | MSC.48(66) adoption + MSC.485(103) 2021 amendments. Per-Chapter. **58 chunks — resolution text, not the full Code; see roadmap §IMO Tier A.** (D6.97) | Manual |
+| IMO FSS Code | `imo_fss` | 1 | MSC.98(73) — fire safety systems. Per-Chapter. **29 chunks — resolution only; see roadmap §IMO Tier A.** (D6.97) | Manual |
 | IMO Graphical Symbols | `imo_symbols` | 1 | A.952(23) FCP symbols + A.760(18) + A.1116(30) LSA/escape signs. 5 sections / 25 chunks. (D6.97 #48) | Manual |
 | Cyprus DMS | `cy_dms` | 2 | Cyprus Shipping Deputy Ministry Circulars. 1,484 chunks. (D6.97) | Manual |
 | Panama MMC | `pa_mmc` | 2 | Panama Maritime Authority Merchant Marine Circulars + Notices. 1,376 chunks. (D6.97) | Manual |
@@ -48,7 +48,7 @@ vague about it"). This document is for engineering planning.
 | Australia NSCV | `nscv` | 1 | National Standard for Commercial Vessels — DCV operational standard. 1,207 chunks. (D6.97 AU sprint) | Manual |
 | USCG NMC Exam Bank | `nmc_exam_bank` | 4 | National Maritime Center merchant-mariner exam questions. Powers Study Tools (D6.83). 2,938 chunks. | Manual |
 
-**~52,000 chunks pre-D6.93. Class-society corpus added 9,281 (D6.93). D6.97 corpus pivot added another ~19,400 chunks (BV 7,213 + IACS CSR 1,000 + COSWP ~700 + Cyprus 1,484 + Panama 1,376 + AU statutes 338 + NSCV 1,207 + NMC exam bank 2,938 + IMO Symbols 25 + per-Reg/Tier-2-enrichment net deltas across SOLAS + 10 IMO codes). Current total ~80k chunks across 64 registered sources.**
+**~52,000 chunks pre-D6.93. Class-society corpus added 9,281 (D6.93). D6.97 corpus pivot added another ~19,400 chunks (BV 7,213 + IACS CSR 1,000 + COSWP ~700 + Cyprus 1,484 + Panama 1,376 + AU statutes 338 + NSCV 1,207 + NMC exam bank 2,938 + IMO Symbols 25 + per-Reg/Tier-2-enrichment net deltas across SOLAS + 10 IMO codes). Live total 2026-09-10: 106,041 chunks across 66 sources. `cfr_*` refreshed weekly by Celery `update_regulations` (Sundays 02:00 UTC), current to eCFR 2026-09-03.**
 
 ## Per-section granularity improvements (Sprint D6.97 #45, #47)
 
@@ -103,7 +103,7 @@ pattern so non-UK users can invoke COSWP explicitly.
 | IMO IGC Code | `imo_igc` | 1 | MSC.370(93) consolidated 2014 revision | + 2 amendments |
 | IMO IBC Code | `imo_ibc` | 1 | MEPC.318(74) major 2019 amendment | + restructuring resolution |
 | IMO CSS Code | `imo_css` | 1 | A.714(17) base resolution | + Circ.1352/Rev.2 + 1623 |
-| IMO Load Lines | `imo_loadlines` | 1 | Partial (MSC.375(93) + treaty HTML; note: 4 chunks only) | 1966 base + protocol amendments |
+| IMO Load Lines | `imo_loadlines` | 1 | Partial (MSC.375(93) + treaty HTML; **3 chunks as of 2026-09-10** — needs HTML-aware adapter, roadmap §IMO Tier A) | 1966 base + protocol amendments |
 
 ## Wired but blocked
 

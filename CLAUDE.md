@@ -20,6 +20,7 @@ RegKnots — maritime-compliance copilot for U.S. commercial vessel operators. L
 - **Propose spec, wait for greenlight** before coding non-trivial work. The user will say "go" or push back.
 - **`packages/ingest/ingest/cli.py`:** DO NOT regenerate from codegen. Patch in place. Preserve the line `dsn = settings.database_url.replace("postgresql+asyncpg://", "postgresql://")` near `create_pool` — it adapts the asyncpg URL for the sync ingest path. If you regenerate this file, dispatch breaks.
 - **Deploy procedure:** production runs from `origin/main` via `scripts/deploy.sh`. Never edit on the VPS. After every push to main, run `scripts/deploy.sh` from your laptop to roll the change.
+- **Two schedulers exist.** systemd timers (`deploy/systemd`; the four corpus-refresh timers were **disabled 2026-08-10**, backup + db-maintenance stay on) AND Celery Beat (`apps/api/celery_beat.py`: weekly `update_regulations` for cfr_33/46/49/nvic, monthly REINDEX, digests, reminders). Disabling one does not disable the other. Check both before assuming a job is off.
 - **Ad-hoc ingest jobs MUST use `scripts/run_ingest.sh`**, not `uv run python -m ingest.cli` directly. The wrapper isolates the job inside a transient systemd unit with a 1.5 GB memory cap so a runaway can't take the box. Plain interactive ingests caused 12 of 13 OOM events / 14 days per the 2026-05-08 audit. There is no good reason to bypass the wrapper.
 - **Grep for "Cassandra" before every commit.** It's a recurring slip.
 
@@ -90,6 +91,9 @@ If a doc says "alembic head is 0045" but `alembic current` says `0092`, the doc 
   - **Maersk demo script:** `docs/maersk-demo-script.md` (15-min arc, all shipped features).
   - Fixed 8 pre-existing "Cassandra" slips in code/docs. **Purchases (paywalled IMO data) remain DEFERRED per Blake.**
 
+- **2026-08-10 incident session:** Anthropic credits hit zero on 08-09 → every Claude call 400 → GPT-4o fallback engaged and then **failed to persist** — `messages_model_used_check` never allowed `fallback_gpt4o`; 13 answers for one user were generated, billed and discarded. Migration **0115** widens the constraint. Anthropic key rotated; a carriage-return byte in `.env` blanked the key for every service until found (`file /opt/RegKnots/.env` after any edit). Four corpus-refresh timers disabled. Deployed `a4e75a4`.
+- **2026-09-09:** first organic Captain-tier purchase (cassclark.425@gmail.com, MAERSK Kinloss). **2026-09-10:** full-system audit — `docs/sprint-audits/full-system-audit-2026-09-10.md`; roadmap rewritten (previous at `docs/archive/roadmap-2026-05.md`). Two P1s awaiting go: prod `.env` still carries `HYBRID_RETRIEVAL_ENABLED=true` against the 07-19 verdict, and the Captain's vessel has `flag_state = Unknown` (cross-flag citation leakage — 19 of 38 citations in her first session were noise). Corpus is 106,041 chunks / 66 sources.
+
 See `docs/PROJECT_STATE.md` for a fuller operational snapshot and `docs/roadmap.md` for the prioritized backlog.
 
 ## Known issues (2026-05-08)
@@ -104,7 +108,7 @@ Status re-verified 2026-07-18 (Fable full audit):
 - ~~JWT signing key~~ — **FIXED.** `.env` now uses `REGKNOTS_JWT_SECRET_KEY` (matches `env_prefix="REGKNOTS_"`); runtime-verified not the dev default (64-char secret).
 - ~~`.env` permissions~~ — **FIXED.** 600.
 - ~~Zero DB backups~~ — **FIXED (2026-07-19).** Nightly pg_dump + **restore-verified** (runbook `docs/runbooks/db-restore.md`) + staleness gates in smoke.sh and the weekly maintenance unit. Offsite sync scaffolded and installed; **only Blake's DO Spaces bucket+keys step remains** (5 min; header of `scripts/backup_offsite.sh`).
-- ~~refresh-weekly dead~~ — **FIXED.** Weekly/monthly/quarterly/nmc refresh timers all active (+ new db-maintenance timer, Sundays 04:30 UTC).
+- ~~refresh-weekly dead~~ — **FIXED in May, then deliberately DISABLED 2026-08-10** (Blake: 'questions only' cost posture). Only `regknots-backup.timer` and `regknots-db-maintenance.timer` remain enabled. Celery Beat still refreshes `cfr_*` + `nvic` weekly — see 'Two schedulers' above and the 2026-09-10 audit.
 - ~~No retrieval eval gate~~ — **FIXED (2026-07-19).** `scripts/eval_retrieval.py`; 124 unit tests green; baseline to beat: strong-recall@8 0.790 / MRR 0.627.
 - LLM-helper boilerplate copy-pasted 6× in `apps/api/app/routers/me.py` — still open.
 - Dense retrieval's own 13/62 missed gold pairs = the next tuning target (per-pair dumps in `data/eval/retrieval/`).
@@ -123,4 +127,4 @@ Full audit report (models, retrieval, UX, product packaging): see the 2026-07-18
 
 ---
 
-*Last updated 2026-07-19 (post Wk1-4 mega-wave — eval harness/hybrid verdict, backups proven, trust pack, persona nav, fleet audit, live-context chat, team audit log). When this drifts from reality, fix it — that's the rule.*
+*Last updated 2026-09-10 (post first Captain-tier purchase audit). When this drifts from reality, fix it — that's the rule.*

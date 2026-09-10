@@ -2,21 +2,21 @@
 
 **One-page operational snapshot for humans and fresh Claude Code sessions.**
 
-Last updated: 2026-05-07 (post D6.83 + Sprint B `/education`, post full-system audit 2026-05-08)
+Last updated: 2026-09-10 (post first Captain-tier purchase; full-system audit 2026-09-10)
 
 ---
 
 ## TL;DR
 
-RegKnot is a maritime-compliance RAG at **https://regknots.com**. Production stack live and healthy. **77,111 chunks across 50 sources** with 100% embedding coverage. Retrieval pipeline now includes multi-query rewrite, Haiku reranker, citation oracle, source-diversified fetch, jurisdiction filter, vessel-profile boosts, synonym + intent expansion; hybrid BM25+dense built and dark-launched. **96.1% A-or-A−** on the latest 152-question regression eval. Marketing push imminent — see audit for the three pre-walk-away items.
+RegKnot is a maritime-compliance RAG at **https://regknots.com**. Production stack live and healthy. **106,041 chunks across 66 sources** with 100% embedding coverage. Retrieval pipeline now includes multi-query rewrite, Haiku reranker, citation oracle, source-diversified fetch, jurisdiction filter, vessel-profile boosts, synonym + intent expansion; hybrid BM25+dense built, measured 2026-07-19 and rejected (dense wins) — but still switched on in prod `.env` as of 2026-09-10, see Known issues. **96.1% A-or-A−** on the latest 152-question regression eval. First organic Captain-tier subscriber 2026-09-09. See the 2026-09-10 audit for the pre-push list.
 
 ## Live production
 
 - **App:** https://regknots.com
 - **API health:** https://regknots.com/api/health — `{"status":"healthy"}`
 - **VPS:** `root@68.183.130.3` (shared box, hostname `spiritflow-prod-01`)
-- **Repo paths:** local `C:\Users\Blake Marchal\Documents\RegKnots`, VPS `/opt/RegKnots` (NOT `/root/RegKnots`)
-- **Alembic head:** `0092`
+- **Repo paths:** local `C:\Users\Blake\Documents\RegKnots`, VPS `/opt/RegKnots` (NOT `/root/RegKnots`)
+- **Alembic head:** `0115`
 - **Services:** `regknots-api`, `regknots-web`, `regknots-worker` — all systemd, all active
 - **DB:** `docker exec regknots-postgres psql -U regknots -d regknots` (PG 16.13 + pgvector, 1528 MB)
 - **Deploy:** `scripts/deploy.sh` + `scripts/smoke.sh` (shipped 2026-05-07; 3-stage smoke catches stale-build failure mode)
@@ -31,7 +31,7 @@ RegKnot is a maritime-compliance RAG at **https://regknots.com**. Production sta
 - **Propose spec, wait for greenlight** before coding non-trivial work.
 - **Grep for Cassandra** before every commit.
 
-## Corpus snapshot — 77,111 chunks across 50 sources
+## Corpus snapshot — 106,041 chunks across 66 sources (live 2026-09-10)
 
 100% embedding coverage. Vector dim 1536. ~108.9M chars / 27.2M tokens. Top sources by chunk count:
 
@@ -52,7 +52,7 @@ Plus 40 additional sources: `cfr_*`, `solas`, `marpol`, `colregs`, `stcw`, `ism`
 
 **Embedding model:** `text-embedding-3-small` (April + May audits both agree the upgrade to `-large` is not the bottleneck).
 
-**Stale outliers:** STCW (2017-07), MARPOL (2022-11), USCG MSM (2021-09). MARPOL is the highest user-visible risk. Quarterly refresh sprint pending.
+**Stale outliers:** STCW (2017-07), ISM (2018-07), USCG MSM (2021-09), MARPOL (2022-11). `stcw_amend` / `marpol_amend` carry the deltas. Acquisition plan for missing IMO instruments (ISPS, LSA, FSS, IS Code, Load Lines, IAMSAR, BMP MS): `docs/roadmap.md` §IMO.
 
 ## RAG pipeline — current architecture
 
@@ -100,33 +100,23 @@ Plus 40 additional sources: `cfr_*`, `solas`, `marpol`, `colregs`, `stcw`, `ism`
 
 Run `git log --oneline --since="2026-04-22"` for the complete list.
 
-## Known issues & open items (per 2026-05-08 audit)
+## Known issues & open items (per 2026-09-10 audit)
 
-**Critical / pre-marketing-push (each <30 min):**
-- **JWT signing-key mismatch** — `.env` has `REGKNOTS_SECRET_KEY` but code reads `REGKNOTS_JWT_SECRET_KEY`; API is signing with hardcoded default. **Fix before traffic arrives.** See audit TL;DR #1.
-- **`.env` is mode 0644** — co-tenant `spiritflow` user can read every secret. `chmod 600`. Audit TL;DR #2.
-- **Zero Postgres backups.** RPO=∞. Cron'd `pg_dump` snippet in audit TL;DR #3.
+Full findings, evidence and the awaiting-go fix spec: `docs/sprint-audits/full-system-audit-2026-09-10.md`.
 
-**High:**
-- `regknots-refresh-weekly.service` failed since 2026-05-03 (`code=203/EXEC`); weekly CFR + bulletin refresh hasn't run for 5 days
-- `next@15.5.14` has DoS CVE GHSA-q4gf-8mx6-v5v3 (fix in 15.5.15)
-- Service crashloop history: `regknots-api` 116 restarts + 1 OOM-kill / 14d. Add 2 GB swap + `MemoryMax` on systemd units
-- Shared tenancy with SpiritFlow on a 4 GB box; SpiritFlow OOMs can take API down
-- **Zero tests.** `apps/api/tests/` doesn't exist; `apps/web` has no test runner. 28+ fix commits in 14d, zero reverts — pace is high but no safety net
-- LLM-helper duplication: Sonnet boilerplate copy-pasted 6× in `me.py`; `_parse_json` exists in 6 files
+**P1 (each a one-line fix; awaiting go):**
+- Prod `.env` still has `HYBRID_RETRIEVAL_ENABLED=true`. Code default has been `False` since the 2026-07-19 eval (dense 0.790 vs hybrid 0.548 strong-recall@8). Every 09-09 query logged `Hybrid selected:` with the documented failure mode (small-source lexical noise: BMA safety alerts, WHO IHR, ERG for a man-overboard question).
+- First Captain subscriber's vessel (MAERSK Kinloss, IMO 9333022) has `flag_state = Unknown` → jurisdiction severance never engages → foreign-flag notices cited to a US-flag Master. 19 of 38 citations in her session were noise.
+- `amount_paid = 3900` on the Captain purchase matches no configured price ($39.99 / $29.99). Confirm the price_id is in `plans.py` (Blake, Stripe dashboard).
 
-**Medium:**
-- Hybrid BM25 + dense is dark-launched; flip `HYBRID_RETRIEVAL_ENABLED=true` and re-eval
-- Synthesis still invents OSHA citations on ~21% of occupational-safety questions; verifier strips them and regen fires. Add explicit no-cite clause to `prompts.py`
-- No CI workflow; no external alerting (Sentry-only); no security headers (HSTS/CSP/etc.) on Caddy
-- Stripe webhook handler re-raises `str(exc)` to Stripe with no logging (`billing.py:68-71`)
-- `auth.py:184-199` swallows three sequential email-send failures on register with zero log signal
+**P2:**
+- Celery Beat (`apps/api/celery_beat.py`) still runs weekly ingest for `cfr_33/46/49/nvic` as bare `uv run` inside the worker's 1 GB cgroup, and a monthly **non-concurrent** `REINDEX` (271 s ACCESS EXCLUSIVE on 2026-09-01) that duplicates systemd `db-maintenance`. Cost is negligible and it makes no Anthropic calls; it just needs `run_ingest.sh` and the reindex deleted.
+- Stripe `invoice.paid` processed before `checkout.session.completed` on first purchase → `UPDATE … WHERE stripe_subscription_id` matched 0 rows → `billing_interval` NULL for new subscribers.
+- Committed `packages/ingest/uv.lock` predates `playwright` (05-22); prod re-resolves every run and dirties the tree.
 
-**Resolved (memory was stale):**
-- Vocab mismatch (`lifejacket`/`log`/etc.) — `synonyms.py` + multi-query rewrite shipped
-- `ism_supplement` migration drift — canonical source list now in migration `0090`
+**Still open from May:** `next@15.5.14` DoS CVE; Sentry `environment` tag; no CI; zero `apps/api` tests; `llm_helpers.py` not extracted; SpiritFlow co-tenancy; offsite backups (Blake's DO Spaces step); STCW 2017 / MARPOL 2022 / MSM 2021 bases; Load Lines 3 chunks; FSS / LSA resolution-only.
 
-See `docs/sprint-audits/full-system-audit-2026-05-08.md` for the full Verdict matrix and 30-day priority order.
+**Resolved since the May audit:** JWT secret, `.env` 600, daily + restore-tested backups, cgroup caps, swap, `run_ingest.sh`, Layer C, NVIC OCR, eval harness, migration 0115 (fallback persist), Anthropic key rotation.
 
 ## Operational data
 

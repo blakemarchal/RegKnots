@@ -1,155 +1,148 @@
 # RegKnots Roadmap
 
-**Last updated:** 2026-05-09 21:00 UTC (post-D6.83 audit + corpus + Layer C sprint)
+**Last updated:** 2026-09-10 (post first Captain-tier purchase; full-system audit at `docs/sprint-audits/full-system-audit-2026-09-10.md`)
 
-**Eval headline at this writing: 97.4% A-or-A− on 149 questions (4 F's)** — beats the April baseline of 96.1% (152 questions, 6 F's) by +1.3pt. All 4 remaining F's are real corpus gaps (1 retrieval whiff on fixed-CO2 carriage, 1 NVIC hallucination, 1 UN-number ungrounded, 1 SCBA-towing retrieval gap), none are verifier bugs. Hedge rate at 15.7%, down from 20.4% baseline.
+**Eval headline:** unchanged since summer — 97.4% A-or-A− on 149 questions (2026-05-09) and, for retrieval alone, dense strong-recall@8 **0.790 / MRR 0.627** on the 62-pair gold set (2026-07-19). **No eval has run since July.** The first verification step in this roadmap is to run it again, because prod has been serving the *other* retriever.
 
-This is the strategic shipped/in-flight/upcoming view of the product. It's separate from `docs/PROJECT_STATE.md` (operational one-pager — alembic head, current corpus, hot-button bugs) and `docs/scaling-roadmap.md` (capacity thresholds and what each one triggers). Findings, calibration, and the prioritized 30-day list lift directly from `docs/sprint-audits/full-system-audit-2026-05-08.md`. The previous version is archived at `docs/archive/roadmap-2026-04.md`.
+**Where we are.** First organic Captain subscriber on 2026-09-09 (a working Master on a US-flag container ship). Infra is green. The audit found that her first session was degraded by two known, one-line problems (hybrid retrieval left on in prod against the July verdict; vessel flag Unknown so nothing scopes her to US regs) and that 19 of 38 citations she and Karynn were shown were noise. That is the whole of "Now / this week." The strategic question Blake asked — which IMO instruments to buy vs. source for free — is answered instrument by instrument in §IMO below.
 
----
-
-## Recent shipped (last 14 days)
-
-Working backwards through `git log --since="2026-04-22"`. Sprint numbers are the ones in commits, not invented.
-
-- **Post-D6.83 audit remediation** (2026-05-08 → 2026-05-09, commits `b2efe1f` → `5d2c567`). End-to-end execution of the 2026-05-08 full-system audit's critical-and-high items in one sitting. JWT secret rotated (env var name fix); `.env` mode 600; daily Postgres backup via `regknots-backup.timer` with `pigz -3` + corruption checks (`scripts/backup_postgres.sh`); systemd `MemoryHigh`/`MemoryMax` cgroup drop-ins on api/web/worker (no more global-OOM blast radius); 2 GB swap; `scripts/run_ingest.sh` wrapper for transient-cgroup-isolated ingest; exec bit fixed in git for all 4 shell scripts (refresh-weekly came back to life as a side effect); `HYBRID_RETRIEVAL_ENABLED=true`; new `packages/rag/rag/maritime_glossary.py` with 52 confidence-tagged slang→formal entries (fire wire → emergency towing-off pennant, etc.); query rewriter prompt now opens with maritime-slang priming + 9 worked examples + 25-entry quick-reference table; citation verifier handles CFR parent-range references and IMO-family MSC.X(Y) sources (closes 6+ false-negative F's from the regression eval); UptimeRobot setup runbook at `docs/runbook-uptimerobot.md`. README.md and CLAUDE.md created at repo root (both were missing). PROJECT_STATE.md and roadmap.md refreshed against verified live numbers.
-- **D6.83 Study Tools — Sprint A1-A5 + Sprint B `/education`** (2026-05-04 → 2026-05-07). Curated `nmc_exam_bank` ingest adapter, backend router with monthly cap accounting, `/study` page with quiz + guide flows, take-the-quiz interactive surface, content_md rendered as actual markdown, then bug fixes and the `/education` landing page. Account toggle to hide Quizzes & Guides from nav (e66a731), with toggle propagation fixed without refresh (519bdce).
-- **`scripts/deploy.sh` + `scripts/smoke.sh`** (2026-05-07, 107ee6a). Boring deploys: `git fetch && git reset --hard origin/main && systemctl restart …`, three-stage smoke (HTTP 200, route bundle in HTML, canary string in JS chunk). Closes the ssh-and-edit drift the old roadmap §1f had as open.
-- **D6.82 Sprint C** — moved 4 AI Co-Pilots from Captain to Mate in marketing copy.
-- **D6.81** — unified role/persona to one source of truth across web + api.
-- **D6.80** — soft-archive for conversations + mobile-compact EmptyState.
-- **D6.79** — auto-populate vessel selector when opening chat from history.
-- **D6.77** — morning UX polish from Karynn's testing list.
-- **D6.76** — declare 35 triaged NMC PDFs from cron-discovered backlog; dedupe `/landing` inline marketing copy via shared module.
-- **D6.75** — weekly NMC corpus refresh via systemd timer; 5 new NMC announcement PDFs into `nmc_policy`; `_MAX_TOKENS` bumped 2048 → 8192 to fix Karynn's Opus truncation; classifier tightened so "tell me about X" routes to Sonnet not Opus.
-- **D6.74** — chat "keeps stopping mid stream" UX gap fix.
-- **D6.73** — off-topic gate Sonnet confirmation + missing Opus alias.
-- **D6.72** — wow-factor marketing parity sections on every entry point.
-- **D6.71 Sprint 7a — hybrid BM25 + dense retrieval** (foundation, dark-launched behind `HYBRID_RETRIEVAL_ENABLED=False`). Frequency-filter on the lexical tsquery.
-- **D6.70 Sprint 8 — citation oracle** (Layer-2 retrieval intervention).
-- **D6.69** — Subchapter M / TSMS source affinity (Bay Pioneer miss fix).
-- **D6.68 Stage 1** — token-by-token streaming on the chat path.
-- **D6.67** — expanded credential types + smarter scanner prompt.
-- **D6.66 Sprint 5** — multi-query rewrite + Haiku reranker + title-boost.
-- **D6.65** — stencil synonyms + equipment-marking intent expander.
-- **D6.64 Sprint 4** — vessel/PSC/changelog/audit AI co-pilots in `me.py` + marketing surfaces.
-- **D6.63** — personalized reasoning across chat + Co-Pilot cards + Career Path.
-- **D6.62** — mariner sea-time logger + PDF credential package.
-- **D6.60** — hedge judge: Haiku gates fallback firing.
-- **D6.59** — cascading ensemble + admin "view as user" preview.
-- **D6.58** — two-tier web fallback surface; off-topic scope gate w/ daily cap + abuse alert; hedge audit feedback loop; Big-3 ensemble fallback (Claude + GPT + Grok).
-- **D6.51** — pre-retrieval query distillation for verbose first turns.
-- **D6.49** — Crew tier / Wheelhouse: workspaces CRUD + role gates, workspace-scoped chat (backend + frontend), invite flow, billing wired end-to-end.
-- **D6.48** — web search fallback (Phase 1 + Phase 2 backend, UI, single-shot review endpoint).
-- **D6.46/D6.47** — multilingual flag-state expansion (FR/DE/ES/IT/GR), corpus badges.
-- **D6.45** — IACS UR full series + MPA SG brute-force discovery.
-- **D6.42/D6.43** — STCW + MARPOL amendments; refresh cadence.
-- **D6.41** — Polar Code + IGF Code + BWM Convention.
-- **D6.36** — IMDG manual UN entries + HK MD auto-discovery.
-- **D6.32 → D6.34** — admin overview + verbosity controls (settings + per-message chips).
-- **D6.31** — user persona + jurisdiction_focus profile.
-- **D6.29/D6.30** — layered jurisdictional context (chat title + user fingerprint).
-- **D6.23 → D6.23g** — multi-flag corpus severance, UI catch-up for international corpus, recover answers after phone-lock / SSE drop, force-dynamic on root, kill stale PWA service worker.
-- **D6.20 → D6.22** — AMSA + LISCR + IRI + Singapore + HK + Bahamas + TC corpora.
-- **D6.18** — UK MCA notices ingest (first non-US corpus).
-- **D6.17** — flag-state-driven jurisdictional scoping + tonnage plausibility check.
-- **D6.16** — UN-number retrieval grounding + UN-claim post-generation verifier.
-- **D6.12** — IMDG Code 2024 Edition.
-- **D6.11** — MARPOL Convention + supplements.
-- **D6.8** — mariner → CFR vocab synonym expansion (closes the documented vocab-mismatch failure mode).
-- **D6.7** — free traffic analytics from Caddy logs.
-- **D6.4** — USCG MSM ingest + conversational-followup retrieval.
-- **D6.1/D6.2/D6.3** — two-tier pricing foundation (Mate + Captain), Mate monthly cap, pricing redesign + `/womenoffshore` + referral capture.
-
-Corpus today: ~77,111 chunks across 50 sources (vs. ~42K / 15 sources at the previous roadmap). Eval at 96.1% A-or-A− on the latest 152-question regression run.
+This file is the strategic shipped / in-flight / upcoming view. `docs/PROJECT_STATE.md` is the operational one-pager; `docs/corpus-status.md` is the corpus inventory; `docs/scaling-roadmap.md` has capacity thresholds. Previous version: `docs/archive/roadmap-2026-05.md`.
 
 ---
 
-## Now / this week
+## What changed since the May roadmap (headline only)
 
-The audit's small-but-real items still open after the 2026-05-09 sprint.
+- **June audit sprint** — live-question quality pass: follow-up retrieval composition, CG-form identifier retrieval, never-assert-non-existence rule, MLC 2006 ingested, MEPC/MSC harvest phase 1, SIRE 2.0 library completed, whale-zones polish.
+- **2026-07-18 model refresh** — Sonnet 5 / Opus 4.8 everywhere; `_MISSING_SOURCES` rot fixed.
+- **2026-07-19 Wk1–4 wave** — retrieval eval harness (`scripts/eval_retrieval.py`) and the **hybrid verdict (dense wins, do not flip)**; per-ingest REINDEX removed in favour of weekly `REINDEX CONCURRENTLY`; backups restore-tested; citation trust pack; per-answer exports; persona nav; fleet audit readiness; live-context injectors; team audit log.
+- **2026-08-09 incident** — Anthropic credits exhausted; the GPT-4o fallback engaged and could not persist (`messages_model_used_check` never allowed `fallback_gpt4o`) — 13 answers for one user generated, billed, discarded. **2026-08-10:** migration 0115 widens the constraint; key rotated (a carriage-return byte in `.env` blanked the key for every service — `file .env` is now part of the rotation procedure); four corpus-refresh systemd timers disabled per Blake's "questions only" cost posture.
+- **2026-09-09** — first Captain purchase. **2026-09-10** — this audit + roadmap.
 
-1. **Bump `next` 15.5.14 → 15.5.15+.** 10 min. DoS CVE GHSA-q4gf-8mx6-v5v3. `pnpm up next` in apps/web, then `scripts/deploy.sh`. (Was item #4 — only one of the original "Now / this week" set still open.)
-2. **Click through the UptimeRobot setup.** 15 min. Runbook at `docs/runbook-uptimerobot.md`. 7 monitors with body-keyword assertions covering `/api/health` + 5 frontend routes + a backup-heartbeat. Free tier, optional Discord webhook for phone push. The runbook is shipped; only the click-through and Discord wiring are pending.
+Corpus today: **106,041 chunks across 66 sources** (May roadmap said ~77k / 50).
 
 ---
 
-## Next 1-2 weeks
+## Now / this week — her next session should not look like her first
 
-Real iterations, prioritized.
+All awaiting "go". Each is independently verifiable.
 
-3. ~~**Layer C — UX inversion when retrieval miss is hard.**~~ **SHIPPED 2026-05-09 (commit `ebb2ca1`).** When `hedge_judge` classifies as `complete_miss` AND `web_fallback_responses.confidence ≥ 3`, the chat answer is rewritten to lead with the web fallback's content + explicit "I couldn't find this in our corpus directly, but {domain} addresses it as follows…" framing + source link + audit-disclosure footer. Same pattern works for `partial_miss` when web confidence ≥ 4. The original web_fallback_card stays attached so thumbs feedback + source-link UI keeps working. Verified live by importing `_should_apply_layer_c` and `_apply_layer_c_inversion` in the running API process; eligibility gates correct, John Collins fire-wire scenario produces the correct ETOP-led answer.
-4. **Phase 2 — multi-model maritime glossary brainstorm.** ~6-8 hr. New `scripts/build_maritime_glossary.py` calling Sonnet 4.6, GPT-5, Grok-4, Gemini-2.5-Pro in parallel via API with structured prompts (roles primed as senior maritime auditor, asked for entries across 9 categories: tanker, deck, engineering, mooring/towing, cargo, navigation, safety, fishing-specific, port-state). Each model returns ~80-150 entries; total ~400-500 before dedup. Then programmatic verification: corpus presence of formal terms, citation-existence checks against the regulations table, cross-model agreement, optional Brave/Bing corroboration. Output bucketed `verified` / `likely` / `review` / `reject` for Karynn's curation gate (1-2 hr of her time). Final glossary lands at `packages/rag/rag/maritime_glossary.py` upgrading current confidence=1 entries to confidence=2/3. The 52 entries seeded in the post-audit sprint are the foundation; this systematizes ongoing curation. Cost: ~$2-5 in API calls, one-time. Reusable: re-run quarterly to refresh.
-5. **OSHA no-cite clause** in chat system prompt. ~30 min. ~21% of chats currently regen because synthesis invents 29 CFR Part 1910 citations that the verifier strips. Add the redirect to 46 CFR Subchapter V to `prompts.py`.
-6. **Corpus gap fills.** Detailed analysis + 2026-05-09 outcomes at [`docs/corpus-gap-report-2026-05-09.md`](corpus-gap-report-2026-05-09.md). Status:
-   - ~~**IMO HSC/IGC/IBC chapter granularity**~~ **SHIPPED 2026-05-09**. IGC + HSC re-ingested with 19 chapter-level sections each (was 1 each). IBC correctly takes single-section fallback (amendment-only PDF).
-   - ~~**NVIC backfill via OCR**~~ **SHIPPED 2026-05-09**. 49 of 54 scanned PDFs OCR'd via Anthropic Haiku Vision and ingested. 160 distinct NVIC IDs → 209 (+30.6%); +672 chunks. NVIC 04-05 confirmed not on USCG index → was a model hallucination, not corpus gap.
-   - **5 oversized scanned NVIC PDFs** (~2-3 hr): Anthropic API has a PDF size limit; chunked-page upload OR `pdf2image` per-page OCR for the few >5MB files.
-   - **Load Lines Convention re-ingest** (~3 hr): currently 4 chunks; should be 100-200. Foundational stability + freeboard reference. The 1966 Convention text is configured as an HTML URL the PDF adapter skipped — needs HTML-aware adapter change. Free source.
-   - **FSS Code + LSA Code ingest** (~10 hr combined): both entirely missing despite heavy SOLAS Ch.II-2 / Ch.III references. Source acquisition needed (IMO Publishing). Highest user impact for fire-system and lifesaving-equipment questions. **Held off until cash flow per 2026-05-09 user direction.**
-   - The `46 CFR 95.25` eval miss turned out to be a model hallucination (eCFR confirmed current via `cfr_46 --update` on 2026-05-09 with 0 net delta) — not a corpus gap. Tracked as a synthesis-quality issue, not an ingest target.
-7. **CI workflow.** ~2 hr. `.github/workflows/ci.yml` running `pnpm lint`, `tsc --noEmit`, `pytest` on PRs. Locks deploy hygiene now that `scripts/deploy.sh` exists.
-8. **First three tests.** ~3 hr total. Stripe webhook handler against a recorded fixture; `study._shuffle_question_options` / `_citation_base` / `_parse_json_response`; `rag.retriever._extract_identifiers` / `_extract_keywords`. All three are pure functions today — no DB fixtures required.
-9. **Extract `app/llm_helpers.py`.** ~3 hr. The Sonnet-call boilerplate is copy-pasted 6 times in `me.py`; `_parse_json` exists in 6 places (me.py, study.py, documents.py, citation_oracle.py, query_rewrite.py, reranker.py). Largest source of accidental drift in the codebase.
-10. **Caddy security headers + rate-limit `/api/domain-check`.** ~30 min. Add `header { ... }` block (HSTS, X-Frame-Options, X-Content-Type-Options, Referrer-Policy, CSP). 50 cert directories in Caddy with scanner-injected hostnames suggests `/api/domain-check` is returning 200 on garbage subdomains.
-11. **Sentry frontend `environment` tag.** 5 min. `apps/web/src/instrumentation-client.ts` and `instrumentation.ts` omit it; every event currently shows up untagged.
-12. **UN-number citation grounding fix** (eval V1/S-046 isocyanate spill). ~1-2 hr. UN-grounding path is separate from the CFR/MSC verifier fixes shipped 2026-05-09. Symptom: model cites `UN 2478` / `UN 3080` / `UN 2206` for isocyanate scenarios; verifier flags them as "ungrounded" because the ERG/IMDG retrieval didn't surface them. Either (a) re-chunk IMDG/ERG with explicit UN-number indexing, or (b) tweak the UN-grounding logic to be less strict when retrieval has at least the right *substance class*. Notes: investigate before deciding which path; one occurrence in 151-q eval, lowest priority of the open items.
+1. **Flip prod to dense retrieval.** Remove `HYBRID_RETRIEVAL_ENABLED=true` from `/opt/RegKnots/.env` (code default is already `False` with the ⛔ MEASURED note), drop the dead `CONFIDENCE_TIERS_MODE=shadow`, restart `regknots-api`. **5 min.** Verify by re-asking her four questions and re-running `scripts/eval_retrieval.py` (expect 0.790 / 0.627).
+2. **Set MAERSK Kinloss `flag_state`.** One UPDATE. **1 min.** Then the product fix in item 6 so the next Captain never hits it.
+3. **Stripe: identify the $39.00 price** on `sub_1UDop0B6F2sQMkiGQwjVd969` and confirm it is in `plans.py`. **Blake, 5 min.** If it is not mapped, renewals will not route.
+4. **Celery hygiene.** Route `update_regulations` through `scripts/run_ingest.sh` (it runs unwrapped in the 1 GB worker cgroup today); delete `reindex-vector-embeddings-monthly` (non-concurrent, 271 s ACCESS EXCLUSIVE on 09-01, duplicates systemd `db-maintenance`); cap the eCFR-503 retry; gitignore `celerybeat-schedule`; regenerate and commit `packages/ingest/uv.lock`. **30 min + deploy.**
+5. **Karynn reads two answers** (MOB alarm; BMP-MS) — 5 minutes, see audit §2.5. If either is wrong it becomes a hedge-audit entry and a gold-set pair.
+6. **Vessel-profile completeness (product).** When `vessels.flag_state` is Unknown and `users.jurisdiction_focus` is set, use it for retrieval scoping; show a one-click "confirm your flag" prompt in chat when the active profile is incomplete; enrich from IMO number on save. **~2 h.** Spec first.
 
-13. **Transient `list index out of range` crash on UN-grounded retries** (eval V1/S-046, V1/S-047). State-dependent — couldn't reproduce locally even with identical query. Likely a multi-query rewrite race or anomalous Anthropic API response shape. ~1 hr to add defensive guards + traceback logging in the regen path so the next occurrence at least leaves a stack trace. Not blocking; happened ~0.7% of eval queries.
+---
 
-14. **2 unresolved scanned NVIC PDFs** (`10-02`, `03-75`). Within Anthropic's size+page limits but still 400-error. Likely a PDF-format issue (encrypted streams, JPEG2000 imagery, or non-standard PDF structure). ~1 hr fallback path: use `pdf2image` to rasterize pages locally, send PNGs to vision API. Adds ~1 KB of code.
+## Next 1–2 weeks
+
+7. **Add her four real questions + Karynn's BMP question to the eval gold set** and re-baseline. The gold set was built from Karynn's and pilot users' questions; the first paying Master's questions belong in it.
+8. **Tier-aware model floor — decision needed.** Router is complexity-only; every Captain question this month went to Haiku. A Sonnet floor for Captain costs on the order of a cent per question. Blake/Karynn call; ~1 h to implement once decided.
+9. **Stripe webhook ordering fix.** `invoice.paid` arrived before `checkout.session.completed` and its UPDATE-by-subscription-id matched 0 rows → `billing_interval` NULL for every first-time subscriber. Fall back to customer id; add the recorded-fixture test (first `apps/api` test in the repo). **~2 h.**
+10. **BMP Maritime Security (2024) ingest.** Free industry PDF (ICS / BIMCO / INTERTANKO / OCIMF et al.). Karynn asked for it on 09-10 and got a mis-attributed answer from adjacent chunks. **~2 h**, `pdf_pipeline` pattern.
+11. **`next` 15.5.14 → 15.5.15+** (DoS CVE, open since May). `pnpm up next` + deploy. **10 min.**
+12. **Sentry `environment` tag** in both `instrumentation*.ts`. **5 min.** Open since May.
+13. **Offsite backups** — Blake's 5-minute DO Spaces bucket + keys step (`scripts/backup_offsite.sh` header). Local backups still share a disk with the database.
+14. **Zombie test account** `kdmarchal+test` — `pro/active` with period ended 2026-05-08; set to `free`. **1 min.**
+
+---
+
+## IMO corpus acquisition plan
+
+**The question:** many IMO instruments are missing or present only as the adopting resolution. Buy, or find free routes?
+
+**Two routes exist for almost every instrument.**
+
+- **Free route.** Every IMO code is adopted as the *annex* of an MSC / MEPC / Assembly resolution, and every amendment is another resolution. The resolutions are public on the IMO resolution index (imo.org Knowledge Centre) and docs.imo.org (free account). Ingesting the adopting resolution's annex gives the full base text; ingesting the amending resolutions as separate sections gives the deltas. **This is exactly the pattern `stcw_amend` and `marpol_amend` already use.** The cost is that the text is not consolidated — a user gets "base text, as amended by MSC.xxx" as two citations rather than one merged paragraph. That is how STCW and MARPOL work in the corpus today and nobody has complained.
+- **Paid route.** IMO Publishing sells consolidated e-book editions with all amendments merged. Most single-code titles are in the tens of pounds; consolidated SOLAS and the IMSBC Code are the expensive outliers (>£100). Prices move; verify at checkout. PDF handling of purchased e-books is the same `pdf_pipeline` path as COLREGs and COSWP.
+
+**Recommendation:** free route first for the whole of Tier A — it costs engineering hours and under $5 of embeddings, not licence fees. Buy consolidated editions only where (a) the free text turns out to be unobtainable or badly OCR'd, or (b) a paying segment needs merged text (bulk carriers → IMSBC). Ranked for the user we actually have — a US-flag container Master — first.
+
+### Tier A — do first (free route covers all of it)
+
+| Instrument | In corpus today | Why a Master needs it | Free route | Paid route | Effort |
+|---|---|---|---|---|---|
+| **ISPS Code** (Parts A + B) | absent | Every port call: DoS, SSP, security levels, PSC | SOLAS 2002 Conference resolution 2 annex; SOLAS XI-2 already in `solas` | ISPS Code consolidated | 4 h |
+| **LSA Code** full text | 58 chunks — resolution text only | Lifejackets, liferafts, immersion suits, EPIRB/SART — every SOLAS III question bottoms out here | MSC.48(66) annex (the Code) + amending resolutions MSC.207(81) through MSC.485(103) | LSA Code consolidated | 6 h |
+| **FSS Code** full text | 29 chunks — resolution only | Fire-fighting systems — every SOLAS II-2 equipment question | MSC.98(73) annex + the ~10 amending MSC resolutions on the IMO FSS page | FSS Code consolidated | 6 h |
+| **2008 IS Code** (Intact Stability) | absent | Stability criteria, weather criterion, container-ship stability booklets; the Captain asked about stability in April | MSC.267(85) annex Parts A + B + amendments (MSC.319(89) onward) | IS Code consolidated | 5 h |
+| **Load Lines 1966 / 1988 Protocol** | 3 chunks | Freeboard, zones and seasonal areas, LL certificate | Convention text (the treaty HTML the adapter skipped — needs an HTML-aware adapter) + MSC.143(77) consolidated Annex B | Load Lines consolidated | 4 h |
+| **IAMSAR Vol III** | wired, geo-blocked | SAR on board, MOB search patterns, on-scene coordination | USCG mirror — download from the laptop, `scp` to `raw_dir` (already the documented workaround) | IMO / ICAO | 2 h |
+| **BMP Maritime Security 2024** | absent | Piracy / HRA transits; Karynn's 09-10 question | Free industry PDF (ICS / BIMCO et al.) | n/a | 2 h |
+
+Tier A total: ~29 engineering hours, $0 in licences, under $5 in embeddings.
+
+### Tier B — next, still free
+
+| Instrument | In corpus today | Why | Free route | Effort |
+|---|---|---|---|---|
+| **CSS Code** full + Annex 13 | 53 chunks | Cargo securing — container lashing, CSM approval | A.714(17) annex + MSC.1/Circ.1352/Rev.2 + MSC.1/Circ.1623 | 3 h |
+| **CSC 1972** (Safe Containers) | absent | Container-ship specific: CSC plates, ACEP, examination intervals | Convention text + MSC.310(88), MSC.355(92) amendments | 3 h |
+| **STCW base refresh** | `stcw` 2017-07 base; `stcw_amend` 28 chunks | 2010 Manila consolidated + 2022/2024 amendments as one coherent base | Existing `stcw_amend` pattern; MSC.486(103) onward | 4 h |
+| **MARPOL base refresh** | `marpol` 2022-11 base; `marpol_amend` 618 chunks | Annex VI CII / EEXI / fuel sulphur enforcement moved | `marpol_amend` already carries MEPC.328(76) onward; refresh the base | 6 h |
+| **HSC / IGC / IBC pending amendments** | bases present | ~6 HSC, 2 IGC, 1 IBC amendment resolutions not ingested | Resolution index | 3 h |
+
+### Tier C — buy only on demand
+
+| Instrument | Why deferred | If bought |
+|---|---|---|
+| **IMSBC Code** | Bulk carriers only; no bulk customers today. Free route via MSC.268(85) + amendments is large and fiddly | IMSBC consolidated (>£100) when a bulk operator signs |
+| **Grain Code**, **BLU Code**, **Timber Deck Cargoes** | Bulk / specialist | Free resolutions; do with IMSBC |
+| **FTP Code 2010**, **III Code**, **Casualty Investigation Code**, **MODU Code**, **SPS Code** | Yard / flag / investigator audiences, not a Master's daily questions | Free resolutions (MSC.307(88), A.1070(28), MSC.255(84), A.1023(26), MSC.266(84)); ~2 h each |
+| **STCW-F**, **Tonnage 1969**, **AFS**, **HKC**, **Nairobi WRC**, **CLC / Bunkers** | Fishing / liability / niche | Out of scope this quarter |
+
+### Sequencing
+
+1. ISPS + BMP MS (both free, both quick, both port-call-relevant) — 1 day.
+2. LSA + FSS full text — the two highest-impact gaps since May; 1.5 days.
+3. IS Code + Load Lines — stability pair; 1 day (Load Lines needs the HTML adapter).
+4. IAMSAR from the laptop — half a day.
+5. Tier B as a corpus sprint when traffic justifies; run the eval before and after every step.
+
+Every ingest above goes through `scripts/run_ingest.sh`, never bare `uv run`.
 
 ---
 
 ## Within 30 days
 
-Architectural items that take a session or two each.
-
-13. **Move SpiritFlow off the box.** ~6 hr + $24/mo. Provision a dedicated droplet for SpiritFlow (or the reverse — give RegKnots its own box). Layer 1 cgroup caps (shipped 2026-05-09) close most of the practical exposure but the shared tenancy is still the largest architectural coupling risk before traffic ramps.
-14. **Test-coverage sprint.** ~2 days. Auth flow, billing webhook, message-cap gate, the six Sonnet endpoints in `me.py`, Study Tools router. The gap isn't a bug today, but at the current ship cadence (35+ fix commits in 14 days, zero reverts) the lack of any safety net is the largest source of latent regression risk.
-15. ~~**Corpus-completeness audit.**~~ **DONE 2026-05-09** — see [`docs/corpus-gap-report-2026-05-09.md`](corpus-gap-report-2026-05-09.md). Programmatic survey via `scripts/corpus_gap_survey.py` confirmed `cfr_*` titles are current to eCFR; identified 7 ranked gaps in IMO codes + NVIC + supplements. Highest-leverage: FSS Code + LSA Code entirely missing, Load Lines thinly ingested. Survey script committed for re-running.
-16. **Documentation completion.** ~6 hr. `docs/architecture.md` (services + data flow), `docs/runbook.md` (deploy / restart / restore / rotate / rollback), `docs/glossary.md` (CFR, COLREGs, MMC, STCW, MSIB, etc.), per-package READMEs (`apps/api`, `apps/web`, `packages/rag`, `packages/ingest`), `SECURITY.md`, `CONTRIBUTING.md`. The repo-root README and CLAUDE.md were created in the audit pass; everything else is the gap.
-17. **Off-host backup destination.** ~1 hr. B2 or S3 nightly upload of the daily local pg_dump (already shipped in the post-audit sprint, see Done section). Local backups survive every failure mode except disk loss; this closes that hole.
+15. **API test coverage** — billing webhook (fixture for the ordering race), message-cap gate, auth flow. `apps/api/tests/` does not exist. 2 days.
+16. **CI** — `.github/workflows/ci.yml`: `pnpm lint`, `tsc --noEmit`, `pytest`. 2 h. Four months open.
+17. **Extract `app/llm_helpers.py`** — Sonnet boilerplate ×6 in `me.py`, `_parse_json` ×6. 3 h.
+18. **SpiritFlow off the box** (or RegKnots onto its own). `merch-*` and `bree-*` still share the 4 GB droplet. 6 h + $24/mo.
+19. **Caddy CSP** header (HSTS / X-Frame / Referrer shipped; CSP still absent). 30 min.
+20. **Documentation completion** — `docs/architecture.md`, `docs/runbook.md`, per-package READMEs. 6 h.
 
 ---
 
 ## Deferred / re-check next quarter
 
-- **Embedding upgrade to `text-embedding-3-large`.** April audit and this audit agree it's not the bottleneck. $3.54 + 4× pgvector storage cost; don't move until a concrete failure mode demands it.
-- **Hot-replica Postgres.** Overkill at current scale (DB is 1528 MB, 1 active + 8 idle connections, 1.9M committed xacts, 0 deadlocks). Revisit at Tier 4 in scaling-roadmap.md (~500 active users/day).
-- **Corpus refresh sprint — STCW (2017-07), MARPOL (2022-11), USCG MSM (2021-09).** Three stale outliers. MARPOL is the highest user-visible risk because Annex VI EEXI/CII rules and fuel-sulphur enforcement details have moved. Schedule a focused sprint when traffic stabilizes.
-- **Drop `'use client'` from marketing landings → RSC + client islands.** All 42 pages are client components today. Cumulative bundle hit is real but not blocking.
+- `text-embedding-3-large` — still not the bottleneck.
+- Hot-replica Postgres — revisit at scaling-roadmap Tier 4.
+- USCG MSM refresh (2021-09) and ISM (2018-07) — stale bases, low query volume.
+- Marketing landings → RSC + client islands.
+- 2FA / TOTP — revisit when paid users cross a threshold.
+- Glossary Phase 2 multi-model build (63 entries today).
+- Translation pipeline (FR / DE / GR / JP / CN / KR regulators) — designed, not built.
+- Hybrid retrieval as a *weighted supplement* to dense (not equal-partner RRF) — only after the harness shows it beats 0.790.
 
 ---
 
-## Done — items closed since 2026-04-20
+## Done — closed since 2026-05-09
 
-Lifting from the previous roadmap so the open list stays calibrated.
+Verified against code, prod and git today, not lifted from the previous roadmap.
 
-### Closed in the post-D6.83 audit remediation sprint (2026-05-08 → 2026-05-09)
+- ~~Layer C UX inversion~~ — shipped 2026-05-09.
+- ~~IMO HSC/IGC granularity~~; ~~NVIC OCR backfill~~ (+49 NVICs) — shipped 2026-05-09.
+- ~~Corpus-completeness audit~~ — `docs/corpus-gap-report-2026-05-09.md`.
+- ~~OSHA no-cite clause~~ — present in `prompts.py`.
+- ~~Caddy security headers~~ — HSTS, X-Frame-Options, Referrer-Policy live (CSP remains, item 19).
+- ~~Hybrid flip + re-eval~~ — evaluated 2026-07-19; **verdict: dense wins**. Reverting prod is item 1.
+- ~~Backups restore-tested~~ — 2026-07-19 (offsite copy remains, item 13).
+- ~~Retrieval eval gate~~ — `scripts/eval_retrieval.py`, 2026-07-19.
+- ~~Per-ingest REINDEX lock~~ — removed 2026-07-19 (the Celery monthly duplicate remains, item 4).
+- ~~JWT secret, `.env` 600, daily backups, cgroup caps, swap, `run_ingest.sh`~~ — May.
+- ~~GPT-4o fallback could not persist~~ — migration 0115, 2026-08-10.
+- ~~Anthropic key exposure~~ — rotated 2026-08-10; legacy key purged from disk.
 
-- **JWT signing key rotation.** `.env` env var renamed `REGKNOTS_SECRET_KEY` → `REGKNOTS_JWT_SECRET_KEY`. API now signs JWTs with a real 64-char secret instead of the hardcoded default `dev-secret-key-...`. All active sessions invalidated once on restart (expected and one-time).
-- **`.env` permissions tightened to mode 0600.** Co-tenant `spiritflow` user can no longer read RegKnots secrets.
-- **Daily Postgres backup operational.** `regknots-backup.timer` fires daily at 03:00 UTC, runs `scripts/backup_postgres.sh` (pg_dump from container | pigz -3 | gzip-integrity-check + zgrep schema-shape check), 14-day retention, mode 0600 on output. First backup confirmed 549 MB on disk. Took 4 iterations of script tuning to handle pipefail/SIGPIPE quirks (gzip -9 timeout → pigz -3, gunzip-pipe-grep false negative → subshell + head + grep). Closes the RPO=∞ exposure.
-- **Failed `regknots-refresh-weekly.service` revived.** Root cause was that all `scripts/*.sh` were committed as mode 100644 (no exec bit) because the worktree is on Windows. `git reset --hard` on the VPS landed `corpus_refresh.sh` as 0644, systemd's exit 203 (EXEC) means "couldn't exec the binary." Same trap was waiting on `deploy.sh`, `smoke.sh`, `backup_postgres.sh`. Fix: `git update-index --chmod=+x` on all four. After re-pull on VPS, refresh-weekly started running clean. ~30-second fix, made possible by accidentally noticing the mode mismatch during diagnosis.
-- **Layer 1 OOM defense.** Systemd cgroup caps via drop-ins at `deploy/systemd/regknots-{api,web,worker}.service.d/memory.conf`: api 1.5G/2G, web + worker 512M/1G. When a service grows past `MemoryMax` the cgroup OOM-kills it; `Restart=always` brings it back; the rest of the box stays green. **Structurally closes the May 1 incident class** — global OOM that took the box for 9 hours can no longer happen without a kernel bug.
-- **2 GB swap on `/swapfile`** with `vm.swappiness=10` and `/etc/fstab` entry. Kernel can bleed cold pages instead of OOM-killing under transient pressure. Persisted across reboots.
-- **`scripts/run_ingest.sh` wrapper.** Wraps ad-hoc ingest in `systemd-run --slice=regknots-ingest.slice --property=MemoryMax=1.5G --property=CPUQuota=150% ...` so a runaway ingest dies in its own cgroup, not the whole box. CLAUDE.md flagged the wrapper as the required path; bare `uv run python -m ingest.cli` is now an anti-pattern.
-- **Maritime glossary v1 (`packages/rag/rag/maritime_glossary.py`).** 52 confidence-tagged slang→formal entries seeded from Sonnet's domain knowledge: towing (`fire wire` → emergency towing-off pennant), mooring, cargo (`ullage`, `dunnage`, `tally`), deck (`scupper`, `lazarette`, `monkey island`), engineering (`donkeyman`, `oiler`), safety (`mob`, `epirb`, `sart`), navigation (`dr`, `ais`, `ecdis`), certificates (`mmc`, `coi`, `iopp`), PSC, drills. All confidence=1; multi-model verification pass tracked under "Phase 2" above.
-- **Maritime-slang few-shot in query_rewrite prompt.** `_REWRITE_SYSTEM_PROMPT` now opens with explicit slang-recognition guidance + 9 worked examples (fire wire → ETOP, etc.) + 25-entry quick-reference table. Attacks the root cause of the John Collins fire-wire miss: not Haiku capability but prompt shape boxing it into bottom-up corpus-vocab translation.
-- **HYBRID_RETRIEVAL_ENABLED flag flipped on.** D6.71's dark-launched BM25+RRF retrieval is now the default for general queries (sources=None). Eval re-run showed expected behavior — more diverse retrieval surfaces (specifically more IMO IGC / IMO HSC content for gas-carrier and CO2 questions) which exposed the citation-verifier format-mismatch bug separately addressed below.
-- **Citation verifier handles CFR parent-range and IMO-family MSC.X(Y) sources** (commit 5d2c567). When the model writes `46 CFR 142` (no subsection), verifier now LIKE-matches against `46 CFR 142.%` instead of failing exact match. When the model writes `MSC.370(93)`, verifier checks `imo_igc`, `imo_hsc`, `imo_ibc`, `fss`, `lsa`, `marpol_supplement`, `ism_supplement` in addition to the original `solas_supplement` / `stcw_supplement`. Targeted DB queries confirmed 6 of 7 specific eval failure cases now resolve. Expected eval delta: 6-8 of 12 F's flip to A on re-run.
-- **UptimeRobot setup runbook** at `docs/runbook-uptimerobot.md`. 7 monitors with body-keyword assertions covering `/api/health` + 5 frontend routes + a backup heartbeat. Free tier ($0/mo), optional Discord webhook for phone push notifications. The runbook is shipped; the click-through is item #2 above.
-- **Memory files refreshed.** `MEMORY.md` index, `project_db_constraint.md`, `project_retrieval_vocab_mismatch.md`, `project_deployment_procedure.md` all updated to reflect resolved status.
-- **Repo-root README.md and CLAUDE.md created** (both were missing). PROJECT_STATE.md and roadmap.md (this file) refreshed against verified live numbers.
-
-### Closed earlier in this cycle
-
-- **§1f — `scripts/deploy.sh`.** Shipped 2026-05-07 (107ee6a). Smoke script ships alongside.
-- **Vocab-mismatch failure mode** (was a memory-flagged "no fix yet"). Closed by D6.8 — `synonyms.py` ships 6 user-vocab entries (lifejacket, log, mob, stability, stencil/stenciled/stenciling) with curated CFR-vocab expansions; `query_rewrite.py` produces 2-3 reformulations every chat (default ON); two intent expanders (drill-frequency, equipment-marking) gate on dual signals.
-- **`ism_supplement` migration drift** (was a "added live, not in migration files" memory flag). Closed by migration `0090_add_nmc_exam_bank_source.py` (2026-05-07) which explicitly defines the canonical source list including `ism_supplement`.
-- **§1a — GovDelivery forward channel / freshness.** Replaced by D6.75 weekly NMC corpus refresh via systemd timer + the existing USCG bulletin pipeline. The "real-time differentiator" V2 path remains deferred — current weekly cadence is fine for current pilot users.
-- **§1b — retrieval-side freshness filtering.** Subsumed by D6.42/D6.43 (STCW + MARPOL amendments + refresh cadence) and the citation oracle (D6.70). Re-open as a discrete item if a stale-citation user complaint surfaces.
-- **§2a — content_hash normalization.** Replaced by the threshold-gated content-hash sensitivity that already shipped in Sprint B3; refresh cadence now driven by weekly systemd timer rather than eCFR republish event.
-- **§5.1 / §5.2 — Cowork weekly ops cadence and folder hygiene.** Out of scope for this strategic doc; if revived, route through the audit's "Workflow / automation opportunities" table (retrieval-miss review, corpus-freshness sentinel, hedge-rate report).
-- **2FA / TOTP** (was §2d). Not in the audit's 30-day list. Remains deferred; revisit when paid-tier user count crosses a threshold that justifies the lift.
+**Still open from May, carried above:** `next` CVE (11), Sentry env tag (12), CI (16), API tests (15), `llm_helpers` (17), SpiritFlow (18), offsite backup (13), STCW / MARPOL refresh (Tier B), Load Lines / FSS / LSA (Tier A), IAMSAR (Tier A), UptimeRobot click-through (unverifiable from the box — confirm), 5 oversized + 2 unresolved scanned NVICs (low).
