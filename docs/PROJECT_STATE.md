@@ -104,15 +104,14 @@ Run `git log --oneline --since="2026-04-22"` for the complete list.
 
 Full findings, evidence and the awaiting-go fix spec: `docs/sprint-audits/full-system-audit-2026-09-10.md`.
 
-**P1 (each a one-line fix; awaiting go):**
-- Prod `.env` still has `HYBRID_RETRIEVAL_ENABLED=true`. Code default has been `False` since the 2026-07-19 eval (dense 0.790 vs hybrid 0.548 strong-recall@8). Every 09-09 query logged `Hybrid selected:` with the documented failure mode (small-source lexical noise: BMA safety alerts, WHO IHR, ERG for a man-overboard question).
-- First Captain subscriber's vessel (MAERSK Kinloss, IMO 9333022) has `flag_state = Unknown` → jurisdiction severance never engages → foreign-flag notices cited to a US-flag Master. 19 of 38 citations in her session were noise.
+**Fixed 2026-09-10 (same day, on go):** prod flipped to dense retrieval (`HYBRID_RETRIEVAL_ENABLED=false`; had been `true` since May against the July verdict); MAERSK Kinloss flag set to `United States`; scheduled Celery ingest wrapped in `run_ingest.sh`; non-concurrent monthly REINDEX task removed; `uv.lock` regenerated. Verification: her four questions 4/32 → 0/32 foreign-flag hits; harness 0.823 / 0.658 (July 0.790 / 0.627).
+
+**P1 remaining:**
 - `amount_paid = 3900` on the Captain purchase matches no configured price ($39.99 / $29.99). Confirm the price_id is in `plans.py` (Blake, Stripe dashboard).
+- **51 of 56 vessel profiles have `flag_state = Unknown`.** Roadmap item 6 (derive scoping from `jurisdiction_focus`, confirm-your-flag prompt, IMO-number enrichment) is the top product item.
 
 **P2:**
-- Celery Beat (`apps/api/celery_beat.py`) still runs weekly ingest for `cfr_33/46/49/nvic` as bare `uv run` inside the worker's 1 GB cgroup, and a monthly **non-concurrent** `REINDEX` (271 s ACCESS EXCLUSIVE on 2026-09-01) that duplicates systemd `db-maintenance`. Cost is negligible and it makes no Anthropic calls; it just needs `run_ingest.sh` and the reindex deleted.
 - Stripe `invoice.paid` processed before `checkout.session.completed` on first purchase → `UPDATE … WHERE stripe_subscription_id` matched 0 rows → `billing_interval` NULL for new subscribers.
-- Committed `packages/ingest/uv.lock` predates `playwright` (05-22); prod re-resolves every run and dirties the tree.
 
 **Still open from May:** `next@15.5.14` DoS CVE; Sentry `environment` tag; no CI; zero `apps/api` tests; `llm_helpers.py` not extracted; SpiritFlow co-tenancy; offsite backups (Blake's DO Spaces step); STCW 2017 / MARPOL 2022 / MSM 2021 bases; Load Lines 3 chunks; FSS / LSA resolution-only.
 

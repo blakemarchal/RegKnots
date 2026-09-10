@@ -2,7 +2,7 @@
 
 **Last updated:** 2026-09-10 (post first Captain-tier purchase; full-system audit at `docs/sprint-audits/full-system-audit-2026-09-10.md`)
 
-**Eval headline:** unchanged since summer — 97.4% A-or-A− on 149 questions (2026-05-09) and, for retrieval alone, dense strong-recall@8 **0.790 / MRR 0.627** on the 62-pair gold set (2026-07-19). **No eval has run since July.** The first verification step in this roadmap is to run it again, because prod has been serving the *other* retriever.
+**Eval headline:** retrieval harness re-run 2026-09-10 after prod was flipped back to dense — strong-recall@8 **0.823 / MRR 0.658** on the 62-pair gold set, 0 errors (July baseline 0.790 / 0.627; evidence `data/eval/retrieval/20260910-144455-dense-ef0.json`). Answer-quality eval still 97.4% A-or-A− on 149 questions (2026-05-09). **New retrieval baseline to beat: 0.823 / 0.658.**
 
 **Where we are.** First organic Captain subscriber on 2026-09-09 (a working Master on a US-flag container ship). Infra is green. The audit found that her first session was degraded by two known, one-line problems (hybrid retrieval left on in prod against the July verdict; vessel flag Unknown so nothing scopes her to US regs) and that 19 of 38 citations she and Karynn were shown were noise. That is the whole of "Now / this week." The strategic question Blake asked — which IMO instruments to buy vs. source for free — is answered instrument by instrument in §IMO below.
 
@@ -26,12 +26,12 @@ Corpus today: **106,041 chunks across 66 sources** (May roadmap said ~77k / 50).
 
 All awaiting "go". Each is independently verifiable.
 
-1. **Flip prod to dense retrieval.** Remove `HYBRID_RETRIEVAL_ENABLED=true` from `/opt/RegKnots/.env` (code default is already `False` with the ⛔ MEASURED note), drop the dead `CONFIDENCE_TIERS_MODE=shadow`, restart `regknots-api`. **5 min.** Verify by re-asking her four questions and re-running `scripts/eval_retrieval.py` (expect 0.790 / 0.627).
-2. **Set MAERSK Kinloss `flag_state`.** One UPDATE. **1 min.** Then the product fix in item 6 so the next Captain never hits it.
+1. ~~**Flip prod to dense retrieval.**~~ **SHIPPED 2026-09-10.** `HYBRID_RETRIEVAL_ENABLED=false` and the dead `CONFIDENCE_TIERS_MODE` line removed from prod `.env`; `regknots-api` restarted; process environment verified. Her four questions re-run through dense retrieval with her real profile: **4/32 foreign-flag hits at flag Unknown → 0/32 at United States** (her live session under hybrid + Unknown: 14 of 30 off-topic). Harness: 0.823 / 0.658.
+2. ~~**Set MAERSK Kinloss `flag_state`.**~~ **SHIPPED 2026-09-10** (`United States`, matching the 5 populated rows). **51 of 56 vessel profiles on prod have flag Unknown** — her case is the norm, which is why item 6 is now the top product item.
 3. **Stripe: identify the $39.00 price** on `sub_1UDop0B6F2sQMkiGQwjVd969` and confirm it is in `plans.py`. **Blake, 5 min.** If it is not mapped, renewals will not route.
-4. **Celery hygiene.** Route `update_regulations` through `scripts/run_ingest.sh` (it runs unwrapped in the 1 GB worker cgroup today); delete `reindex-vector-embeddings-monthly` (non-concurrent, 271 s ACCESS EXCLUSIVE on 09-01, duplicates systemd `db-maintenance`); cap the eCFR-503 retry; gitignore `celerybeat-schedule`; regenerate and commit `packages/ingest/uv.lock`. **30 min + deploy.**
+4. ~~**Celery hygiene.**~~ **SHIPPED 2026-09-10.** `update_regulations` now calls `scripts/run_ingest.sh` (which picks `--pipe` when there is no TTY, so the worker still captures output and the exit code); `reindex-vector-embeddings-monthly` and its task deleted; `celerybeat-schedule` gitignored; `packages/ingest/uv.lock` regenerated (greenlet, playwright, pyee) so prod stops re-resolving it every Sunday. The eCFR-503 retry was already bounded by `max_retries=2` — no change. Deployed via `scripts/deploy.sh`. First scheduled run under the wrapper: Sunday 2026-09-13 02:00 UTC — check `journalctl -u regknots-worker` and the transient `regknots-ingest-*` unit afterwards.
 5. **Karynn reads two answers** (MOB alarm; BMP-MS) — 5 minutes, see audit §2.5. If either is wrong it becomes a hedge-audit entry and a gold-set pair.
-6. **Vessel-profile completeness (product).** When `vessels.flag_state` is Unknown and `users.jurisdiction_focus` is set, use it for retrieval scoping; show a one-click "confirm your flag" prompt in chat when the active profile is incomplete; enrich from IMO number on save. **~2 h.** Spec first.
+6. **Vessel-profile completeness (product) — now the top product item.** 51 of 56 vessel profiles have flag Unknown, and the A/B above shows flag alone moves foreign-flag noise from 4/32 to 0/32. When `vessels.flag_state` is Unknown and `users.jurisdiction_focus` is set, use it for retrieval scoping; show a one-click "confirm your flag" prompt in chat when the active profile is incomplete; enrich from IMO number on save. **~2 h.** Spec first.
 
 ---
 

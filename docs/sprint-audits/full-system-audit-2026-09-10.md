@@ -162,9 +162,9 @@ Patched today: the factual headers above. Rewritten today: `docs/roadmap.md` (pr
 
 ---
 
-## Proposed fix spec — awaiting "go"
+## Fix spec — executed 2026-09-10 on Blake's go
 
-Nothing below has been executed. Ordered so each step is independently verifiable.
+**Outcome.** Steps 1, 2 and 4 shipped the same day; step 3 (product fix) awaits a spec; step 5 (Stripe) is Blake's. Verification: her four questions re-run through dense retrieval went from 4/32 foreign-flag hits at flag Unknown to **0/32** at United States (live session under hybrid + Unknown: 14 of 30 off-topic); the retrieval harness came back at **0.823 strong-recall@8 / 0.658 MRR** against the July 0.790 / 0.627 baseline (`data/eval/retrieval/20260910-144455-dense-ef0.json`). A finding from the fix itself: **51 of 56 vessel profiles on prod have flag Unknown**, so §2.4 is a fleet-wide product gap, not one user's. The original spec follows for the record.
 
 **Step 1 — Retrieval flip (prod, 5 min).**
 ```
