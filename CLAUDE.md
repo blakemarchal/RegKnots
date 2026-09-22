@@ -93,6 +93,7 @@ If a doc says "alembic head is 0045" but `alembic current` says `0092`, the doc 
 
 - **2026-08-10 incident session:** Anthropic credits hit zero on 08-09 → every Claude call 400 → GPT-4o fallback engaged and then **failed to persist** — `messages_model_used_check` never allowed `fallback_gpt4o`; 13 answers for one user were generated, billed and discarded. Migration **0115** widens the constraint. Anthropic key rotated; a carriage-return byte in `.env` blanked the key for every service until found (`file /opt/RegKnots/.env` after any edit). Four corpus-refresh timers disabled. Deployed `a4e75a4`.
 - **2026-09-09:** first organic Captain-tier purchase (cassclark.425@gmail.com, MAERSK Kinloss). **2026-09-10:** full-system audit — `docs/sprint-audits/full-system-audit-2026-09-10.md`; roadmap rewritten (previous at `docs/archive/roadmap-2026-05.md`). Both P1s fixed the same day on Blake's go: prod `.env` flipped to `HYBRID_RETRIEVAL_ENABLED=false` (it had carried `true` since May against the 07-19 verdict), and the Captain's vessel set to `United States` — her four questions went from 4/32 foreign-flag hits (Unknown) to 0/32; harness 0.823/0.658. Also shipped: scheduled Celery ingest now runs through `run_ingest.sh`, the non-concurrent monthly REINDEX task is gone, `uv.lock` regenerated. **51 of 56 vessel profiles have flag Unknown** — the product fix (roadmap item 6) is next. Corpus is 106,041 chunks / 66 sources.
+- **2026-09-22 Opus 5.5 rollout (`claude-opus-5-5`, $4/$20 vs 4.8's $5/$25):** `MODEL_MAP[3]` + `REGENERATION_MODEL` moved from Opus 4.8; `_MODEL_ALIAS` gained the key (4.8 kept, D6.73 rule). Opus 5.5 always thinks and opens every response with a `thinking` block — the regeneration path's `response.content[0].text` would have raised on it and silently disabled regeneration (swallowed by the D6.96 bare except). `engine._text_of()` now reads by block type; `_opus_kwargs()` sends explicit effort (`medium` stream / `high` regen) + a 16K cap for Opus only (Haiku rejects `output_config`); the streaming path logs non-`end_turn` stop reasons and routes a classifier `refusal` to the GPT-4o fallback. Deployed `83ded7a`. Prod smoke on the Captain's profile: regen ok (11 s), followup turn on Opus 5.5 with 8 cites — **synthesis TTFT 12.9 s at `medium` vs 7.6 s at `low`** (2.8K vs 2.0K output tokens, same answer); `low` recommended for the streamed path, Blake's call. **LLM surface audit** at `docs/sprint-audits/llm-surface-audit-2026-09-22.md`: models are current, call shapes are not — no prompt caching on a ~10K-token static system prompt, JSON scraped instead of structured outputs, 5.7 sequential API calls per question, SDK 0.86 vs 1.8. Ranked upgrades U1–U11 there and in the roadmap.
 
 See `docs/PROJECT_STATE.md` for a fuller operational snapshot and `docs/roadmap.md` for the prioritized backlog.
 
@@ -119,7 +120,8 @@ Full audit report (models, retrieval, UX, product packaging): see the 2026-07-18
 
 - **Operational state:** `docs/PROJECT_STATE.md`
 - **Strategic roadmap:** `docs/roadmap.md`
-- **Latest full audit:** `docs/sprint-audits/full-system-audit-2026-05-08.md`
+- **Latest full audit:** `docs/sprint-audits/full-system-audit-2026-09-10.md`
+- **LLM surface audit (call sites, caching, structured outputs, SDK):** `docs/sprint-audits/llm-surface-audit-2026-09-22.md`
 - **Corpus inventory:** `docs/corpus-status.md`
 - **Scaling thresholds:** `docs/scaling-roadmap.md`
 - **Cowork tasks:** `docs/cowork-task-prompts.md`
@@ -127,4 +129,4 @@ Full audit report (models, retrieval, UX, product packaging): see the 2026-07-18
 
 ---
 
-*Last updated 2026-09-10 (post first Captain-tier purchase audit). When this drifts from reality, fix it — that's the rule.*
+*Last updated 2026-09-22 (Opus 5.5 rollout + LLM surface audit). When this drifts from reality, fix it — that's the rule.*

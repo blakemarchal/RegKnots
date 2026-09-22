@@ -2,7 +2,7 @@
 
 **One-page operational snapshot for humans and fresh Claude Code sessions.**
 
-Last updated: 2026-09-10 (post first Captain-tier purchase; full-system audit 2026-09-10)
+Last updated: 2026-09-22 (Opus 5.5 rollout + LLM surface audit; system audit 2026-09-10)
 
 ---
 
@@ -56,7 +56,7 @@ Plus 40 additional sources: `cfr_*`, `solas`, `marpol`, `colregs`, `stcw`, `ism`
 
 ## RAG pipeline — current architecture
 
-1. **Router** (Haiku classifier) → Haiku/Sonnet/Opus per query complexity (D6.75 tightened)
+1. **Router** (Haiku classifier) → Haiku 4.5 / Sonnet 5 / **Opus 5.5** (`claude-opus-5-5`, since 2026-09-22; also every followup turn and regeneration) per query complexity (D6.75 tightened)
 2. **Pre-retrieval distillation** (D6.51) for verbose first turns
 3. **Multi-query rewrite** (D6.66) — Haiku produces 2-3 reformulations; default ON
 4. **Synonym + intent expansion** — `synonyms.py` (lifejacket/log/mob/stability/stencil), drill-frequency + equipment-marking intent expanders

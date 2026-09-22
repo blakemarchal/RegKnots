@@ -1,6 +1,6 @@
 # RegKnots Roadmap
 
-**Last updated:** 2026-09-10 (post first Captain-tier purchase; full-system audit at `docs/sprint-audits/full-system-audit-2026-09-10.md`)
+**Last updated:** 2026-09-22 (Opus 5.5 rollout; LLM surface audit at `docs/sprint-audits/llm-surface-audit-2026-09-22.md`; system audit at `docs/sprint-audits/full-system-audit-2026-09-10.md`)
 
 **Eval headline:** retrieval harness re-run 2026-09-10 after prod was flipped back to dense — strong-recall@8 **0.823 / MRR 0.658** on the 62-pair gold set, 0 errors (July baseline 0.790 / 0.627; evidence `data/eval/retrieval/20260910-144455-dense-ef0.json`). Answer-quality eval still 97.4% A-or-A− on 149 questions (2026-05-09). **New retrieval baseline to beat: 0.823 / 0.658.**
 
@@ -17,6 +17,7 @@ This file is the strategic shipped / in-flight / upcoming view. `docs/PROJECT_ST
 - **2026-07-19 Wk1–4 wave** — retrieval eval harness (`scripts/eval_retrieval.py`) and the **hybrid verdict (dense wins, do not flip)**; per-ingest REINDEX removed in favour of weekly `REINDEX CONCURRENTLY`; backups restore-tested; citation trust pack; per-answer exports; persona nav; fleet audit readiness; live-context injectors; team audit log.
 - **2026-08-09 incident** — Anthropic credits exhausted; the GPT-4o fallback engaged and could not persist (`messages_model_used_check` never allowed `fallback_gpt4o`) — 13 answers for one user generated, billed, discarded. **2026-08-10:** migration 0115 widens the constraint; key rotated (a carriage-return byte in `.env` blanked the key for every service — `file .env` is now part of the rotation procedure); four corpus-refresh systemd timers disabled per Blake's "questions only" cost posture.
 - **2026-09-09** — first Captain purchase. **2026-09-10** — this audit + roadmap.
+- **2026-09-22** — Opus traffic → **Opus 5.5** (`claude-opus-5-5`, $4/$20): `MODEL_MAP[3]`, `REGENERATION_MODEL`, alias map; regeneration path fixed to read by block type (Opus 5.5 always opens with a thinking block — the old `content[0].text` would have silently disabled regen); explicit effort (`medium` stream / `high` regen) + 16K cap; refusal → GPT-4o. Deployed `83ded7a`, smoke-verified on prod: synthesis TTFT **12.9 s at `medium`, 7.6 s at `low`**. **LLM surface audit** shipped alongside — see the new section below.
 
 Corpus today: **106,041 chunks across 66 sources** (May roadmap said ~77k / 50).
 
@@ -38,7 +39,7 @@ All awaiting "go". Each is independently verifiable.
 ## Next 1–2 weeks
 
 7. **Add her four real questions + Karynn's BMP question to the eval gold set** and re-baseline. The gold set was built from Karynn's and pilot users' questions; the first paying Master's questions belong in it.
-8. **Tier-aware model floor — decision needed.** Router is complexity-only; every Captain question this month went to Haiku. A Sonnet floor for Captain costs on the order of a cent per question. Blake/Karynn call; ~1 h to implement once decided.
+8. **Tier-aware model floor — decision needed.** Router is complexity-only; every Captain question this month went to Haiku. A Sonnet floor for Captain costs on the order of a cent per question; an **Opus 5.5 `low` floor is ~$0.10/question** (18K in / 1.5K out at $4/$20) and, measured 2026-09-22, streams its first token in ~7.6 s after retrieval. Blake/Karynn call; ~1 h to implement once decided (audit item U11).
 9. **Stripe webhook ordering fix.** `invoice.paid` arrived before `checkout.session.completed` and its UPDATE-by-subscription-id matched 0 rows → `billing_interval` NULL for every first-time subscriber. Fall back to customer id; add the recorded-fixture test (first `apps/api` test in the repo). **~2 h.**
 10. **BMP Maritime Security (2024) ingest.** Free industry PDF (ICS / BIMCO / INTERTANKO / OCIMF et al.). Karynn asked for it on 09-10 and got a mis-attributed answer from adjacent chunks. **~2 h**, `pdf_pipeline` pattern.
 11. **`next` 15.5.14 → 15.5.15+** (DoS CVE, open since May). `pnpm up next` + deploy. **10 min.**
@@ -101,6 +102,28 @@ Tier A total: ~29 engineering hours, $0 in licences, under $5 in embeddings.
 5. Tier B as a corpus sprint when traffic justifies; run the eval before and after every step.
 
 Every ingest above goes through `scripts/run_ingest.sh`, never bare `uv run`.
+
+---
+
+## LLM surface upgrades (audit 2026-09-22)
+
+`docs/sprint-audits/llm-surface-audit-2026-09-22.md` — 35 Anthropic call sites inventoried. The models are current (Haiku 4.5 sidecars, Sonnet 5, Opus 5.5); the call shapes are not. Measured: 5.7 sequential API calls per question; synthesis input averages 17.8K tokens of which the byte-identical system prompt is ~10K; one `cache_control` in the repo; zero structured outputs; SDK 0.86.0 vs 1.8.0 on PyPI. Ranked:
+
+| # | Upgrade | Effort | When |
+|---|---|---|---|
+| U1 | Sidecar parallelism — `gather(router, distill, rewrite)` and `gather(judge, oracle)`; est. −2–4 s per answer | ½ d | now |
+| U2 | Shared `_text_of` + refusal guard in the five API routers still reading `content[0].text` | ½ d | now |
+| U3 | Prompt caching on the static ~10K-token system block (≈0 saving today; 40–60% of synthesis input cost at push volume) | ½ d | now, pays later |
+| U4 | SDK 0.86 → 1.8 + extract `llm_helpers.py` (May #9) | 1 d | before U5 |
+| U5 | Structured outputs replacing six `_parse_json` copies and the regex fallbacks | 2 d | after U4 |
+| U6 | `web_search_20260209` + native `allowed_domains` in web fallback | ½ d | any time |
+| U7 | Native PDF `document` blocks + structured extraction in `documents.py` | 1 d | with U5 |
+| U8 | Batch API for corpus enrichment (50% off every ingest sprint) | ½ d | before Tier A IMO |
+| U9 | Opus 5.5 `low` vision for the OCR scripts (7 stuck NVICs, IMO scans) | ½ d | with Tier A |
+| U10 | Quiz generation → Sonnet 5 | 1 h | Karynn's call |
+| U11 | Captain model floor at Opus 5.5 `low` (~$0.10/question) | 1 h | Blake's call |
+
+Each is spec-then-go. Retrieval is untouched by all of them, so the check is that `scripts/eval_retrieval.py` does *not* move (baseline 0.823 / 0.658), plus a five-question answer spot check.
 
 ---
 
