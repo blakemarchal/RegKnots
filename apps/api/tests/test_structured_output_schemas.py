@@ -91,6 +91,19 @@ def test_documents_flatten_restores_null_and_string_contract():
     assert multi["conditions_of_operation"] == ["a", "b"]
 
 
+def test_documents_flatten_drops_placeholder_strings():
+    """2026-09-22 post-deploy smoke: 'IMO Number: None' came back as 'None'."""
+    docs = importlib.import_module("app.routers.documents")
+    out = docs._flatten_extraction({
+        "imo_number": "None", "call_sign": " N/A ", "keel_date": "—",
+        "vessel_name": "NONESUCH", "other_fields": [],
+    })
+    assert out["imo_number"] is None
+    assert out["call_sign"] is None
+    assert out["keel_date"] is None
+    assert out["vessel_name"] == "NONESUCH"
+
+
 def test_documents_flatten_folds_other_fields_without_overwriting():
     docs = importlib.import_module("app.routers.documents")
     out = docs._flatten_extraction({

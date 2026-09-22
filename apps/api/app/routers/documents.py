@@ -84,7 +84,8 @@ For any other maritime document, extract all identifiable fields.
 Return ONLY a JSON object with the extracted fields. Use null for fields you cannot identify.
 Do not include any explanation or markdown — just the JSON.
 In this response format: use an empty string ("") instead of null for text fields you
-cannot identify, and return route_limitations and conditions_of_operation as a list
+cannot identify or that the document marks as None / N/A, and return
+route_limitations and conditions_of_operation as a list
 (empty if none, one item if there is a single one).
 Put any identifiable field that is not in the list above into other_fields as
 {"name": ..., "value": ...} pairs."""
@@ -181,6 +182,12 @@ async def _verify_vessel_ownership(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Vessel not found")
 
 
+_PLACEHOLDERS = frozenset({
+    "none", "null", "n/a", "na", "not applicable", "not stated", "not shown",
+    "not listed", "not specified", "unknown", "-", "--", "–", "—",
+})
+
+
 def _flatten_extraction(data: dict) -> dict:
     """Map the structured output back to the flat dict the rest of this
     module (profile enrichment, confirm/corrections, the review UI) uses:
@@ -194,7 +201,10 @@ def _flatten_extraction(data: dict) -> dict:
     for k, v in data.items():
         if k == "other_fields":
             continue
-        if isinstance(v, str) and not v.strip():
+        # A COI that prints "IMO Number: None" came back as the string
+        # "None" in the 2026-09-22 post-deploy smoke; it would have been
+        # stored in additional_details verbatim.
+        if isinstance(v, str) and (not v.strip() or v.strip().lower() in _PLACEHOLDERS):
             v = None
         elif k in _LIST_FIELDS and isinstance(v, list):
             v = [x for x in v if isinstance(x, str) and x.strip()]
