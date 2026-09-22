@@ -58,7 +58,12 @@ MANIFEST_PATH = SCREENSHOT_DIR / "extracted" / "_manifest.json"
 
 # Claude Sonnet 4.6 — same model the NMC OCR script uses. Image input is
 # straightforward transcription, no need for Opus.
-_VISION_MODEL = "claude-sonnet-5"
+# 2026-09-22 (U9) — Opus 5.5 at effort=low for vision transcription.
+# Opus 5.5 reads dense tables/screenshots more accurately than Sonnet 5
+# even at `low`; it always thinks, so the cap covers thinking + transcript.
+_VISION_MODEL = "claude-opus-5-5"
+_VISION_EFFORT = "low"
+_VISION_MAX_TOKENS = 16000
 
 # Max parallel Vision calls. Anthropic rate limits at our tier comfortably
 # permit 5; higher would blow latency budgets without saving wall time.
@@ -167,7 +172,8 @@ async def _vision_call(
     try:
         response = await client.messages.create(
             model=_VISION_MODEL,
-            max_tokens=8192,
+            max_tokens=_VISION_MAX_TOKENS,
+            output_config={"effort": _VISION_EFFORT},
             system=_VISION_SYSTEM_PROMPT,
             messages=[{
                 "role": "user",
@@ -187,10 +193,9 @@ async def _vision_call(
     except Exception as exc:  # noqa: BLE001
         return None, f"{type(exc).__name__}: {exc}"
 
-    if not response.content or not getattr(response.content[0], "text", None):
-        return None, "empty response"
-
-    transcript = response.content[0].text.strip()
+    transcript = "".join(getattr(b, "text", "") or "" for b in (response.content or []) if getattr(b, "type", None) == "text").strip()
+    if not transcript:
+        return None, f"empty response (stop_reason={response.stop_reason})"
     if response.stop_reason == "max_tokens":
         transcript += "\n\n[WARNING: hit max_tokens — review for truncation]"
     return transcript, None

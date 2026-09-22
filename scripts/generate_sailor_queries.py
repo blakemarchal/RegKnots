@@ -182,7 +182,11 @@ async def generate_one(client: AsyncAnthropic, topic: dict, vessel_code: str) ->
         max_tokens=400,
         messages=[{"role": "user", "content": prompt}],
     )
-    text = resp.content[0].text.strip()
+    # 2026-09-22 (U2) — by block type, not content[0].
+    text = "".join(
+        getattr(b, "text", "") or "" for b in resp.content
+        if getattr(b, "type", None) == "text"
+    ).strip()
     variants = [line.strip() for line in text.splitlines() if line.strip()]
     # Drop anything that looks like a preamble / numbering / quotes wrapper
     cleaned = []

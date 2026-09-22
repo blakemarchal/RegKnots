@@ -110,7 +110,11 @@ def needs_ocr(pdf_path: Path) -> bool:
 # Anthropic supports PDFs as document content blocks directly (no need to
 # render to images locally). The model reads the PDF natively, including
 # scanned page rasters via OCR internally.
-ANTHROPIC_MODEL = "claude-haiku-4-5-20251001"
+# 2026-09-22 (U9) — Opus 5.5 at effort=low for vision transcription.
+# Opus 5.5 reads scanned rasters far better than Haiku 4.5 (the 7 NVICs
+# that never OCR'd cleanly are the target); it always thinks, so the cap
+# below covers thinking + transcript. 1M context -> 600-page PDF limit.
+ANTHROPIC_MODEL = "claude-opus-5-5"
 
 OCR_SYSTEM_PROMPT = """You are extracting text from a scanned USCG Navigation and Vessel Inspection Circular (NVIC) PDF for regulatory reference ingest.
 
@@ -139,7 +143,8 @@ async def _vision_call(
     pdf_b64 = base64.b64encode(pdf_bytes).decode()
     payload = {
         "model": ANTHROPIC_MODEL,
-        "max_tokens": 8000,
+        "max_tokens": 16000,
+        "output_config": {"effort": "low"},
         "system": OCR_SYSTEM_PROMPT,
         "messages": [
             {

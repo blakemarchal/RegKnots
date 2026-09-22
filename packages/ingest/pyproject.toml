@@ -25,7 +25,7 @@ dependencies = [
     # documents into ≤80-page chunks before vision OCR.)
     "pypdf>=5.1.0",
     # Vision extraction (STCW image-based ingestion)
-    "anthropic>=0.40.0",
+    "anthropic>=1,<2",
     # HTML parsing (NVIC index scraper)
     "beautifulsoup4>=4.12.0",
     # YAML manifests for the knowledge-base audit tool

@@ -57,7 +57,12 @@ TARGETS = [
 ]
 
 # Claude Sonnet is plenty for OCR-style transcription. Opus would be overkill.
-_VISION_MODEL = "claude-sonnet-5"
+# 2026-09-22 (U9) — Opus 5.5 at effort=low for vision transcription.
+# Opus 5.5 reads dense scans more accurately than Sonnet 5 even at `low`;
+# it always thinks, so the cap covers thinking + transcript.
+_VISION_MODEL = "claude-opus-5-5"
+_VISION_EFFORT = "low"
+_VISION_MAX_TOKENS = 16000
 _DPI = 200  # matches the DPI used by apps/api/app/routers/documents.py Vision path
 
 _TRANSCRIBE_PROMPT = """\
@@ -113,7 +118,8 @@ async def _ocr_pdf(pdf_path: Path, client: AsyncAnthropic, console: Console) -> 
 
     response = await client.messages.create(
         model=_VISION_MODEL,
-        max_tokens=8192,
+        max_tokens=_VISION_MAX_TOKENS,
+        output_config={"effort": _VISION_EFFORT},
         messages=[{"role": "user", "content": content_blocks}],
     )
 
@@ -122,7 +128,9 @@ async def _ocr_pdf(pdf_path: Path, client: AsyncAnthropic, console: Console) -> 
             "    [yellow]warning:[/yellow] Claude hit max_tokens — transcript may be truncated"
         )
 
-    return response.content[0].text.strip()
+    if response.stop_reason == "refusal":
+        console.print("    [yellow]warning:[/yellow] model refused this page range")
+    return "".join(getattr(b, "text", "") or "" for b in (response.content or []) if getattr(b, "type", None) == "text").strip()
 
 
 async def _ingest_one(

@@ -361,6 +361,22 @@ Reject if the bulletin contains:
 Return JSON only: {"accept": true|false, "bulletin_type": "MSIB|NVIC|ALCOAST_OPERATIONAL|NMC|POLICY_LETTER|OTHER_REGULATORY|ADMIN|NEWS|RECRUITMENT", "confidence": 0.0-1.0, "reason": "brief"}"""
 
 
+_LLM_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "accept": {"type": "boolean"},
+        "bulletin_type": {"enum": [
+            "MSIB", "NVIC", "ALCOAST_OPERATIONAL", "NMC", "POLICY_LETTER",
+            "OTHER_REGULATORY", "ADMIN", "NEWS", "RECRUITMENT",
+        ]},
+        "confidence": {"type": "number"},
+        "reason": {"type": "string"},
+    },
+    "required": ["accept", "bulletin_type", "confidence", "reason"],
+    "additionalProperties": False,
+}
+
+
 def _try_parse_llm_json(text: str) -> dict | None:
     """Parse a JSON response from Claude. Strip markdown fences defensively.
 
@@ -410,10 +426,18 @@ async def _classify_one(client, subject: str, body: str) -> dict:
                 ),
             }],
             timeout=_LLM_TIMEOUT,
+            # 2026-09-22 (U5) — structured output: the API enforces the
+            # accept/bulletin_type/confidence/reason shape. (Note: the
+            # cache_control above is a no-op — this ~300-token prompt is
+            # below Haiku 4.5's 4,096-token caching minimum. Harmless.)
+            output_config={"format": {"type": "json_schema", "schema": _LLM_SCHEMA}},
         )
         if not resp.content:
             return {"accept": False, "reason": "llm_empty_response", "confidence": 0.0}
-        text = resp.content[0].text if hasattr(resp.content[0], "text") else ""
+        text = "".join(
+            getattr(b, "text", "") or "" for b in resp.content
+            if getattr(b, "type", None) == "text"
+        )
         parsed = _try_parse_llm_json(text)
         if parsed is None:
             return {"accept": False, "reason": "llm_malformed_json", "confidence": 0.0,

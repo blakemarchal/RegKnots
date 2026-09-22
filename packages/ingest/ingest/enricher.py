@@ -17,6 +17,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import os
 from dataclasses import replace
 from pathlib import Path
 
@@ -39,6 +40,17 @@ _BATCH_CONCURRENCY = 10  # D6.94 — concurrent API calls per batch.
                          # large sources (lr_rules / abs_mvr) without
                          # tripping rate limits.
 _MAX_ALIAS_TOKENS = 60  # hard cap on alias block token count
+
+# 2026-09-22 (U8) — Message Batches API for bulk enrichment: 50% of the
+# online price and no per-minute ceiling, and enrichment has no latency
+# requirement (it only runs inside an ingest). The batch PRE-FILLS the
+# content-hash cache; the online loop in enrich_chunks then runs
+# unchanged and covers whatever the batch did not (errored / expired /
+# canceled requests), plus runs too small to be worth a batch.
+# REGKNOTS_ENRICH_MODE=online restores the all-online path.
+_BATCH_API_MIN_CHUNKS = 50
+_BATCH_POLL_SECONDS = 30
+_BATCH_MAX_WAIT_SECONDS = 24 * 3600  # the API's own ceiling
 
 _SYSTEM_PROMPT = """\
 You are a maritime safety expert. Given a regulatory text chunk, \
@@ -99,6 +111,9 @@ class AliasEnricher:
 
         self._source = source
         self._cache = self._load_cache(source)
+
+        if os.environ.get("REGKNOTS_ENRICH_MODE", "batch").strip().lower() == "batch":
+            await self._prefill_cache_via_batch(chunks, source)
 
         enriched: list[Chunk] = []
         api_calls = 0
@@ -181,24 +196,120 @@ class AliasEnricher:
         )
         return enriched
 
-    async def _generate_aliases(self, chunk: Chunk) -> list[str]:
-        """Call Sonnet to generate search aliases for a single chunk."""
-        resp = await self._client.messages.create(
-            model=_MODEL,
-            max_tokens=200,
-            system=_SYSTEM_PROMPT,
-            messages=[{
+    @staticmethod
+    def _alias_request_params(chunk: Chunk) -> dict:
+        """Messages API params for one chunk — shared by the online and batch paths."""
+        return {
+            "model": _MODEL,
+            "max_tokens": 200,
+            "system": _SYSTEM_PROMPT,
+            "messages": [{
                 "role": "user",
                 "content": f"Text:\n{chunk.chunk_text}",
             }],
-        )
-        raw = resp.content[0].text if resp.content else ""
+        }
+
+    @staticmethod
+    def _parse_aliases(raw: str) -> list[str]:
         # Parse comma-separated terms, strip whitespace and empty strings
         aliases = [t.strip() for t in raw.split(",") if t.strip()]
         # Filter: skip terms longer than 50 chars (likely sentences, not terms)
         aliases = [a for a in aliases if len(a) <= 50]
         # Cap at 12 terms
         return aliases[:12]
+
+    @staticmethod
+    def _text_of(message) -> str:
+        # By block type, not content[0] (2026-09-22 U2 — a thinking-enabled
+        # model opens with a thinking block; a refusal has no text at all).
+        return "".join(
+            getattr(b, "text", "") or "" for b in (getattr(message, "content", None) or [])
+            if getattr(b, "type", None) == "text"
+        )
+
+    async def _generate_aliases(self, chunk: Chunk) -> list[str]:
+        """Call Sonnet to generate search aliases for a single chunk."""
+        resp = await self._client.messages.create(**self._alias_request_params(chunk))
+        return self._parse_aliases(self._text_of(resp))
+
+    async def _prefill_cache_via_batch(self, chunks: list[Chunk], source: str) -> None:
+        """Generate aliases for every uncached, in-budget chunk through one
+        Message Batch (50% price), writing successes into the cache.
+
+        Never raises: any failure (create, polling, results) just leaves the
+        remaining chunks for the online loop. Requests are keyed by the
+        chunk's content_hash (sha256 hex — 64 chars, a valid custom_id), which
+        is also the cache key, so duplicate chunks are sent once.
+        """
+        pending: dict[str, Chunk] = {}
+        for chunk in chunks:
+            tokens = chunk.token_count or _count(chunk.chunk_text)
+            if tokens > _MAX_TOKENS - _MAX_ALIAS_TOKENS:
+                continue
+            if chunk.content_hash in self._cache:
+                continue
+            pending.setdefault(chunk.content_hash, chunk)
+        if len(pending) < _BATCH_API_MIN_CHUNKS:
+            if pending:
+                logger.info(
+                    "enricher: %s — %d uncached chunks, below the batch threshold (%d); online",
+                    source, len(pending), _BATCH_API_MIN_CHUNKS,
+                )
+            return
+
+        requests = [
+            {"custom_id": h, "params": self._alias_request_params(c)}
+            for h, c in pending.items()
+        ]
+        try:
+            batch = await self._client.messages.batches.create(requests=requests)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("enricher: batch create failed (%s) — falling back to online", exc)
+            return
+        logger.info(
+            "enricher: %s — submitted batch %s for %d chunks (Batch API, 50%% price)",
+            source, batch.id, len(requests),
+        )
+
+        waited = 0
+        while getattr(batch, "processing_status", None) != "ended":
+            if waited >= _BATCH_MAX_WAIT_SECONDS:
+                logger.warning(
+                    "enricher: batch %s not ended after %ds — online fallback for the rest",
+                    batch.id, waited,
+                )
+                return
+            await asyncio.sleep(_BATCH_POLL_SECONDS)
+            waited += _BATCH_POLL_SECONDS
+            try:
+                batch = await self._client.messages.batches.retrieve(batch.id)
+            except Exception as exc:  # noqa: BLE001 — transient; keep polling
+                logger.info("enricher: batch %s poll failed (%s) — retrying", batch.id, exc)
+                continue
+            if waited % 300 == 0:
+                counts = getattr(batch, "request_counts", None)
+                logger.info(
+                    "enricher: batch %s %s after %ds (%s)",
+                    batch.id, batch.processing_status, waited, counts,
+                )
+
+        succeeded = not_succeeded = 0
+        try:
+            decoder = await self._client.messages.batches.results(batch.id)
+            async for entry in decoder:
+                if entry.result.type == "succeeded":
+                    raw = self._text_of(entry.result.message)
+                    self._cache[entry.custom_id] = self._parse_aliases(raw)
+                    succeeded += 1
+                else:
+                    not_succeeded += 1
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("enricher: reading batch %s results failed (%s)", batch.id, exc)
+        self._save_cache(source, self._cache)
+        logger.info(
+            "enricher: batch %s ended — %d succeeded, %d errored/expired (those go online)",
+            batch.id, succeeded, not_succeeded,
+        )
 
     def _apply_aliases(self, chunk: Chunk, aliases: list[str]) -> Chunk:
         """Create a new Chunk with aliases prepended to chunk_text."""

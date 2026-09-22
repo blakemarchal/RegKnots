@@ -316,13 +316,20 @@ async def extract_images(raw_dir: Path, force: bool = False) -> None:
         })
 
         try:
+            # 2026-09-22 (U9) — Opus 5.5 at effort=low for vision transcription.
+            # Always thinks, so the cap covers thinking + transcript, and
+            # the transcript is read by block type (content[0] is thinking).
             resp = await client.messages.create(
-                model="claude-sonnet-5",
-                max_tokens=8192,
+                model="claude-opus-5-5",
+                max_tokens=16000,
+                output_config={"effort": "low"},
                 system=_VISION_SYSTEM_PROMPT,
                 messages=[{"role": "user", "content": content}],
             )
-            raw_text = resp.content[0].text if resp.content else ""
+            raw_text = "".join(
+                getattr(b, "text", "") or "" for b in (resp.content or [])
+                if getattr(b, "type", None) == "text"
+            )
         except Exception as exc:
             print(f"    ERROR extracting pages {label}: {exc}", file=sys.stderr)
             continue
