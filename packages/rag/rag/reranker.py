@@ -30,16 +30,18 @@ Output discipline:
 """
 from __future__ import annotations
 
-import json
 import logging
-import re
-from typing import Optional
+
+from rag.llm import INT, arr, create_json, obj
 
 logger = logging.getLogger(__name__)
 
 
 _RERANK_MODEL = "claude-haiku-4-5-20251001"
 _RERANK_MAX_TOKENS = 800
+
+# 2026-09-22 (U5) — structured output replaces the fence-strip/regex parse.
+_RERANK_SCHEMA = obj({"scores": arr(obj({"index": INT, "score": INT}))})
 
 # Truncation budget for each chunk's text in the rerank prompt.
 # Most CFR sections are 500-2000 chars; we send the first 1500 to
@@ -103,15 +105,14 @@ async def rerank_chunks(
     )
 
     try:
-        response = await anthropic_client.messages.create(
+        result = await create_json(
+            anthropic_client,
+            schema=_RERANK_SCHEMA,
+            label="reranker",
             model=_RERANK_MODEL,
             max_tokens=_RERANK_MAX_TOKENS,
             system=_RERANK_SYSTEM_PROMPT,
             messages=[{"role": "user", "content": user_payload}],
-        )
-        text = "".join(
-            getattr(b, "text", "") for b in response.content
-            if getattr(b, "type", None) == "text"
         )
     except Exception as exc:
         logger.info(
@@ -120,11 +121,11 @@ async def rerank_chunks(
         )
         return chunks
 
-    parsed = _parse_json(text)
+    parsed = result.data
     if parsed is None:
         logger.info(
-            "reranker: no JSON in response (returning original): %s",
-            text[:200],
+            "reranker: no structured output (returning original): %s",
+            result.text[:200],
         )
         return chunks
 
@@ -178,21 +179,3 @@ def _format_candidates(chunks: list[dict], per_chunk_chars: int) -> str:
     return "\n\n".join(parts)
 
 
-def _parse_json(text: str) -> Optional[dict]:
-    if not text:
-        return None
-    cleaned = text.strip()
-    if cleaned.startswith("```"):
-        cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
-        cleaned = re.sub(r"\s*```$", "", cleaned)
-    try:
-        return json.loads(cleaned)
-    except json.JSONDecodeError:
-        pass
-    m = re.search(r"\{.*\}", cleaned, flags=re.DOTALL)
-    if m:
-        try:
-            return json.loads(m.group(0))
-        except json.JSONDecodeError:
-            return None
-    return None

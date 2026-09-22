@@ -15,6 +15,7 @@ import re
 
 from anthropic import AsyncAnthropic
 
+from rag.llm import text_of
 from rag.models import RouteDecision
 from rag.prompts import CLASSIFIER_PROMPT
 
@@ -67,7 +68,10 @@ async def _classify_once(
             }
         ],
     )
-    text = response.content[0].text.strip()
+    # 2026-09-22 (U2) — read by block type: a thinking-enabled model opens
+    # with a `thinking` block, and a refusal returns no text at all (→ None
+    # → caller's default-score path).
+    text = text_of(response).strip()
     match = re.search(r"[0123]", text)
     if not match:
         return None

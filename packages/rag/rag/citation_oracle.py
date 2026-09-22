@@ -43,11 +43,12 @@ fires on hedge. ~$0.002, ~1.5-2.5s.
 """
 from __future__ import annotations
 
-import json
 import logging
 import re
 from dataclasses import dataclass, field
 from typing import Optional
+
+from rag.llm import STR, arr, create_json, enum, nullable, obj
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +60,14 @@ _ORACLE_MODEL = "claude-haiku-4-5-20251001"
 
 # Tight token budget — the oracle returns a small JSON object, not prose.
 _ORACLE_MAX_TOKENS = 600
+
+# 2026-09-22 (U5) — structured output replaces the fence-strip/regex parse.
+_ORACLE_SCHEMA = obj({
+    "primary_citation": nullable(STR),
+    "alt_citations": arr(STR),
+    "confidence": enum("high", "medium", "low"),
+    "reasoning": STR,
+})
 
 
 _ORACLE_SYSTEM_PROMPT = """You are a maritime regulatory citation oracle. Given a user's question, search the web and identify the SINGLE CFR / SOLAS / MARPOL / STCW / NVIC section that most directly contains the answer.
@@ -151,7 +160,13 @@ async def find_citation_hint(
     started = time.monotonic()
 
     try:
-        response = await anthropic_client.messages.create(
+        # 2026-09-22 (U5) — structured output alongside the web_search
+        # server tool (verified live on Haiku 4.5: the search blocks come
+        # first, the final text block is the schema-valid JSON).
+        result = await create_json(
+            anthropic_client,
+            schema=_ORACLE_SCHEMA,
+            label="citation_oracle",
             model=_ORACLE_MODEL,
             max_tokens=_ORACLE_MAX_TOKENS,
             system=_ORACLE_SYSTEM_PROMPT,
@@ -164,10 +179,7 @@ async def find_citation_hint(
                 "max_uses": 3,
             }],
         )
-        text = "".join(
-            getattr(b, "text", "") for b in response.content
-            if getattr(b, "type", None) == "text"
-        )
+        text = result.text
     except Exception as exc:
         err = f"{type(exc).__name__}: {str(exc)[:200]}"
         logger.info("citation_oracle call failed (degrading to fallback): %s", err)
@@ -177,12 +189,12 @@ async def find_citation_hint(
             latency_ms=int((time.monotonic() - started) * 1000),
         )
 
-    parsed = _parse_json(text)
+    parsed = result.data
     latency = int((time.monotonic() - started) * 1000)
 
     if parsed is None:
         logger.info(
-            "citation_oracle returned no JSON (degrading): %s",
+            "citation_oracle returned no structured output (degrading): %s",
             text[:200],
         )
         return CitationHint(
@@ -232,21 +244,3 @@ async def find_citation_hint(
     )
 
 
-def _parse_json(text: str) -> Optional[dict]:
-    if not text:
-        return None
-    cleaned = text.strip()
-    if cleaned.startswith("```"):
-        cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
-        cleaned = re.sub(r"\s*```$", "", cleaned)
-    try:
-        return json.loads(cleaned)
-    except json.JSONDecodeError:
-        pass
-    m = re.search(r"\{.*\}", cleaned, flags=re.DOTALL)
-    if m:
-        try:
-            return json.loads(m.group(0))
-        except json.JSONDecodeError:
-            return None
-    return None

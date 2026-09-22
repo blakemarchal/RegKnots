@@ -29,11 +29,11 @@ Output discipline:
 """
 from __future__ import annotations
 
-import json
 import logging
-import re
 from dataclasses import dataclass
 from typing import Optional
+
+from rag.llm import STR, arr, create_json, obj
 
 logger = logging.getLogger(__name__)
 
@@ -220,6 +220,10 @@ Apply the rule with judgment: if the original query is already in formal CFR voc
 """
 
 
+# 2026-09-22 (U5) — structured output replaces the fence-strip/regex parse.
+_REWRITE_SCHEMA = obj({"reformulations": arr(STR)})
+
+
 @dataclass
 class QueryRewrite:
     """Multi-query rewrite output."""
@@ -244,26 +248,25 @@ async def rewrite_query(
         return QueryRewrite(original=query, reformulations=[])
 
     try:
-        response = await anthropic_client.messages.create(
+        result = await create_json(
+            anthropic_client,
+            schema=_REWRITE_SCHEMA,
+            label="query_rewrite",
             model=_REWRITE_MODEL,
             max_tokens=_REWRITE_MAX_TOKENS,
             system=_REWRITE_SYSTEM_PROMPT,
             messages=[{"role": "user", "content": query[:1000]}],
         )
-        text = ""
-        for block in response.content:
-            if getattr(block, "type", None) == "text":
-                text += block.text
     except Exception as exc:
         err = f"{type(exc).__name__}: {str(exc)[:200]}"
         logger.info("query_rewrite call failed (proceeding without): %s", err)
         return QueryRewrite(original=query, reformulations=[], error=err)
 
-    parsed = _parse_json(text)
+    parsed = result.data
     if parsed is None:
         logger.info(
-            "query_rewrite: no JSON in response (proceeding with original): %s",
-            text[:200],
+            "query_rewrite: no structured output (proceeding with original): %s",
+            result.text[:200],
         )
         return QueryRewrite(
             original=query, reformulations=[], error="no_json_in_response",
@@ -299,21 +302,3 @@ async def rewrite_query(
     return QueryRewrite(original=query, reformulations=cleaned)
 
 
-def _parse_json(text: str) -> Optional[dict]:
-    if not text:
-        return None
-    cleaned = text.strip()
-    if cleaned.startswith("```"):
-        cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
-        cleaned = re.sub(r"\s*```$", "", cleaned)
-    try:
-        return json.loads(cleaned)
-    except json.JSONDecodeError:
-        pass
-    m = re.search(r"\{.*\}", cleaned, flags=re.DOTALL)
-    if m:
-        try:
-            return json.loads(m.group(0))
-        except json.JSONDecodeError:
-            return None
-    return None

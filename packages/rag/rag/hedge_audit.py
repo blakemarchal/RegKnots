@@ -59,7 +59,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 from dataclasses import dataclass
 from typing import Optional
 from uuid import UUID
@@ -72,6 +71,15 @@ _CLASSIFIER_MODEL = "claude-haiku-4-5-20251001"
 _VALID_CLASSIFICATIONS = frozenset({
     "VOCAB", "INTENT", "RANKING", "COSINE",
     "CORPUS_GAP", "JURISDICTION", "OTHER",
+})
+
+# 2026-09-22 (U5) — structured output replaces the fence-strip/regex parse.
+from rag.llm import STR, create_json, enum, obj  # noqa: E402
+
+_CLASSIFIER_SCHEMA = obj({
+    "classification": enum(*sorted(_VALID_CLASSIFICATIONS)),
+    "reasoning": STR,
+    "recommendation": STR,
 })
 
 
@@ -194,7 +202,10 @@ async def classify_hedge(
     )
 
     try:
-        response = await anthropic_client.messages.create(
+        result = await create_json(
+            anthropic_client,
+            schema=_CLASSIFIER_SCHEMA,
+            label="hedge_audit",
             model=_CLASSIFIER_MODEL,
             max_tokens=400,
             system=_CLASSIFIER_SYSTEM_PROMPT,
@@ -207,15 +218,8 @@ async def classify_hedge(
         )
         return None
 
-    text = ""
-    try:
-        for block in response.content:
-            if getattr(block, "type", None) == "text":
-                text += block.text
-    except Exception:
-        return None
-
-    parsed = _parse_classifier_json(text)
+    text = result.text
+    parsed = result.data
     if parsed is None:
         return None
 
@@ -231,35 +235,6 @@ async def classify_hedge(
         model=_CLASSIFIER_MODEL,
         raw_response=text[:4000],
     )
-
-
-def _parse_classifier_json(text: str) -> Optional[dict]:
-    """Tolerantly extract the JSON object from the model's response.
-
-    Haiku is good but occasionally wraps JSON in markdown fences or adds
-    a leading sentence. We strip both.
-    """
-    if not text:
-        return None
-    cleaned = text.strip()
-    # Strip markdown fences if present
-    if cleaned.startswith("```"):
-        # ```json ... ``` or ``` ... ```
-        cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
-        cleaned = re.sub(r"\s*```$", "", cleaned)
-    # Try direct parse first
-    try:
-        return json.loads(cleaned)
-    except json.JSONDecodeError:
-        pass
-    # Fallback: find the first {...} block
-    m = re.search(r"\{.*\}", cleaned, flags=re.DOTALL)
-    if m:
-        try:
-            return json.loads(m.group(0))
-        except json.JSONDecodeError:
-            return None
-    return None
 
 
 def _json_safe(obj):

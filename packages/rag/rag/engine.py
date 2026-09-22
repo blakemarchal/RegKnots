@@ -12,6 +12,7 @@ Steps:
   8. Return ChatResponse
 """
 
+import asyncio
 import logging
 import re
 import time
@@ -40,6 +41,7 @@ from rag.prompts import (
     assemble_system_prompt,
 )
 from rag.retriever import retrieve, retrieve_enhanced
+from rag.llm import INT, STR, cached_system, create_json, obj, text_of
 from rag.router import REGENERATION_MODEL, route_query
 
 # Anthropic exceptions that indicate Claude itself is unavailable — these are
@@ -78,10 +80,15 @@ _MAX_TOKENS = 8192
 # no-thinking route cuts replies off — the D6.75 truncation, now
 # structural. Opus calls get the larger cap and an explicit effort (the
 # API default is `medium`, one level below Opus 5's `high`); Sonnet,
-# Haiku and the GPT-4o fallback keep _MAX_TOKENS. `output_config` is
-# rejected by Haiku 4.5, so it is only sent for claude-opus-* models.
+# Haiku and the GPT-4o fallback keep _MAX_TOKENS. `effort` is rejected
+# by Haiku 4.5 (and pointless on Sonnet 5 here), so it is only sent for
+# claude-opus-* models. (Structured outputs via output_config.format ARE
+# supported on Haiku 4.5 — see rag/llm.py.)
 _OPUS_MAX_TOKENS = 16384
-_OPUS_EFFORT_STREAM = "medium"  # chat synthesis — streamed, TTFT-sensitive
+# 2026-09-22 — `low` on Blake's go. Measured on prod, same followup turn:
+# synthesis TTFT 12.9 s at medium vs 7.6 s at low (2.8K vs 2.0K output
+# tokens), same answer and citations. Regeneration stays `high`.
+_OPUS_EFFORT_STREAM = "low"     # chat synthesis — streamed, TTFT-sensitive
 _OPUS_EFFORT_REGEN = "high"     # second try after a verification failure
 
 
@@ -96,17 +103,18 @@ def _opus_kwargs(model: str | None, effort: str) -> dict:
     return {"max_tokens": _MAX_TOKENS}
 
 
-def _text_of(response) -> str:
-    """Join the text blocks of a non-streaming response by block type.
+# Kept as an alias for the test suite and any external imports; the shared
+# implementation lives in rag/llm.py (U2).
+_text_of = text_of
 
-    Opus 5.5 responses open with a `thinking` block (empty text under the
-    default display), so `response.content[0].text` is no longer the
-    answer — it raises AttributeError on a ThinkingBlock.
-    """
-    return "".join(
-        getattr(b, "text", "") for b in response.content
-        if getattr(b, "type", None) == "text"
-    )
+# 2026-09-22 (U5) — citation-oracle synthesis output shape.
+_ORACLE_SYNTHESIS_SCHEMA = obj({
+    "confidence": INT,
+    "answer": STR,
+    "summary": STR,
+    "quote": STR,
+    "section": STR,
+})
 
 _HISTORY_ENCODER = tiktoken.get_encoding("cl100k_base")
 
@@ -1248,7 +1256,7 @@ async def _regenerate_answer(
     try:
         response = await anthropic_client.messages.create(
             model=regen_model,
-            system=effective_system_prompt,
+            system=cached_system(effective_system_prompt),
             messages=messages,
             **_opus_kwargs(regen_model, _OPUS_EFFORT_REGEN),
         )
@@ -1278,7 +1286,7 @@ async def _regenerate_answer(
         try:
             response = await anthropic_client.messages.create(
                 model=model_used,
-                system=effective_system_prompt,
+                system=cached_system(effective_system_prompt),
                 messages=messages,
                 **_opus_kwargs(model_used, _OPUS_EFFORT_REGEN),
             )
@@ -1879,7 +1887,7 @@ async def _try_citation_oracle_intervention(
         "retrieval. A separate web search has identified the controlling section, and we've pulled "
         "the verbatim text from our verified corpus. Your job is to answer the question using ONLY "
         "the supplied corpus passages, anchored on a verbatim quote from the matched section.\n\n"
-        "Output JSON only — no prose, no markdown fences:\n\n"
+        "Output JSON:\n\n"
         "{\n"
         '  "confidence": 1-5 (5 = certain, 1 = guessing),\n'
         '  "answer":     "direct answer to the user\'s question, anchored on the quote",\n'
@@ -1891,15 +1899,14 @@ async def _try_citation_oracle_intervention(
         "passages don't actually answer the question, return confidence ≤ 2."
     )
     try:
-        response = await anthropic_client.messages.create(
+        result = await create_json(
+            anthropic_client,
+            schema=_ORACLE_SYNTHESIS_SCHEMA,
+            label="citation_oracle synthesis",
             model="claude-sonnet-5",
             max_tokens=1500,
             system=synthesis_prompt,
             messages=[{"role": "user", "content": user_payload}],
-        )
-        text = "".join(
-            getattr(b, "text", "") for b in response.content
-            if getattr(b, "type", None) == "text"
         )
     except Exception as exc:
         logger.warning(
@@ -1908,27 +1915,9 @@ async def _try_citation_oracle_intervention(
         )
         return None
 
-    # Parse synthesized JSON (re-use the tolerant parser pattern).
-    import json as _json
-    import re as _re
-    cleaned = text.strip()
-    if cleaned.startswith("```"):
-        cleaned = _re.sub(r"^```(?:json)?\s*", "", cleaned)
-        cleaned = _re.sub(r"\s*```$", "", cleaned)
-    parsed = None
-    try:
-        parsed = _json.loads(cleaned)
-    except _json.JSONDecodeError:
-        m = _re.search(r"\{.*\}", cleaned, flags=_re.DOTALL)
-        if m:
-            try:
-                parsed = _json.loads(m.group(0))
-            except _json.JSONDecodeError:
-                parsed = None
+    # 2026-09-22 (U5) — structured output; no fence-strip/regex fallback.
+    parsed = result.data
     if parsed is None:
-        logger.warning(
-            "citation_oracle synthesis returned no JSON: %s", text[:200],
-        )
         return None
 
     confidence = int(parsed.get("confidence") or 0)
@@ -2599,9 +2588,95 @@ async def chat_with_progress(
     The done payload contains the same fields as the JSON serialization of
     ChatResponse, with conversation_id stringified for transport.
     """
-    # Stage 1: Route
+    # Stage 1: Route — concurrently with query prep and retrieval.
+    #
+    # 2026-09-22 (U1) — the Haiku router (~0.6 s measured on prod) and
+    # retrieval are independent: retrieval never reads the route. So the
+    # route runs as a task while the retrieval query is prepared
+    # (followup composition / verbose-query distillation) and retrieval
+    # starts; the route is awaited only after that. Off-topic still
+    # short-circuits — the in-flight retrieval is cancelled before any
+    # context is built, so an off-topic query costs at most one extra
+    # rewrite call and a partial embedding/DB fan-out. Alternatives that
+    # were measured on prod and NOT shipped (overlapping reformulation
+    # searches with the primary search; a 30-connection pool): see
+    # docs/sprint-audits/llm-surface-audit-2026-09-22.md, U1.
     yield {"event": "status", "data": "Analyzing your question…"}
-    route = await route_query(query, anthropic_client)
+    route_task = asyncio.create_task(route_query(query, anthropic_client))
+    retrieval_task = None
+    try:
+        # Sprint D6.4 — followup detection. NARROW pattern match
+        # (followup_match) drives the Opus model escalation below. Sprint
+        # D6.97 audit (2026-06) — the BROADER compose_reason additionally
+        # composes the retrieval query for any SHORT mid-thread message, not
+        # just pattern-matched pushback. This fixes the Nirmal 2026-06-04
+        # provisions thread: clarifications that match no pushback pattern
+        # ("The question is about USCG best before date rule") were
+        # retrieving on bare words with no topical context → complete miss.
+        # Composition is cheap (changes only what we embed); model escalation
+        # stays gated on the narrow signal so cost doesn't balloon.
+        followup_match = detect_followup(query)
+        compose = compose_reason(query, len(conversation_history))
+        retrieval_query = query
+        if compose:
+            prior_user_msg = next(
+                (m.content for m in reversed(conversation_history) if m.role == "user"),
+                None,
+            )
+            retrieval_query = compose_followup_query(prior_user_msg, query)
+            logger.info(
+                "Followup composition (%s); model_escalate=%s; combined retrieval query",
+                compose, bool(followup_match),
+            )
+        elif (
+            len(conversation_history) == 0
+            and len(query) > LENGTH_THRESHOLD_CHARS
+        ):
+            # Sprint D6.51 — verbose first-turn query distillation. See
+            # query_distill.py for rationale. Streaming users get a status
+            # event so the brief Haiku call is visible during the retrieval
+            # pause.
+            yield {"event": "status", "data": "Refining your question…"}
+            from rag.query_distill import distill_query
+            distilled = await distill_query(
+                query=query,
+                anthropic_client=anthropic_client,
+                pool=pool,
+                user_id=user_id,
+                conversation_id=conversation_id,
+            )
+            if distilled:
+                retrieval_query = distilled
+                logger.info(
+                    "Distilled verbose first-turn query "
+                    "(orig=%dch, distilled=%dch): %r",
+                    len(query), len(distilled), distilled[:100],
+                )
+
+        # Stage 2: Retrieve (D6.66 — same enhanced path as the non-stream
+        # chat handler; flags piped through from the chat router).
+        source_labels = _describe_sources(query)
+        retrieval_task = asyncio.create_task(retrieve_enhanced(
+            query=retrieval_query,
+            pool=pool,
+            openai_api_key=openai_api_key,
+            anthropic_client=anthropic_client,
+            vessel_profile=vessel_profile,
+            limit=8,
+            query_rewrite_enabled=query_rewrite_enabled,
+            reranker_enabled=reranker_enabled,
+            hybrid_retrieval_enabled=hybrid_retrieval_enabled,
+            hybrid_rrf_k=hybrid_rrf_k,
+        ))
+        route = await route_task
+    except BaseException:
+        # Client disconnect (GeneratorExit / CancelledError) or a router
+        # crash: don't leave either task running unowned — awaiting a task
+        # propagates cancellation only to that task.
+        route_task.cancel()
+        if retrieval_task is not None:
+            retrieval_task.cancel()
+        raise
     logger.info(f"Routed query to {route.model} (score={route.score})")
 
     # D6.97 Phase 2 — when images attached, force a vision-capable model
@@ -2632,8 +2707,12 @@ async def chat_with_progress(
     # D6.58 — off-topic short-circuit (streaming path). Same gate as
     # the non-streaming chat() function. Skip retrieval/fallback/
     # ensemble entirely and emit a polite refusal as a single done
-    # event.
+    # event. (2026-09-22: cancel the retrieval already in flight; gather
+    # with return_exceptions absorbs the child's CancelledError without
+    # masking a cancellation of this generator itself.)
     if route.is_off_topic:
+        retrieval_task.cancel()
+        await asyncio.gather(retrieval_task, return_exceptions=True)
         async for event in _handle_off_topic_stream(
             pool=pool,
             user_id=user_id,
@@ -2643,70 +2722,8 @@ async def chat_with_progress(
             yield event
         return
 
-    # Sprint D6.4 — followup detection. NARROW pattern match
-    # (followup_match) drives the Opus model escalation below. Sprint
-    # D6.97 audit (2026-06) — the BROADER compose_reason additionally
-    # composes the retrieval query for any SHORT mid-thread message, not
-    # just pattern-matched pushback. This fixes the Nirmal 2026-06-04
-    # provisions thread: clarifications that match no pushback pattern
-    # ("The question is about USCG best before date rule") were
-    # retrieving on bare words with no topical context → complete miss.
-    # Composition is cheap (changes only what we embed); model escalation
-    # stays gated on the narrow signal so cost doesn't balloon.
-    followup_match = detect_followup(query)
-    compose = compose_reason(query, len(conversation_history))
-    retrieval_query = query
-    if compose:
-        prior_user_msg = next(
-            (m.content for m in reversed(conversation_history) if m.role == "user"),
-            None,
-        )
-        retrieval_query = compose_followup_query(prior_user_msg, query)
-        logger.info(
-            "Followup composition (%s); model_escalate=%s; combined retrieval query",
-            compose, bool(followup_match),
-        )
-    elif (
-        len(conversation_history) == 0
-        and len(query) > LENGTH_THRESHOLD_CHARS
-    ):
-        # Sprint D6.51 — verbose first-turn query distillation. See
-        # query_distill.py for rationale. Streaming users get a status
-        # event so the brief Haiku call is visible during the retrieval
-        # pause.
-        yield {"event": "status", "data": "Refining your question…"}
-        from rag.query_distill import distill_query
-        distilled = await distill_query(
-            query=query,
-            anthropic_client=anthropic_client,
-            pool=pool,
-            user_id=user_id,
-            conversation_id=conversation_id,
-        )
-        if distilled:
-            retrieval_query = distilled
-            logger.info(
-                "Distilled verbose first-turn query "
-                "(orig=%dch, distilled=%dch): %r",
-                len(query), len(distilled), distilled[:100],
-            )
-
-    # Stage 2: Retrieve (D6.66 — same enhanced path as the non-stream
-    # chat handler; flags piped through from the chat router).
-    source_labels = _describe_sources(query)
     yield {"event": "status", "data": f"Searching {source_labels}…"}
-    chunks = await retrieve_enhanced(
-        query=retrieval_query,
-        pool=pool,
-        openai_api_key=openai_api_key,
-        anthropic_client=anthropic_client,
-        vessel_profile=vessel_profile,
-        limit=8,
-        query_rewrite_enabled=query_rewrite_enabled,
-        reranker_enabled=reranker_enabled,
-        hybrid_retrieval_enabled=hybrid_retrieval_enabled,
-        hybrid_rrf_k=hybrid_rrf_k,
-    )
+    chunks = await retrieval_task
     logger.info(f"Retrieved {len(chunks)} chunks")
 
     # Stage 3: Build context
@@ -2776,9 +2793,13 @@ async def chat_with_progress(
     output_tokens = 0
     streaming_failed_for_fallback = False
     try:
+        # 2026-09-22 (U3) — the ~10K-token system prompt is byte-identical
+        # across users (per-user context lives in the user turn), so it is
+        # marked for prompt caching: reads bill at 0.1x input (0.05x on
+        # Opus 5.5) within the 5-minute TTL.
         async with anthropic_client.messages.stream(
             model=model_used,
-            system=effective_system_prompt,
+            system=cached_system(effective_system_prompt),
             messages=messages,
             **_opus_kwargs(model_used, _OPUS_EFFORT_STREAM),
         ) as stream:

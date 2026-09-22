@@ -30,9 +30,7 @@ narrative.
 """
 from __future__ import annotations
 
-import json
 import logging
-import re
 import time
 from dataclasses import dataclass, field
 from typing import Optional
@@ -53,6 +51,16 @@ DEFAULT_ANSWER_CHARS = 4000       # the assistant's hedged response
 
 
 VALID_VERDICTS = ("complete_miss", "partial_miss", "precision_callout", "false_hedge")
+
+# 2026-09-22 (U5) — structured output: the API enforces the verdict enum,
+# so "unknown verdict" and "no JSON" become refusal/truncation-only paths.
+from rag.llm import STR, create_json, enum, nullable, obj  # noqa: E402
+
+_JUDGE_SCHEMA = obj({
+    "verdict": enum(*VALID_VERDICTS),
+    "missing_topic": nullable(STR),
+    "reasoning": STR,
+})
 
 # Sprint D6.92 — two invocation paths exposed as a typed parameter so the
 # judge can be told which decision rubric to apply. Both paths share the
@@ -348,16 +356,16 @@ async def judge_hedge(
     )
 
     try:
-        response = await anthropic_client.messages.create(
+        result = await create_json(
+            anthropic_client,
+            schema=_JUDGE_SCHEMA,
+            label="hedge_judge",
             model=_JUDGE_MODEL,
             max_tokens=400,
             system=_JUDGE_SYSTEM_PROMPT,
             messages=[{"role": "user", "content": user_payload}],
         )
-        text = ""
-        for block in response.content:
-            if getattr(block, "type", None) == "text":
-                text += block.text
+        text = result.text
     except Exception as exc:
         err = f"{type(exc).__name__}: {str(exc)[:200]}"
         logger.warning("hedge_judge API call failed (defaulting to complete_miss): %s", err)
@@ -368,7 +376,7 @@ async def judge_hedge(
             latency_ms=int((time.monotonic() - started) * 1000),
         )
 
-    parsed = _parse_judge_json(text)
+    parsed = result.data
     latency_ms = int((time.monotonic() - started) * 1000)
 
     if parsed is None:
@@ -432,24 +440,3 @@ async def judge_hedge(
     )
 
 
-def _parse_judge_json(text: str) -> Optional[dict]:
-    """Tolerantly extract the JSON object from Haiku's response.
-    Mirrors the parser in ensemble_fallback.py — strips markdown
-    fences and tolerates a leading sentence."""
-    if not text:
-        return None
-    cleaned = text.strip()
-    if cleaned.startswith("```"):
-        cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
-        cleaned = re.sub(r"\s*```$", "", cleaned)
-    try:
-        return json.loads(cleaned)
-    except json.JSONDecodeError:
-        pass
-    m = re.search(r"\{.*\}", cleaned, flags=re.DOTALL)
-    if m:
-        try:
-            return json.loads(m.group(0))
-        except json.JSONDecodeError:
-            return None
-    return None
