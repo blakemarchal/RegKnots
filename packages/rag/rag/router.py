@@ -28,11 +28,15 @@ MODEL_MAP: dict[int, str] = {
     0: "",
     1: "claude-haiku-4-5-20251001",
     # 2026-07-18 model refresh — Sonnet 4.6 → Sonnet 5, Opus 4.7 → 4.8.
-    # IDs validated against the prod API key before shipping. REMINDER:
+    # 2026-09-22 — Opus 4.8 → Opus 5.5 (claude-opus-5-5, $4/$20 vs $5/$25).
+    # ID validated against the prod API key (Models API + two live calls)
+    # before shipping. Opus 5.5 always thinks (adaptive; it cannot be
+    # disabled) and its API default effort is `medium` — engine.py sets
+    # effort and max_tokens explicitly via _opus_kwargs(). REMINDER:
     # any change here must ALSO add the new ID to chat.py _MODEL_ALIAS,
     # or model_used persists as NULL (bit us in D6.73).
     2: "claude-sonnet-5",
-    3: "claude-opus-4-8",
+    3: "claude-opus-5-5",
 }
 
 # Regeneration pass always uses the top model regardless of the initial
@@ -40,7 +44,7 @@ MODEL_MAP: dict[int, str] = {
 # unverified cite or the initial answer hedged (i.e., bad answer already
 # happened). Cheap second chance: costs Opus only on failures, not on
 # every call. Engine imports this and passes it to the second-try path.
-REGENERATION_MODEL: str = "claude-opus-4-8"
+REGENERATION_MODEL: str = "claude-opus-5-5"
 
 _DEFAULT_SCORE = 2
 

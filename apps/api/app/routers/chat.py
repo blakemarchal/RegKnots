@@ -45,6 +45,9 @@ _MODEL_ALIAS: dict[str, str] = {
     "claude-haiku-4-5-20251001": "haiku",
     # 2026-07-18 model refresh — Sonnet 5 / Opus 4.8 are the live IDs.
     "claude-sonnet-5": "sonnet",
+    # 2026-09-22 — Opus 5.5 is the live Opus (router.MODEL_MAP[3] and
+    # REGENERATION_MODEL). 4.8 stays mapped below per the D6.73 rule.
+    "claude-opus-5-5": "opus",
     "claude-opus-4-8": "opus",
     # Sprint D6.73 lesson — Sprint D4 upgraded the Opus version in
     # router.MODEL_MAP but this alias map was missed. Result: every

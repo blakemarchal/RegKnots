@@ -72,6 +72,42 @@ _MAX_HISTORY_TOKENS = 12_000
 # average output is much smaller; we only pay for what's generated.
 _MAX_TOKENS = 8192
 
+# 2026-09-22 — Opus 5.5 (claude-opus-5-5) always thinks (adaptive; it
+# cannot be disabled) and thinking counts toward max_tokens even though
+# its text is not returned under the default display. A cap sized for a
+# no-thinking route cuts replies off — the D6.75 truncation, now
+# structural. Opus calls get the larger cap and an explicit effort (the
+# API default is `medium`, one level below Opus 5's `high`); Sonnet,
+# Haiku and the GPT-4o fallback keep _MAX_TOKENS. `output_config` is
+# rejected by Haiku 4.5, so it is only sent for claude-opus-* models.
+_OPUS_MAX_TOKENS = 16384
+_OPUS_EFFORT_STREAM = "medium"  # chat synthesis — streamed, TTFT-sensitive
+_OPUS_EFFORT_REGEN = "high"     # second try after a verification failure
+
+
+def _is_opus(model: str | None) -> bool:
+    return bool(model) and model.startswith("claude-opus-")
+
+
+def _opus_kwargs(model: str | None, effort: str) -> dict:
+    """Per-model create()/stream() kwargs: cap + effort for Opus, cap only otherwise."""
+    if _is_opus(model):
+        return {"max_tokens": _OPUS_MAX_TOKENS, "output_config": {"effort": effort}}
+    return {"max_tokens": _MAX_TOKENS}
+
+
+def _text_of(response) -> str:
+    """Join the text blocks of a non-streaming response by block type.
+
+    Opus 5.5 responses open with a `thinking` block (empty text under the
+    default display), so `response.content[0].text` is no longer the
+    answer — it raises AttributeError on a ThinkingBlock.
+    """
+    return "".join(
+        getattr(b, "text", "") for b in response.content
+        if getattr(b, "type", None) == "text"
+    )
+
 _HISTORY_ENCODER = tiktoken.get_encoding("cl100k_base")
 
 
@@ -1201,7 +1237,7 @@ async def _regenerate_answer(
             logger.warning("Regeneration via GPT-4o failed: %s", exc)
             return None
 
-    # Sprint D4 — regeneration pass always uses Opus 4.7 regardless of the
+    # Sprint D4 — regeneration pass always uses REGENERATION_MODEL (Opus) regardless of the
     # initial model. The first answer already failed verification; we spend
     # Opus only on these recoveries, not on every call. Upside: second-try
     # reasoning is materially better on conflict/applicability cases.
@@ -1212,12 +1248,19 @@ async def _regenerate_answer(
     try:
         response = await anthropic_client.messages.create(
             model=regen_model,
-            max_tokens=_MAX_TOKENS,
             system=effective_system_prompt,
             messages=messages,
+            **_opus_kwargs(regen_model, _OPUS_EFFORT_REGEN),
         )
+        text = _text_of(response)
+        if not text:
+            logger.warning(
+                "REGEN: %s returned no text (stop_reason=%s) — keeping original answer",
+                regen_model, getattr(response, "stop_reason", None),
+            )
+            return None
         return (
-            response.content[0].text,
+            text,
             response.usage.input_tokens,
             response.usage.output_tokens,
         )
@@ -1235,12 +1278,19 @@ async def _regenerate_answer(
         try:
             response = await anthropic_client.messages.create(
                 model=model_used,
-                max_tokens=_MAX_TOKENS,
                 system=effective_system_prompt,
                 messages=messages,
+                **_opus_kwargs(model_used, _OPUS_EFFORT_REGEN),
             )
+            text = _text_of(response)
+            if not text:
+                logger.warning(
+                    "REGEN fallback: %s returned no text (stop_reason=%s)",
+                    model_used, getattr(response, "stop_reason", None),
+                )
+                return None
             return (
-                response.content[0].text,
+                text,
                 response.usage.input_tokens,
                 response.usage.output_tokens,
             )
@@ -2728,9 +2778,9 @@ async def chat_with_progress(
     try:
         async with anthropic_client.messages.stream(
             model=model_used,
-            max_tokens=_MAX_TOKENS,
             system=effective_system_prompt,
             messages=messages,
+            **_opus_kwargs(model_used, _OPUS_EFFORT_STREAM),
         ) as stream:
             async for text_chunk in stream.text_stream:
                 if not text_chunk:
@@ -2741,6 +2791,21 @@ async def chat_with_progress(
         answer = "".join(answer_chunks)
         input_tokens = final_msg.usage.input_tokens
         output_tokens = final_msg.usage.output_tokens
+        # 2026-09-22 — surface non-normal terminations. Opus 5.5 / Sonnet 5
+        # run safety classifiers (cyber, bio, reasoning_extraction) that
+        # return HTTP 200 with stop_reason="refusal" and no usable text;
+        # "max_tokens" means the reply was cut off. Neither raises, so log
+        # both, and route a refusal through the existing GPT-4o fallback
+        # exactly as a Claude outage would be.
+        stop_reason = getattr(final_msg, "stop_reason", None)
+        if stop_reason not in (None, "end_turn"):
+            logger.warning(
+                "Claude stream ended with stop_reason=%s (model=%s, out=%d, details=%s)",
+                stop_reason, model_used, output_tokens,
+                getattr(final_msg, "stop_details", None),
+            )
+        if stop_reason == "refusal":
+            streaming_failed_for_fallback = True
     except _CLAUDE_FAILURE_EXCEPTIONS as exc:
         logger.warning(
             "Claude streaming failed (%s: %s), falling back to OpenAI GPT-4o",
