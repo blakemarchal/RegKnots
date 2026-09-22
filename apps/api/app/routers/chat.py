@@ -1500,7 +1500,7 @@ async def _generate_title(
                 }
             ],
         )
-        title = msg.content[0].text.strip()[:120] if msg.content else None
+        title = text_of(msg).strip()[:120] or None  # 2026-09-22 (U2) — by block type
         if title:
             await pool.execute(
                 "UPDATE conversations SET title = $1 WHERE id = $2 AND title IS NULL",
@@ -1523,6 +1523,7 @@ from pydantic import BaseModel  # noqa: E402
 # rag.models is leaf-pure (only stdlib + pydantic) so it's safe to
 # import at module level here.
 from rag.models import ChatImageInput  # noqa: E402
+from rag.llm import text_of  # noqa: E402
 
 
 class ChatRequestBody(BaseModel):

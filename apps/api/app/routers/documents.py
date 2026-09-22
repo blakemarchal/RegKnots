@@ -12,7 +12,6 @@ POST   /documents/extract-preview  — extract without saving (for onboarding)
 """
 
 import base64
-import io
 import json
 import logging
 import uuid as _uuid
@@ -23,6 +22,7 @@ import asyncpg
 from anthropic import AsyncAnthropic
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, Form, status
 from pydantic import BaseModel
+from rag.llm import NUM, STR, arr, create_json, enum, nullable, obj, pdf_document_block
 
 from app.auth.deps import get_current_user
 from app.auth.schemas import CurrentUser
@@ -82,7 +82,55 @@ If this is a Certificate of Inspection (COI), extract:
 For any other maritime document, extract all identifiable fields.
 
 Return ONLY a JSON object with the extracted fields. Use null for fields you cannot identify.
-Do not include any explanation or markdown — just the JSON."""
+Do not include any explanation or markdown — just the JSON.
+In this response format: use an empty string ("") instead of null for text fields you
+cannot identify, and return route_limitations and conditions_of_operation as a list
+(empty if none, one item if there is a single one).
+Put any identifiable field that is not in the list above into other_fields as
+{"name": ..., "value": ...} pairs."""
+
+# 2026-09-22 (U5) — structured-output schema for the COI field list above.
+# The API caps union-typed parameters (every nullable/anyOf field counts;
+# 20 was rejected with "exponential compilation"), so text fields are plain
+# strings where "" means "not identified", and the two string-or-list
+# fields are always lists. _flatten_extraction maps ""/[] back to None and
+# a one-item list back to its string, so the stored dict keeps the
+# pre-2026-09-22 contract. Only vessel_type and gross_tonnage stay nullable.
+_VESSEL_TYPES = (
+    "Containership", "Tanker", "Bulk Carrier", "OSV / Offshore Support",
+    "Towing / Tugboat", "Passenger Vessel", "Ferry", "Fish Processing",
+    "Research Vessel", "Other",
+)
+_CARGO_TYPES = (
+    "Containers", "Petroleum / Oil", "Chemicals", "Liquefied Gas", "Dry Bulk",
+    "Passengers", "Hazardous Materials", "Vehicles", "General Cargo",
+    "None / Not Applicable",
+)
+_LIST_FIELDS = ("route_limitations", "conditions_of_operation")
+_EXTRACTION_SCHEMA = obj({
+    "vessel_name": STR,
+    "official_number": STR,
+    "imo_number": STR,
+    "call_sign": STR,
+    "vessel_type": nullable(enum(*_VESSEL_TYPES)),
+    "cargo_types": arr(enum(*_CARGO_TYPES)),
+    "subchapter": STR,
+    "gross_tonnage": nullable(NUM),
+    "route": STR,
+    "route_limitations": arr(STR),
+    "max_persons": STR,
+    "max_passengers": STR,
+    "manning_requirement": STR,
+    "hull_material": STR,
+    "keel_date": STR,
+    "inspection_date": STR,
+    "expiration_date": STR,
+    "issuing_office": STR,
+    "conditions_of_operation": arr(STR),
+    "lifesaving_equipment": STR,
+    "fire_equipment": STR,
+    "other_fields": arr(obj({"name": STR, "value": STR})),
+})
 
 
 # ── Models ──────────────────────────────────────────────────────────────────
@@ -133,15 +181,31 @@ async def _verify_vessel_ownership(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Vessel not found")
 
 
-def _parse_json_response(text: str) -> dict:
-    """Parse JSON from Claude's response, stripping markdown fences."""
-    text = text.strip()
-    if text.startswith("```"):
-        text = text.split("\n", 1)[1] if "\n" in text else text[3:]
-    if text.endswith("```"):
-        text = text[:-3]
-    text = text.strip()
-    return json.loads(text)
+def _flatten_extraction(data: dict) -> dict:
+    """Map the structured output back to the flat dict the rest of this
+    module (profile enrichment, confirm/corrections, the review UI) uses:
+      * "" (not identified) -> None, as the prompt's "use null" always meant;
+      * route_limitations / conditions_of_operation: [] -> None and a
+        one-item list -> its string (multi-item lists stay lists);
+      * `other_fields` ([{name, value}]) folded in as snake_case keys —
+        fixed COI keys win on a name collision.
+    """
+    out: dict = {}
+    for k, v in data.items():
+        if k == "other_fields":
+            continue
+        if isinstance(v, str) and not v.strip():
+            v = None
+        elif k in _LIST_FIELDS and isinstance(v, list):
+            v = [x for x in v if isinstance(x, str) and x.strip()]
+            v = None if not v else (v[0] if len(v) == 1 else v)
+        out[k] = v
+    for f in data.get("other_fields") or []:
+        name = str(f.get("name") or "").strip().lower()
+        key = "_".join("".join(ch if ch.isalnum() else " " for ch in name).split())
+        if key and key not in out:
+            out[key] = f.get("value")
+    return out
 
 
 async def _extract_with_vision(
@@ -149,22 +213,17 @@ async def _extract_with_vision(
 ) -> dict:
     """Send image(s) to Claude Vision for structured data extraction.
 
-    PDFs are converted to PNG images (up to 3 pages) via pdf2image.
+    2026-09-22 (U7) — PDFs go to the API as a native `document` block
+    (text layer + page images), trimmed to the first 3 pages — the same
+    cap the old PDF->PNG path had, so token cost stays at parity.
     """
     if mime_type == "application/pdf":
-        from pdf2image import convert_from_path
-
-        images = convert_from_path(file_path, first_page=1, last_page=3, dpi=200)
-        content_blocks: list[dict] = []
-        for img in images:
-            buf = io.BytesIO()
-            img.save(buf, format="PNG")
-            b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
-            content_blocks.append({
-                "type": "image",
-                "source": {"type": "base64", "media_type": "image/png", "data": b64},
-            })
-        content_blocks.append({"type": "text", "text": _EXTRACTION_PROMPT})
+        with open(file_path, "rb") as f:
+            pdf_bytes = f.read()
+        content_blocks: list[dict] = [
+            pdf_document_block(pdf_bytes, max_pages=3),
+            {"type": "text", "text": _EXTRACTION_PROMPT},
+        ]
     else:
         with open(file_path, "rb") as f:
             b64 = base64.b64encode(f.read()).decode("utf-8")
@@ -173,16 +232,21 @@ async def _extract_with_vision(
             {"type": "text", "text": _EXTRACTION_PROMPT},
         ]
 
-    response = await client.messages.create(
+    # 2026-09-22 (U5) — structured output. The COI fields are fixed keys;
+    # "extract all identifiable fields" for other documents is carried by
+    # other_fields and flattened back into the same flat dict as before.
+    result = await create_json(
+        client,
+        schema=_EXTRACTION_SCHEMA,
+        label="document extraction",
         model="claude-sonnet-5",
         max_tokens=4096,
         messages=[{"role": "user", "content": content_blocks}],
     )
-
-    if response.stop_reason == "max_tokens":
-        logger.warning("Vision extraction hit max_tokens — response may be truncated")
-
-    return _parse_json_response(response.content[0].text)
+    if result.data is None:
+        # Same failure surface as the old json.loads raising.
+        raise ValueError(f"no structured output (stop_reason={result.stop_reason})")
+    return _flatten_extraction(result.data)
 
 
 def _row_to_doc(r) -> DocumentOut:

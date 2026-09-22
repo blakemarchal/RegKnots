@@ -45,6 +45,7 @@ from typing import Annotated, Any, Optional
 from anthropic import AsyncAnthropic
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
+from rag.llm import INT, STR, arr, create_json, enum, nullable, obj
 
 from app.auth.deps import get_current_user
 from app.auth.schemas import CurrentUser
@@ -59,6 +60,73 @@ router = APIRouter(prefix="/me", tags=["me"])
 # context-only fetches. Keeping these explicit (vs imported from a
 # central config) so per-endpoint tuning is clear in this file.
 _REASONING_MODEL = "claude-sonnet-5"
+
+# 2026-09-22 (U5) — structured-output schemas for the six co-pilots. Each
+# mirrors the "Output JSON ONLY" spec in its system prompt and every key its
+# consumer reads; consumers keep their clamping/coercion unchanged.
+_RENEWAL_SCHEMA = obj({
+    "overall_status": enum("ready", "partial", "not_ready", "expired"),
+    "narrative": STR,
+    "requirements": arr(obj({
+        "label": STR,
+        "status": enum("satisfied", "missing", "unknown", "expiring"),
+        "detail": STR,
+    })),
+    "suggested_actions": arr(STR),
+    "citations": arr(STR),
+})
+_CAREER_UPGRADE = obj({
+    "title": STR,
+    "status": enum("cap_eligible", "within_reach", "requires_training"),
+    "summary": STR,
+    "gap": nullable(STR),
+    "estimated_timeline": nullable(STR),
+    "citations": arr(STR),
+})
+_CAREER_SCHEMA = obj({
+    "current_credentials": arr(STR),
+    "cap_eligible_now": arr(_CAREER_UPGRADE),
+    "within_reach": arr(_CAREER_UPGRADE),
+    "narrative": STR,
+    "citations": arr(STR),
+})
+_VESSEL_ANALYSIS_SCHEMA = obj({
+    "narrative": STR,
+    "applicable_regulations": arr(obj({"area": STR, "citation": STR, "summary": STR})),
+    "inspection_focus": arr(STR),
+    "required_certificates": arr(STR),
+    "citations": arr(STR),
+})
+_PSC_PREP_SCHEMA = obj({
+    "narrative": STR,
+    "focus_areas": arr(obj({"title": STR, "rationale": STR, "citation": STR})),
+    "common_deficiencies": arr(STR),
+    "documents_to_have_ready": arr(STR),
+    "citations": arr(STR),
+})
+_CHANGELOG_SCHEMA = obj({
+    "narrative": STR,
+    "items": arr(obj({
+        "title": STR,
+        "citation": STR,
+        "why_it_affects_you": STR,
+        "severity": enum("high", "medium", "low"),
+        "effective_date": nullable(STR),
+    })),
+})
+_AUDIT_READINESS_SCHEMA = obj({
+    "score_percent": INT,
+    "score_label": enum("Audit-ready", "Minor gaps", "Significant gaps", "Critical gaps"),
+    "narrative": STR,
+    "findings": arr(obj({
+        "severity": enum("critical", "warning", "info"),
+        "area": enum("Credentials", "Vessel docs", "Sea-time", "Operational"),
+        "headline": STR,
+        "detail": STR,
+        "affected": STR,
+        "citation": nullable(STR),
+    })),
+})
 
 
 # ── /me/context — structured user context ─────────────────────────────────
@@ -300,7 +368,10 @@ async def get_renewal_readiness(
 
     anthropic_client: AsyncAnthropic = request.app.state.anthropic
     try:
-        response = await anthropic_client.messages.create(
+        result = await create_json(
+            anthropic_client,
+            schema=_RENEWAL_SCHEMA,
+            label="renewal-readiness",
             model=_REASONING_MODEL,
             # 2500 (was 1500). 1500 truncated mid-narrative on a thin
             # record (heavy not_ready prose + multi-action remediation
@@ -310,10 +381,7 @@ async def get_renewal_readiness(
             system=_RENEWAL_SYSTEM_PROMPT,
             messages=[{"role": "user", "content": user_payload}],
         )
-        text = ""
-        for block in response.content:
-            if getattr(block, "type", None) == "text":
-                text += block.text
+        text = result.text
     except Exception as exc:
         logger.warning(
             "renewal-readiness Sonnet call failed: %s: %s",
@@ -327,7 +395,9 @@ async def get_renewal_readiness(
     # Tolerant parse: strict first, then salvage from a truncated
     # response (max_tokens hit). Truncated JSON still has the prefix
     # fields populated; we surface what we can rather than 503.
-    parsed = _parse_json(text) or _salvage_truncated_json(text)
+    # 2026-09-22 (U5) — structured output; the salvage parser stays for
+    # max_tokens truncation, which a schema cannot prevent.
+    parsed = result.data or _salvage_truncated_json(text)
     if parsed is None:
         logger.warning("renewal-readiness: no JSON in response: %s", text[:200])
         raise HTTPException(
@@ -485,7 +555,10 @@ async def get_career_progression(
 
     anthropic_client: AsyncAnthropic = request.app.state.anthropic
     try:
-        response = await anthropic_client.messages.create(
+        result = await create_json(
+            anthropic_client,
+            schema=_CAREER_SCHEMA,
+            label="career-progression",
             model=_REASONING_MODEL,
             # 3000 (was 2000) — career narratives + 6+ upgrade cards
             # with citations + gaps occasionally tipped over 2000.
@@ -493,10 +566,7 @@ async def get_career_progression(
             system=_CAREER_SYSTEM_PROMPT,
             messages=[{"role": "user", "content": user_payload}],
         )
-        text = ""
-        for block in response.content:
-            if getattr(block, "type", None) == "text":
-                text += block.text
+        text = result.text
     except Exception as exc:
         logger.warning(
             "career-progression Sonnet call failed: %s: %s",
@@ -507,7 +577,9 @@ async def get_career_progression(
             detail="Career analysis temporarily unavailable. Try again.",
         )
 
-    parsed = _parse_json(text) or _salvage_truncated_json(text)
+    # 2026-09-22 (U5) — structured output; the salvage parser stays for
+    # max_tokens truncation, which a schema cannot prevent.
+    parsed = result.data or _salvage_truncated_json(text)
     if parsed is None:
         logger.warning("career-progression: no JSON in response: %s", text[:200])
         raise HTTPException(
@@ -816,21 +888,23 @@ async def get_vessel_analysis(
 
     anthropic_client: AsyncAnthropic = request.app.state.anthropic
     try:
-        response = await anthropic_client.messages.create(
+        result = await create_json(
+            anthropic_client,
+            schema=_VESSEL_ANALYSIS_SCHEMA,
+            label="vessel-analysis",
             model=_REASONING_MODEL,
             max_tokens=3000,
             system=_VESSEL_ANALYSIS_SYSTEM_PROMPT,
             messages=[{"role": "user", "content": user_payload}],
         )
-        text = "".join(
-            getattr(b, "text", "") for b in response.content
-            if getattr(b, "type", None) == "text"
-        )
+        text = result.text
     except Exception as exc:
         logger.warning("vessel-analysis Sonnet call failed: %s", exc)
         raise HTTPException(status_code=503, detail="Vessel analysis unavailable. Try again.")
 
-    parsed = _parse_json(text) or _salvage_truncated_json(text)
+    # 2026-09-22 (U5) — structured output; the salvage parser stays for
+    # max_tokens truncation, which a schema cannot prevent.
+    parsed = result.data or _salvage_truncated_json(text)
     if parsed is None:
         raise HTTPException(status_code=503, detail="Vessel analysis returned malformed output.")
 
@@ -975,21 +1049,23 @@ async def get_psc_prep(
 
     anthropic_client: AsyncAnthropic = request.app.state.anthropic
     try:
-        response = await anthropic_client.messages.create(
+        result = await create_json(
+            anthropic_client,
+            schema=_PSC_PREP_SCHEMA,
+            label="psc-prep",
             model=_REASONING_MODEL,
             max_tokens=3000,
             system=_PSC_PREP_SYSTEM_PROMPT,
             messages=[{"role": "user", "content": user_payload}],
         )
-        text = "".join(
-            getattr(b, "text", "") for b in response.content
-            if getattr(b, "type", None) == "text"
-        )
+        text = result.text
     except Exception as exc:
         logger.warning("psc-prep Sonnet call failed: %s", exc)
         raise HTTPException(status_code=503, detail="PSC prep unavailable. Try again.")
 
-    parsed = _parse_json(text) or _salvage_truncated_json(text)
+    # 2026-09-22 (U5) — structured output; the salvage parser stays for
+    # max_tokens truncation, which a schema cannot prevent.
+    parsed = result.data or _salvage_truncated_json(text)
     if parsed is None:
         raise HTTPException(status_code=503, detail="PSC prep returned malformed output.")
 
@@ -1125,21 +1201,23 @@ async def get_compliance_changelog(
 
     anthropic_client: AsyncAnthropic = request.app.state.anthropic
     try:
-        response = await anthropic_client.messages.create(
+        result = await create_json(
+            anthropic_client,
+            schema=_CHANGELOG_SCHEMA,
+            label="compliance-changelog",
             model=_REASONING_MODEL,
             max_tokens=2500,
             system=_CHANGELOG_SYSTEM_PROMPT,
             messages=[{"role": "user", "content": user_payload}],
         )
-        text = "".join(
-            getattr(b, "text", "") for b in response.content
-            if getattr(b, "type", None) == "text"
-        )
+        text = result.text
     except Exception as exc:
         logger.warning("compliance-changelog Sonnet call failed: %s", exc)
         raise HTTPException(status_code=503, detail="Changelog unavailable. Try again.")
 
-    parsed = _parse_json(text) or _salvage_truncated_json(text)
+    # 2026-09-22 (U5) — structured output; the salvage parser stays for
+    # max_tokens truncation, which a schema cannot prevent.
+    parsed = result.data or _salvage_truncated_json(text)
     if parsed is None:
         raise HTTPException(status_code=503, detail="Changelog returned malformed output.")
 
@@ -1334,21 +1412,23 @@ async def get_audit_readiness(
 
     anthropic_client: AsyncAnthropic = request.app.state.anthropic
     try:
-        response = await anthropic_client.messages.create(
+        result = await create_json(
+            anthropic_client,
+            schema=_AUDIT_READINESS_SCHEMA,
+            label="audit-readiness",
             model=_REASONING_MODEL,
             max_tokens=2500,
             system=_AUDIT_READINESS_SYSTEM_PROMPT,
             messages=[{"role": "user", "content": user_payload}],
         )
-        text = "".join(
-            getattr(b, "text", "") for b in response.content
-            if getattr(b, "type", None) == "text"
-        )
+        text = result.text
     except Exception as exc:
         logger.warning("audit-readiness Sonnet call failed: %s", exc)
         raise HTTPException(status_code=503, detail="Audit readiness unavailable. Try again.")
 
-    parsed = _parse_json(text) or _salvage_truncated_json(text)
+    # 2026-09-22 (U5) — structured output; the salvage parser stays for
+    # max_tokens truncation, which a schema cannot prevent.
+    parsed = result.data or _salvage_truncated_json(text)
     if parsed is None:
         raise HTTPException(status_code=503, detail="Audit readiness returned malformed output.")
 
@@ -1387,29 +1467,6 @@ async def get_audit_readiness(
         counts=counts,
         model_used=_REASONING_MODEL,
     )
-
-
-def _parse_json(text: str) -> Optional[dict]:
-    """Tolerantly extract the JSON object from a model response.
-    Mirrors the parser pattern used in ensemble_fallback / hedge_judge.
-    """
-    if not text:
-        return None
-    cleaned = text.strip()
-    if cleaned.startswith("```"):
-        cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
-        cleaned = re.sub(r"\s*```$", "", cleaned)
-    try:
-        return json.loads(cleaned)
-    except json.JSONDecodeError:
-        pass
-    m = re.search(r"\{.*\}", cleaned, flags=re.DOTALL)
-    if m:
-        try:
-            return json.loads(m.group(0))
-        except json.JSONDecodeError:
-            return None
-    return None
 
 
 def _salvage_truncated_json(text: str) -> Optional[dict]:

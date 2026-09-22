@@ -43,6 +43,7 @@ from typing import Annotated, Any, Optional
 from anthropic import AsyncAnthropic
 from fastapi import APIRouter, Depends, HTTPException, Path, Request, status
 from pydantic import BaseModel, Field
+from rag.llm import STR, arr, create_json, enum, obj
 
 from app.auth.deps import get_current_user
 from app.auth.schemas import CurrentUser
@@ -61,6 +62,28 @@ router = APIRouter(prefix="/study", tags=["study"])
 _QUIZ_MODEL = "claude-haiku-4-5-20251001"
 _GUIDE_MODEL_FAST = "claude-haiku-4-5-20251001"
 _GUIDE_MODEL_DEEP = "claude-sonnet-5"
+
+# 2026-09-22 (U5) — structured-output schemas mirroring the quiz / guide
+# "Output JSON only" specs below. The whole parsed dict is persisted as
+# study_generations.content_json, so the shape is unchanged.
+_QUIZ_SCHEMA = obj({
+    "title": STR,
+    "topic": STR,
+    "questions": arr(obj({
+        "stem": STR,
+        "options": obj({"A": STR, "B": STR, "C": STR, "D": STR}),
+        "correct_letter": enum("A", "B", "C", "D"),
+        "explanation": STR,
+        "citation": STR,
+        "difficulty": enum("easy", "medium", "hard"),
+    })),
+})
+_GUIDE_SCHEMA = obj({
+    "title": STR,
+    "topic": STR,
+    "sections": arr(obj({"heading": STR, "content_md": STR, "citations": arr(STR)})),
+    "key_citations": arr(STR),
+})
 
 # Per-month generation caps by tier. Captain is unlimited (None).
 _MATE_STUDY_CAP_PER_MONTH = 200
@@ -363,27 +386,6 @@ def _format_chunks_for_prompt(
     return "\n".join(parts)
 
 
-def _parse_json_response(text: str) -> Optional[dict]:
-    """Tolerant JSON parser — strip markdown fences if present, then
-    fall back to first {...} block extraction."""
-    if not text:
-        return None
-    cleaned = text.strip()
-    if cleaned.startswith("```"):
-        cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
-        cleaned = re.sub(r"\s*```$", "", cleaned)
-    try:
-        return json.loads(cleaned)
-    except json.JSONDecodeError:
-        m = re.search(r"\{.*\}", cleaned, flags=re.DOTALL)
-        if m:
-            try:
-                return json.loads(m.group(0))
-            except json.JSONDecodeError:
-                return None
-    return None
-
-
 # ── Citation verification ──────────────────────────────────────────────────
 
 
@@ -511,15 +513,18 @@ async def generate_quiz(
 
     anthropic_client: AsyncAnthropic = request.app.state.anthropic
     try:
-        response = await anthropic_client.messages.create(
+        result = await create_json(
+            anthropic_client,
+            schema=_QUIZ_SCHEMA,
+            label="study quiz",
             model=_QUIZ_MODEL,
             max_tokens=_QUIZ_MAX_TOKENS,
             system=_QUIZ_SYSTEM_PROMPT,
             messages=[{"role": "user", "content": user_payload}],
         )
-        text = "".join(getattr(b, "text", "") for b in response.content if getattr(b, "type", None) == "text")
-        in_tok = response.usage.input_tokens
-        out_tok = response.usage.output_tokens
+        text = result.text
+        in_tok = result.response.usage.input_tokens
+        out_tok = result.response.usage.output_tokens
     except Exception as exc:
         logger.warning("quiz generation failed: %s: %s", type(exc).__name__, str(exc)[:200])
         raise HTTPException(
@@ -527,7 +532,7 @@ async def generate_quiz(
             detail="Quiz generation temporarily unavailable. Try again in a moment.",
         )
 
-    parsed = _parse_json_response(text)
+    parsed = result.data  # 2026-09-22 (U5) — structured output
     if not parsed or "questions" not in parsed:
         logger.warning("quiz JSON parse failed: %s", text[:300])
         raise HTTPException(
@@ -620,15 +625,18 @@ async def generate_guide(
     max_tokens = _GUIDE_MAX_TOKENS_DEEP if body.deep_dive else _GUIDE_MAX_TOKENS_FAST
 
     try:
-        response = await anthropic_client.messages.create(
+        result = await create_json(
+            anthropic_client,
+            schema=_GUIDE_SCHEMA,
+            label="study guide",
             model=model,
             max_tokens=max_tokens,
             system=_GUIDE_SYSTEM_PROMPT,
             messages=[{"role": "user", "content": user_payload}],
         )
-        text = "".join(getattr(b, "text", "") for b in response.content if getattr(b, "type", None) == "text")
-        in_tok = response.usage.input_tokens
-        out_tok = response.usage.output_tokens
+        text = result.text
+        in_tok = result.response.usage.input_tokens
+        out_tok = result.response.usage.output_tokens
     except Exception as exc:
         logger.warning("guide generation failed: %s: %s", type(exc).__name__, str(exc)[:200])
         raise HTTPException(
@@ -636,7 +644,7 @@ async def generate_guide(
             detail="Study guide generation temporarily unavailable. Try again in a moment.",
         )
 
-    parsed = _parse_json_response(text)
+    parsed = result.data  # 2026-09-22 (U5) — structured output
     if not parsed or "sections" not in parsed:
         logger.warning("guide JSON parse failed: %s", text[:300])
         raise HTTPException(

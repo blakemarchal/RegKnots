@@ -9,8 +9,6 @@ POST   /credentials/extract-from-photo   — extract credential data from a phot
 """
 
 import base64
-import io
-import json
 import logging
 import uuid as _uuid
 from datetime import date, datetime, timedelta
@@ -20,6 +18,7 @@ from anthropic import AsyncAnthropic
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+from rag.llm import STR, create_json, nullable, obj, pdf_document_block
 
 from app.auth.deps import get_current_user
 from app.auth.schemas import CurrentUser
@@ -632,6 +631,16 @@ _MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
 _ALLOWED_TYPES = {"image/jpeg", "image/png", "image/webp", "application/pdf"}
 
 
+_CREDENTIAL_SCHEMA = obj({
+    "credential_type": nullable(STR),
+    "title": nullable(STR),
+    "credential_number": nullable(STR),
+    "issuing_authority": nullable(STR),
+    "issue_date": nullable(STR),
+    "expiry_date": nullable(STR),
+})
+
+
 class CredentialExtraction(BaseModel):
     credential_type: str | None = None
     title: str | None = None
@@ -664,19 +673,12 @@ async def extract_credential_from_photo(
 
     # Build vision content blocks
     if content_type == "application/pdf":
-        from pdf2image import convert_from_bytes
-
-        images = convert_from_bytes(content, first_page=1, last_page=2, dpi=200)
-        content_blocks: list[dict] = []
-        for img in images:
-            buf = io.BytesIO()
-            img.save(buf, format="PNG")
-            b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
-            content_blocks.append({
-                "type": "image",
-                "source": {"type": "base64", "media_type": "image/png", "data": b64},
-            })
-        content_blocks.append({"type": "text", "text": _CREDENTIAL_EXTRACTION_PROMPT})
+        # 2026-09-22 (U7) — native PDF document block (text layer + page
+        # images) instead of rasterizing to PNG; same 2-page cap as before.
+        content_blocks: list[dict] = [
+            pdf_document_block(content, max_pages=2),
+            {"type": "text", "text": _CREDENTIAL_EXTRACTION_PROMPT},
+        ]
     else:
         b64 = base64.b64encode(content).decode("utf-8")
         content_blocks = [
@@ -686,18 +688,18 @@ async def extract_credential_from_photo(
 
     try:
         anthropic_client: AsyncAnthropic = request.app.state.anthropic
-        response = await anthropic_client.messages.create(
+        # 2026-09-22 (U5) — structured output: six nullable fields.
+        result = await create_json(
+            anthropic_client,
+            schema=_CREDENTIAL_SCHEMA,
+            label="credential extraction",
             model="claude-sonnet-5",
             max_tokens=1024,
             messages=[{"role": "user", "content": content_blocks}],
         )
-
-        text = response.content[0].text.strip()
-        if text.startswith("```"):
-            text = text.split("\n", 1)[1] if "\n" in text else text[3:]
-        if text.endswith("```"):
-            text = text[:-3]
-        extracted = json.loads(text.strip())
+        if result.data is None:
+            raise ValueError(f"no structured output (stop_reason={result.stop_reason})")
+        extracted = result.data
 
         logger.info("Credential extraction complete: user=%s fields=%s", current_user.user_id, list(extracted.keys()))
         return CredentialExtraction(**{k: v for k, v in extracted.items() if v != "null" and v is not None})

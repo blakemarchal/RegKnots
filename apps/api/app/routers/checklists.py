@@ -19,6 +19,7 @@ import asyncpg
 from anthropic import AsyncAnthropic
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
+from rag.llm import STR, arr, create_json, obj
 
 from app.auth.deps import get_current_user
 from app.auth.schemas import CurrentUser
@@ -140,6 +141,15 @@ applicability reason. If no categories were excluded for applicability, \
 return an empty array.
 
 Return ONLY the JSON object."""
+
+# 2026-09-22 (U5) — structured-output schema for the OUTPUT SHAPE above.
+_PSC_SCHEMA = obj({
+    "items": arr(obj({"category": STR, "item": STR, "regulation": STR, "notes": STR})),
+    "coverage": obj({
+        "included_categories": arr(STR),
+        "omitted_categories": arr(obj({"category": STR, "reason": STR})),
+    }),
+})
 
 
 # ── Profile completeness gate ──────────────────────────────────────────────
@@ -505,7 +515,10 @@ async def generate_psc_checklist(
 
     try:
         anthropic_client: AsyncAnthropic = request.app.state.anthropic
-        response = await anthropic_client.messages.create(
+        result = await create_json(
+            anthropic_client,
+            schema=_PSC_SCHEMA,
+            label="psc checklist",
             model="claude-sonnet-5",
             max_tokens=8192,
             system=_PSC_SYSTEM_PROMPT,
@@ -520,20 +533,17 @@ async def generate_psc_checklist(
             }],
         )
 
+        response = result.response
         if response.stop_reason == "max_tokens":
             logger.warning(
                 "PSC checklist hit max_tokens (vessel=%s) — attempting recovery",
                 vessel["name"],
             )
 
-        text = response.content[0].text.strip()
-        if text.startswith("```"):
-            text = text.split("\n", 1)[1] if "\n" in text else text[3:]
-        if text.endswith("```"):
-            text = text[:-3]
-        text = text.strip()
-
-        parsed = _parse_or_recover_json(text)
+        # 2026-09-22 (U5) — structured output; the recovery parser stays
+        # for max_tokens truncation, which a schema cannot prevent.
+        text = result.text.strip()
+        parsed = result.data if result.data is not None else _parse_or_recover_json(text)
         items, coverage_dict = _extract_items_and_coverage(parsed)
 
         if not items:

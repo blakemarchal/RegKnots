@@ -18,6 +18,7 @@ from app.auth.deps import get_current_user
 from app.auth.schemas import CurrentUser
 from app.db import get_pool, get_redis
 from rag.fallback import fallback_chat
+from rag.llm import text_of
 
 _CLAUDE_FAILURE_EXCEPTIONS = (
     APIError,
@@ -100,7 +101,9 @@ async def support_chat(
                 system=_SUPPORT_SYSTEM_PROMPT,
                 messages=messages,
             )
-            text = resp.content[0].text if resp.content else "I'm sorry, I couldn't generate a response."
+            # 2026-09-22 (U2) — by block type; a refusal / empty reply gets
+            # the same apology the empty-content case always had.
+            text = text_of(resp) or "I'm sorry, I couldn't generate a response."
         except _CLAUDE_FAILURE_EXCEPTIONS as exc:
             logger.warning(
                 "Support chat: Claude API failed (%s: %s), falling back to OpenAI GPT-4o",
