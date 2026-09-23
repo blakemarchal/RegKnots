@@ -599,7 +599,11 @@ async def attempt_web_fallback(
     try:
         response = await anthropic_client.messages.create(
             model=model,
-            max_tokens=2048,
+            # 2026-09-23 — was 2048. Sonnet 5 runs adaptive thinking when
+            # `thinking` is omitted (Sonnet 4.x did not) and thinking counts
+            # toward max_tokens; this path has not fired on prod since the
+            # 07-18 Sonnet 5 switch. Billed as generated — headroom is free.
+            max_tokens=8192,
             system=_FALLBACK_SYSTEM_PROMPT,
             messages=[{"role": "user", "content": query}],
             tools=[{
@@ -771,7 +775,8 @@ async def attempt_news_fallback(
     try:
         response = await anthropic_client.messages.create(
             model=model,
-            max_tokens=2048,
+            # 2026-09-23 — was 2048; thinking headroom, see attempt_web_fallback().
+            max_tokens=8192,
             system=_NEWS_FALLBACK_SYSTEM_PROMPT,
             messages=[{"role": "user", "content": query}],
             tools=[{

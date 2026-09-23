@@ -60,6 +60,13 @@ router = APIRouter(prefix="/me", tags=["me"])
 # context-only fetches. Keeping these explicit (vs imported from a
 # central config) so per-endpoint tuning is clear in this file.
 _REASONING_MODEL = "claude-sonnet-5"
+# 2026-09-23 — output cap for the six co-pilots. Sonnet 5 runs adaptive
+# thinking when `thinking` is omitted (Sonnet 4.x did not), and thinking
+# counts toward max_tokens. Measured on prod: vessel-analysis at the API
+# default effort used 2,721-2,871 of its old 3,000 cap (thinking + JSON),
+# one larger profile away from truncated JSON. Output is billed as
+# generated, so the headroom costs nothing unless it is used.
+_REASONING_MAX_TOKENS = 8000
 
 # 2026-09-22 (U5) — structured-output schemas for the six co-pilots. Each
 # mirrors the "Output JSON ONLY" spec in its system prompt and every key its
@@ -377,7 +384,8 @@ async def get_renewal_readiness(
             # record (heavy not_ready prose + multi-action remediation
             # easily exceeds the cap). 2500 covers the worst-case
             # output without meaningful cost impact.
-            max_tokens=2500,
+            # 2026-09-23 — now _REASONING_MAX_TOKENS (thinking headroom).
+            max_tokens=_REASONING_MAX_TOKENS,
             system=_RENEWAL_SYSTEM_PROMPT,
             messages=[{"role": "user", "content": user_payload}],
         )
@@ -562,7 +570,7 @@ async def get_career_progression(
             model=_REASONING_MODEL,
             # 3000 (was 2000) — career narratives + 6+ upgrade cards
             # with citations + gaps occasionally tipped over 2000.
-            max_tokens=3000,
+            max_tokens=_REASONING_MAX_TOKENS,
             system=_CAREER_SYSTEM_PROMPT,
             messages=[{"role": "user", "content": user_payload}],
         )
@@ -893,7 +901,7 @@ async def get_vessel_analysis(
             schema=_VESSEL_ANALYSIS_SCHEMA,
             label="vessel-analysis",
             model=_REASONING_MODEL,
-            max_tokens=3000,
+            max_tokens=_REASONING_MAX_TOKENS,
             system=_VESSEL_ANALYSIS_SYSTEM_PROMPT,
             messages=[{"role": "user", "content": user_payload}],
         )
@@ -1054,7 +1062,7 @@ async def get_psc_prep(
             schema=_PSC_PREP_SCHEMA,
             label="psc-prep",
             model=_REASONING_MODEL,
-            max_tokens=3000,
+            max_tokens=_REASONING_MAX_TOKENS,
             system=_PSC_PREP_SYSTEM_PROMPT,
             messages=[{"role": "user", "content": user_payload}],
         )
@@ -1206,7 +1214,7 @@ async def get_compliance_changelog(
             schema=_CHANGELOG_SCHEMA,
             label="compliance-changelog",
             model=_REASONING_MODEL,
-            max_tokens=2500,
+            max_tokens=_REASONING_MAX_TOKENS,
             system=_CHANGELOG_SYSTEM_PROMPT,
             messages=[{"role": "user", "content": user_payload}],
         )
@@ -1417,7 +1425,7 @@ async def get_audit_readiness(
             schema=_AUDIT_READINESS_SCHEMA,
             label="audit-readiness",
             model=_REASONING_MODEL,
-            max_tokens=2500,
+            max_tokens=_REASONING_MAX_TOKENS,
             system=_AUDIT_READINESS_SYSTEM_PROMPT,
             messages=[{"role": "user", "content": user_payload}],
         )
