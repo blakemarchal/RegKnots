@@ -2,13 +2,13 @@
 
 **One-page operational snapshot for humans and fresh Claude Code sessions.**
 
-Last updated: 2026-09-22 (Opus 5.5 rollout + LLM surface audit; system audit 2026-09-10)
+Last updated: 2026-09-22 (Opus 5.5 rollout + LLM surface audit + upgrades U1–U9 shipped; system audit 2026-09-10)
 
 ---
 
 ## TL;DR
 
-RegKnot is a maritime-compliance RAG at **https://regknots.com**. Production stack live and healthy. **106,041 chunks across 66 sources** with 100% embedding coverage. Retrieval pipeline now includes multi-query rewrite, Haiku reranker, citation oracle, source-diversified fetch, jurisdiction filter, vessel-profile boosts, synonym + intent expansion; hybrid BM25+dense built, measured 2026-07-19 and rejected (dense wins) — but still switched on in prod `.env` as of 2026-09-10, see Known issues. **96.1% A-or-A−** on the latest 152-question regression eval. First organic Captain-tier subscriber 2026-09-09. See the 2026-09-10 audit for the pre-push list.
+RegKnot is a maritime-compliance RAG at **https://regknots.com**. Production stack live and healthy. **106,041 chunks across 66 sources** with 100% embedding coverage. Retrieval pipeline now includes multi-query rewrite, Haiku reranker, citation oracle, source-diversified fetch, jurisdiction filter, vessel-profile boosts, synonym + intent expansion; hybrid BM25+dense built, measured 2026-07-19 and rejected (dense wins) — prod `.env` carried it switched on until the 2026-09-10 fix, now dense. **96.1% A-or-A−** on the latest 152-question regression eval. First organic Captain-tier subscriber 2026-09-09. See the 2026-09-10 audit for the pre-push list.
 
 ## Live production
 
@@ -66,7 +66,7 @@ Plus 40 additional sources: `cfr_*`, `solas`, `marpol`, `colregs`, `stcw`, `ism`
 8. **Vessel-type × CFR-Subchapter applicability filter** (Sprint C2) + **Subchapter M / TSMS source affinity** (D6.69)
 9. **Haiku reranker** (D6.66) + source-affinity / vessel-profile / title boosts
 10. **Citation oracle** (D6.70 Layer-2 retrieval intervention)
-11. **Synthesis** — Claude Sonnet 4.6 default, Opus for high-complexity; `_MAX_TOKENS` 8192 (D6.75)
+11. **Synthesis** — Sonnet 5 default, Opus 5.5 (effort `low` on the stream, `high` on regeneration) for high-complexity and followups; `_MAX_TOKENS` 8192 (D6.75), 16K cap on Opus; the 14.5K-token system prompt is prompt-cached (2026-09-22)
 12. **Hedge judging** (D6.60) → cascading ensemble web fallback (D6.59), Big-3 (Claude + GPT + Grok, D6.58)
 13. **Citation verification** — regex extracts cites, verifies in DB, regen on unverified, strips remainders
 14. **Token-by-token streaming** on the chat path (D6.68)
@@ -113,9 +113,9 @@ Full findings, evidence and the awaiting-go fix spec: `docs/sprint-audits/full-s
 **P2:**
 - Stripe `invoice.paid` processed before `checkout.session.completed` on first purchase → `UPDATE … WHERE stripe_subscription_id` matched 0 rows → `billing_interval` NULL for new subscribers.
 
-**Still open from May:** `next@15.5.14` DoS CVE; Sentry `environment` tag; no CI; zero `apps/api` tests; `llm_helpers.py` not extracted; SpiritFlow co-tenancy; offsite backups (Blake's DO Spaces step); STCW 2017 / MARPOL 2022 / MSM 2021 bases; Load Lines 3 chunks; FSS / LSA resolution-only.
+**Still open from May:** `next@15.5.14` DoS CVE; Sentry `environment` tag; no CI; SpiritFlow co-tenancy; offsite backups (Blake's DO Spaces step); STCW 2017 / MARPOL 2022 / MSM 2021 bases; Load Lines 3 chunks; FSS / LSA resolution-only.
 
-**Resolved since the May audit:** JWT secret, `.env` 600, daily + restore-tested backups, cgroup caps, swap, `run_ingest.sh`, Layer C, NVIC OCR, eval harness, migration 0115 (fallback persist), Anthropic key rotation.
+**Resolved since the May audit:** shared LLM helpers (`packages/rag/rag/llm.py`, 2026-09-22) and the first `apps/api` tests (`apps/api/tests/`), JWT secret, `.env` 600, daily + restore-tested backups, cgroup caps, swap, `run_ingest.sh`, Layer C, NVIC OCR, eval harness, migration 0115 (fallback persist), Anthropic key rotation.
 
 ## Operational data
 

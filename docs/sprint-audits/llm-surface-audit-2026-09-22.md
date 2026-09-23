@@ -83,6 +83,39 @@ Roadmap item 8 (a model floor for Captain) was priced at Opus 4.8 rates. Opus 5.
 | U10 | Quiz generation → Sonnet 5 (F11) | 1 h | Exam-key accuracy | Karynn's call |
 | U11 | Captain model floor at Opus 5.5 `low` (F12) | 1 h | Best model for the paying tier at ~$0.10/question | Blake's call |
 
+---
+
+## 4. Outcome — shipped the same day (Blake: "greenlight all recommended items")
+
+Commits `f64bbfc` (rag), `cb7cf27` (api), `25eabf5` (ingest/scripts); deployed via `scripts/deploy.sh`, smoke OK. U10 and U11 stay product calls. What the measurements changed about the plan:
+
+| # | Result | Measured |
+|---|---|---|
+| U1 | **Rescoped, shipped.** The audit's premise was wrong twice: the oracle consumes the judge's verdict and `missing_topic` (dependent, not parallel), and `retrieve_enhanced` already runs its rewrite + per-reformulation searches concurrently. The only independent pair was router ∥ retrieval: the Haiku router now runs as a task beside retrieval; off-topic cancels the in-flight retrieval, a client disconnect cancels both. | Prod: router 0.5–1.0 s fully hidden under retrieval (7.6–11.6 s). **~0.6 s per answer, not 2–4 s.** Pre-synthesis time is the DB fan-out (31 source-group queries × 4 `retrieve()` calls on a 2-vCPU box, 128 MB `shared_buffers` against an 828 MB HNSW index) plus the 2.7–3.4 s rerank. Overlapping reformulation searches measured no gain at pool 10; with a 30-connection pool they saved ~1.2 s but put ~124 concurrent vector queries on 2 shared cores — not shipped. That is a DB decision (shared_buffers / fan-out), not a code one. |
+| U2 | Shipped. `rag/llm.py` `text_of()` everywhere a response is read; refusals and max_tokens logged. | — |
+| U3 | Shipped on the synthesis stream and both regeneration calls. | **The static prefix is 14,559 tokens, not ~10K** (cl100k undercounted). Prod: Sonnet stream wrote 14,560; the Opus followup stream wrote 14,559 and **the next two Opus regenerations read 14,559 from cache** — stream and regen share the prefix. Cold calls pay 1.25× on the prefix (~$0.007 Sonnet / ~$0.015 Opus) at today's volume. |
+| U4 | Shipped. `anthropic` 1.8.0 in all three projects; no code needed changing for the major. | — |
+| U5 | Shipped: reranker, rewrite, judge, hedge audit, citation oracle (+ its synthesis), six `me.py` co-pilots, quiz, guide, PSC checklist, credentials, documents, bulletin classifier. 18 schemas validated against the live API before deploy. | The first documents schema (20 nullable fields) was **rejected by the API** — too many union-typed parameters. Redesigned to 2 unions with `""`/`[]` sentinels mapped back by `_flatten_extraction`; `apps/api/tests` now caps unions at 8 per schema. |
+| U6 | **Not shipped.** | `web_search_20260209` on a real fallback query: 40.1 s, 7 code-execution rounds, no usable answer; `allowed_domains` cannot express the `*.gov` / `*.mil` suffix whitelist and 400s the whole call on a domain the crawler cannot reach. The 2025 tool + Python whitelist stays. |
+| U7 | Shipped: credentials (2 pages) and documents (3 pages) send native `document` blocks, trimmed with pypdf. | Prod smoke on a synthetic 2-page COI: every field correct incl. page-2 conditions, 8.4 s, 6.1K input tokens. Found and fixed: a COI printing "IMO Number: None" came back as the string `"None"`; placeholders now map to null. |
+| U8 | Shipped: enrichment pre-fills its cache through one Message Batch when ≥50 chunks are pending; online loop covers the rest. `REGKNOTS_ENRICH_MODE=online` reverts. | First live run (3 synthetic chunks, threshold patched): the batch took **35 min** to end (3/3 succeeded); the probe's 25-min ceiling fell back to online and produced correct aliases. Enrichment is opt-in (`--enrich`) and the scheduled refreshes pass `--no-enrich`, so only manual corpus sprints wait on a batch (production ceiling 24 h) — use `REGKNOTS_ENRICH_MODE=online` when speed matters more than the 50%. |
+| U9 | Shipped: four OCR scripts + ISM/STCW adapters on `claude-opus-5-5`, effort `low`, 16K cap, block-type reads. | Not exercised live (ad-hoc scripts); call shape validated in the Opus 5.5 rollout. |
+| — | Opus stream effort `medium` → `low` (Blake's go). | Followup turn on prod: synthesis TTFT 5.9 s, 1,760 output tokens, 8 citations, 0 unverified. |
+
+**Retrieval harness after deploy** (`data/eval/retrieval/20260923-*-postdeploy-20260922.json`): dense strong-recall@8 **0.823** (unchanged), MRR 0.688 (0.658 on 09-10 — the dense arm is embeddings + SQL only, untouched by this batch; the MRR drift is the weekly Celery CFR/NVIC refresh changing the corpus). **First baseline of the `dense-prod` arm** — rewrite + rerank, now on structured outputs: **0.919 / MRR 0.737**, p50 6.9 s. Rewrite + rerank are worth +0.097 strong recall; that is the number to beat for any sidecar change.
+
+**New finding — Sonnet 5 thinks by default on real synthesis requests (not fixed; needs Blake's go).** The Sonnet synthesis stream sends no `thinking` parameter. A short question gets a lone `text` block in ~1 s, but the real payload (14.5K-token system prompt + ~17K chars of context) gets adaptive thinking first. Replaying the exact captured request on prod:
+
+| Variant | First text token | Blocks |
+|---|---|---|
+| As sent today (cache hit) | 25.6 s / 30.7 s | thinking → text, 3,376 output tokens |
+| System as plain string (no cache) | 25.8 s | thinking → text |
+| `thinking: {"type": "disabled"}` | **4.1 s** | text |
+
+Live turn on the Captain's profile: synthesis TTFT 24.0 s. This predates today's batch — the plain-string replay (the pre-U3 request shape) thinks just the same, so it has most likely been there since the 07-18 Sonnet 5 refresh — and it is the biggest latency item left on the Sonnet path — larger than all of U1. The thinking also counts toward `_MAX_TOKENS` (8192). Options: disable thinking on the stream, or send `effort: "low"` as Opus already does. Either is a one-line change in `_opus_kwargs()` (generalised to Sonnet); run a five-question answer spot check before and after.
+
+**Side findings.** (1) The bulletin classifier's `cache_control` never worked — its prompt is below Haiku 4.5's 4,096-token caching minimum. (2) Retrieval is nondeterministic end to end: two identical `retrieve_enhanced` calls share only 2–6 of their 8 final chunks, from Haiku rewrite + rerank variance — any single-run A/B on the `-prod` arms is noise. (3) The chat title generator, support replies and `generate_sailor_queries` were also positional readers; all fixed.
+
 **Sequencing that respects the standing rules:** U1–U3 are each a spec-then-go and each gets a before/after on `scripts/eval_retrieval.py` (retrieval is untouched, so the check is that the score *doesn't move*) plus a five-question answer-quality spot check. U4 first, then U5. U8 before the next ingest sprint.
 
 **Not recommended:** moving the Haiku sidecars up a tier (they are classification/ranking tasks and Haiku 4.5 is the current Haiku); the embedding model (twice audited as not the bottleneck); re-enabling hybrid retrieval (measured, 2026-07-19). Fast mode on Opus 5.5 ($8/$40) — TTFT here is dominated by the sequential sidecars (U1), not by output speed.
