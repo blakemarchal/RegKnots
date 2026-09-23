@@ -59,6 +59,35 @@ def test_me_schemas_cover_every_key_the_consumers_read():
         assert set(getattr(me, name)["properties"]) == keys, name
 
 
+def test_me_copilots_leave_thinking_headroom():
+    """2026-09-23 — Sonnet 5 thinks adaptively and thinking counts toward
+    max_tokens; vessel-analysis used 2,721-2,871 of an old 3,000 cap. Every
+    co-pilot call must use the shared headroom constant, not a literal cap."""
+    import re
+    from pathlib import Path
+
+    me = importlib.import_module("app.routers.me")
+    src = Path(me.__file__).read_text(encoding="utf-8")
+    calls = re.findall(r"model=_REASONING_MODEL,\s*(?:#[^\n]*\n\s*)*max_tokens=([A-Za-z_0-9]+)", src)
+    assert len(calls) == 6, calls
+    assert set(calls) == {"_REASONING_MAX_TOKENS"}, calls
+    assert me._REASONING_MAX_TOKENS >= 8000
+
+
+def test_chat_routes_pass_the_synthesis_model_floor():
+    """2026-09-23 — Opus 5.5 is the default answer model via
+    settings.synthesis_model_floor; both engine call sites in chat.py
+    (the /chat wrapper and the /chat/stream generator) must pass it."""
+    from pathlib import Path
+
+    from app.config import Settings
+
+    chat = importlib.import_module("app.routers.chat")
+    src = Path(chat.__file__).read_text(encoding="utf-8")
+    assert src.count("synthesis_model_floor=settings.synthesis_model_floor or None") == 2
+    assert Settings.model_fields["synthesis_model_floor"].default == "claude-opus-5-5"
+
+
 def _union_count(schema):
     return sum(1 for node in _walk(schema) if "anyOf" in node or isinstance(node.get("type"), list))
 

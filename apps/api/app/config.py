@@ -181,6 +181,17 @@ class Settings(BaseSettings):
         default=True, validation_alias="RERANKER_ENABLED",
     )
 
+    # ── 2026-09-23 — Synthesis model floor ─────────────────────────────
+    # Minimum model for every chat answer. The Haiku router still runs on
+    # each question (off-topic gate; complexity score kept in the logs),
+    # but its Haiku / Sonnet pick is lifted to this model. Blake: "make
+    # Opus 5.5 the default" after the 2026-09-23 six-way comparison (LLM
+    # surface audit §5). Set SYNTHESIS_MODEL_FLOOR= (empty) to restore
+    # pure complexity routing; any model ID works as a floor.
+    synthesis_model_floor: str = Field(
+        default="claude-opus-5-5", validation_alias="SYNTHESIS_MODEL_FLOOR",
+    )
+
     # ── D6.70 Sprint 8 — Citation oracle (Layer-2 retrieval intervention) ──
     # When true, hedge events fire a Haiku-with-web-search call to identify
     # the controlling CFR / SOLAS / MARPOL / NVIC / STCW section, look it

@@ -103,6 +103,46 @@ def _opus_kwargs(model: str | None, effort: str) -> dict:
     return {"max_tokens": _MAX_TOKENS}
 
 
+# 2026-09-23 — Sonnet 5 runs adaptive thinking when `thinking` is omitted,
+# at the API default effort `high`, and on the real synthesis payload (14.5K-
+# token system prompt + retrieved context) it thinks for 20+ s before the
+# first answer token (measured: 25.6 s as sent vs 4.1 s with thinking off, same
+# captured request). An explicit effort bounds it. Only used when a question
+# is actually synthesized on Sonnet (router-only mode, see the floor below).
+_SONNET_EFFORT_STREAM: str | None = "low"
+
+
+def _stream_kwargs(model: str | None) -> dict:
+    """Kwargs for the streamed chat-synthesis call."""
+    if _is_opus(model):
+        return _opus_kwargs(model, _OPUS_EFFORT_STREAM)
+    if model and "sonnet" in model and _SONNET_EFFORT_STREAM:
+        return {"max_tokens": _MAX_TOKENS, "output_config": {"effort": _SONNET_EFFORT_STREAM}}
+    return {"max_tokens": _MAX_TOKENS}
+
+
+# 2026-09-23 — synthesis model floor (Blake: "make Opus 5.5 the default").
+# The Haiku router still classifies every question — it is the off-topic
+# gate, and its complexity score stays in the logs — but the answer is
+# synthesized by at least the caller's floor model. chat.py passes
+# settings.synthesis_model_floor (env SYNTHESIS_MODEL_FLOOR; "" restores
+# pure complexity routing). Evidence: LLM surface audit §5.
+def _model_rank(model: str | None) -> int:
+    m = (model or "").lower()
+    for key, rank in (("haiku", 1), ("sonnet", 2), ("opus", 3)):
+        if key in m:
+            return rank
+    return 0
+
+
+def _apply_model_floor(model: str | None, floor: str | None) -> str | None:
+    """Lift `model` to `floor` when the floor is a higher tier; never lowers it.
+    An empty model (the off-topic short-circuit) is left alone."""
+    if not model or not floor:
+        return model
+    return floor if _model_rank(floor) > _model_rank(model) else model
+
+
 # Kept as an alias for the test suite and any external imports; the shared
 # implementation lives in rag/llm.py (U2).
 _text_of = text_of
@@ -1652,6 +1692,8 @@ async def chat(
     # 2026-07-19 Wk3 — caller-supplied live-data block; see
     # chat_with_progress for the contract.
     live_context_block: str | None = None,
+    # 2026-09-23 — minimum synthesis model; see chat_with_progress.
+    synthesis_model_floor: str | None = None,
 ) -> ChatResponse:
     """Run the full RAG pipeline and return a ChatResponse.
 
@@ -1715,6 +1757,7 @@ async def chat(
         images=images,
         precision_mode=precision_mode,
         live_context_block=live_context_block,
+        synthesis_model_floor=synthesis_model_floor,
     ):
         # Discard status/delta/delta_reset — non-streaming caller only
         # needs the terminal payload. Every chat_with_progress path
@@ -2578,6 +2621,11 @@ async def chat_with_progress(
     # reg-change intent (see rag/live_context.py) — that one needs only
     # the pool, so no caller involvement.
     live_context_block: str | None = None,
+    # 2026-09-23 — minimum model for the answer. The router's pick (and
+    # the followup escalation) is lifted to this tier when it is lower;
+    # None = pure complexity routing. chat.py passes
+    # settings.synthesis_model_floor. See _apply_model_floor().
+    synthesis_model_floor: str | None = None,
 ) -> AsyncIterator[dict]:
     """Same RAG pipeline as chat() but yields lightweight progress events.
 
@@ -2788,6 +2836,10 @@ async def chat_with_progress(
     # message in real time so the user starts reading at second 1
     # rather than second 5-8.
     model_used = REGENERATION_MODEL if followup_match else route.model
+    floored = _apply_model_floor(model_used, synthesis_model_floor)
+    if floored != model_used:
+        logger.info("synthesis model floor: %s -> %s", model_used, floored)
+        model_used = floored
     answer_chunks: list[str] = []
     input_tokens = 0
     output_tokens = 0
@@ -2801,7 +2853,7 @@ async def chat_with_progress(
             model=model_used,
             system=cached_system(effective_system_prompt),
             messages=messages,
-            **_opus_kwargs(model_used, _OPUS_EFFORT_STREAM),
+            **_stream_kwargs(model_used),
         ) as stream:
             async for text_chunk in stream.text_stream:
                 if not text_chunk:
