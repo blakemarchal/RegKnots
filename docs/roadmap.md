@@ -1,6 +1,6 @@
 # RegKnots Roadmap
 
-**Last updated:** 2026-09-22 (Opus 5.5 rollout; LLM upgrades U1–U9 shipped; LLM surface audit at `docs/sprint-audits/llm-surface-audit-2026-09-22.md`; system audit at `docs/sprint-audits/full-system-audit-2026-09-10.md`)
+**Last updated:** 2026-09-23 (Opus 5.5 low is the default answer model; LLM upgrades U1–U9 shipped 09-22; LLM surface audit at `docs/sprint-audits/llm-surface-audit-2026-09-22.md`; system audit at `docs/sprint-audits/full-system-audit-2026-09-10.md`)
 
 **Eval headline:** retrieval harness re-run 2026-09-10 after prod was flipped back to dense — strong-recall@8 **0.823 / MRR 0.658** on the 62-pair gold set, 0 errors (July baseline 0.790 / 0.627; evidence `data/eval/retrieval/20260910-144455-dense-ef0.json`). Answer-quality eval still 97.4% A-or-A− on 149 questions (2026-05-09). **New retrieval baseline to beat: 0.823 / 0.658.** Post-deploy 2026-09-23: dense 0.823 / 0.688 (unchanged recall; MRR drift from the weekly CFR refresh), and the first `dense-prod` baseline (rewrite + rerank) **0.919 / 0.737**.
 
@@ -33,7 +33,7 @@ All awaiting "go". Each is independently verifiable.
 3. **Stripe: identify the $39.00 price** on `sub_1UDop0B6F2sQMkiGQwjVd969` and confirm it is in `plans.py`. **Blake, 5 min.** If it is not mapped, renewals will not route.
 4. ~~**Celery hygiene.**~~ **SHIPPED 2026-09-10.** `update_regulations` now calls `scripts/run_ingest.sh` (which picks `--pipe` when there is no TTY, so the worker still captures output and the exit code); `reindex-vector-embeddings-monthly` and its task deleted; `celerybeat-schedule` gitignored; `packages/ingest/uv.lock` regenerated (greenlet, playwright, pyee) so prod stops re-resolving it every Sunday. The eCFR-503 retry was already bounded by `max_retries=2` — no change. Deployed via `scripts/deploy.sh`. First scheduled run under the wrapper: Sunday 2026-09-13 02:00 UTC — check `journalctl -u regknots-worker` and the transient `regknots-ingest-*` unit afterwards.
 5. **Karynn reads two answers** (MOB alarm; BMP-MS) — 5 minutes, see audit §2.5. If either is wrong it becomes a hedge-audit entry and a gold-set pair.
-6a. **Sonnet synthesis thinking — decision needed (Blake), found 2026-09-22.** Sonnet 5 applies adaptive thinking to real synthesis requests: first answer token **24–31 s** after retrieval today vs **4.1 s** with thinking disabled (same captured request, replayed on prod). Most Captain questions route to Sonnet, so this is the largest latency item in the product. Disable thinking or send `effort: "low"` on the Sonnet stream (one line in `_opus_kwargs()`), with a five-question answer spot check before/after. Evidence: LLM surface audit §4.
+6a. ~~**Sonnet synthesis thinking.**~~ **SHIPPED 2026-09-23, together with the Opus 5.5 default.** A six-way comparison on 16 questions put Opus 5.5 at effort `low` top with both blind judges: 8.62 vs 5.06 (Opus judge) and 9.25 vs 8.31 (GPT-4o) for what routing sent. It had 9 vs 53 flagged errors, the p90 first token fell from 16.4 s to 7.9 s after retrieval, and it costs ~$0.13 vs ~$0.04 per answer at a cold cache. It now answers every question (`SYNTHESIS_MODEL_FLOOR`, default `claude-opus-5-5`). Sonnet, when used, streams at effort `low`. Evidence: LLM surface audit §5, `data/eval/model_compare/20260923-175735/`.
 6. **Vessel-profile completeness (product) — now the top product item.** 51 of 56 vessel profiles have flag Unknown, and the A/B above shows flag alone moves foreign-flag noise from 4/32 to 0/32. When `vessels.flag_state` is Unknown and `users.jurisdiction_focus` is set, use it for retrieval scoping; show a one-click "confirm your flag" prompt in chat when the active profile is incomplete; enrich from IMO number on save. **~2 h.** Spec first.
 
 ---
@@ -41,7 +41,7 @@ All awaiting "go". Each is independently verifiable.
 ## Next 1–2 weeks
 
 7. **Add her four real questions + Karynn's BMP question to the eval gold set** and re-baseline. The gold set was built from Karynn's and pilot users' questions; the first paying Master's questions belong in it.
-8. **Tier-aware model floor — decision needed.** Router is complexity-only; every Captain question this month went to Haiku. A Sonnet floor for Captain costs on the order of a cent per question; an **Opus 5.5 `low` floor is ~$0.10/question** (18K in / 1.5K out at $4/$20) and, measured 2026-09-22 at `low`, streams its first token 5.9–7.6 s after retrieval (and its 14.5K-token system prefix is now cached). Blake/Karynn call; ~1 h to implement once decided (audit item U11).
+8. ~~**Tier-aware model floor.**~~ **Superseded 2026-09-23:** Opus 5.5 `low` is the floor for every tier (item 6a). If cost ever matters, the same setting can become tier-aware in one line. Worst case at a cold cache is Cadet $3.25 of $9.99 and Mate $13 of $19.99 a month; Captain is uncapped, at about $39 a month for 10 questions a day.
 9. **Stripe webhook ordering fix.** `invoice.paid` arrived before `checkout.session.completed` and its UPDATE-by-subscription-id matched 0 rows → `billing_interval` NULL for every first-time subscriber. Fall back to customer id; add the recorded-fixture test (`apps/api/tests/` exists as of 2026-09-22). **~2 h.**
 10. **BMP Maritime Security (2024) ingest.** Free industry PDF (ICS / BIMCO / INTERTANKO / OCIMF et al.). Karynn asked for it on 09-10 and got a mis-attributed answer from adjacent chunks. **~2 h**, `pdf_pipeline` pattern.
 11. **`next` 15.5.14 → 15.5.15+** (DoS CVE, open since May). `pnpm up next` + deploy. **10 min.**
@@ -123,9 +123,11 @@ Every ingest above goes through `scripts/run_ingest.sh`, never bare `uv run`.
 | U8 | Batch API for enrichment | **Shipped** — first live run will be the next ingest (≥50 chunks); `REGKNOTS_ENRICH_MODE=online` reverts |
 | U9 | Opus 5.5 `low` vision for OCR | **Shipped** — first live run will be the next OCR job |
 | U10 | Quiz generation → Sonnet 5 | Karynn's call |
-| U11 | Captain model floor at Opus 5.5 `low` (~$0.10/question) | Blake's call |
+| U11 | Captain model floor at Opus 5.5 `low` | **Superseded** — Opus 5.5 `low` answers every tier since 2026-09-23 (audit §5) |
 
-**DB headroom — decision needed (Blake).** Each question fans out 31 source-group queries × 4 `retrieve()` calls against an 828 MB HNSW index with `shared_buffers` at 128 MB on a shared 2-vCPU box; that plus the ~3 s Haiku rerank is 7–12 s before synthesis starts. Options: raise `shared_buffers` (Postgres restart), trim the group fan-out, or both — each needs an eval-harness run before and after.
+**DB headroom — decision needed (Blake), now the top latency item.** Each question fans out 31 source-group queries × 4 `retrieve()` calls against an 828 MB HNSW index with `shared_buffers` at 128 MB on a shared 2-vCPU box. With the ~3 s Haiku rerank, that is 8–10 s before synthesis starts, and 19 s on the first question after a restart (measured 2026-09-23). Opus 5.5 then takes about 5 s to its first token, so retrieval is now most of the wait. Options: raise `shared_buffers` (needs a Postgres restart), trim the group fan-out, or both. Each needs an eval-harness run before and after.
+
+**Corpus gap found 2026-09-23:** Subchapter M (46 CFR 144) fire-protection text does not reach a towboat's fixed-CO2 question. The judge returned `partial_miss`, and the web fallback found it on eCFR. Gold pair F5/V5 is the test case.
 
 ---
 

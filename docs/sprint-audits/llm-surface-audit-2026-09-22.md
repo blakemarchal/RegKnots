@@ -83,6 +83,10 @@ Roadmap item 8 (a model floor for Captain) was priced at Opus 4.8 rates. Opus 5.
 | U10 | Quiz generation → Sonnet 5 (F11) | 1 h | Exam-key accuracy | Karynn's call |
 | U11 | Captain model floor at Opus 5.5 `low` (F12) | 1 h | Best model for the paying tier at ~$0.10/question | Blake's call |
 
+**Sequencing that respects the standing rules:** U1–U3 are each a spec-then-go and each gets a before/after on `scripts/eval_retrieval.py` (retrieval is untouched, so the check is that the score *doesn't move*) plus a five-question answer-quality spot check. U4 first, then U5. U8 before the next ingest sprint.
+
+**Not recommended:** moving the Haiku sidecars up a tier (they are classification/ranking tasks and Haiku 4.5 is the current Haiku); the embedding model (twice audited as not the bottleneck); re-enabling hybrid retrieval (measured, 2026-07-19). Fast mode on Opus 5.5 ($8/$40) — time to first token is dominated by retrieval (8–19 s of DB fan-out + rerank before synthesis starts, measured §4 U1 and §5), not by output speed. *(This line originally blamed the sequential sidecars; U1 measured otherwise.)*
+
 ---
 
 ## 4. Outcome — shipped the same day (Blake: "greenlight all recommended items")
@@ -104,7 +108,7 @@ Commits `f64bbfc` (rag), `cb7cf27` (api), `25eabf5` (ingest/scripts); deployed v
 
 **Retrieval harness after deploy** (`data/eval/retrieval/20260923-*-postdeploy-20260922.json`): dense strong-recall@8 **0.823** (unchanged), MRR 0.688 (0.658 on 09-10 — the dense arm is embeddings + SQL only, untouched by this batch; the MRR drift is the weekly Celery CFR/NVIC refresh changing the corpus). **First baseline of the `dense-prod` arm** — rewrite + rerank, now on structured outputs: **0.919 / MRR 0.737**, p50 6.9 s. Rewrite + rerank are worth +0.097 strong recall; that is the number to beat for any sidecar change.
 
-**New finding — Sonnet 5 thinks by default on real synthesis requests (not fixed; needs Blake's go).** The Sonnet synthesis stream sends no `thinking` parameter. A short question gets a lone `text` block in ~1 s, but the real payload (14.5K-token system prompt + ~17K chars of context) gets adaptive thinking first. Replaying the exact captured request on prod:
+**New finding — Sonnet 5 thinks by default on real synthesis requests (resolved 2026-09-23, §5).** The Sonnet synthesis stream sends no `thinking` parameter. A short question gets a lone `text` block in ~1 s, but the real payload (14.5K-token system prompt + ~17K chars of context) gets adaptive thinking first. Replaying the exact captured request on prod:
 
 | Variant | First text token | Blocks |
 |---|---|---|
@@ -116,9 +120,54 @@ Live turn on the Captain's profile: synthesis TTFT 24.0 s. This predates today's
 
 **Side findings.** (1) The bulletin classifier's `cache_control` never worked — its prompt is below Haiku 4.5's 4,096-token caching minimum. (2) Retrieval is nondeterministic end to end: two identical `retrieve_enhanced` calls share only 2–6 of their 8 final chunks, from Haiku rewrite + rerank variance — any single-run A/B on the `-prod` arms is noise. (3) The chat title generator, support replies and `generate_sailor_queries` were also positional readers; all fixed.
 
-**Sequencing that respects the standing rules:** U1–U3 are each a spec-then-go and each gets a before/after on `scripts/eval_retrieval.py` (retrieval is untouched, so the check is that the score *doesn't move*) plus a five-question answer-quality spot check. U4 first, then U5. U8 before the next ingest sprint.
+---
 
-**Not recommended:** moving the Haiku sidecars up a tier (they are classification/ranking tasks and Haiku 4.5 is the current Haiku); the embedding model (twice audited as not the bottleneck); re-enabling hybrid retrieval (measured, 2026-07-19). Fast mode on Opus 5.5 ($8/$40) — TTFT here is dominated by the sequential sidecars (U1), not by output speed.
+## 5. Default answer model: Opus 5.5 at effort low (2026-09-23)
+
+Blake: "Go ahead with the Sonnet effort low test … I'm ok with a push to make Opus 5.5 the default … Greenlight all recommended." Commits `3a5e9b6`, `f51cdbe`, `5f0ebb5`; deployed via `scripts/deploy.sh`, smoke OK.
+
+**Method.** `scripts/compare_synthesis_models.py` ran 16 questions: 14 gold-set pairs across five vessel types, plus the Captain's two real questions on her vessel profile. Each went through the real engine (routing, retrieval, rewrite, rerank, prompt assembly) and was stopped at the synthesis call. That exact request was then replayed under six configurations, so model and thinking were the only variables. Two blind judges scored all six answers per question, each in its own shuffled order: Opus 5.5 (effort medium) and GPT-4o. Opus grading Opus answers is a self-preference risk, which is why GPT-4o judges too. GPT-4o compresses its scores into 8–9.3 but agrees on the worst answers. Evidence: `data/eval/model_compare/20260923-175735/`; spend ≈ $5.70.
+
+| Configuration | First token after retrieval, median / p90 | Opus judge | GPT-4o judge | Errors flagged, Opus / GPT-4o | Gold citation hit | $ per answer, cold / warm cache |
+|---|---|---|---|---|---|---|
+| Router mix — what production sent (10/16 Haiku, 6/16 Sonnet) | 0.8 / 16.4 s | 5.06 | 8.31 | 53 / 9 | 93% | 0.041 / 0.020 |
+| Haiku 4.5 | 0.6 / 0.9 s | 4.25 | 8.19 | 69 / 9 | 86% | 0.021 / 0.009 |
+| Sonnet 5 as sent (adaptive thinking, default `high`) | 2.7 / 27.2 s | 6.19 | 9.19 | 38 / 4 | 93% | 0.065 / 0.031 |
+| Sonnet 5, effort `low` | 2.3 / 2.8 s | 5.88 | 8.88 | 41 / 5 | 93% | 0.057 / 0.023 |
+| Sonnet 5, thinking disabled | 2.2 / 2.7 s | 6.38 | 9.00 | 43 / 6 | 86% | 0.059 / 0.026 |
+| **Opus 5.5, effort `low`** | **4.5 / 7.9 s** | **8.62** | **9.25** | **9 / 3** | **100%** | **0.130 / 0.060** |
+| Opus 5.5, effort `medium` | 9.3 / 13.8 s | 8.75 | 9.31 | 8 / 3 | 100% | 0.144 / 0.074 |
+
+**What the errors were.** Both judges flagged these, and all came from the model the router actually picked:
+
+- **Drill schedule, containership (Haiku):** called 46 CFR 199.250, a passenger-vessel section, controlling, and said weekly drills are required.
+- **ROUPV for a 65 GT T-boat (Haiku):** treated an inspected Subchapter T vessel as uninspected and cited a nonexistent 46 CFR 11.467(a)(4).
+- **Firefighter's outfits (Sonnet):** filed 46 CFR 96.35-10 under tank vessels and told the mariner not to rely on it.
+- **Hydrogen peroxide ERG (Haiku):** cited an "ISM Code Part C", which does not exist.
+
+Opus low's worst flags were two ballast-water misreadings. It read the alternatives in 33 CFR 151.2025(a)(2) as cumulative, and it applied a Subpart C sediment rule where 151.2050(c) governs.
+
+**Decision.** Opus 5.5 at `low` answers every question: `SYNTHESIS_MODEL_FLOOR=claude-opus-5-5` is the default, and an empty value restores pure routing. The Haiku router still runs as the off-topic gate and its score is still logged. `medium` bought nothing measurable for twice the first-token time. When Sonnet does answer (router-only mode), the stream now sends effort `low`: Sonnet thought adaptively on 38% of questions, and `low` removes that 27 s tail. The quality cost is about 0.3 points on both judges' scales, within the noise of 16 questions.
+
+**Checked before shipping.**
+
+- **Refusals:** eight sensitive-but-legitimate questions got 0 refusals on Opus 5.5 low and on Sonnet. They covered IMDG 6.2 infectious substances, WHO IHR, cholera, D-2 ballast organisms, phosphine fumigation, HCN, H2S tank entry and 33 CFR 101 cyber. The GPT-4o path still catches a refusal if one happens.
+- **Gap callouts:** Opus trips the hedge regex on 9 of 16 answers (router mix 2 of 16). They are precise callouts after a full answer, such as "I didn't retrieve Rule 34(c); check it directly." The UI shows nothing for a hedge alone, and the judge labels most of them `precision_callout`, which skips web fallback. The extra `retrieval_misses` rows each name the missing section, which is useful retrieval signal.
+- **Sonnet JSON routes:** at the default effort, the vessel-analysis co-pilot used 2,721–2,871 of its 3,000 cap on thinking plus JSON. The six co-pilots now share an 8,000 cap, and the web-fallback calls went from 2,048 to 8,192. The oracle synthesis does not think on its payload (500–600 tokens) and was left alone.
+
+**Post-deploy smoke** (prod, flags as `chat.py` passes them):
+
+- **Drill question:** the router picked Haiku and Opus 5.5 low answered. First token came 5.0 s after retrieval, the answer was correct (monthly drills, the 25% rule), and the judge returned `precision_callout`.
+- **Towboat fixed-CO2 question:** Opus answered with a 14,559-token cache hit in 5.4 s. The judge returned `partial_miss` on "Subchapter M fixed fire-extinguishing requirements".
+- **Web fallback, called directly:** Sonnet 5 with web search surfaced a verified eCFR quote in 15.4 s. It used 1,491 output tokens, 73% of the old cap.
+- **Off-topic question:** no synthesis call.
+
+**What this changes.**
+
+- **Cost:** about $0.13 per answer on a cold cache ($0.06 warm), against about $0.04 before. At today's ~10–100 questions a month that is $1–13. If every message were used cold, the worst cases per plan are: Cadet 25 × $0.13 = $3.25 of $9.99; Mate $13 of $19.99. Captain is uncapped, so 10 questions a day costs about $39 against its $39.99 price. A tier-aware floor is a one-line change if that ever matters.
+- **Latency:** retrieval is now the long pole. It takes 8–10 s warm and 19 s on the first question after a restart, before Opus's 5 s first token. The DB headroom decision (`shared_buffers` or fan-out, §4 U1) is the next latency lever.
+- **Corpus gap:** Subchapter M (46 CFR 144) fire-protection text does not reach a towboat's CO2 question. Gold pair F5/V5 is the test case.
+- **Evaluation:** any change to the synthesis model, its effort or the synthesis prompt re-runs `scripts/compare_synthesis_models.py` first, the way retrieval changes re-run `scripts/eval_retrieval.py`.
 
 ---
 

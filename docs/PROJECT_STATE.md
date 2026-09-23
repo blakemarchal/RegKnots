@@ -2,7 +2,7 @@
 
 **One-page operational snapshot for humans and fresh Claude Code sessions.**
 
-Last updated: 2026-09-22 (Opus 5.5 rollout + LLM surface audit + upgrades U1–U9 shipped; system audit 2026-09-10)
+Last updated: 2026-09-23 (Opus 5.5 low is the default answer model; 09-22 Opus 5.5 rollout + LLM surface audit + upgrades U1–U9; system audit 2026-09-10)
 
 ---
 
@@ -56,7 +56,7 @@ Plus 40 additional sources: `cfr_*`, `solas`, `marpol`, `colregs`, `stcw`, `ism`
 
 ## RAG pipeline — current architecture
 
-1. **Router** (Haiku classifier) → Haiku 4.5 / Sonnet 5 / **Opus 5.5** (`claude-opus-5-5`, since 2026-09-22; also every followup turn and regeneration) per query complexity (D6.75 tightened)
+1. **Router** (Haiku classifier) — off-topic gate plus a complexity score 1–3 (D6.75 tightened), which is logged. Since 2026-09-23 the score no longer picks the answer model: `SYNTHESIS_MODEL_FLOOR` (default `claude-opus-5-5`) lifts every pick to Opus 5.5. Empty restores Haiku / Sonnet / Opus routing.
 2. **Pre-retrieval distillation** (D6.51) for verbose first turns
 3. **Multi-query rewrite** (D6.66) — Haiku produces 2-3 reformulations; default ON
 4. **Synonym + intent expansion** — `synonyms.py` (lifejacket/log/mob/stability/stencil), drill-frequency + equipment-marking intent expanders
@@ -66,7 +66,7 @@ Plus 40 additional sources: `cfr_*`, `solas`, `marpol`, `colregs`, `stcw`, `ism`
 8. **Vessel-type × CFR-Subchapter applicability filter** (Sprint C2) + **Subchapter M / TSMS source affinity** (D6.69)
 9. **Haiku reranker** (D6.66) + source-affinity / vessel-profile / title boosts
 10. **Citation oracle** (D6.70 Layer-2 retrieval intervention)
-11. **Synthesis** — Sonnet 5 default, Opus 5.5 (effort `low` on the stream, `high` on regeneration) for high-complexity and followups; `_MAX_TOKENS` 8192 (D6.75), 16K cap on Opus; the 14.5K-token system prompt is prompt-cached (2026-09-22)
+11. **Synthesis** — **Opus 5.5 for every answer** (2026-09-23; effort `low` on the stream, `high` on regeneration; 16K cap) after a six-way comparison (`scripts/compare_synthesis_models.py`, LLM surface audit §5). In router-only mode Sonnet 5 streams at effort `low` with `_MAX_TOKENS` 8192. The 14.5K-token system prompt is prompt-cached (2026-09-22).
 12. **Hedge judging** (D6.60) → cascading ensemble web fallback (D6.59), Big-3 (Claude + GPT + Grok, D6.58)
 13. **Citation verification** — regex extracts cites, verifies in DB, regen on unverified, strips remainders
 14. **Token-by-token streaming** on the chat path (D6.68)
