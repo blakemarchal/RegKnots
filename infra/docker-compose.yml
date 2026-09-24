@@ -2,6 +2,12 @@ services:
   postgres:
     image: pgvector/pgvector:pg16
     container_name: regknots-postgres
+    # 2026-09-23 — shared_buffers 128MB (image default) -> 512MB so the
+    # retrieval working set stays in Postgres memory instead of cycling
+    # through the OS page cache (which deploy builds evict); pg_prewarm's
+    # autoprewarm reloads the pool after any restart. Blake's go; evidence
+    # and procedure: docs/postgres-shared-buffers-spec-2026-09-23.md.
+    command: ["postgres", "-c", "shared_buffers=512MB", "-c", "shared_preload_libraries=pg_prewarm"]
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-regknots}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-regknots_dev}
