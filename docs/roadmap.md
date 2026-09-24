@@ -122,10 +122,12 @@ Every ingest above goes through `scripts/run_ingest.sh`, never bare `uv run`.
 | U7 | Native PDF `document` blocks | **Shipped** — credentials + documents; COI smoke correct |
 | U8 | Batch API for enrichment | **Shipped** — first live run will be the next ingest (≥50 chunks); `REGKNOTS_ENRICH_MODE=online` reverts |
 | U9 | Opus 5.5 `low` vision for OCR | **Shipped** — first live run will be the next OCR job |
-| U10 | Quiz generation → Sonnet 5 | Karynn's call |
+| U10 | Quiz generation → Sonnet 5 | **Shipped 2026-09-23** (Blake's go). Answer keys were already equal (95% vs 95–97%); citations that resolve to the corpus rose from 50% to 97%. COLREGs citations had shown 0% verified for every model — a case-sensitive verifier, now fixed. See audit §6. |
 | U11 | Captain model floor at Opus 5.5 `low` | **Superseded** — Opus 5.5 `low` answers every tier since 2026-09-23 (audit §5) |
 
-**DB headroom — decision needed (Blake), now the top latency item.** Each question fans out 31 source-group queries × 4 `retrieve()` calls against an 828 MB HNSW index with `shared_buffers` at 128 MB on a shared 2-vCPU box. With the ~3 s Haiku rerank, that is 8–10 s before synthesis starts, and 19 s on the first question after a restart (measured 2026-09-23). Opus 5.5 then takes about 5 s to its first token, so retrieval is now most of the wait. Options: raise `shared_buffers` (needs a Postgres restart), trim the group fan-out, or both. Each needs an eval-harness run before and after.
+**DB headroom — Blake chose `shared_buffers`; spec awaiting go:** `docs/postgres-shared-buffers-spec-2026-09-23.md` (128 MB → 512 MB plus `pg_prewarm`; a ~10–30 s Postgres restart). Measured: 21 of 31 source groups compute exact distances over TOASTed embeddings, and one question touches ~720 MB of buffers through a 128 MB pool. The 31 group queries take 3.0 s cold against 0.47 s warm, and the concurrent fan-out slows on repeat runs (0.9 → 2.5 s). The first question after a deploy spends ~12.7 s in the DB because the build evicts the page cache. Expected: that drops to about warm, and warm DB time to ~0.4–1 s. The Haiku rewrite + rerank (~5–6 s) are then the rest of the wait.
+
+**Quiz exam-bank context (found 2026-09-23):** `_retrieve_for_topic` matches the whole topic string as a substring of the exam pool, so multi-word topics ("COLREGs Rule 13 overtaking") get 0 exam-bank chunks — true for 3 of the 6 real quiz topics. Fix: a vector search restricted to `nmc_exam_bank`. It changes quiz inputs, so quick-check it with the quiz audit probe first.
 
 **Corpus gap found 2026-09-23:** Subchapter M (46 CFR 144) fire-protection text does not reach a towboat's fixed-CO2 question. The judge returned `partial_miss`, and the web fallback found it on eCFR. Gold pair F5/V5 is the test case.
 

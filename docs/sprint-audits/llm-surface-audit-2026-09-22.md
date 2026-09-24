@@ -80,7 +80,7 @@ Roadmap item 8 (a model floor for Captain) was priced at Opus 4.8 rates. Opus 5.
 | U7 | **Native PDF `document` blocks** + structured extraction in `documents.py` (F7) | 1 day | Better COI/CSC extraction; fewer "review the extracted data" corrections | With U5 |
 | U8 | **Batch API for enrichment** (F9) | ½ day | 50% off every corpus sprint from here on | Before Tier A IMO ingest |
 | U9 | **Opus 5.5 `low` vision** for the OCR scripts (F10) | ½ day | The 7 stuck NVICs; better IMO scans | With Tier A |
-| U10 | Quiz generation → Sonnet 5 (F11) | 1 h | Exam-key accuracy | Karynn's call |
+| U10 | Quiz generation → Sonnet 5 (F11) | 1 h | Exam-key accuracy | Karynn's call — **shipped 2026-09-23 on Blake's go; see §6** |
 | U11 | Captain model floor at Opus 5.5 `low` (F12) | 1 h | Best model for the paying tier at ~$0.10/question | Blake's call |
 
 **Sequencing that respects the standing rules:** U1–U3 are each a spec-then-go and each gets a before/after on `scripts/eval_retrieval.py` (retrieval is untouched, so the check is that the score *doesn't move*) plus a five-question answer-quality spot check. U4 first, then U5. U8 before the next ingest sprint.
@@ -168,6 +168,25 @@ Opus low's worst flags were two ballast-water misreadings. It read the alternati
 - **Latency:** retrieval is now the long pole. It takes 8–10 s warm and 19 s on the first question after a restart, before Opus's 5 s first token. The DB headroom decision (`shared_buffers` or fan-out, §4 U1) is the next latency lever.
 - **Corpus gap:** Subchapter M (46 CFR 144) fire-protection text does not reach a towboat's CO2 question. Gold pair F5/V5 is the test case.
 - **Evaluation:** any change to the synthesis model, its effort or the synthesis prompt re-runs `scripts/compare_synthesis_models.py` first, the way retrieval changes re-run `scripts/eval_retrieval.py`.
+
+---
+
+## 6. U10 — quiz generation on Sonnet 5 (2026-09-23)
+
+Blake: "quiz generation can move to sonnet." Measured first on prod. Four real historical topics, 10 questions each, went through the router's own retrieval, prompt, schema and citation check. Opus 5.5 then audited every answer key against the same passages.
+
+| Quiz model | Median time | Answer key correct | Single best answer | Citations resolving to the corpus | $ per quiz |
+|---|---|---|---|---|---|
+| Haiku 4.5 (before) | 23.3 s | 95% | 95% | 38% (50% without COLREGs) | 0.014 |
+| **Sonnet 5, effort `high`** | 35.6 s | 95% | 97% | **72% (97%)** | 0.050 |
+| Sonnet 5, `medium` | 26.9 s | 97% | 95% | 60% (80%) | 0.037 |
+| Sonnet 5, `low` | 23.1 s | 95% | 100% | 55% (73%) | 0.034 |
+
+- **Answer keys:** the reason in F11 did not hold up. Haiku's answer keys were as good as Sonnet's in this sample, within one question of 40.
+- **Citations:** the difference is grounding. Sonnet at `high` cites sections that exist in the corpus far more often.
+- **Shipped:** Sonnet 5 with effort pinned at `high`. The cap went from 4,000 to 16,000, because `high` produced up to 5,055 tokens; the old cap would have truncated the JSON into a 502.
+- **COLREGs:** 0 of 10 citations resolved for every model. The quiz verifier matched `section_number` case-sensitively, and the corpus writes "COLREGS Rule 13" where quizzes cite "COLREGs Rule 13(b)". It now matches case-insensitively, with no collisions: 35,866 distinct section numbers either way. Guides share the verifier and get the fix too.
+- **Found, not fixed:** exam-bank context retrieval matches the whole topic string, so multi-word topics get none (roadmap).
 
 ---
 
