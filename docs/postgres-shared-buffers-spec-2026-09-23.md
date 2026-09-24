@@ -1,8 +1,40 @@
 # Postgres `shared_buffers` 128 MB → 512 MB — spec
 
-**Status:** awaiting Blake's go (restarts prod Postgres; ~10–30 s of failed requests).
+**Status:** **EXECUTED 2026-09-24 02:27 UTC** on Blake's go ("512MB, pg_prewarm yes, restart now"; `pg_buffercache` was not answered and was not installed). Commit `e066078`. Results and a correction are in §0.
 **Date:** 2026-09-23. **Asked for by:** Blake ("go with shared_buffers, spec it").
 **Evidence:** read-only diagnostics on prod, 2026-09-23 20:10 UTC (`free`, `/proc`, `docker inspect`, `pg_settings`, `pg_statio_*`, and `EXPLAIN (ANALYZE, BUFFERS)` of the exact `_fetch_group` SQL for every source group).
+
+---
+
+## 0. Result (2026-09-24)
+
+**Restart.** A detached script ran the pre-checks: same image digest, compose command resolved, no backup or ingest running, next backup 33 min away. It stopped the API and worker, recreated the container, and waited for health. Postgres was healthy in 9 s after a clean shutdown, and the API was down 14 s in total. Now `shared_buffers = 512MB`, `wal_buffers = 16MB` (auto) and `shared_preload_libraries = pg_prewarm`. The autoprewarm leader is running, and its first dump at 02:32 recorded 65,536 blocks — the pool was already full.
+
+| Check | Before | After |
+|---|---|---|
+| 31 group queries, warm, sequential (EXPLAIN) | 470 ms, 32 MB read from outside the pool | 329 ms, **0 MB** |
+| Dense retrieval harness | 0.8226 / 0.6881 | **0.8226 / 0.6881** — 0 pairs gained or lost; plans unchanged |
+| Harness latency, p50 / p95 | 620 / 1,441 ms | 585 / 1,253 ms |
+| DB phase, first chat question after a deploy | ~13 s | **8.3 s** (warm is 7.6 s) |
+| Memory used / available | 1,286 / 2,629 MB | 1,707–1,762 / 2,153–2,208 MB |
+| Postgres shared memory in swap after a deploy build | — | ~23 MB of 512 MB |
+
+**Correction to §2 — the warm path did not get faster.** §2 projected 0.4–1 s for the warm DB phase, but that came from one isolated `retrieve()`. The full pipeline runs four reformulations × 31 groups = 124 group queries per question, through a 10-connection pool on 2 shared cores. Timed per step on four prod questions:
+
+| Step | Mean |
+|---|---|
+| `retrieve()` (4 per question, concurrent) | 3.33 s each |
+| One group query, including the wait for a pooled connection | 1.00 s |
+| Rewrite | 1.26 s |
+| Rerank | 3.23 s |
+
+The whole retrieval step took 7.95–11.32 s, the same as before the change (7.6–11.6 s, audit §4). The 32 MB of warm reads this removed were already served from the OS page cache.
+
+**What 512 MB did deliver:** the first question after a deploy now costs about the same as a warm one. The build can no longer push the working set out; only ~23 MB of the pool went to swap. The pool also holds the data regardless of other page-cache pressure, and autoprewarm refills it after any restart.
+
+**What is left, now the known long pole:** the fan-out itself is CPU- and connection-bound. The next candidate is to batch the 21 small exact-scan groups into one window-function query per reformulation, cutting 124 queries to ~44. It would keep top-k-per-group exactly, so the harness can prove results identical. Behind that are inline embedding storage (removes the TOAST lookups) and fewer reformulations (changes results; needs the harness).
+
+**One-week check:** counter baseline in `/root/pds/statio_baseline_20260924.txt` (HNSW read 758,669,519 / hit 30,521,552,926; heap read 222,293,719 / hit 1,005,498,210; TOAST read 90,978,390 / hit 153,722,316 at 02:33 UTC). Compute the deltas rather than calling `pg_stat_reset()`, which would also reset the counters autovacuum relies on.
 
 ---
 
@@ -94,7 +126,7 @@ Verify:
 9. **Plans unchanged.** `scripts/eval_retrieval.py --arm dense` must return exactly 0.8226 / 0.6881, the same per-pair ranks as the 2026-09-23 run.
 10. **Pool contents.** Check what the pool holds: `SELECT c.relname, count(*) * 8 / 1024 AS mb FROM pg_buffercache b JOIN pg_class c ON b.relfilenode = pg_relation_filenode(c.oid) GROUP BY 1 ORDER BY 2 DESC LIMIT 10;`
 11. **Next deploy.** Watch `vmstat` swap-in and swap-out during the build. Time the first chat question afterwards; it should be close to warm.
-12. **After a week.** Recheck the `pg_statio` hit ratios. Reset the counters on change day with `pg_stat_reset()`, so the numbers are not five months of history.
+12. **After a week.** Recheck the `pg_statio` hit ratios as deltas from a change-day snapshot, not five months of history. *(Superseded: the original plan called `pg_stat_reset()`, which also zeroes the counters autovacuum uses. A snapshot was taken instead; see §0.)*
 
 ## 6. Rollback
 
