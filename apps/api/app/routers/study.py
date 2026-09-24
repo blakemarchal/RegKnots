@@ -56,10 +56,17 @@ router = APIRouter(prefix="/study", tags=["study"])
 
 # ── Constants ──────────────────────────────────────────────────────────────
 
-# Model choices. Quizzes are always Haiku — structured-output, cheap,
-# and the ground truth is the regulation citation, not the model's
-# reasoning depth. Guides default Haiku for cost, Sonnet on deep_dive.
-_QUIZ_MODEL = "claude-haiku-4-5-20251001"
+# Model choices. Guides default Haiku for cost, Sonnet on deep_dive.
+# 2026-09-23 — quizzes moved Haiku -> Sonnet 5 (Blake's go, audit U10).
+# Measured on prod, 4 real topics x 10 questions, keys audited by Opus 5.5:
+# answer keys were equally good (Haiku 95%, Sonnet 95-97%), but citations
+# that resolve to a corpus section went from 50% (Haiku) to 97% (Sonnet at
+# its default effort), excluding COLREGs, which the verifier's case-sensitive
+# match failed for every model (fixed below). Effort is pinned at `high`
+# (the Sonnet 5 API default) rather than left implicit; `medium` / `low`
+# resolved 80% / 73%. Median generation 36 s vs 23 s for Haiku.
+_QUIZ_MODEL = "claude-sonnet-5"
+_QUIZ_EFFORT = "high"
 _GUIDE_MODEL_FAST = "claude-haiku-4-5-20251001"
 _GUIDE_MODEL_DEEP = "claude-sonnet-5"
 
@@ -92,7 +99,10 @@ _CAPTAIN_STUDY_CAP_PER_MONTH = None
 # Token budgets — quizzes are dense (10 questions × 4 options × short
 # explanation), guides are denser still. Plenty of headroom; we'd
 # rather pay a few cents than truncate.
-_QUIZ_MAX_TOKENS = 4000
+# 2026-09-23 — was 4000 (sized for Haiku). Sonnet 5 thinks adaptively and
+# thinking counts toward max_tokens: at `high` it produced up to 5,055
+# tokens on a 10-question quiz, which 4000 would have truncated into a 502.
+_QUIZ_MAX_TOKENS = 16000
 _GUIDE_MAX_TOKENS_FAST = 4000
 _GUIDE_MAX_TOKENS_DEEP = 8000
 
@@ -420,17 +430,21 @@ async def _verify_citations(pool, citations: list[str]) -> dict[str, bool]:
     rate to the frontend so users see a verification confidence."""
     if not citations:
         return {}
-    bases = list({_citation_base(c) for c in citations if c})
+    # 2026-09-23 — case-insensitive. The corpus stores "COLREGS Rule 13";
+    # generated quizzes cite "COLREGs Rule 13(b)", so every COLREGs quiz
+    # showed 0% verified. lower() creates no collisions on prod (35,866
+    # distinct section_numbers either way).
+    bases = list({_citation_base(c).lower() for c in citations if c})
     if not bases:
         return {c: False for c in citations}
     rows = await pool.fetch(
-        "SELECT DISTINCT section_number FROM regulations "
-        "WHERE section_number = ANY($1::text[])",
+        "SELECT DISTINCT lower(section_number) AS section_number FROM regulations "
+        "WHERE lower(section_number) = ANY($1::text[])",
         bases,
     )
     verified_bases: set[str] = {r["section_number"] for r in rows}
     return {
-        c: _citation_base(c) in verified_bases
+        c: _citation_base(c).lower() in verified_bases
         for c in citations
     }
 
@@ -519,6 +533,7 @@ async def generate_quiz(
             label="study quiz",
             model=_QUIZ_MODEL,
             max_tokens=_QUIZ_MAX_TOKENS,
+            output_config={"effort": _QUIZ_EFFORT},
             system=_QUIZ_SYSTEM_PROMPT,
             messages=[{"role": "user", "content": user_payload}],
         )
