@@ -48,6 +48,33 @@ def test_verify_citations_ignores_case_and_subsections():
     assert "lower(section_number)" in pool.sql
 
 
+def test_exam_bank_context_uses_a_source_restricted_vector_search(monkeypatch):
+    """2026-09-24 — was a whole-topic ILIKE: multi-word topics got 0 exam chunks."""
+    import rag.retriever as R
+
+    calls = []
+
+    async def fake_retrieve(**kw):
+        calls.append(kw)
+        if kw.get("sources") == ["nmc_exam_bank"]:
+            return [
+                {"source": "nmc_exam_bank", "section_number": "Q103", "section_title": "Deck Safety", "full_text": "a"},
+                {"source": "cfr_46", "section_number": "46 CFR 199.180", "section_title": "", "full_text": "b"},
+                {"source": "nmc_exam_bank", "section_number": "Q104", "section_title": "Deck Safety", "full_text": "c"},
+            ]
+        return [{"source": "cfr_46", "section_number": "46 CFR 199.180", "section_title": "", "full_text": "b"}]
+
+    async def fake_pool():
+        return object()
+
+    monkeypatch.setattr(R, "retrieve", fake_retrieve)
+    monkeypatch.setattr(S, "get_pool", fake_pool)
+    exam, corpus = asyncio.run(S._retrieve_for_topic("COLREGs Rule 13 overtaking", k_exam_bank=4))
+    assert [c["section_number"] for c in exam] == ["Q103", "Q104"]   # other sources filtered out
+    assert calls[0]["sources"] == ["nmc_exam_bank"] and calls[0]["query"] == "COLREGs Rule 13 overtaking"
+    assert [c["section_number"] for c in corpus] == ["46 CFR 199.180"]
+
+
 def test_verify_citations_empty_inputs():
     assert asyncio.run(S._verify_citations(_Pool([]), [])) == {}
     assert asyncio.run(S._verify_citations(_Pool([]), ["", ""])) == {"": False}

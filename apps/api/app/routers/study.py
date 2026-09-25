@@ -333,25 +333,23 @@ async def _retrieve_for_topic(
     corpus_chunks: list[dict] = []
 
     if include_exam_bank:
-        # Direct SQL — chat retrieval explicitly excludes nmc_exam_bank
-        # from SOURCE_GROUPS, so we bypass it for this targeted pull.
-        # ILIKE on section_title for topic match (titles are like
-        # "Deck Safety — USCG exam-pool questions (Q103)").
+        # Chat retrieval excludes nmc_exam_bank from SOURCE_GROUPS, so this
+        # is a targeted pull. 2026-09-24 — vector search restricted to the
+        # exam pool, replacing a whole-topic ILIKE that matched only when
+        # the topic string appeared verbatim: "COLREGs" did, "COLREGs Rule 13
+        # overtaking" never could, so 3 of the 6 real quiz topics got no
+        # exam context. The explicit-sources path uses the iterative HNSW
+        # scan (the exam pool is 2.8% of rows). retrieve()'s keyword
+        # side-searches span every source, hence the filter on the way out.
         try:
-            rows = await pool.fetch(
-                """
-                SELECT id, source, section_number, section_title, full_text,
-                       1.0 AS similarity
-                FROM regulations
-                WHERE source = 'nmc_exam_bank'
-                  AND (section_title ILIKE '%' || $1 || '%'
-                       OR full_text ILIKE '%' || $1 || '%')
-                ORDER BY length(full_text) DESC
-                LIMIT $2
-                """,
-                topic, k_exam_bank,
+            rows = await retrieve(
+                query=topic,
+                pool=pool,
+                openai_api_key=settings.openai_api_key,
+                limit=k_exam_bank * 2,
+                sources=["nmc_exam_bank"],
             )
-            exam_chunks = [dict(r) for r in rows]
+            exam_chunks = [r for r in rows if r.get("source") == "nmc_exam_bank"][:k_exam_bank]
         except Exception as exc:
             logger.warning(
                 "exam_bank retrieval failed (degrading to corpus-only): %s: %s",
