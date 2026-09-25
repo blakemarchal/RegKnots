@@ -2715,6 +2715,9 @@ async def chat_with_progress(
             reranker_enabled=reranker_enabled,
             hybrid_retrieval_enabled=hybrid_retrieval_enabled,
             hybrid_rrf_k=hybrid_rrf_k,
+            # 2026-09-24 — scopes retrieval by the user's jurisdiction
+            # focus when the vessel's flag is Unknown (roadmap item 6).
+            jurisdiction_focus=user_jurisdiction_focus,
         ))
         route = await route_task
     except BaseException:

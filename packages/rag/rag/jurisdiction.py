@@ -447,6 +447,19 @@ _QUERY_JURISDICTION_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
 ]
 
 
+def focus_to_jurisdiction(focus: str | None) -> str | None:
+    """Map users.jurisdiction_focus to a jurisdiction code.
+
+    2026-09-24 — values on prod: 'us', 'uk', 'international_mixed', NULL.
+    Only a single-flag code maps; 'international_mixed' and anything
+    unrecognized return None (no single flag to scope to).
+    """
+    if not focus:
+        return None
+    code = focus.strip().lower()
+    return code if code in _FLAG_ALIASES else None
+
+
 def jurisdictions_in_query(query: str) -> set[str]:
     """Detect explicit jurisdiction references in the query text.
 
@@ -465,6 +478,7 @@ def jurisdictions_in_query(query: str) -> set[str]:
 def allowed_jurisdictions(
     query: str,
     vessel_profile: dict | None,
+    jurisdiction_focus: str | None = None,
 ) -> set[str] | None:
     """Compute the retrieval allow-set for a query.
 
@@ -483,7 +497,16 @@ def allowed_jurisdictions(
     """
     allowed: set[str] = {"intl"}
 
-    flag_juris = flag_to_jurisdiction((vessel_profile or {}).get("flag_state"))
+    # 2026-09-24 (roadmap item 6) — when the vessel's flag is Unknown (50 of
+    # 56 profiles on prod) or there is no vessel, fall back to the user's own
+    # jurisdiction_focus. A recognized vessel flag always wins. 17 of the 50
+    # Unknown-flag vessels belong to a 'us' / 'uk' user. The 09-10 audit
+    # measured the effect of scoping: the Captain's questions went from
+    # 4/32 foreign-flag hits (flag Unknown) to 0/32 (flag set).
+    flag_juris = (
+        flag_to_jurisdiction((vessel_profile or {}).get("flag_state"))
+        or focus_to_jurisdiction(jurisdiction_focus)
+    )
     if flag_juris:
         allowed.add(flag_juris)
 

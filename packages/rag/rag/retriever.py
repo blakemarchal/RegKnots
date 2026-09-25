@@ -209,6 +209,11 @@ _DEFAULT_CANDIDATES_PER_GROUP = 6
 # same retrieval. The alternative (top-1) suppresses Table-1 style
 # content behind chunk-0 intros that score higher on vector similarity.
 _MAX_CHUNKS_PER_SECTION = 2
+# 2026-09-25 — a section the user cited by number (identifier
+# section_number match) may keep up to this many chunks, so a question
+# about "SOLAS III/20" can see the whole regulation (5 chunks), not 2 of
+# them. The reranker still picks the final top-k.
+_MAX_CHUNKS_PER_CITED_SECTION = 5
 
 # Reverse index: source_code → group_name. Built once at module load.
 _SOURCE_TO_GROUP: dict[str, str] = {
@@ -871,7 +876,7 @@ _IDENTIFIER_PATTERNS: list[tuple[str, re.Pattern]] = [
         re.IGNORECASE,
     )),
     ("colregs_rule", re.compile(r"\b(?:COLREGs?\s+)?Rule\s+(\d{1,2})\b", re.IGNORECASE)),
-    ("solas_reg",    re.compile(r"\bSOLAS\s+(Ch\.?)?([IVX]+-\d+)(?:\s*(?:Reg\.?\s*|/)(\d+))?\b", re.IGNORECASE)),
+    # SOLAS citations are parsed separately (_solas_citations below).
     ("nvic_number",  re.compile(r"\bNVIC\s+(\d{2}-\d{2})\b", re.IGNORECASE)),
     ("ism_section",  re.compile(r"\bISM\s+(?:Code\s+)?(\d+(?:\.\d+)?)\b", re.IGNORECASE)),
     # MARPOL — explicit "MARPOL Annex <roman>" + optional Regulation number.
@@ -904,6 +909,80 @@ _IDENTIFIER_PATTERNS: list[tuple[str, re.Pattern]] = [
     # CG-719B/C/K (medical), CG-2692 (casualty report), CG-1258.
     ("cg_form",      re.compile(r"\bCG[-\s]?(\d{2,4}[A-Za-z]?)\b", re.IGNORECASE)),
 ]
+
+
+# CFR titles the corpus carries (sources cfr_33 / cfr_46 / cfr_49); a
+# citation of one resolves against section_number within that source.
+_CFR_CORPUS_TITLES = frozenset({"33", "46", "49"})
+
+
+# 2026-09-25 — SOLAS citations. The corpus names per-Regulation sections
+# "SOLAS Ch.III Reg.20" (D6.97 Sprint B), so a regulation citation resolves
+# to an exact section_number. The old pattern accepted only hyphenated
+# chapters ("II-2") and then searched full_text for the chapter string
+# alone, so "SOLAS III/20" and "SOLAS Chapter III, Part B, Section I,
+# Regulation 20" (the Captain, 2026-09-23) matched nothing and the answer
+# said the regulation's text had not been retrieved.
+_SOLAS_CH = r"(?P<chap>[IVX]{1,4}(?:-\d)?)"
+_SOLAS_CH_NAMED = r"(?P<chap>[IVX]{1,4}(?:-\d)?|\d{1,2}(?:-\d)?)"   # "Chapter 3" too
+_SOLAS_REG = r"(?P<reg>\d{1,3}(?:-\d{1,2})?)(?!\d)"                # "20", "3-9"
+_SOLAS_NAME = r"\bSOLAS\b(?:\s+(?:19)?74)?(?:\s+Convention)?"
+_SOLAS_CITATION_RES: tuple[re.Pattern, ...] = (
+    # SOLAS III/20 · SOLAS regulation II-2/10.2 · SOLAS 74 Reg. III/20
+    re.compile(
+        _SOLAS_NAME + r"[\s,]+(?:Reg(?:ulation)?s?\.?\s*)?" + _SOLAS_CH + r"\s*/\s*" + _SOLAS_REG,
+        re.IGNORECASE,
+    ),
+    # Regulation III/20 of SOLAS · regulation II-2/10 of the SOLAS Convention
+    re.compile(
+        r"\bReg(?:ulation)?s?\.?\s*" + _SOLAS_CH + r"\s*/\s*" + _SOLAS_REG
+        + r"(?:\.\d+)*\s+of\s+(?:the\s+)?SOLAS\b",
+        re.IGNORECASE,
+    ),
+    # SOLAS Ch.III Reg.20 · SOLAS Chapter III, Part B, Section I, Regulation 20
+    # · SOLAS Ch.III/20
+    re.compile(
+        _SOLAS_NAME + r"[\s,]+Ch(?:apter)?\.?\s*" + _SOLAS_CH_NAMED + r"\b"
+        r"(?:[\s,]+(?:Part\s+[A-Z](?:-\d)?|Section\s+[IVX]+|Sec\.?\s*[IVX]+)\b)*"
+        r"(?:[\s,]+Reg(?:ulation)?\.?\s*|\s*/\s*)" + _SOLAS_REG,
+        re.IGNORECASE,
+    ),
+    # Regulation 20 of SOLAS Chapter III
+    re.compile(
+        r"\bReg(?:ulation)?\.?\s*" + _SOLAS_REG + r"\s+of\s+(?:the\s+)?"
+        + _SOLAS_NAME + r"[\s,]+Ch(?:apter)?\.?\s*" + _SOLAS_CH_NAMED + r"\b",
+        re.IGNORECASE,
+    ),
+)
+_ROMAN =("", "I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X",
+          "XI", "XII", "XIII", "XIV", "XV")
+
+
+def _solas_chapter(raw: str) -> str | None:
+    """Normalise a cited chapter to the corpus form: "iii" → "III", "2-1" → "II-1"."""
+    head, _, tail = raw.upper().partition("-")
+    if head.isdigit():
+        n = int(head)
+        if not 1 <= n < len(_ROMAN):
+            return None
+        head = _ROMAN[n]
+    return f"{head}-{tail}" if tail else head
+
+
+def _solas_citations(query: str) -> list[tuple[str, str]]:
+    """(chapter, regulation) for each SOLAS regulation citation, in query order."""
+    found: list[tuple[int, str, str]] = []
+    for regex in _SOLAS_CITATION_RES:
+        for m in regex.finditer(query):
+            chap = _solas_chapter(m.group("chap"))
+            if chap:
+                found.append((m.start(), chap, m.group("reg")))
+    found.sort()
+    out: list[tuple[str, str]] = []
+    for _, chap, reg in found:
+        if (chap, reg) not in out:
+            out.append((chap, reg))
+    return out
 
 
 # Form-context words that, when present alongside a bare 3-4 digit
@@ -1024,23 +1103,46 @@ def _extract_identifiers(query: str) -> list[dict]:
                 })
             elif id_type == "cfr_section":
                 title = m.group(1)
-                section = m.group(2)
-                identifiers.append({
-                    "type": id_type,
-                    "value": f"{title} CFR {section}",
-                    "pattern": section,
-                })
+                section = m.group(2).rstrip(".")
+                cited = f"{title} CFR {section}"
+                source = f"cfr_{title}" if title in _CFR_CORPUS_TITLES else None
+                # 2026-09-25 — the old identifier searched full_text for the
+                # bare section string, so a part-only citation ("46 CFR 34",
+                # often invented by a query reformulation) matched any chunk
+                # containing "34" and put 5 arbitrary chunks at the top of the
+                # pool; Karynn's bunker-CLC answer (2026-09-25) cited one of
+                # them, 49 CFR 171.8. Sections now resolve to the section
+                # (corpus names them "46 CFR 199.180"), parts to the part's
+                # chunks nearest the query, and an invented citation to nothing.
+                if "." in section and source:
+                    identifiers.append({
+                        "type": id_type,
+                        "value": cited,
+                        "pattern": section,
+                        "section_number": cited,
+                        "source_filter": (source,),
+                        "fallback_pattern": section,
+                    })
+                elif "." in section:
+                    identifiers.append({
+                        "type": id_type,
+                        "value": cited,
+                        "pattern": section,
+                    })
+                elif source:
+                    identifiers.append({
+                        "type": "cfr_part",
+                        "value": cited,
+                        "pattern": section,
+                        "section_prefix": cited + ".",
+                        "source_filter": (source,),
+                    })
+                # a bare part number of a title we don't carry: nothing
             elif id_type == "colregs_rule":
                 identifiers.append({
                     "type": id_type,
                     "value": f"Rule {m.group(1)}",
                     "pattern": f"Rule {m.group(1)}",
-                })
-            elif id_type == "solas_reg":
-                identifiers.append({
-                    "type": id_type,
-                    "value": m.group(0),
-                    "pattern": m.group(2),  # e.g. "II-2"
                 })
             elif id_type == "nvic_number":
                 identifiers.append({
@@ -1122,6 +1224,25 @@ def _extract_identifiers(query: str) -> list[dict]:
                     "pattern": f"P{num}",
                     "regex": True,
                 })
+
+    # 2026-09-25 — SOLAS citations. A regulation resolves to its exact
+    # section_number; one the corpus doesn't have finds nothing. A chapter
+    # cited without a regulation adds no identifier. The old one searched
+    # full_text for the chapter string ("II-2") and returned 5 arbitrary
+    # chunks. A within-chapter search was measured and held back: the
+    # "SOLAS Ch.II-2 " rows are stale Part-level ones (the per-Regulation
+    # text sits under older "SOLAS Ch.II Reg.N" names), and injecting them
+    # took "SOLAS II-2 fire detection" from 2 to 0 correct chunks in the top 8.
+    # Revisit after the SOLAS re-ingest (docs/sprint-audits/question-audit-2026-09-25.md §3.5).
+    for chap, reg in _solas_citations(query):
+        section = f"SOLAS Ch.{chap} Reg.{reg}"
+        identifiers.append({
+            "type": "solas_reg",
+            "value": section,
+            "pattern": section,
+            "section_number": section,
+            "source_filter": ("solas",),
+        })
 
     # Sprint D6.24 — implicit MARPOL Annex inference. Runs AFTER the
     # explicit pattern loop so we can check whether the explicit
@@ -1275,6 +1396,7 @@ async def _identifier_search(
     pool: asyncpg.Pool,
     limit: int = 5,
     allowed_jurisdictions: list[str] | None = None,
+    query_vec: str | None = None,
 ) -> list[dict]:
     """Search regulations by text for structured identifiers (high confidence).
 
@@ -1288,6 +1410,15 @@ async def _identifier_search(
                        is restricted to those sources only. Used for
                        bare-number UN searches against imdg/erg where
                        the "UN" prefix is omitted in tabular storage.
+      section_number — exact section_number match instead of a text
+                       search (2026-09-25, SOLAS / CFR section citations).
+                       The section's chunks come back nearest-first to
+                       `query_vec` when given, else in document order.
+      section_prefix — section_number prefix match (a cited CFR part or
+                       SOLAS chapter): the chunks under it nearest to
+                       `query_vec`.
+      fallback_pattern — with section_number: substring pattern searched
+                       when no section carries that exact name.
 
     Sprint D6.19 — `allowed_jurisdictions`, when set, intersects against
     chunk.jurisdictions via the && (overlap) operator. Same severance
@@ -1297,20 +1428,21 @@ async def _identifier_search(
     """
     results: list[dict] = []
     seen_ids: set = set()
-    juris_clause = " AND jurisdictions && $JN::text[] " if allowed_jurisdictions else ""
     for ident in identifiers:
         is_regex = bool(ident.get("regex"))
         source_filter = ident.get("source_filter")
-        pattern = ident["pattern"]
-        # Build the parameter list and clause, then renumber the JN
-        # placeholder to match its position. Order: $1=pattern,
-        # $2=limit, $3=source_filter (optional), $N=juris (optional).
-        args: list = [pattern if not is_regex else (r"\m" + pattern + r"\M"), limit]
-        clauses: list[str] = []
-        if is_regex:
-            clauses.append("full_text ~ $1")
+        section = ident.get("section_number")
+        prefix = ident.get("section_prefix")
+        by_section = bool(section or prefix)
+        # Order: $1=pattern (or section), $2=limit, then optional
+        # source_filter, juris and query vector in that order.
+        if by_section:
+            args: list = [section or prefix + "%", limit]
+            clauses: list[str] = ["section_number = $1" if section else "section_number LIKE $1"]
         else:
-            clauses.append("full_text ILIKE '%' || $1 || '%'")
+            pattern = ident["pattern"]
+            args = [pattern if not is_regex else (r"\m" + pattern + r"\M"), limit]
+            clauses = ["full_text ~ $1" if is_regex else "full_text ILIKE '%' || $1 || '%'"]
         next_idx = 3
         if source_filter:
             clauses.append(f"source = ANY(${next_idx})")
@@ -1320,12 +1452,35 @@ async def _identifier_search(
             clauses.append(f"jurisdictions && ${next_idx}::text[]")
             args.append(list(allowed_jurisdictions))
             next_idx += 1
-        sql = (
-            "SELECT id, source, section_number, section_title, full_text, "
-            "       0.0 AS similarity "
-            "FROM regulations WHERE " + " AND ".join(clauses) + " LIMIT $2"
-        )
+        where = " AND ".join(clauses)
+        if by_section and query_vec:
+            # MATERIALIZED: filter through the btree first, then rank, so the
+            # planner never takes the HNSW index (whose post-filter can come
+            # back short). 49 CFR Part 172, 710 chunks: ~40-55 ms.
+            sql = (
+                "WITH m AS MATERIALIZED ("
+                "SELECT id, source, section_number, section_title, full_text, embedding "
+                "FROM regulations WHERE " + where + ") "
+                "SELECT id, source, section_number, section_title, full_text, "
+                "       0.0 AS similarity "
+                f"FROM m ORDER BY embedding <=> ${next_idx}::vector LIMIT $2"
+            )
+            args.append(query_vec)
+        else:
+            order = " ORDER BY section_number, chunk_index" if by_section else ""
+            sql = (
+                "SELECT id, source, section_number, section_title, full_text, "
+                "       0.0 AS similarity "
+                "FROM regulations WHERE " + where + order + " LIMIT $2"
+            )
         rows = await pool.fetch(sql, *args)
+        if not rows and ident.get("fallback_pattern"):
+            # The cited section isn't in the corpus under that exact name
+            # (typo, unusual format): fall back to the old substring search.
+            rows = await _identifier_search(
+                [{"type": ident["type"], "value": ident["value"], "pattern": ident["fallback_pattern"]}],
+                pool, limit, allowed_jurisdictions,
+            )
         for r in rows:
             if r["id"] not in seen_ids:
                 seen_ids.add(r["id"])
@@ -1447,6 +1602,110 @@ async def _broad_keyword_search(
 # ── Per-group SQL fetch ──────────────────────────────────────────────────────
 
 
+# ── 2026-09-24 — retrieval fan-out: skip impossible groups, iterative scan ────
+#
+# Measured on prod (docs/postgres-shared-buffers-spec-2026-09-23.md §0): each
+# question ran 4 reformulations × 31 per-group queries = 124 queries through a
+# 10-connection pool on 2 cores; the DB phase was CPU- and queue-bound.
+#   1. A group whose sources carry no chunk tagged with an allowed
+#      jurisdiction can only return zero rows, so it is skipped (for a
+#      US-flag profile, 9 of 31 groups: AMSA, NMA, MPA, BMA, CY, PA, LISCR,
+#      IRI, MARDEP). Identical results; retrieve() ~14% faster under load.
+#   2. pgvector 0.8's iterative index scan, so a selective source filter
+#      cannot come back short when the planner takes the HNSW index (the
+#      drill question's NVIC group had returned 0 of 6 rows). Kept on the
+#      explicit-source path as a guard (one small source, e.g. the quiz's
+#      nmc_exam_bank; on 2026-09-25 six exam topics returned the same rows
+#      with and without it). NOT on the group fan-out: measured 2026-09-25
+#      on eval_retrieval.py, it gained 1 strong-recall pair but cost 0.027
+#      MRR, all from fuller CFR groups ranking 49 CFR 391 (FMCSA truck-driver
+#      medical rules) above the mariner-medical NVIC. Revisit once cfr_49 is
+#      scoped to its maritime parts.
+# Also measured and NOT shipped: batching the small exact-scan groups into one
+# windowed query per retrieve() — identical results, but it concentrated the
+# exact-scan work on one connection and was slower under real concurrency.
+_GROUP_ITERATIVE_SCAN = False
+
+# SET LOCAL, per query: asyncpg's pool runs RESET ALL whenever a connection
+# is released, so a session-level SET (pool `init`) is lost after the
+# connection's first query. max_scan_tuples bounds the scan for groups with
+# few matching rows (pgvector's default is 20,000).
+_ITERATIVE_SCAN_SQL = (
+    "SET LOCAL hnsw.iterative_scan = relaxed_order; "
+    "SET LOCAL hnsw.max_scan_tuples = 5000"
+)
+
+# source -> (rows with embeddings, jurisdiction tags on any of its rows).
+# Process-lifetime, like _AVAILABLE_SOURCES; deploys restart the process.
+_SOURCE_STATS: dict[str, tuple[int, frozenset[str]]] | None = None
+_SOURCE_STATS_LOCK = asyncio.Lock()
+
+
+async def _get_source_stats(pool: asyncpg.Pool) -> dict[str, tuple[int, frozenset[str]]]:
+    global _SOURCE_STATS
+    if _SOURCE_STATS is not None:
+        return _SOURCE_STATS
+    async with _SOURCE_STATS_LOCK:
+        if _SOURCE_STATS is not None:
+            return _SOURCE_STATS
+        rows = await pool.fetch(
+            """
+            WITH counts AS (
+                SELECT source, count(*) AS n
+                FROM regulations WHERE embedding IS NOT NULL GROUP BY source
+            ), tags AS (
+                SELECT source, array_agg(DISTINCT tag) AS tags
+                FROM regulations, unnest(jurisdictions) AS tag
+                WHERE embedding IS NOT NULL GROUP BY source
+            )
+            SELECT c.source, c.n, coalesce(t.tags, '{}'::text[]) AS tags
+            FROM counts c LEFT JOIN tags t USING (source)
+            """
+        )
+        _SOURCE_STATS = {r["source"]: (int(r["n"]), frozenset(r["tags"] or ())) for r in rows}
+    return _SOURCE_STATS
+
+
+def _plan_groups(
+    available: set[str],
+    stats: dict[str, tuple[int, frozenset[str]]],
+    juris: list[str] | None,
+) -> list[tuple[str, list[str], int]]:
+    """Active groups in SOURCE_GROUPS order, as (name, sources, k).
+
+    A source is dropped when a jurisdiction filter is active and none of its
+    chunks carries an allowed tag — it could only contribute zero rows.
+    """
+    allowed = frozenset(juris) if juris is not None else None
+    active: list[tuple[str, list[str], int]] = []
+    for group_name, group_sources in SOURCE_GROUPS.items():
+        present = [
+            s for s in group_sources
+            if s in available and (allowed is None or stats.get(s, (0, frozenset()))[1] & allowed)
+        ]
+        if present:
+            k = _CANDIDATES_PER_GROUP.get(group_name, _DEFAULT_CANDIDATES_PER_GROUP)
+            active.append((group_name, present, k))
+    return active
+
+
+async def _fetch_iterative(
+    pool: asyncpg.Pool, sql: str, *params, iterative: bool = True,
+) -> list[dict]:
+    """Run a vector query with pgvector's iterative index scan enabled and
+    return rows best-first (relaxed_order may emit them slightly out of order).
+    iterative=False is a plain fetch."""
+    if not iterative:
+        return [dict(r) for r in await pool.fetch(sql, *params)]
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute(_ITERATIVE_SCAN_SQL)
+            rows = await conn.fetch(sql, *params)
+    out = [dict(r) for r in rows]
+    out.sort(key=lambda c: c["similarity"], reverse=True)
+    return out
+
+
 async def _fetch_group(
     pool: asyncpg.Pool,
     vec_literal: str,
@@ -1460,9 +1719,12 @@ async def _fetch_group(
     intersects against the chunk's `jurisdictions` array using the &&
     (overlap) operator, backed by the GIN index on jurisdictions.
     None = no filter (preserve generic-query default behavior).
+
+    Iterative HNSW scan per _GROUP_ITERATIVE_SCAN (off; see above).
     """
     if allowed_jurisdictions is not None:
-        rows = await pool.fetch(
+        return await _fetch_iterative(
+            pool,
             """
             SELECT id, source, section_number, section_title, full_text,
                    1 - (embedding <=> $1::vector) AS similarity
@@ -1477,23 +1739,24 @@ async def _fetch_group(
             candidates,
             group_sources,
             allowed_jurisdictions,
+            iterative=_GROUP_ITERATIVE_SCAN,
         )
-    else:
-        rows = await pool.fetch(
-            """
-            SELECT id, source, section_number, section_title, full_text,
-                   1 - (embedding <=> $1::vector) AS similarity
-            FROM regulations
-            WHERE embedding IS NOT NULL
-              AND source = ANY($3)
-            ORDER BY embedding <=> $1::vector
-            LIMIT $2
-            """,
-            vec_literal,
-            candidates,
-            group_sources,
-        )
-    return [dict(r) for r in rows]
+    return await _fetch_iterative(
+        pool,
+        """
+        SELECT id, source, section_number, section_title, full_text,
+               1 - (embedding <=> $1::vector) AS similarity
+        FROM regulations
+        WHERE embedding IS NOT NULL
+          AND source = ANY($3)
+        ORDER BY embedding <=> $1::vector
+        LIMIT $2
+        """,
+        vec_literal,
+        candidates,
+        group_sources,
+        iterative=_GROUP_ITERATIVE_SCAN,
+    )
 
 
 # ── Public API ───────────────────────────────────────────────────────────────
@@ -1506,6 +1769,10 @@ async def retrieve(
     vessel_profile: dict | None = None,
     limit: int = 8,
     sources: list[str] | None = None,
+    jurisdiction_focus: str | None = None,
+    # 2026-09-25 — False for query-rewrite reformulations (retrieve_enhanced):
+    # only the user's own words may inject a cited section.
+    identifier_search: bool = True,
 ) -> list[dict]:
     """Return semantically relevant regulation chunks.
 
@@ -1534,16 +1801,22 @@ async def retrieve(
     # which preserves D6.17 behavior — no SQL filter is applied and the
     # prompt-side rules handle the answer.
     from rag.jurisdiction import allowed_jurisdictions as _allowed_juris_fn
-    juris_allow = _allowed_juris_fn(query, vessel_profile)
+    # 2026-09-24 — jurisdiction_focus (users.jurisdiction_focus) scopes the
+    # search when the vessel's flag is Unknown; see allowed_jurisdictions().
+    juris_allow = _allowed_juris_fn(query, vessel_profile, jurisdiction_focus)
     juris_list = list(juris_allow) if juris_allow is not None else None
     if juris_list is not None:
         logger.info("Jurisdiction filter active: %s", sorted(juris_list))
 
     if sources:
         # Explicit source filter — single query, no diversification.
+        # 2026-09-24 — iterative HNSW scan, a guard for a filter to one small
+        # source (e.g. nmc_exam_bank, 2.8% of rows) if the planner takes the
+        # HNSW index; see the fan-out notes above _GROUP_ITERATIVE_SCAN.
         fetch_limit = max(limit * 3, 20)
         if juris_list is not None:
-            rows = await pool.fetch(
+            rows = await _fetch_iterative(
+                pool,
                 """
                 SELECT id, source, section_number, section_title, full_text,
                        1 - (embedding <=> $1::vector) AS similarity
@@ -1560,7 +1833,8 @@ async def retrieve(
                 juris_list,
             )
         else:
-            rows = await pool.fetch(
+            rows = await _fetch_iterative(
+                pool,
                 """
                 SELECT id, source, section_number, section_title, full_text,
                        1 - (embedding <=> $1::vector) AS similarity
@@ -1601,19 +1875,16 @@ async def retrieve(
         active_groups: list[str] = []
     else:
         # Diversified fetch: one query per source group that has data, all
-        # running concurrently on the HNSW index.
+        # running concurrently. 2026-09-24 — groups that cannot match the
+        # jurisdiction filter are skipped (see _plan_groups).
         available = await _get_available_sources(pool)
-        tasks: list = []
-        active_groups = []
-        for group_name, group_sources in SOURCE_GROUPS.items():
-            present = [s for s in group_sources if s in available]
-            if not present:
-                continue
-            n = _CANDIDATES_PER_GROUP.get(group_name, _DEFAULT_CANDIDATES_PER_GROUP)
-            active_groups.append(group_name)
-            tasks.append(_fetch_group(pool, vec_literal, present, n, juris_list))
-
-        results_per_group = await asyncio.gather(*tasks)
+        stats = await _get_source_stats(pool)
+        planned = _plan_groups(available, stats, juris_list)
+        active_groups = [name for name, _, _ in planned]
+        results_per_group = await asyncio.gather(*(
+            _fetch_group(pool, vec_literal, sources_, k, juris_list)
+            for _, sources_, k in planned
+        ))
 
         candidates = []
         seen_ids: set = set()
@@ -1666,7 +1937,7 @@ async def retrieve(
     # When a keyword-matched chunk is already in the pool (same
     # section_number), we BOOST the existing chunk's similarity to the
     # keyword synthetic score instead of silently discarding the signal.
-    identifiers = _extract_identifiers(query)
+    identifiers = _extract_identifiers(query) if identifier_search else []
     keywords = _extract_keywords(query)
 
     # Sprint D6.8 — expand mariner-vocab keywords ("lifejacket", "log",
@@ -1705,12 +1976,15 @@ async def retrieve(
     kw_results: list[dict] = []
     specific_keywords: list[str] = []
     if identifiers:
-        id_results = await _identifier_search(identifiers, pool, allowed_jurisdictions=juris_list)
+        id_results = await _identifier_search(
+            identifiers, pool, allowed_jurisdictions=juris_list, query_vec=vec_literal,
+        )
     if keywords:
         kw_results, specific_keywords = await _broad_keyword_search(
             keywords, pool, synonym_keywords=synonym_added,
             allowed_jurisdictions=juris_list,
         )
+    cited_sections = {i["section_number"] for i in identifiers if i.get("section_number")}
 
     max_sim = max(
         (float(c["similarity"]) for c in candidates),
@@ -1759,7 +2033,15 @@ async def retrieve(
             boosted = 0
             for chunk in chunks:
                 sec = chunk.get("section_number", "")
+                cited = sec in cited_sections
                 if chunk["id"] in existing_ids:
+                    if cited:
+                        # A cited section's chunk that vector search already
+                        # found ranks with its siblings, not below them.
+                        for c in candidates:
+                            if c["id"] == chunk["id"] and float(c["similarity"]) < synthetic_sim:
+                                c["similarity"] = synthetic_sim
+                                boosted += 1
                     continue
                 if sec and sec in existing_sections:
                     # Section already present. Either:
@@ -1771,7 +2053,8 @@ async def retrieve(
                     #       (Sprint D5.5 — allows Table 1 chunks to enter
                     #       even when chunk-0 intro already got retrieved).
                     existing = section_indices.get(sec, [])
-                    if len(existing) < _MAX_CHUNKS_PER_SECTION:
+                    cap = _MAX_CHUNKS_PER_CITED_SECTION if cited else _MAX_CHUNKS_PER_SECTION
+                    if len(existing) < cap:
                         chunk["similarity"] = synthetic_sim
                         section_indices[sec].append(len(candidates))
                         candidates.append(chunk)
@@ -2186,7 +2469,15 @@ def _filter_by_vessel_applicability(
         if parsed is None:
             kept.append(r)
             continue
-        _title, part = parsed
+        title, part = parsed
+        # 2026-09-25 — the part lists are 46 CFR subchapters. Matched against
+        # every title, they dropped 33/49 CFR parts that merely share a
+        # number: for a containership 5,137 chunks, including the Inland
+        # Rules (33 CFR 83-89), RNAs and safety zones (33 CFR 165), ship
+        # reporting (169), COFR (138) and hazmat carriage by vessel (49 CFR 176).
+        if title != "46":
+            kept.append(r)
+            continue
         # Universal parts: never drop
         if part in _UNIVERSAL_CFR_46_PARTS:
             kept.append(r)
@@ -2731,6 +3022,10 @@ async def retrieve_hybrid(
     *,
     rrf_k: int = 60,
     lexical_per_group: int | None = None,
+    jurisdiction_focus: str | None = None,
+    # 2026-09-25 — False for query-rewrite reformulations (retrieve_enhanced):
+    # only the user's own words may inject a cited section.
+    identifier_search: bool = True,
 ) -> list[dict]:
     """Sprint D6.71 — hybrid dense + lexical retrieval with RRF fusion.
 
@@ -2759,7 +3054,7 @@ async def retrieve_hybrid(
     vec_literal = await _embed_query(openai_api_key, query)
 
     from rag.jurisdiction import allowed_jurisdictions as _allowed_juris_fn
-    juris_allow = _allowed_juris_fn(query, vessel_profile)
+    juris_allow = _allowed_juris_fn(query, vessel_profile, jurisdiction_focus)
     juris_list = list(juris_allow) if juris_allow is not None else None
 
     available = await _get_available_sources(pool)
@@ -2824,7 +3119,7 @@ async def retrieve_hybrid(
     # Reused with synthetic similarities (max_sim + 0.05 / 0.02) that
     # will dominate RRF scores (~0.03 max), preserving identifier and
     # keyword priority identical to the dense-only path.
-    identifiers = _extract_identifiers(query)
+    identifiers = _extract_identifiers(query) if identifier_search else []
     keywords = _extract_keywords(query)
     synonym_added: set[str] = set()
     if keywords:
@@ -2840,12 +3135,15 @@ async def retrieve_hybrid(
     kw_results: list[dict] = []
     specific_keywords: list[str] = []
     if identifiers:
-        id_results = await _identifier_search(identifiers, pool, allowed_jurisdictions=juris_list)
+        id_results = await _identifier_search(
+            identifiers, pool, allowed_jurisdictions=juris_list, query_vec=vec_literal,
+        )
     if keywords:
         kw_results, specific_keywords = await _broad_keyword_search(
             keywords, pool, synonym_keywords=synonym_added,
             allowed_jurisdictions=juris_list,
         )
+    cited_sections = {i["section_number"] for i in identifiers if i.get("section_number")}
 
     max_sim = max(
         (float(c["similarity"]) for c in candidates),
@@ -2877,7 +3175,9 @@ async def retrieve_hybrid(
                     continue
                 if sec and sec in existing_sections:
                     existing = section_indices.get(sec, [])
-                    if len(existing) < _MAX_CHUNKS_PER_SECTION:
+                    cap = (_MAX_CHUNKS_PER_CITED_SECTION if sec in cited_sections
+                           else _MAX_CHUNKS_PER_SECTION)
+                    if len(existing) < cap:
                         chunk["similarity"] = synthetic_sim
                         section_indices[sec].append(len(candidates))
                         candidates.append(chunk)
@@ -2945,6 +3245,9 @@ async def retrieve_enhanced(
     hybrid_retrieval_enabled: bool = False,
     hybrid_rrf_k: int = 60,
     hybrid_lexical_per_group: int | None = None,
+    # 2026-09-24 — users.jurisdiction_focus; scopes retrieval when the
+    # vessel's flag is Unknown (see rag.jurisdiction.allowed_jurisdictions).
+    jurisdiction_focus: str | None = None,
 ) -> list[dict]:
     """Sprint D6.66 — enhanced retrieval orchestrator.
 
@@ -3004,72 +3307,65 @@ async def retrieve_enhanced(
     # at the top of the pipeline. All downstream layers (query rewrite,
     # title boost, rerank) operate identically on either's output. When
     # the flag is OFF (default), behavior is bit-for-bit identical to
-    # the pre-D6.71 path.
-    if hybrid_retrieval_enabled and sources is None:
-        # Hybrid path is per-source-group diversified; the explicit-
-        # source path (used by citation lookup) bypasses it and stays
-        # on dense-only for predictable single-source semantics.
-        primary = await retrieve_hybrid(
-            query=query,
-            pool=pool,
-            openai_api_key=openai_api_key,
-            vessel_profile=vessel_profile,
-            limit=fetch_limit,
-            sources=sources,
-            rrf_k=hybrid_rrf_k,
-            lexical_per_group=hybrid_lexical_per_group,
-        )
-    else:
-        primary = await retrieve(
-            query=query,
-            pool=pool,
-            openai_api_key=openai_api_key,
-            vessel_profile=vessel_profile,
-            limit=fetch_limit,
-            sources=sources,
-        )
-
-    # Reformulation retrievals also pick the same path so a hybrid run
-    # at the primary level isn't degraded back to dense-only on extras.
-    def _retrieve_one(q: str) -> "asyncio.Future":
+    # the pre-D6.71 path. Hybrid is per-source-group diversified; the
+    # explicit-source path (used by citation lookup) bypasses it and stays
+    # on dense-only for predictable single-source semantics. Reformulation
+    # retrievals pick the same path so a hybrid run at the primary level
+    # isn't degraded back to dense-only on extras.
+    #
+    # 2026-09-25 — reformulations run without identifier search: the rewriter
+    # invents citations ("46 CFR 148.5", "SOLAS III-1 Reg.19"; about 8 in 10
+    # were wrong in the audit probes), and an identifier hit enters the pool
+    # above every vector result.
+    def _retrieve_one(q: str, n: int, identifiers: bool):
         if hybrid_retrieval_enabled and sources is None:
             return retrieve_hybrid(
                 query=q,
                 pool=pool,
                 openai_api_key=openai_api_key,
                 vessel_profile=vessel_profile,
-                limit=limit,
+                limit=n,
                 sources=sources,
                 rrf_k=hybrid_rrf_k,
                 lexical_per_group=hybrid_lexical_per_group,
+                jurisdiction_focus=jurisdiction_focus,
+                identifier_search=identifiers,
             )
         return retrieve(
             query=q,
             pool=pool,
             openai_api_key=openai_api_key,
             vessel_profile=vessel_profile,
-            limit=limit,
+            limit=n,
             sources=sources,
+            jurisdiction_focus=jurisdiction_focus,
+            identifier_search=identifiers,
         )
 
-    # 2. Pull reformulation results (if rewrite fired).
+    # 2026-09-25 — the primary retrieval runs as a task so the reformulation
+    # retrievals start the moment the rewrite returns, not after the primary
+    # finishes (the Captain's 2026-09-23 follow-up: rewrite back 1.2 s before
+    # the primary, whose reformulations then ran another 4.2 s).
+    primary_task = asyncio.create_task(_retrieve_one(query, fetch_limit, True))
+    extra_tasks: list[asyncio.Task] = []
     extras: list[list[dict]] = []
-    if rewrite_task is not None:
-        try:
-            rewrite_result = await rewrite_task
-        except Exception as exc:
-            logger.info("query_rewrite task failed: %s", exc)
-            rewrite_result = None
-        if rewrite_result is not None and rewrite_result.reformulations:
-            # Retrieve each reformulation in parallel. Each retrieval
-            # gets its own embedding, vector fetch, and reranking
-            # path — but the per-reformulation fetch_limit is smaller
-            # (limit, not rerank_pool_size) since the primary already
-            # carries the wider pool.
-            extra_tasks = [
-                _retrieve_one(r)
-                for r in rewrite_result.reformulations
-            ]
+    try:
+        # 2. Reformulation retrievals (if rewrite fired). Each gets its own
+        #    embedding and vector fetch, at `limit` rather than the wider
+        #    `rerank_pool_size`, since the primary carries the wide pool.
+        rewrite_result = None
+        if rewrite_task is not None:
+            try:
+                rewrite_result = await rewrite_task
+            except Exception as exc:
+                logger.info("query_rewrite task failed: %s", exc)
+            if rewrite_result is not None and rewrite_result.reformulations:
+                extra_tasks = [
+                    asyncio.create_task(_retrieve_one(r, limit, False))
+                    for r in rewrite_result.reformulations
+                ]
+        primary = await primary_task
+        if extra_tasks:
             extra_results = await asyncio.gather(
                 *extra_tasks, return_exceptions=True,
             )
@@ -3085,6 +3381,14 @@ async def retrieve_enhanced(
                 "query_rewrite: %d reformulations contributed %d extra chunk-lists",
                 len(rewrite_result.reformulations), len(extras),
             )
+    except BaseException:
+        # Client disconnect or a failed primary: don't leave retrievals
+        # running unowned.
+        for t in (primary_task, *extra_tasks):
+            t.cancel()
+        if rewrite_task is not None:
+            rewrite_task.cancel()
+        raise
 
     # 3. Merge primary + extras, dedupe by id, sort by similarity.
     merged = _merge_chunks(primary, extras)

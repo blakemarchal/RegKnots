@@ -41,7 +41,13 @@ _RERANK_MODEL = "claude-haiku-4-5-20251001"
 _RERANK_MAX_TOKENS = 800
 
 # 2026-09-22 (U5) — structured output replaces the fence-strip/regex parse.
-_RERANK_SCHEMA = obj({"scores": arr(obj({"index": INT, "score": INT}))})
+# 2026-09-25 — [index, score] pairs instead of {"index", "score"} objects:
+# about half the output tokens, and output is most of this call's latency
+# (3.3-5.5 s on the audited 2026-09-23/25 questions). Probe 2026-09-24:
+# top-8 agreement with the object form within Haiku's own run-to-run
+# noise, 0.54 s faster at the median. The object form also ran near the
+# 800-token cap on a full pool (30 primary + 3 x 8 reformulation chunks).
+_RERANK_SCHEMA = obj({"scores": arr(arr(INT))})
 
 # Truncation budget for each chunk's text in the rerank prompt.
 # Most CFR sections are 500-2000 chars; we send the first 1500 to
@@ -64,17 +70,11 @@ Hard rules:
   3. Score the answer-fit, not the chunk's prestige. A short, on-target paragraph beats a long, prestigious section that doesn't address the question.
   4. Be discriminating. If 8 chunks all score 5, you're not reading carefully.
 
-Output JSON ONLY — no prose, no markdown fences:
+Output JSON ONLY — no prose, no markdown fences. One [index, score] pair per candidate:
 
-{
-  "scores": [
-    {"index": 0, "score": 5},
-    {"index": 1, "score": 3},
-    ...
-  ]
-}
+{"scores": [[0, 5], [1, 3], ...]}
 
-The "index" matches the [N] number in the candidate list you receive. Score every candidate; missing entries are treated as score 0.
+The index matches the [N] number in the candidate list you receive. Score every candidate; missing entries are treated as score 0.
 """
 
 
@@ -132,11 +132,15 @@ async def rerank_chunks(
     scores_raw = parsed.get("scores") or []
     score_by_index: dict[int, int] = {}
     for s in scores_raw:
-        if not isinstance(s, dict):
+        if isinstance(s, (list, tuple)) and len(s) == 2:
+            idx_raw, score_raw = s
+        elif isinstance(s, dict):          # the pre-2026-09-25 object form
+            idx_raw, score_raw = s.get("index"), s.get("score", 0)
+        else:
             continue
         try:
-            idx = int(s.get("index"))
-            score = max(0, min(5, int(s.get("score", 0))))
+            idx = int(idx_raw)
+            score = max(0, min(5, int(score_raw)))
         except (TypeError, ValueError):
             continue
         score_by_index[idx] = score
