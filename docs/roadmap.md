@@ -1,6 +1,6 @@
 # RegKnots Roadmap
 
-**Last updated:** 2026-09-23 (Opus 5.5 low is the default answer model; LLM upgrades U1–U9 shipped 09-22; LLM surface audit at `docs/sprint-audits/llm-surface-audit-2026-09-22.md`; system audit at `docs/sprint-audits/full-system-audit-2026-09-10.md`)
+**Last updated:** 2026-09-25 (question audit at `docs/sprint-audits/question-audit-2026-09-25.md`: retrieval fixes committed, awaiting deploy, 4 proposals awaiting go; Opus 5.5 low is the default answer model; LLM surface audit at `docs/sprint-audits/llm-surface-audit-2026-09-22.md`; system audit at `docs/sprint-audits/full-system-audit-2026-09-10.md`)
 
 **Eval headline:** retrieval harness re-run 2026-09-10 after prod was flipped back to dense — strong-recall@8 **0.823 / MRR 0.658** on the 62-pair gold set, 0 errors (July baseline 0.790 / 0.627; evidence `data/eval/retrieval/20260910-144455-dense-ef0.json`). Answer-quality eval still 97.4% A-or-A− on 149 questions (2026-05-09). **New retrieval baseline to beat: 0.823 / 0.658.** Post-deploy 2026-09-23: dense 0.823 / 0.688 (unchanged recall; MRR drift from the weekly CFR refresh), and the first `dense-prod` baseline (rewrite + rerank) **0.919 / 0.737**.
 
@@ -34,7 +34,7 @@ All awaiting "go". Each is independently verifiable.
 4. ~~**Celery hygiene.**~~ **SHIPPED 2026-09-10.** `update_regulations` now calls `scripts/run_ingest.sh` (which picks `--pipe` when there is no TTY, so the worker still captures output and the exit code); `reindex-vector-embeddings-monthly` and its task deleted; `celerybeat-schedule` gitignored; `packages/ingest/uv.lock` regenerated (greenlet, playwright, pyee) so prod stops re-resolving it every Sunday. The eCFR-503 retry was already bounded by `max_retries=2` — no change. Deployed via `scripts/deploy.sh`. First scheduled run under the wrapper: Sunday 2026-09-13 02:00 UTC — check `journalctl -u regknots-worker` and the transient `regknots-ingest-*` unit afterwards.
 5. **Karynn reads two answers** (MOB alarm; BMP-MS) — 5 minutes, see audit §2.5. If either is wrong it becomes a hedge-audit entry and a gold-set pair.
 6a. ~~**Sonnet synthesis thinking.**~~ **SHIPPED 2026-09-23, together with the Opus 5.5 default.** A six-way comparison on 16 questions put Opus 5.5 at effort `low` top with both blind judges: 8.62 vs 5.06 (Opus judge) and 9.25 vs 8.31 (GPT-4o) for what routing sent. It had 9 vs 53 flagged errors, the p90 first token fell from 16.4 s to 7.9 s after retrieval, and it costs ~$0.13 vs ~$0.04 per answer at a cold cache. It now answers every question (`SYNTHESIS_MODEL_FLOOR`, default `claude-opus-5-5`). Sonnet, when used, streams at effort `low`. Evidence: LLM surface audit §5, `data/eval/model_compare/20260923-175735/`.
-6. **Vessel-profile completeness (product) — now the top product item.** 51 of 56 vessel profiles have flag Unknown, and the A/B above shows flag alone moves foreign-flag noise from 4/32 to 0/32. When `vessels.flag_state` is Unknown and `users.jurisdiction_focus` is set, use it for retrieval scoping; show a one-click "confirm your flag" prompt in chat when the active profile is incomplete; enrich from IMO number on save. **~2 h.** Spec first.
+6. **Vessel-profile completeness (product) — now the top product item.** 51 of 56 vessel profiles have flag Unknown, and the A/B above shows flag alone moves foreign-flag noise from 4/32 to 0/32. When `vessels.flag_state` is Unknown and `users.jurisdiction_focus` is set, use it for retrieval scoping; show a one-click "confirm your flag" prompt in chat when the active profile is incomplete; enrich from IMO number on save. **~2 h.** Spec first. **Scoping fallback built 2026-09-24** (committed `18fb15f`, awaiting deploy): on the Captain's profile with the flag set to Unknown, her questions went from 10/48 foreign-flag hits to 0/48. The confirm-your-flag prompt and IMO enrichment remain.
 
 ---
 
@@ -44,10 +44,31 @@ All awaiting "go". Each is independently verifiable.
 8. ~~**Tier-aware model floor.**~~ **Superseded 2026-09-23:** Opus 5.5 `low` is the floor for every tier (item 6a). If cost ever matters, the same setting can become tier-aware in one line. Worst case at a cold cache is Cadet $3.25 of $9.99 and Mate $13 of $19.99 a month; Captain is uncapped, at about $39 a month for 10 questions a day.
 9. **Stripe webhook ordering fix.** `invoice.paid` arrived before `checkout.session.completed` and its UPDATE-by-subscription-id matched 0 rows → `billing_interval` NULL for every first-time subscriber. Fall back to customer id; add the recorded-fixture test (`apps/api/tests/` exists as of 2026-09-22). **~2 h.**
 10. **BMP Maritime Security (2024) ingest.** Free industry PDF (ICS / BIMCO / INTERTANKO / OCIMF et al.). Karynn asked for it on 09-10 and got a mis-attributed answer from adjacent chunks. **~2 h**, `pdf_pipeline` pattern.
-11. **`next` 15.5.14 → 15.5.15+** (DoS CVE, open since May). `pnpm up next` + deploy. **10 min.**
+11. **`next` 15.5.14 → 15.5.15+** (DoS CVE, open since May). `pnpm up next` + deploy. **10 min.** **Committed 2026-09-24** (`6976759`, 15.5.26); awaiting push and deploy.
 12. **Sentry `environment` tag** in both `instrumentation*.ts`. **5 min.** Open since May.
 13. **Offsite backups** — Blake's 5-minute DO Spaces bucket + keys step (`scripts/backup_offsite.sh` header). Local backups still share a disk with the database.
 14. **Zombie test account** `kdmarchal+test` — `pro/active` with period ended 2026-05-08; set to `free`. **1 min.**
+
+---
+
+## From the 2026-09-25 question audit
+
+Findings and evidence: `docs/sprint-audits/question-audit-2026-09-25.md`.
+
+**Committed, awaiting deploy** (`18fb15f`, `505bde8`):
+- SOLAS and CFR citation resolution.
+- Vessel filter limited to Title 46; it had been dropping 5,137 chunks of 33/49 CFR for containerships.
+- No identifier search on reformulations.
+- Reformulations overlap the primary retrieval.
+- Reranker pairs.
+
+**Awaiting go**, in recommended order:
+- **A1. SOLAS stale-row cleanup + pipeline `--prune`.** The upsert never deletes. SOLAS has Part- and chapter-level duplicates and II-1/II-2 collision rows, and they filled 2–4 of the final 8 slots on Chapter III questions. Steps: a parse-and-diff script, a reviewed delete after a backup, then the harness. After that, check the IMO codes re-split in Sprint #47. **~3 h.**
+- **A2. Scope cfr_49 to maritime parts in the adapter**: hazmat 105–180, Part 40, CSC 450–453, and the NTSB marine parts. Rail, FMCSA and pipeline chunks surface in real questions, and 49 CFR 391 is why the group iterative scan loses MRR. **~2 h.**
+- **A3. Hedge-judge gate on text citations; corpus citation oracle on `partial_miss`.** Today the gate counts retrieved sections, so recovery never fires. **~2 h.**
+- **A4. Gold-set pairs for citations and non-46 CFR**: the Captain's Reg.20 questions, COFR, the Inland Rules. Folds into item 7. **~1 h.**
+- **A5. Hedge audit and title off the path to `done`.** **~1 h.**
+- **A6. Credential-reminder policy.** Product decision, then a compare-harness run.
 
 ---
 

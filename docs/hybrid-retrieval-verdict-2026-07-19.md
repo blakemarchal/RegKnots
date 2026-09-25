@@ -27,6 +27,13 @@ top-8 chunk's section_number/title. Deterministic; embeddings only.
 - `hnsw.ef_search` 40→100 changes **nothing** (identical to 4 decimals on
   both arms): the HNSW graph is not the recall bottleneck at our per-group
   fetch sizes. Not shipping that knob.
+  **Correction 2026-09-24: this row did not test what it says.** The
+  harness set `ef_search` in the asyncpg pool's `init` hook, and asyncpg
+  runs `RESET ALL` whenever a connection is released, so only each
+  connection's first query ran at 100. The identical-to-4-decimals result
+  is that artifact. Retrieval now sets HNSW options with `SET LOCAL` inside
+  each query's transaction (`rag.retriever._fetch_iterative`); an
+  `ef_search` test would have to do the same.
 
 ## Failure mechanism (from `--compare` lost-pair dumps)
 

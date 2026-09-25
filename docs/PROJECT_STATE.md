@@ -2,7 +2,7 @@
 
 **One-page operational snapshot for humans and fresh Claude Code sessions.**
 
-Last updated: 2026-09-23 (Opus 5.5 low is the default answer model; 09-22 Opus 5.5 rollout + LLM surface audit + upgrades U1–U9; system audit 2026-09-10)
+Last updated: 2026-09-25 (question audit `docs/sprint-audits/question-audit-2026-09-25.md`: retrieval fixes committed, awaiting deploy; Opus 5.5 low is the default answer model; system audit 2026-09-10)
 
 ---
 
@@ -60,11 +60,15 @@ Plus 40 additional sources: `cfr_*`, `solas`, `marpol`, `colregs`, `stcw`, `ism`
 2. **Pre-retrieval distillation** (D6.51) for verbose first turns
 3. **Multi-query rewrite** (D6.66) — Haiku produces 2-3 reformulations; default ON
 4. **Synonym + intent expansion** — `synonyms.py` (lifejacket/log/mob/stability/stencil), drill-frequency + equipment-marking intent expanders
-5. **Retrieval** (pgvector HNSW + per-source-group diversified fetch + identifier regex + broad keyword trigram, merged with boosts)
+5. **Retrieval** (pgvector HNSW + per-source-group diversified fetch + identifier regex + broad keyword trigram, merged with boosts). As of 2026-09-25 (committed, awaiting deploy):
+   - SOLAS regulation and CFR section/part citations resolve against `section_number`, not a `full_text` substring. A cited section keeps up to 5 chunks.
+   - Identifier search runs only on the user's own words, not on reformulations.
+   - Groups that cannot match the jurisdiction filter are skipped.
+   - Reformulation retrievals start when the rewrite returns.
 6. **Hybrid BM25 + dense (RRF)** — built and **dark-launched** behind `HYBRID_RETRIEVAL_ENABLED=False` (D6.71)
-7. **Jurisdiction filter** — `jurisdictions text[]` array overlap (`&&`); 9-flag severance regression passes 9/9
-8. **Vessel-type × CFR-Subchapter applicability filter** (Sprint C2) + **Subchapter M / TSMS source affinity** (D6.69)
-9. **Haiku reranker** (D6.66) + source-affinity / vessel-profile / title boosts
+7. **Jurisdiction filter** — `jurisdictions text[]` array overlap (`&&`); 9-flag severance regression passes 9/9. Since 2026-09-24 it falls back to `users.jurisdiction_focus` when the vessel flag is Unknown.
+8. **Vessel-type × CFR-Subchapter applicability filter** (Sprint C2) + **Subchapter M / TSMS source affinity** (D6.69). 2026-09-25: Title 46 only; it had been dropping 33/49 CFR parts that share a 46 CFR part number.
+9. **Haiku reranker** (D6.66), output as `[index, score]` pairs since 2026-09-25, + source-affinity / vessel-profile / title boosts
 10. **Citation oracle** (D6.70 Layer-2 retrieval intervention)
 11. **Synthesis** — **Opus 5.5 for every answer** (2026-09-23; effort `low` on the stream, `high` on regeneration; 16K cap) after a six-way comparison (`scripts/compare_synthesis_models.py`, LLM surface audit §5). In router-only mode Sonnet 5 streams at effort `low` with `_MAX_TOKENS` 8192. The 14.5K-token system prompt is prompt-cached (2026-09-22).
 12. **Hedge judging** (D6.60) → cascading ensemble web fallback (D6.59), Big-3 (Claude + GPT + Grok, D6.58)
@@ -113,7 +117,13 @@ Full findings, evidence and the awaiting-go fix spec: `docs/sprint-audits/full-s
 **P2:**
 - Stripe `invoice.paid` processed before `checkout.session.completed` on first purchase → `UPDATE … WHERE stripe_subscription_id` matched 0 rows → `billing_interval` NULL for new subscribers.
 
-**Still open from May:** `next@15.5.14` DoS CVE; Sentry `environment` tag; no CI; SpiritFlow co-tenancy; offsite backups (Blake's DO Spaces step); STCW 2017 / MARPOL 2022 / MSM 2021 bases; Load Lines 3 chunks; FSS / LSA resolution-only.
+**From the 2026-09-25 question audit (awaiting go; details in the audit doc):**
+- **Stale corpus rows.** `store.upsert_chunks` never deletes rows a re-parse no longer produces. SOLAS carries Part- and chapter-level duplicates of its per-Regulation sections, and "SOLAS Ch.II Reg.N" rows where II-1 and II-2 collided. Proposal: a parse-and-diff script, then a reviewed delete, then a pipeline `--prune`.
+- **cfr_49 is all of Title 49**, including FMCSA, rail, pipelines, transit and the STB. It adds noise to the CFR group. Proposal: scope it in the adapter to the maritime-relevant parts.
+- **The hedge judge's "verified citations" gate counts retrieved sections**, so the citation oracle and web fallback never fire (0 runs in 30 days).
+- **Credential reminders** appear on unrelated answers; needs a product decision.
+
+**Still open from May:** `next@15.5.14` DoS CVE (bumped to 15.5.26 in `6976759`, awaiting push); Sentry `environment` tag; no CI; SpiritFlow co-tenancy; offsite backups (Blake's DO Spaces step); STCW 2017 / MARPOL 2022 / MSM 2021 bases; Load Lines 3 chunks; FSS / LSA resolution-only.
 
 **Resolved since the May audit:** shared LLM helpers (`packages/rag/rag/llm.py`, 2026-09-22) and the first `apps/api` tests (`apps/api/tests/`), JWT secret, `.env` 600, daily + restore-tested backups, cgroup caps, swap, `run_ingest.sh`, Layer C, NVIC OCR, eval harness, migration 0115 (fallback persist), Anthropic key rotation.
 

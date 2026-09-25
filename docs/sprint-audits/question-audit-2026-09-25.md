@@ -1,0 +1,196 @@
+# Question audit — 2026-09-25
+
+**Scope.** The three most recent real questions: the Captain (MAERSK Kinloss, US-flag containership) on 2026-09-23 at 23:52 and 23:53 UTC, and Karynn (Maersk Seletar, US-flag containership) on 2026-09-25 at 04:49 UTC.
+
+**Method.**
+- The answer text, and per-stage timelines from `journalctl -u regknots-api`.
+- Corpus inspection on the prod DB.
+- Before/after probes run on prod through the full retrieval path (rewrite and rerank on, the users' real vessel profiles). The candidate `rag` package was imported ahead of the deployed one, so prod kept serving `main`.
+- Every retrieval change was run through `scripts/eval_retrieval.py`.
+
+## 1. How we did
+
+| | Question | Outcome | Cause |
+|---|---|---|---|
+| Q1 | "SOLAS Chapter III, Part B, Section I, Regulation 20" | **Partial.** The answer said only the Unified Interpretation of Reg.20.11 had been retrieved and declined to give the weekly and monthly inspection intervals. | The citation parser did not recognise the form, so none of Reg.20's 5 chunks were retrieved (0 of 8). The reranker scored the top 8 at `[4,1,1,1,1,1,1,1]`. The hedge judge said `partial_miss` and named the missing paragraphs; recovery was suppressed (§3.7). |
+| Q2 | "…Regulation 20 life boat lowering" | Useful answer, **but Reg.20 itself was not retrieved** (0 of 8). | Same parser bug. The primary retrieval's top 4 were the Chapter III Unified Interpretations stored under two section names, and a stale Part-level row ("SOLAS Ch.III Part B") was cited (§3.5). |
+| Q3 | "If a port is asking for a copy of the vessels bunker CLC, what is that?" | **Good.** It identified the Bunkers 2001 Art. 7 certificate, the non-State-Party route, and COFR as the US analogue, and flagged US non-ratification as unverified. | Two blemishes. (1) A reformulation's invented "46 CFR 34" matched any chunk containing "34", and one of those chunks (49 CFR 171.8, hazmat definitions) took one of the 8 context slots (§3.2). (2) The answer closed with an unrelated "Personal note" that her medical certificate had expired (§3.9). |
+
+**Latency** (seconds, from journald):
+
+| | route | rewrite | primary retrieval | reformulation retrievals | rerank | synthesis (Opus 5.5 `low`) | judge |
+|---|---|---|---|---|---|---|---|
+| Q1 | 0.9 | 0 reformulations | 3.2 | none | 2.2 | ~18 | ~3.5 |
+| Q2 | 0.6 | 0.8 | 2.6 | +4.2, started only after the primary finished | 3.3 | ~19 | 4.4 |
+| Q3 | 1.1 | 2.6 | 3.1 | +3.6 | 5.5 | ~24.5 | 5.3 |
+
+Pre-synthesis wall time was 5.5, 10.1 and 12.4 s.
+
+## 2. Measured results
+
+**Citation probe.** Share of queries whose cited target reached the final top 8 (full pipeline, prod data). Rewrite and rerank are LLM calls, so single runs vary by a chunk or two.
+
+| probe | deployed | candidate |
+|---|---|---|
+| 6 SOLAS citation forms (round 1) | 3/6 | **6/6** |
+| 12 SOLAS + CFR queries, including Karynn's question twice (round 3) | 6/12 | 8/12 |
+| same 12, final candidate (round 4) | 6/12 | 8/12 |
+| 4 chapter and regulation checks after holding back the chapter search (round 5) | — | 4/4 |
+
+Chunks of the cited target in the final 8, deployed → final candidate:
+
+| query | deployed | candidate |
+|---|---|---|
+| The Captain's Q1 (the whole regulation is 5 chunks) | 0 | **5** |
+| The Captain's Q2 | 0 | **4** |
+| "SOLAS III/20 weekly and monthly LSA inspections" | 1–2 | **5** |
+| "33 CFR 138 certificate of financial responsibility" (§3.3) | 0 | **4** |
+| "SOLAS II-2/10 fire main" | 2 | **4** |
+| "What does 46 CFR 199.180 require" (round 3 / round 4) | 2 | 5 / 2 |
+
+Karynn's question, run twice on the final candidate, drew no identifier lookups, so no invented sections reached the pool. One run still carried `49 CFR 1244.3` (§3.6).
+
+**Exam-bank path** (the quiz's explicit-source retrieval): six topics returned the same 82 rows deployed and candidate. That is 16 of 16 for five topics and 2 for "stability and trim", where one long section fills the per-section cap.
+
+**Retrieval harness** (dense, 62 pairs; baseline `20260924-022839-…-post-shared-buffers-512mb.json`):
+
+| arm | strong recall@8 | MRR | p50 ms |
+|---|---|---|---|
+| baseline (deployed) | 0.8226 | 0.6881 | 586 |
+| skip impossible groups | 0.8226 | 0.6881 | 567 |
+| + iterative HNSW scan on the group fan-out | 0.8387 | 0.6614 | 652 |
+| **final candidate** (shipped set, §4) | **0.8226** | **0.6795** | **572** |
+
+- The final candidate gained 0 pairs and lost 0.
+- Two pairs moved down one rank. `N-C1/V5` fell 5 → 6 because a newly admitted `33 CFR 165.813` took rank 2 (§3.3); `N-E3/V1` fell 1 → 2 on an ERG tie.
+- The gold set contains no citation-bearing questions and no pairs that expect 33 or 49 CFR, so neither the citation fixes nor the filter fix can show a gain here.
+- The iterative scan's MRR loss is entirely the medical-certificate question on all three vessels (C3/V1, V3, V5 fell from rank 1 to 5). Fuller CFR groups ranked **49 CFR 391 (FMCSA truck-driver medical rules)** above the mariner-medical NVIC 04-08. The scan is therefore not shipped for the fan-out (§3.6).
+
+## 3. Findings
+
+### 3.1 SOLAS citations never resolved — FIXED
+The pattern accepted only hyphenated chapters ("II-2") and then searched `full_text` for the chapter string alone. "SOLAS III/20", "SOLAS Ch.III Reg.20" and the Captain's "Chapter III, Part B, Section I, Regulation 20" therefore matched nothing. Q1's own answer suggested the follow-up "SOLAS III/20 weekly and monthly LSA inspections", which also failed.
+
+The corpus names per-Regulation sections "SOLAS Ch.III Reg.20" (D6.97 Sprint B), so a regulation citation now resolves to that exact `section_number`:
+- The section's chunks are ranked by similarity to the question, and a cited section may keep up to 5 chunks instead of 2.
+- A citation the corpus doesn't have returns nothing.
+- A chapter cited without a regulation adds no identifier. The old one returned 5 arbitrary chunks containing the chapter string.
+- A within-chapter search was built, measured and **held back**. The only `SOLAS Ch.II-2 …` rows are stale Part-level ones, because the per-Regulation text sits under older `SOLAS Ch.II Reg.N` names (§3.5). Injecting them took "SOLAS II-2 fire detection" from 2 to 0 correct chunks. Revisit after the SOLAS cleanup.
+
+### 3.2 CFR citations matched substrings — FIXED
+`cfr_section` searched `full_text ILIKE '%<section>%'`. For a part-only citation such as "46 CFR 34", "33 CFR 138" or "46 CFR 199", that is any chunk containing those digits, and 5 of them entered the pool above every vector result. Now:
+- A section citation resolves to the section, falling back to the old substring search only if no section has that exact name.
+- A part citation returns the part's chunks nearest the question.
+- A bare part of a title we don't carry returns nothing.
+
+### 3.3 The vessel filter dropped 33 and 49 CFR parts — FIXED
+The forbidden-part lists in `_VESSEL_TYPE_CFR_APPLICABILITY` are 46 CFR subchapters, but `_filter_by_vessel_applicability` ignored the title. Any 33 or 49 CFR part sharing a number was dropped. For a containership that was **5,137 chunks**, including:
+- the Inland Navigation Rules (33 CFR 83–89),
+- RNAs and safety zones (33 CFR 165, 902 chunks), traffic separation schemes (167) and ship reporting, including right-whale reporting (169),
+- COFR (33 CFR 138),
+- hazmat carriage by vessel (49 CFR 176).
+
+The prod log shows 32 retrievals in 30 days dropping such sections (33 CFR 83.xx and 88.xx, 49 CFR 176.xx, 178.xx, 180.417). That is a floor, because each log line lists only 5 sections. The 33 CFR 165–169 range was on every mapped type's list.
+
+### 3.4 Invented citations from the query rewriter — FIXED
+Reformulations cited sections the user never mentioned. Across the probes: "46 CFR 109", "46 CFR 76", "46 CFR 34", "46 CFR 148.5", "46 CFR 160.35", "46 CFR 199.300", "SOLAS III-2", "SOLAS III-1 Reg.19". About 8 in 10 were wrong: nonexistent, or for another vessel type. An identifier hit enters the pool above every vector result, and "46 CFR 148.5" (bulk solids) reached the final 8 for Karynn's bunker question. Reformulations now run without identifier search; only the user's own words can inject a cited section.
+
+### 3.5 Stale SOLAS rows; the ingest never prunes — PROPOSED (spec needs go)
+`store.upsert_chunks` is `ON CONFLICT (source, section_number, chunk_index) DO UPDATE`, so rows that a re-parse no longer produces stay in the corpus and keep being retrieved.
+
+`solas` holds 1,739 chunks from four runs:
+
+| created | chunks | content |
+|---|---|---|
+| 04-03 | 742 | Part- and chapter-level parse |
+| 04-13 | 292 | chapter-level rows, "Unified interpretations for chapter X" naming |
+| 05-11 | 300 | per-Regulation rows, including 1-chunk "Ch.II-1 Reg.N" / "Ch.II-2 Reg.N" rows |
+| 05-24 | 405 | the current per-Regulation parse |
+
+Consequences:
+- Part B of Chapter III is stored twice, once as "SOLAS Ch.III Part B" (45 chunks) and again as Regs 6–37.
+- The Chapter III Unified Interpretations are stored under two names; Q2 cited both.
+- An older parse merged II-1 and II-2 into "SOLAS Ch.II Reg.N". "SOLAS Ch.II Reg.10" holds 23 chunks of fire-fighting text, while "SOLAS Ch.II-2 Reg.10" is a single chunk.
+- Sections also carry stale tail chunks: "Unified interpretations for chapter II" has 38 chunks at the current version plus 19 older ones.
+- On Chapter III questions, stale chapter- and Part-level rows filled 2–4 of the final 8 slots in the probes.
+
+**Proposal:**
+1. `scripts/diff_source_rows.py` parses and chunks a source with no embedding and no writes, and lists DB rows the current parse doesn't produce.
+2. Review the list.
+3. Take a backup, then delete those rows in one transaction.
+4. Run the harness and the citation probe.
+5. Add `--prune` to the pipeline, which deletes not-produced rows after a successful full-source run.
+6. After SOLAS, check the IMO codes re-split in Sprint #47 (IBC, CSS, BWM, IGF, Polar).
+
+### 3.6 cfr_49 is all of Title 49 — PROPOSED
+15,967 chunks cover rail (200–299), FMCSA (300–399), pipelines (190–199), transit ADA (37/38) and the Surface Transportation Board (1000+) alongside hazmat. In the audited sessions this surfaced:
+- `49 CFR 229.125` (locomotive safety) at #2 in a "lifeboat lowering" reformulation,
+- `49 CFR 1244.3` (STB waybill sample) in Karynn's pool,
+- 49 CFR 391 ahead of the mariner NVIC on the medical-certificate gold pairs.
+
+**Proposal:** scope cfr_49 to maritime-relevant parts: hazmat 105–180, Part 40 (drug testing, which 46 CFR 16 incorporates), 450–453 (CSC container safety), and the NTSB marine parts. Do it in the ingest adapter, not only at retrieval time: Celery Beat refreshes cfr_49 weekly, so excluded rows would come back. Then re-test the group iterative scan.
+
+### 3.7 The judge's "verified citations" gate counts retrieved sections — PROPOSED
+- `verified_cited` is every retrieved section that exists in the DB (`build_context` → `verify_citations`), so it is non-empty whenever retrieval returns anything.
+- That means `should_fire_fallback = verdict in (complete_miss, partial_miss) and not has_verified_citations` can essentially never fire.
+- The last 30 days of logs show 4 suppressions and **0** citation-oracle or web-fallback runs.
+- D6.97 Phase 1a (`8d16bdc`) meant "an answer that already carries verified citations". The UI already counts citations from the answer text (`extractFooterCitations`).
+
+**Proposal:**
+1. Count the citations the answer text actually makes.
+2. Let the corpus-only citation oracle run on `partial_miss` even when the answer has citations. It adds a verified corpus card, not a 🌐 web card, so the trust contract Phase 1a protected is intact.
+3. Keep the web card gated as today.
+
+Q1's judge named exactly what was missing; step 2 would have recovered it even before the parser fix.
+
+### 3.8 Latency
+**Shipped:**
+- Reranker output as `[index, score]` pairs: about half the output tokens, and the 2026-09-24 probe measured −0.54 s median with top-8 agreement within Haiku's own run-to-run noise. The object form also ran near its 800-token cap on a full 54-chunk pool.
+- Reformulation retrievals start when the rewrite returns, not after the primary retrieval. On Q2 the rewrite was back 1.2 s before the primary finished.
+- Skip source groups that cannot match the jurisdiction filter: identical results, 9 of 31 groups skipped for a US flag.
+
+**Proposed:**
+- Take the analytics-only hedge audit and title generation off the path to the stream's `done` event.
+- Keep the judge inline once §3.7 makes its verdict matter again.
+
+The latency probes on the shared box were too noisy to rank configurations: the same configuration swung 1.5–4.6 s per `retrieve()`.
+
+### 3.9 Credential "personal note" on an unrelated question — DECISION NEEDED
+The credential block says "When relevant, tailor your answer…" and marks an expired certificate `EXPIRED`, so Opus 5.5 closed a bunker-certificate answer with a note about Karynn's medical certificate, adding that "the on-file dates look inconsistent".
+
+Two actions:
+- **Karynn:** check the dates on her medical certificate record.
+- **Blake:** keep the proactive reminder, limit it to credential and eligibility questions, or move it to a UI banner. A prompt change re-runs `scripts/compare_synthesis_models.py` first.
+
+### 3.10 Corpus gaps (Tier C)
+- The Bunkers Convention 2001, CLC 1992 and the Nairobi WRC 2007 are not in the corpus. Q3 worked from a certificate list that quotes Art. 7.
+- The Captain's Reg.20 questions and a COFR / Inland Rules pair belong in the gold set (roadmap item 7), so the harness finally covers citation resolution and non-46 CFR retrieval.
+
+## 4. What shipped
+
+Committed to `main`; see the commit messages for detail.
+
+| Change | Files |
+|---|---|
+| SOLAS and CFR citation resolution (§3.1, 3.2) | `packages/rag/rag/retriever.py` |
+| Vessel filter limited to Title 46 (§3.3) | `packages/rag/rag/retriever.py` |
+| Reformulations without identifier search (§3.4) | `packages/rag/rag/retriever.py` |
+| Reformulations overlap the primary retrieval (§3.8) | `packages/rag/rag/retriever.py` |
+| Reranker pairs (§3.8) | `packages/rag/rag/reranker.py` |
+| From 2026-09-24: group skip, iterative scan on the explicit-source path only, `users.jurisdiction_focus` fallback for flag-Unknown vessels, quiz exam-bank vector retrieval | `packages/rag/rag/{retriever,jurisdiction,engine}.py`, `apps/api/app/routers/study.py` |
+
+Tests: `packages/rag/test_solas_citations.py`, `test_retrieval_fanout.py`, `test_reranker_pairs.py`, `test_jurisdiction_focus.py`, and `apps/api/tests/test_study_quiz.py`. Current totals: rag 180 passed plus 1 pre-existing DB-bound failure (`test_hybrid_retrieve`); api 32 passed.
+
+Commits: `18fb15f` (rag) and `505bde8` (study). Not yet pushed or deployed as of this writing.
+
+## 5. Proposals, in recommended order
+
+| # | Item | Effort | Needs |
+|---|---|---|---|
+| 1 | SOLAS stale-row cleanup plus a pipeline `--prune` step (§3.5) | ~3 h, plus a review of the diff list | go; deletes prod rows after a backup |
+| 2 | Scope cfr_49 to maritime parts, in the adapter (§3.6) | ~2 h | go; changes the weekly refresh |
+| 3 | Judge gate on text citations; corpus oracle on `partial_miss` (§3.7) | ~2 h | go |
+| 4 | Gold-set pairs for citations and non-46 CFR (the Captain's Reg.20 questions, COFR, Inland Rules) | ~1 h | none |
+| 5 | Hedge audit and title off the path to `done` (§3.8) | ~1 h | go |
+| 6 | Credential reminder policy (§3.9) | 15 min, plus a compare-harness run | decision |
+| 7 | After 1 and 2: a within-chapter SOLAS search, and the group iterative scan, each re-measured | ~1 h | none |
