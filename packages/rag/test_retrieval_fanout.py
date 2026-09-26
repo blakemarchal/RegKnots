@@ -143,14 +143,11 @@ def test_reformulations_start_before_the_primary_finishes(monkeypatch):
 
     import rag.query_rewrite as QR
 
-    searched = {}
-
     async def run():
         extra_started = asyncio.Event()
 
         async def fake_retrieve(query, pool, openai_api_key, vessel_profile=None, limit=8,
-                                sources=None, jurisdiction_focus=None, identifier_search=True):
-            searched[query] = identifier_search
+                                sources=None, jurisdiction_focus=None):
             if query == "orig":
                 await asyncio.wait_for(extra_started.wait(), 2)
                 return [_row("p", 0.9)]
@@ -167,8 +164,6 @@ def test_reformulations_start_before_the_primary_finishes(monkeypatch):
 
     out = asyncio.run(run())
     assert {c["id"] for c in out} == {"p", "r1", "r2"}
-    # only the user's own words run identifier search
-    assert searched == {"orig": True, "r1": False, "r2": False}
 
 
 class _PlainPool:

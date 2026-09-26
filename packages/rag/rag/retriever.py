@@ -1772,9 +1772,6 @@ async def retrieve(
     limit: int = 8,
     sources: list[str] | None = None,
     jurisdiction_focus: str | None = None,
-    # 2026-09-25 — False for query-rewrite reformulations (retrieve_enhanced):
-    # only the user's own words may inject a cited section.
-    identifier_search: bool = True,
 ) -> list[dict]:
     """Return semantically relevant regulation chunks.
 
@@ -1939,7 +1936,7 @@ async def retrieve(
     # When a keyword-matched chunk is already in the pool (same
     # section_number), we BOOST the existing chunk's similarity to the
     # keyword synthetic score instead of silently discarding the signal.
-    identifiers = _extract_identifiers(query) if identifier_search else []
+    identifiers = _extract_identifiers(query)
     keywords = _extract_keywords(query)
 
     # Sprint D6.8 — expand mariner-vocab keywords ("lifejacket", "log",
@@ -3025,9 +3022,6 @@ async def retrieve_hybrid(
     rrf_k: int = 60,
     lexical_per_group: int | None = None,
     jurisdiction_focus: str | None = None,
-    # 2026-09-25 — False for query-rewrite reformulations (retrieve_enhanced):
-    # only the user's own words may inject a cited section.
-    identifier_search: bool = True,
 ) -> list[dict]:
     """Sprint D6.71 — hybrid dense + lexical retrieval with RRF fusion.
 
@@ -3121,7 +3115,7 @@ async def retrieve_hybrid(
     # Reused with synthetic similarities (max_sim + 0.05 / 0.02) that
     # will dominate RRF scores (~0.03 max), preserving identifier and
     # keyword priority identical to the dense-only path.
-    identifiers = _extract_identifiers(query) if identifier_search else []
+    identifiers = _extract_identifiers(query)
     keywords = _extract_keywords(query)
     synonym_added: set[str] = set()
     if keywords:
@@ -3315,11 +3309,14 @@ async def retrieve_enhanced(
     # retrievals pick the same path so a hybrid run at the primary level
     # isn't degraded back to dense-only on extras.
     #
-    # 2026-09-25 — reformulations run without identifier search: the rewriter
-    # invents citations ("46 CFR 148.5", "SOLAS III-1 Reg.19"; about 8 in 10
-    # were wrong in the audit probes), and an identifier hit enters the pool
-    # above every vector result.
-    def _retrieve_one(q: str, n: int, identifiers: bool):
+    # 2026-09-26 — measured: reformulations keep identifier search. Turning
+    # it off (2026-09-25, after a few citation-heavy probe queries where the
+    # rewriter invented sections) cost 4 of 71 pairs on the full-pipeline
+    # harness: strong recall 1.000 -> 0.944, MRR 0.730 -> 0.706 (cleaned
+    # corpus, docs/sprint-audits/question-audit-2026-09-25.md section 6). The
+    # rewriter's citations are mostly right, and since citations resolve to
+    # exact sections, an invented one finds nothing.
+    def _retrieve_one(q: str, n: int):
         if hybrid_retrieval_enabled and sources is None:
             return retrieve_hybrid(
                 query=q,
@@ -3331,7 +3328,6 @@ async def retrieve_enhanced(
                 rrf_k=hybrid_rrf_k,
                 lexical_per_group=hybrid_lexical_per_group,
                 jurisdiction_focus=jurisdiction_focus,
-                identifier_search=identifiers,
             )
         return retrieve(
             query=q,
@@ -3341,14 +3337,13 @@ async def retrieve_enhanced(
             limit=n,
             sources=sources,
             jurisdiction_focus=jurisdiction_focus,
-            identifier_search=identifiers,
         )
 
     # 2026-09-25 — the primary retrieval runs as a task so the reformulation
     # retrievals start the moment the rewrite returns, not after the primary
     # finishes (the Captain's 2026-09-23 follow-up: rewrite back 1.2 s before
     # the primary, whose reformulations then ran another 4.2 s).
-    primary_task = asyncio.create_task(_retrieve_one(query, fetch_limit, True))
+    primary_task = asyncio.create_task(_retrieve_one(query, fetch_limit))
     extra_tasks: list[asyncio.Task] = []
     extras: list[list[dict]] = []
     try:
@@ -3363,7 +3358,7 @@ async def retrieve_enhanced(
                 logger.info("query_rewrite task failed: %s", exc)
             if rewrite_result is not None and rewrite_result.reformulations:
                 extra_tasks = [
-                    asyncio.create_task(_retrieve_one(r, limit, False))
+                    asyncio.create_task(_retrieve_one(r, limit))
                     for r in rewrite_result.reformulations
                 ]
         primary = await primary_task

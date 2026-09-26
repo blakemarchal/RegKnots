@@ -102,7 +102,7 @@ If a doc says "alembic head is 0045" but `alembic current` says `0092`, the doc 
   - **SOLAS regulation citations resolve to the exact section.** "Chapter III, Part B, Section I, Regulation 20" retrieved 0 of Reg.20's 5 chunks; the candidate returns 5 of 8.
   - **CFR citations resolve to the section or part.** A part number used to substring-match any chunk containing the digits.
   - **The vessel-applicability filter is Title 46 only.** Its 46 CFR part lists were dropping 5,137 chunks of 33/49 CFR for containerships: Inland Rules, 33 CFR 165/169, COFR, 49 CFR 176. "33 CFR 138 COFR" went from 0 to 4 of 8.
-  - Query-rewrite reformulations no longer run identifier search (they invent citations), and their retrievals start when the rewrite returns.
+  - Reformulation retrievals start when the rewrite returns. Dropping identifier search on reformulations was tried and **reverted on 2026-09-26** (it cost 4 of 71 pairs on the full pipeline).
   - Also: reranker `[index, score]` pairs; group skip; `jurisdiction_focus` fallback for flag-Unknown vessels; quiz exam-bank vector retrieval.
   - Harness 0.8226/0.6795 vs baseline 0.8226/0.6881: 0 pairs gained or lost, two down one rank.
   - The iterative HNSW scan stays OFF on the group fan-out (+1 pair, −0.027 MRR from 49 CFR 391 trucking rules).
@@ -116,8 +116,10 @@ If a doc says "alembic head is 0045" but `alembic current` says `0092`, the doc 
   - **`ingest/cfr_scope.py`:** cfr_49 now ingests maritime parts only.
   - **Applied:** SOLAS 1,739 → 848 and cfr_49 15,967 → 3,145 chunks; the corpus is now **92,336**. Dense harness after the cleanup: recall 0.8592 (+0.014), MRR 0.6924 (−0.025, three fire-equipment pairs whose #1 had been a stale short row).
   - **Re-measured on the clean corpus:** the within-chapter SOLAS search and the group iterative scan both stay OFF. 8 of 8 chapter-cited questions already hit without the chapter search, and the iterative scan gains +0.005 MRR for +100 ms.
-  - **`7080fce` is committed, NOT deployed:** the recovery-gate fix, the corpus oracle on `partial_miss`, analytics after `done`, credential reminders only when asked. It needs Claude to verify.
-  - **INCIDENT: Anthropic credits exhausted at ~00:15 UTC 2026-09-26.** Every Claude call returns 400; users get GPT-4o fallback answers (10.6 s, not streamed; they persist). Blake to top up. Then re-run the dense-prod control and ablation, and the staged engine checks.
+  - **Engine `51231cc` verified on prod and deployed.** The recovery-gate fix: the corpus oracle now runs on a cited `partial_miss` and surfaced a verified quote in testing. Analytics moved after `done`: last token → `done` went 3.7 → 0.0 s on a normal answer and 9.3 → 4.4 s on a hedged one. Credential reminders appear only on credential questions.
+  - **Full pipeline on the clean corpus** (71 pairs): pre-audit 0.8732 / 0.6722 → shipped **1.0000 / 0.7301**.
+  - **New baselines:** dense 0.8592 / 0.6924, dense-prod 1.0000 / 0.7301.
+  - **INCIDENT: Anthropic credits exhausted from 00:15 to ~02:10 UTC 2026-09-26.** Every Claude call returned 400, and the GPT-4o fallback served (10.6 s, not streamed; messages persisted). No user traffic during the outage. `eval_retrieval.py` `-prod` arms now refuse to run without the API.
 
 See `docs/PROJECT_STATE.md` for a fuller operational snapshot and `docs/roadmap.md` for the prioritized backlog.
 

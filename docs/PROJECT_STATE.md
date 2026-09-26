@@ -122,8 +122,12 @@ Full findings, evidence and the awaiting-go fix spec: `docs/sprint-audits/full-s
   - Stale corpus rows: `ingest/prune.py` plus the SOLAS parser fix. SOLAS went from 1,739 to 848 chunks, with the removed rows kept in `data/pruned/`.
   - cfr_49 is scoped to its maritime parts: 15,967 → 3,145 chunks.
   - Gold pairs A25-1 to A25-7 added.
-- **Committed, not deployed (`7080fce`):** the hedge judge's `verified_citations` gate now counts citations in the answer, the corpus oracle runs on `partial_miss`, analytics run after `done`, and credential reminders appear only when asked. It needs Claude to verify.
-- **Incident, 2026-09-26 ~00:15 UTC:** Anthropic credits exhausted. Every Claude call returns 400, and users get GPT-4o fallback answers. Blake to top up.
+- **Deployed 2026-09-26 (`51231cc`, verified on prod first):**
+  - The recovery gate counts citations in the answer, and the corpus oracle runs on `partial_miss`.
+  - Analytics run after `done`: last token → `done` 3.7 → 0.0 s on normal answers, 9.3 → 4.4 s on hedged ones.
+  - Credential reminders appear only when asked.
+- **Harness baselines** (71 pairs, clean corpus): dense 0.8592 / 0.6924, dense-prod 1.0000 / 0.7301.
+- **Incident, 2026-09-26 00:15 to ~02:10 UTC:** Anthropic credits were exhausted and the GPT-4o fallback served. No user traffic during the outage; resolved.
 
 **Still open from May:** `next@15.5.14` DoS CVE (bumped to 15.5.26 in `6976759`, awaiting push); Sentry `environment` tag; no CI; SpiritFlow co-tenancy; offsite backups (Blake's DO Spaces step); STCW 2017 / MARPOL 2022 / MSM 2021 bases; Load Lines 3 chunks; FSS / LSA resolution-only.
 

@@ -58,19 +58,18 @@ Findings and evidence: `docs/sprint-audits/question-audit-2026-09-25.md`.
 **Deployed 2026-09-26** (`78a7485`):
 - SOLAS and CFR citation resolution.
 - Vessel filter limited to Title 46.
-- No identifier search on reformulations; reformulations overlap the primary retrieval.
+- Reformulations overlap the primary retrieval. (Dropping their identifier search was reverted on 2026-09-26: −4 of 71 pairs on the full pipeline.)
 - Reranker pairs.
 
 **Status of the six proposals** (audit doc §6):
 - **A1. Done 2026-09-26.** Pipeline prune (`1e41a87`) and the SOLAS parser fix (`825c62e`). SOLAS went from 1,739 to 848 chunks. Next: a stale report for the IMO codes re-split in Sprint #47.
 - **A2. Done 2026-09-26.** cfr_49 is scoped to its maritime parts: 15,967 → 3,145 chunks.
-- **A3. Committed, not deployed** (`7080fce`): the gate counts citations in the answer text, and the corpus oracle runs on `partial_miss`. Needs Claude to verify.
+- **A3. Deployed 2026-09-26** (`51231cc`, verified on prod): the gate counts citations in the answer text, and the corpus oracle runs on `partial_miss`. In testing it surfaced a verified 46 CFR 95.50-10 quote.
 - **A4. Done 2026-09-26** (`2469c73`). Dense arm on the expanded set: 0.8451 / 0.7178 before the cleanup, 0.8592 / 0.6924 after.
-- **A5. Committed, not deployed** (`7080fce`): the precautionary judge and the hedge audit run after `done`.
-- **A6. Committed, not deployed** (`7080fce`): credential reminders appear only for credential questions.
-- **Blocked on Anthropic credits** (exhausted 2026-09-26 ~00:15 UTC):
-  - the full-pipeline control and ablation for the 54/62 reading;
-  - the staged engine checks for `7080fce`.
+- **A5. Deployed 2026-09-26:** analytics run after `done`. Last token → `done` went 3.7 → 0.0 s on normal answers and 9.3 → 4.4 s on hedged ones.
+- **A6. Deployed 2026-09-26:** credential reminders appear only for credential questions (verified by A/B).
+- **Full pipeline, clean corpus, 71 pairs:** pre-audit 0.8732 / 0.6722 → shipped **1.0000 / 0.7301**. These are the new baselines, with dense at 0.8592 / 0.6924.
+- **Credit outage** (2026-09-26, 00:15 to ~02:10 UTC): resolved, with no user traffic in the window.
 
 ---
 

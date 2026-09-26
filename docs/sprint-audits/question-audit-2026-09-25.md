@@ -92,8 +92,8 @@ The forbidden-part lists in `_VESSEL_TYPE_CFR_APPLICABILITY` are 46 CFR subchapt
 
 The prod log shows 32 retrievals in 30 days dropping such sections (33 CFR 83.xx and 88.xx, 49 CFR 176.xx, 178.xx, 180.417). That is a floor, because each log line lists only 5 sections. The 33 CFR 165–169 range was on every mapped type's list.
 
-### 3.4 Invented citations from the query rewriter — FIXED
-Reformulations cited sections the user never mentioned. Across the probes: "46 CFR 109", "46 CFR 76", "46 CFR 34", "46 CFR 148.5", "46 CFR 160.35", "46 CFR 199.300", "SOLAS III-2", "SOLAS III-1 Reg.19". About 8 in 10 were wrong: nonexistent, or for another vessel type. An identifier hit enters the pool above every vector result, and "46 CFR 148.5" (bulk solids) reached the final 8 for Karynn's bunker question. Reformulations now run without identifier search; only the user's own words can inject a cited section.
+### 3.4 Invented citations from the query rewriter — CHANGED, THEN REVERTED 2026-09-26
+Reformulations cited sections the user never mentioned. Across the probes: "46 CFR 109", "46 CFR 76", "46 CFR 34", "46 CFR 148.5", "46 CFR 160.35", "46 CFR 199.300", "SOLAS III-2", "SOLAS III-1 Reg.19". About 8 in 10 were wrong: nonexistent, or for another vessel type. An identifier hit enters the pool above every vector result, and "46 CFR 148.5" (bulk solids) reached the final 8 for Karynn's bunker question. Reformulations were switched to run without identifier search. **Reverted on 2026-09-26 after measurement (§6).** On the full-pipeline harness the change cost 4 of 71 pairs: strong recall 1.000 → 0.944, MRR 0.730 → 0.706. The rewriter's citations are mostly right. Since citations now resolve to exact sections (§3.1, §3.2), an invented one finds nothing, which removes most of the harm this change guarded against.
 
 ### 3.5 Stale SOLAS rows; the ingest never prunes — PROPOSED (spec needs go)
 `store.upsert_chunks` is `ON CONFLICT (source, section_number, chunk_index) DO UPDATE`, so rows that a re-parse no longer produces stay in the corpus and keep being retrieved.
@@ -174,7 +174,7 @@ Committed to `main`; see the commit messages for detail.
 |---|---|
 | SOLAS and CFR citation resolution (§3.1, 3.2) | `packages/rag/rag/retriever.py` |
 | Vessel filter limited to Title 46 (§3.3) | `packages/rag/rag/retriever.py` |
-| Reformulations without identifier search (§3.4) | `packages/rag/rag/retriever.py` |
+| Reformulations without identifier search (§3.4); reverted 2026-09-26 | `packages/rag/rag/retriever.py` |
 | Reformulations overlap the primary retrieval (§3.8) | `packages/rag/rag/retriever.py` |
 | Reranker pairs (§3.8) | `packages/rag/rag/reranker.py` |
 | From 2026-09-24: group skip, iterative scan on the explicit-source path only, `users.jurisdiction_focus` fallback for flag-Unknown vessels, quiz exam-bank vector retrieval | `packages/rag/rag/{retriever,jurisdiction,engine}.py`, `apps/api/app/routers/study.py` |
@@ -303,20 +303,50 @@ The within-chapter search variant also got 8 of 8. Two ranks improved (2 to 1), 
 
 Its earlier −0.027 MRR loss (49 CFR 391) went away with the cfr_49 scope, but what remains doesn't pay for the latency. **Still off.**
 
-### Engine changes committed, not deployed (`7080fce`)
+### Engine changes: verified on prod, then deployed (`51231cc`, first committed as `7080fce`)
 
-These need Claude to verify:
+The changes:
 - The recovery gate counts citations in the answer text (§3.7), and the corpus oracle runs on `partial_miss`. The oracle's synthesis cap rises from 1500 to 8192.
 - The precautionary judge and the hedge audit run after the done event (§3.8).
 - The credential block applies only to credential questions (§3.9).
 
-Unit tests pass. The end-to-end probe (`done` latency, the oracle, and the credential A/B) is staged.
+Measured on prod once credits were back, deployed engine vs this commit, on a synthetic US-flag containership profile:
 
-### Incident: Anthropic credits exhausted, about 00:15 UTC 2026-09-26
+| check | deployed | `51231cc` |
+|---|---|---|
+| last token → `done`, cited answer, no hedge | 3.7 s | **0.0 s** (the judge logs afterwards) |
+| last token → `done`, hedged answer | 9.3 s | **4.4 s** (judge inline, audit afterwards) |
+| bunker-CLC question, expired medical on file | mentions medical / credentials | **no mention** |
+| "Can I sail as Master with my medical cert?" | uses the credential | still uses it |
+| hedged `partial_miss` with 8 citations | no recovery | the oracle surfaced a verified 46 CFR 95.50-10 table quote; web card suppressed |
 
-Every Claude call returns 400 "credit balance is too low". The GPT-4o fallback serves users:
+The oracle adds about 12 s before `done` when it runs (Haiku web search plus Sonnet synthesis). Only regex-hedged `partial_miss` answers pay it.
+
+In a direct oracle call, Sonnet's quote failed the verbatim check on one of two runs, so that card was withheld by design (the additive-only contract).
+
+### Full pipeline on the clean corpus (the control that the outage delayed)
+
+`dense-prod` (rewrite + rerank), expanded gold set, 71 pairs, all on the same corpus:
+
+| arm | strong recall@8 | MRR | p50 |
+|---|---|---|---|
+| pre-audit rag | 0.8732 | 0.6722 | 7.5 s |
+| deployed rag, reformulations without identifier search | 0.9437 | 0.7062 | 5.9 s |
+| **deployed rag, reformulation identifiers on (shipped)** | **1.0000** | **0.7301** | 6.1 s |
+
+The audit's retrieval work beats the pre-audit code on the same corpus. Turning reformulation identifier search back on (§3.4, reverted) is worth 4 more pairs.
+
+**New baselines to beat** (expanded 71-pair gold set, clean corpus):
+- dense 0.8592 / 0.6924
+- dense-prod 1.0000 / 0.7301
+
+### Incident: Anthropic credits exhausted, 00:15 to about 02:10 UTC 2026-09-26
+
+Every Claude call returned 400 "credit balance is too low". The GPT-4o fallback served:
 - 10.6 s, not streamed;
-- the router, rewrite, rerank and judge all fail open;
-- the message persists (migration 0115).
+- the router, rewrite, rerank and judge failed open;
+- messages persisted (migration 0115).
 
-There was no user traffic between the exhaustion and this writing. Blake to top up.
+No user asked a question during the outage. Credits were restored at about 02:10 UTC.
+
+`eval_retrieval.py`'s `-prod` arms now refuse to run without the API, because two runs during the outage silently measured dense retrieval instead.
