@@ -18,17 +18,17 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
+          python-version: "3.12"      # prod runs 3.12
 
       - name: apps/api
         working-directory: apps/api
-        run: uv run python -m pytest tests -q
+        # pytest is not a declared dependency of apps/api
+        run: uv run --with pytest python -m pytest tests -q
 
       - name: packages/rag
         working-directory: apps/api
         # test_hybrid_retrieve needs a live database
-        run: >-
-          uv run python -m pytest ../../packages/rag -q
-          --deselect ../../packages/rag/test_hybrid_search.py::test_hybrid_retrieve
+        run: uv run --with pytest python -m pytest ../../packages/rag -q -k "not test_hybrid_retrieve"
 
       - name: packages/ingest
         working-directory: packages/ingest
