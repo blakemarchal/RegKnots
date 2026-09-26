@@ -1,6 +1,6 @@
 # RegKnots Roadmap
 
-**Last updated:** 2026-09-25 (question audit at `docs/sprint-audits/question-audit-2026-09-25.md`: retrieval fixes committed, awaiting deploy, 4 proposals awaiting go; Opus 5.5 low is the default answer model; LLM surface audit at `docs/sprint-audits/llm-surface-audit-2026-09-22.md`; system audit at `docs/sprint-audits/full-system-audit-2026-09-10.md`)
+**Last updated:** 2026-09-26 (question-audit follow-up deployed, SOLAS / cfr_49 cleanup applied, `7080fce` awaiting verification, Anthropic credits exhausted; audit at `docs/sprint-audits/question-audit-2026-09-25.md`; Opus 5.5 low is the default answer model; LLM surface audit at `docs/sprint-audits/llm-surface-audit-2026-09-22.md`; system audit at `docs/sprint-audits/full-system-audit-2026-09-10.md`)
 
 **Eval headline:** retrieval harness re-run 2026-09-10 after prod was flipped back to dense — strong-recall@8 **0.823 / MRR 0.658** on the 62-pair gold set, 0 errors (July baseline 0.790 / 0.627; evidence `data/eval/retrieval/20260910-144455-dense-ef0.json`). Answer-quality eval still 97.4% A-or-A− on 149 questions (2026-05-09). **New retrieval baseline to beat: 0.823 / 0.658.** Post-deploy 2026-09-23: dense 0.823 / 0.688 (unchanged recall; MRR drift from the weekly CFR refresh), and the first `dense-prod` baseline (rewrite + rerank) **0.919 / 0.737**.
 
@@ -20,7 +20,7 @@ This file is the strategic shipped / in-flight / upcoming view. `docs/PROJECT_ST
 - **2026-09-22** — Opus traffic → **Opus 5.5** (`claude-opus-5-5`, $4/$20): `MODEL_MAP[3]`, `REGENERATION_MODEL`, alias map; regeneration path fixed to read by block type (Opus 5.5 always opens with a thinking block — the old `content[0].text` would have silently disabled regen); explicit effort (`medium` stream / `high` regen) + 16K cap; refusal → GPT-4o. Deployed `83ded7a`, smoke-verified on prod: synthesis TTFT **12.9 s at `medium`, 7.6 s at `low`**. **LLM surface audit** shipped alongside — see the new section below.
 - **2026-09-22 (later)** — audit upgrades **U1–U9 shipped** on Blake's greenlight: SDK 1.8, shared `rag/llm.py`, structured outputs on 18 call sites, prompt caching (verified hits), router ∥ retrieval, native PDF input, Batch-API enrichment, Opus 5.5 `low` OCR; Opus stream effort → `low` (followup TTFT 5.9 s on prod). U6 measured and dropped. First `apps/api` tests.
 
-Corpus today: **106,041 chunks across 66 sources** (May roadmap said ~77k / 50).
+Corpus today: **92,336 chunks across 66 sources** (2026-09-26, after the SOLAS re-parse and the cfr_49 scope; 106,041 on 2026-09-10; the May roadmap said ~77k / 50).
 
 ---
 
@@ -55,20 +55,22 @@ All awaiting "go". Each is independently verifiable.
 
 Findings and evidence: `docs/sprint-audits/question-audit-2026-09-25.md`.
 
-**Committed, awaiting deploy** (`18fb15f`, `505bde8`):
+**Deployed 2026-09-26** (`78a7485`):
 - SOLAS and CFR citation resolution.
-- Vessel filter limited to Title 46; it had been dropping 5,137 chunks of 33/49 CFR for containerships.
-- No identifier search on reformulations.
-- Reformulations overlap the primary retrieval.
+- Vessel filter limited to Title 46.
+- No identifier search on reformulations; reformulations overlap the primary retrieval.
 - Reranker pairs.
 
-**Awaiting go**, in recommended order:
-- **A1. SOLAS stale-row cleanup + pipeline `--prune`.** The upsert never deletes. SOLAS has Part- and chapter-level duplicates and II-1/II-2 collision rows, and they filled 2–4 of the final 8 slots on Chapter III questions. Steps: a parse-and-diff script, a reviewed delete after a backup, then the harness. After that, check the IMO codes re-split in Sprint #47. **~3 h.**
-- **A2. Scope cfr_49 to maritime parts in the adapter**: hazmat 105–180, Part 40, CSC 450–453, and the NTSB marine parts. Rail, FMCSA and pipeline chunks surface in real questions, and 49 CFR 391 is why the group iterative scan loses MRR. **~2 h.**
-- **A3. Hedge-judge gate on text citations; corpus citation oracle on `partial_miss`.** Today the gate counts retrieved sections, so recovery never fires. **~2 h.**
-- **A4. Gold-set pairs for citations and non-46 CFR**: the Captain's Reg.20 questions, COFR, the Inland Rules. Folds into item 7. **~1 h.**
-- **A5. Hedge audit and title off the path to `done`.** **~1 h.**
-- **A6. Credential-reminder policy.** Product decision, then a compare-harness run.
+**Status of the six proposals** (audit doc §6):
+- **A1. Done 2026-09-26.** Pipeline prune (`1e41a87`) and the SOLAS parser fix (`825c62e`). SOLAS went from 1,739 to 848 chunks. Next: a stale report for the IMO codes re-split in Sprint #47.
+- **A2. Done 2026-09-26.** cfr_49 is scoped to its maritime parts: 15,967 → 3,145 chunks.
+- **A3. Committed, not deployed** (`7080fce`): the gate counts citations in the answer text, and the corpus oracle runs on `partial_miss`. Needs Claude to verify.
+- **A4. Done 2026-09-26** (`2469c73`). Dense arm on the expanded set: 0.8451 / 0.7178 before the cleanup, 0.8592 / 0.6924 after.
+- **A5. Committed, not deployed** (`7080fce`): the precautionary judge and the hedge audit run after `done`.
+- **A6. Committed, not deployed** (`7080fce`): credential reminders appear only for credential questions.
+- **Blocked on Anthropic credits** (exhausted 2026-09-26 ~00:15 UTC):
+  - the full-pipeline control and ablation for the 54/62 reading;
+  - the staged engine checks for `7080fce`.
 
 ---
 

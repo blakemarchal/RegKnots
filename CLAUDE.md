@@ -98,7 +98,7 @@ If a doc says "alembic head is 0045" but `alembic current` says `0092`, the doc 
 - **2026-09-23 Opus 5.5 is the default answer model** (Blake: "make Opus 5.5 the default … greenlight all recommended"; `3a5e9b6`, `f51cdbe`, `5f0ebb5`). **New harness `scripts/compare_synthesis_models.py`:** it captures each question's exact synthesis request from the real engine and replays it under six model/effort configs, with two blind judges (Opus 5.5 + GPT-4o). On 16 questions (14 gold + the Captain's 2), Opus 5.5 `low` beat what routing sent (10/16 Haiku): judges 8.62 vs 5.06 and 9.25 vs 8.31, flagged errors 9 vs 53, p90 first token 7.9 vs 16.4 s after retrieval, ~$0.13 vs ~$0.04 per answer cold. `medium` bought nothing for 2× first-token time. **`SYNTHESIS_MODEL_FLOOR`** (default `claude-opus-5-5`, empty = pure routing) lifts the router's pick at the synthesis call; the router remains the off-topic gate. Sonnet streams at effort `low` when it answers. Sonnet 5 JSON routes got thinking headroom: co-pilots `_REASONING_MAX_TOKENS=8000` (vessel-analysis used 96% of its old 3,000 cap), web fallback 2048 → 8192. 0 refusals on 8 sensitive-but-legit questions. **Any change to the synthesis model, effort or prompt re-runs the harness first.** Retrieval (8–19 s) is now the latency long pole → DB headroom decision. Evidence: audit §5, `data/eval/model_compare/`.
 - **2026-09-23 (later) quiz generation → Sonnet 5, effort pinned `high`, cap 16K** (Blake's go on U10). Answer keys were already equal to Haiku's (95% vs 95–97%, Opus-audited); resolvable citations rose from 50% to 97%. Also fixed: the quiz/guide citation verifier was case-sensitive, so every COLREGs quiz showed 0% verified (corpus "COLREGS Rule 13" vs cited "COLREGs Rule 13(b)"). Audit §6.
 - **2026-09-24 Postgres `shared_buffers` 128 → 512 MB + `pg_prewarm` autoprewarm SHIPPED** (Blake's go; `e066078`). It is set in `infra/docker-compose.yml` `command:` and applied by recreating the container (`cd /opt/RegKnots/infra && docker compose up -d --no-deps postgres`, API/worker stopped first). API downtime was 14 s. Dense harness identical (0.8226/0.6881). Warm group queries read 0 MB from outside the pool; the first question after a deploy is now about as fast as warm (DB phase 8.3 vs 7.6 s; was ~13 s). **The warm retrieval step did NOT get faster (8–11 s):** the 124-query fan-out (4 reformulations × 31 groups) is CPU- and connection-bound on 2 cores. Batching the small exact-scan groups was then measured and NOT shipped: identical results, but slower under real concurrency. Details, the corrected projection and the one-week hit-ratio baseline: spec §0.
-- **2026-09-25 question audit + retrieval fixes** (committed `18fb15f` rag and `505bde8` study; **not deployed**, awaiting Blake's go together with `6976759` next 15.5.26). Audited the Captain's SOLAS III/20 pair and Karynn's bunker-CLC question: `docs/sprint-audits/question-audit-2026-09-25.md`.
+- **2026-09-25 question audit + retrieval fixes** (`18fb15f` rag, `505bde8` study; deployed 2026-09-26 in `78a7485` with `6976759` next 15.5.26). Audited the Captain's SOLAS III/20 pair and Karynn's bunker-CLC question: `docs/sprint-audits/question-audit-2026-09-25.md`.
   - **SOLAS regulation citations resolve to the exact section.** "Chapter III, Part B, Section I, Regulation 20" retrieved 0 of Reg.20's 5 chunks; the candidate returns 5 of 8.
   - **CFR citations resolve to the section or part.** A part number used to substring-match any chunk containing the digits.
   - **The vessel-applicability filter is Title 46 only.** Its 46 CFR part lists were dropping 5,137 chunks of 33/49 CFR for containerships: Inland Rules, 33 CFR 165/169, COFR, 49 CFR 176. "33 CFR 138 COFR" went from 0 to 4 of 8.
@@ -106,9 +106,21 @@ If a doc says "alembic head is 0045" but `alembic current` says `0092`, the doc 
   - Also: reranker `[index, score]` pairs; group skip; `jurisdiction_focus` fallback for flag-Unknown vessels; quiz exam-bank vector retrieval.
   - Harness 0.8226/0.6795 vs baseline 0.8226/0.6881: 0 pairs gained or lost, two down one rank.
   - The iterative HNSW scan stays OFF on the group fan-out (+1 pair, −0.027 MRR from 49 CFR 391 trucking rules).
-  - **Found, awaiting go:** stale SOLAS rows (the ingest upsert never deletes: Part/chapter-level duplicates and "Ch.II Reg.N" II-1/II-2 collisions); cfr_49 is all of Title 49 (FMCSA, rail, pipeline noise); the hedge judge's `verified_citations` gate counts *retrieved* sections, so the citation oracle and web fallback never fire.
+  - Found in this audit and handled on 2026-09-26 (next entry): stale SOLAS rows and the parser bug behind them, cfr_49 carrying all of Title 49, and the hedge judge's `verified_citations` gate counting *retrieved* sections.
+- **2026-09-26 follow-up (Blake: "Greenlight all recommended") and an incident.** Details: audit doc §6.
+  - **Deployed:** `78a7485` and `2469c73`.
+  - **The Captain's two questions, re-run on prod:** Reg.20 fully retrieved; the answers now give the inspection intervals.
+  - **Gold set +7 questions / 9 pairs** (A25-*: citations, COFR, Inland Rules, 49 CFR 176). Dense arm, pre-audit vs deployed: 0.7606/0.6337 → 0.8451/0.7178.
+  - **SOLAS root cause was the parser**, which cut "Chapter II-1" at the first hyphen. Fixed in `825c62e`.
+  - **New `ingest/prune.py`** (`--stale-report` / `--prune-stale` / `--prune`): refused unless provably safe; removed rows copied to `data/pruned/*.csv.gz`.
+  - **`ingest/cfr_scope.py`:** cfr_49 now ingests maritime parts only.
+  - **Applied:** SOLAS 1,739 → 848 and cfr_49 15,967 → 3,145 chunks; the corpus is now **92,336**. Dense harness after the cleanup: recall 0.8592 (+0.014), MRR 0.6924 (−0.025, three fire-equipment pairs whose #1 had been a stale short row).
+  - **Re-measured on the clean corpus:** the within-chapter SOLAS search and the group iterative scan both stay OFF. 8 of 8 chapter-cited questions already hit without the chapter search, and the iterative scan gains +0.005 MRR for +100 ms.
+  - **`7080fce` is committed, NOT deployed:** the recovery-gate fix, the corpus oracle on `partial_miss`, analytics after `done`, credential reminders only when asked. It needs Claude to verify.
+  - **INCIDENT: Anthropic credits exhausted at ~00:15 UTC 2026-09-26.** Every Claude call returns 400; users get GPT-4o fallback answers (10.6 s, not streamed; they persist). Blake to top up. Then re-run the dense-prod control and ablation, and the staged engine checks.
 
 See `docs/PROJECT_STATE.md` for a fuller operational snapshot and `docs/roadmap.md` for the prioritized backlog.
+
 
 ## Known issues (2026-05-08)
 
@@ -142,4 +154,4 @@ Full audit report (models, retrieval, UX, product packaging): see the 2026-07-18
 
 ---
 
-*Last updated 2026-09-25 (question audit: citation resolution, vessel-filter and fan-out fixes committed, awaiting deploy; 09-23 Opus 5.5 low default). When this drifts from reality, fix it — that's the rule.*
+*Last updated 2026-09-26 (question-audit follow-up deployed; SOLAS / cfr_49 cleanup; Anthropic credits exhausted, see the entry above). When this drifts from reality, fix it — that's the rule.*

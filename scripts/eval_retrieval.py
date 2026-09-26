@@ -135,6 +135,18 @@ async def run_arm(arm: str, ef_search: int, limit: int, tag: str | None):
     if arm.endswith("-prod"):
         from anthropic import AsyncAnthropic
         anthropic_client = AsyncAnthropic(api_key=settings.anthropic_api_key)
+        # 2026-09-26 — rewrite and rerank fail open, so with the API down
+        # (credits exhausted that day) a -prod arm silently measured dense
+        # retrieval instead. Refuse to run rather than record that.
+        try:
+            await anthropic_client.messages.create(
+                model="claude-haiku-4-5-20251001", max_tokens=1,
+                messages=[{"role": "user", "content": "ok"}],
+            )
+        except Exception as exc:
+            await anthropic_client.close()
+            raise SystemExit(f"{arm}: Anthropic API unavailable, not running "
+                             f"({type(exc).__name__}: {str(exc)[:160]})")
 
     pool = await _make_pool(ef_search)
     rows = []

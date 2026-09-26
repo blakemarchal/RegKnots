@@ -1,6 +1,6 @@
 # Corpus Status
 
-_Last updated: 2026-09-10 (counts re-verified live; IMO acquisition plan — free vs purchase per instrument — moved to `docs/roadmap.md` §IMO)_
+_Last updated: 2026-09-26 (SOLAS re-parse and cfr_49 scope with stale-row prune; counts live. 2026-09-10: IMO acquisition plan moved to `docs/roadmap.md` §IMO)_
 
 This document is the engineering counterpart to the user-facing
 [/coverage](https://regknots.com/coverage) page. It tracks what's
@@ -18,14 +18,14 @@ vague about it"). This document is for engineering planning.
 |---|---|---|---|---|
 | 33 CFR | `cfr_33` | 1 | Full | Continuous (eCFR API) |
 | 46 CFR | `cfr_46` | 1 | Full | Continuous |
-| 49 CFR | `cfr_49` | 1 | Full + per-row hazmat table chunking (D6.16b) | Continuous |
+| 49 CFR | `cfr_49` | 1 | Maritime parts only since 2026-09-26 (`ingest/cfr_scope.py`: hazmat 105–109, 171–173, 176, 178, 180; Part 40; CSC 450–453; NTSB 831/850; TSA 1520/1570/1572); 3,145 chunks; per-row hazmat table chunking (D6.16b) | Continuous |
 | 46 USC Subtitle II | `usc_46` | 1 | Full | Continuous |
 | NVIC | `nvic` | 2 | Full set — 1,638 sections / 4,202 chunks | Weekly via Celery `update_regulations` (last 2026-09-06) |
 | NMC Policy | `nmc_policy` | 2 | Full | Manual |
 | NMC Checklist | `nmc_checklist` | 2 | Full | Manual |
 | USCG MSM | `uscg_msm` | 2 | All current chapters | Manual |
 | USCG Bulletins | `uscg_bulletin` | 3 | 2023-04 to 2026-04 window | Discovery scheduled |
-| SOLAS | `solas` | 1 | Full + Jan 2026 supplement | Manual |
+| SOLAS | `solas` | 1 | Full + Jan 2026 supplement; re-parsed 2026-09-26 (II-1 / II-2 / XI-1 / XI-2 named correctly, hyphenated regulations split, stale rows pruned): 848 chunks | Manual |
 | MARPOL | `marpol` | 1 | Full + supplements | Manual |
 | COLREGs | `colregs` | 1 | Full | Static |
 | STCW | `stcw` | 1 | Full + Jan 2025 supplement | Manual |
@@ -48,7 +48,7 @@ vague about it"). This document is for engineering planning.
 | Australia NSCV | `nscv` | 1 | National Standard for Commercial Vessels — DCV operational standard. 1,207 chunks. (D6.97 AU sprint) | Manual |
 | USCG NMC Exam Bank | `nmc_exam_bank` | 4 | National Maritime Center merchant-mariner exam questions. Powers Study Tools (D6.83). 2,938 chunks. | Manual |
 
-**~52,000 chunks pre-D6.93. Class-society corpus added 9,281 (D6.93). D6.97 corpus pivot added another ~19,400 chunks (BV 7,213 + IACS CSR 1,000 + COSWP ~700 + Cyprus 1,484 + Panama 1,376 + AU statutes 338 + NSCV 1,207 + NMC exam bank 2,938 + IMO Symbols 25 + per-Reg/Tier-2-enrichment net deltas across SOLAS + 10 IMO codes). Live total 2026-09-10: 106,041 chunks across 66 sources. `cfr_*` refreshed weekly by Celery `update_regulations` (Sundays 02:00 UTC), current to eCFR 2026-09-03.**
+**~52,000 chunks pre-D6.93. Class-society corpus added 9,281 (D6.93). D6.97 corpus pivot added another ~19,400 chunks (BV 7,213 + IACS CSR 1,000 + COSWP ~700 + Cyprus 1,484 + Panama 1,376 + AU statutes 338 + NSCV 1,207 + NMC exam bank 2,938 + IMO Symbols 25 + per-Reg/Tier-2-enrichment net deltas across SOLAS + 10 IMO codes). Live total 2026-09-10: 106,041 chunks across 66 sources; 2026-09-26: 92,336 after the SOLAS re-parse (1,739 → 848) and the cfr_49 scope (15,967 → 3,145). `cfr_*` refreshed weekly by Celery `update_regulations` (Sundays 02:00 UTC), current to eCFR 2026-09-03.**
 
 ## Per-section granularity improvements (Sprint D6.97 #45, #47)
 

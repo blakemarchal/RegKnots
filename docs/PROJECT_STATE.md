@@ -2,13 +2,13 @@
 
 **One-page operational snapshot for humans and fresh Claude Code sessions.**
 
-Last updated: 2026-09-25 (question audit `docs/sprint-audits/question-audit-2026-09-25.md`: retrieval fixes committed, awaiting deploy; Opus 5.5 low is the default answer model; system audit 2026-09-10)
+Last updated: 2026-09-26 (question-audit follow-up deployed, SOLAS / cfr_49 cleanup applied, Anthropic credits exhausted; audit `docs/sprint-audits/question-audit-2026-09-25.md`; Opus 5.5 low is the default answer model; system audit 2026-09-10)
 
 ---
 
 ## TL;DR
 
-RegKnot is a maritime-compliance RAG at **https://regknots.com**. Production stack live and healthy. **106,041 chunks across 66 sources** with 100% embedding coverage. Retrieval pipeline now includes multi-query rewrite, Haiku reranker, citation oracle, source-diversified fetch, jurisdiction filter, vessel-profile boosts, synonym + intent expansion; hybrid BM25+dense built, measured 2026-07-19 and rejected (dense wins) — prod `.env` carried it switched on until the 2026-09-10 fix, now dense. **96.1% A-or-A−** on the latest 152-question regression eval. First organic Captain-tier subscriber 2026-09-09. See the 2026-09-10 audit for the pre-push list.
+RegKnot is a maritime-compliance RAG at **https://regknots.com**. Production stack live and healthy. **92,336 chunks across 66 sources** (2026-09-26, after the SOLAS re-parse and the cfr_49 scope) with 100% embedding coverage. Retrieval pipeline now includes multi-query rewrite, Haiku reranker, citation oracle, source-diversified fetch, jurisdiction filter, vessel-profile boosts, synonym + intent expansion; hybrid BM25+dense built, measured 2026-07-19 and rejected (dense wins) — prod `.env` carried it switched on until the 2026-09-10 fix, now dense. **96.1% A-or-A−** on the latest 152-question regression eval. First organic Captain-tier subscriber 2026-09-09. See the 2026-09-10 audit for the pre-push list.
 
 ## Live production
 
@@ -31,7 +31,7 @@ RegKnot is a maritime-compliance RAG at **https://regknots.com**. Production sta
 - **Propose spec, wait for greenlight** before coding non-trivial work.
 - **Grep for Cassandra** before every commit.
 
-## Corpus snapshot — 106,041 chunks across 66 sources (live 2026-09-10)
+## Corpus snapshot — 106,041 chunks across 66 sources (live 2026-09-10; 92,336 on 2026-09-26, see `docs/corpus-status.md`)
 
 100% embedding coverage. Vector dim 1536. ~108.9M chars / 27.2M tokens. Top sources by chunk count:
 
@@ -60,7 +60,7 @@ Plus 40 additional sources: `cfr_*`, `solas`, `marpol`, `colregs`, `stcw`, `ism`
 2. **Pre-retrieval distillation** (D6.51) for verbose first turns
 3. **Multi-query rewrite** (D6.66) — Haiku produces 2-3 reformulations; default ON
 4. **Synonym + intent expansion** — `synonyms.py` (lifejacket/log/mob/stability/stencil), drill-frequency + equipment-marking intent expanders
-5. **Retrieval** (pgvector HNSW + per-source-group diversified fetch + identifier regex + broad keyword trigram, merged with boosts). As of 2026-09-25 (committed, awaiting deploy):
+5. **Retrieval** (pgvector HNSW + per-source-group diversified fetch + identifier regex + broad keyword trigram, merged with boosts). As of 2026-09-25 (deployed 2026-09-26):
    - SOLAS regulation and CFR section/part citations resolve against `section_number`, not a `full_text` substring. A cited section keeps up to 5 chunks.
    - Identifier search runs only on the user's own words, not on reformulations.
    - Groups that cannot match the jurisdiction filter are skipped.
@@ -117,11 +117,13 @@ Full findings, evidence and the awaiting-go fix spec: `docs/sprint-audits/full-s
 **P2:**
 - Stripe `invoice.paid` processed before `checkout.session.completed` on first purchase → `UPDATE … WHERE stripe_subscription_id` matched 0 rows → `billing_interval` NULL for new subscribers.
 
-**From the 2026-09-25 question audit (awaiting go; details in the audit doc):**
-- **Stale corpus rows.** `store.upsert_chunks` never deletes rows a re-parse no longer produces. SOLAS carries Part- and chapter-level duplicates of its per-Regulation sections, and "SOLAS Ch.II Reg.N" rows where II-1 and II-2 collided. Proposal: a parse-and-diff script, then a reviewed delete, then a pipeline `--prune`.
-- **cfr_49 is all of Title 49**, including FMCSA, rail, pipelines, transit and the STB. It adds noise to the CFR group. Proposal: scope it in the adapter to the maritime-relevant parts.
-- **The hedge judge's "verified citations" gate counts retrieved sections**, so the citation oracle and web fallback never fire (0 runs in 30 days).
-- **Credential reminders** appear on unrelated answers; needs a product decision.
+**From the 2026-09-25 question audit (details in the audit doc, §6 for 2026-09-26):**
+- **Done 2026-09-26:**
+  - Stale corpus rows: `ingest/prune.py` plus the SOLAS parser fix. SOLAS went from 1,739 to 848 chunks, with the removed rows kept in `data/pruned/`.
+  - cfr_49 is scoped to its maritime parts: 15,967 → 3,145 chunks.
+  - Gold pairs A25-1 to A25-7 added.
+- **Committed, not deployed (`7080fce`):** the hedge judge's `verified_citations` gate now counts citations in the answer, the corpus oracle runs on `partial_miss`, analytics run after `done`, and credential reminders appear only when asked. It needs Claude to verify.
+- **Incident, 2026-09-26 ~00:15 UTC:** Anthropic credits exhausted. Every Claude call returns 400, and users get GPT-4o fallback answers. Blake to top up.
 
 **Still open from May:** `next@15.5.14` DoS CVE (bumped to 15.5.26 in `6976759`, awaiting push); Sentry `environment` tag; no CI; SpiritFlow co-tenancy; offsite backups (Blake's DO Spaces step); STCW 2017 / MARPOL 2022 / MSM 2021 bases; Load Lines 3 chunks; FSS / LSA resolution-only.
 

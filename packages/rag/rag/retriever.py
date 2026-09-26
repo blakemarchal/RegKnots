@@ -1229,11 +1229,12 @@ def _extract_identifiers(query: str) -> list[dict]:
     # section_number; one the corpus doesn't have finds nothing. A chapter
     # cited without a regulation adds no identifier. The old one searched
     # full_text for the chapter string ("II-2") and returned 5 arbitrary
-    # chunks. A within-chapter search was measured and held back: the
-    # "SOLAS Ch.II-2 " rows are stale Part-level ones (the per-Regulation
-    # text sits under older "SOLAS Ch.II Reg.N" names), and injecting them
-    # took "SOLAS II-2 fire detection" from 2 to 0 correct chunks in the top 8.
-    # Revisit after the SOLAS re-ingest (docs/sprint-audits/question-audit-2026-09-25.md §3.5).
+    # chunks. A within-chapter search (section_prefix) was measured twice
+    # and held back: on the pre-cleanup corpus it injected stale Part-level
+    # rows; after the 2026-09-26 SOLAS re-parse, 8 of 8 chapter-cited
+    # questions already hit without it, and with it two ranks improved
+    # while in-chapter noise rose (V/35, V/17 on a BNWAS question).
+    # Evidence: docs/sprint-audits/question-audit-2026-09-25.md §6.
     for chap, reg in _solas_citations(query):
         section = f"SOLAS Ch.{chap} Reg.{reg}"
         identifiers.append({
@@ -1619,8 +1620,9 @@ async def _broad_keyword_search(
 #      with and without it). NOT on the group fan-out: measured 2026-09-25
 #      on eval_retrieval.py, it gained 1 strong-recall pair but cost 0.027
 #      MRR, all from fuller CFR groups ranking 49 CFR 391 (FMCSA truck-driver
-#      medical rules) above the mariner-medical NVIC. Revisit once cfr_49 is
-#      scoped to its maritime parts.
+#      medical rules) above the mariner-medical NVIC. Re-measured
+#      2026-09-26 after cfr_49 was scoped to its maritime parts: +0.005 MRR,
+#      same recall, +100 ms p50. Still off.
 # Also measured and NOT shipped: batching the small exact-scan groups into one
 # windowed query per retrieve() — identical results, but it concentrated the
 # exact-scan work on one connection and was slower under real concurrency.

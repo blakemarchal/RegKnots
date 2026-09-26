@@ -181,7 +181,7 @@ Committed to `main`; see the commit messages for detail.
 
 Tests: `packages/rag/test_solas_citations.py`, `test_retrieval_fanout.py`, `test_reranker_pairs.py`, `test_jurisdiction_focus.py`, and `apps/api/tests/test_study_quiz.py`. Current totals: rag 180 passed plus 1 pre-existing DB-bound failure (`test_hybrid_retrieve`); api 32 passed.
 
-Commits: `18fb15f` (rag) and `505bde8` (study). Not yet pushed or deployed as of this writing.
+Commits: `18fb15f` (rag) and `505bde8` (study). Deployed 2026-09-26 with `78a7485` (§6).
 
 ## 5. Proposals, in recommended order
 
@@ -194,3 +194,129 @@ Commits: `18fb15f` (rag) and `505bde8` (study). Not yet pushed or deployed as of
 | 5 | Hedge audit and title off the path to `done` (§3.8) | ~1 h | go |
 | 6 | Credential reminder policy (§3.9) | 15 min, plus a compare-harness run | decision |
 | 7 | After 1 and 2: a within-chapter SOLAS search, and the group iterative scan, each re-measured | ~1 h | none |
+
+## 6. Follow-up, 2026-09-26 (Blake: "Greenlight all recommended")
+
+### Deployed
+
+- `78a7485`: the §4 batch plus Next.js 15.5.26.
+- `2469c73`: the ingest prune tooling, the cfr_49 scope, the SOLAS parser fix and the gold pairs.
+
+Smoke passed on both.
+
+### The Captain's questions, re-run on prod
+
+Run end to end on her vessel profile, in a throwaway conversation:
+
+| | 2026-09-23 | 2026-09-26 |
+|---|---|---|
+| Reg.20 chunks in context (Q1) | 0 of 5 | all 5 |
+| Reranker top-8 (Q1) | `[4,1,1,1,1,1,1,1]` | `[5,5,5,5,5,4,2,2]` |
+| Judge (Q1) | `partial_miss` | `precision_callout` |
+| Answer (Q1) | declined the intervals | gives the weekly, monthly, annual and 5-year cycle |
+
+Q2 behaves the same way. TTFT was 13 s and 15 s.
+
+### Gold set (item 4, `2469c73`)
+
+Seven questions, nine pairs (A25-1 to A25-7): the Captain's citation, SOLAS III/20, V/19, 46 CFR 199.180, COFR (33 CFR 138), the Inland Rules' towing lights (33 CFR 83.24), and 49 CFR 176 segregation.
+
+Dense arm, expanded set:
+
+| arm | strong recall@8 | MRR |
+|---|---|---|
+| pre-audit rag | 0.7606 | 0.6337 |
+| deployed rag | 0.8451 | 0.7178 |
+
+The deployed rag gains 6 pairs and loses 0.
+
+Full pipeline (`dense-prod`) on the deployed rag: 0.8873 / 0.7029, with 9 of 9 on the new pairs. On the 62 original pairs it read 54/62 against 57/62 on 09-23. The misses were marginal ranks on stale SOLAS rows: a `Ch.II-2 Part G` row at rank 7 and a 1-chunk `Ch.II-2 Reg.14` row at rank 4.
+
+The same-day control and the ablation that would separate today's changes from run-to-run noise could not run: Anthropic credits ran out mid-session (see the incident below), and both runs are discarded. Re-run them with credits.
+
+### SOLAS: the parser was the root cause, not only old rows
+
+`_structural_part` cut header titles at their first hyphen. "Chapter II-1" became "Chapter II" and the Part was lost, so every Part of II-1 and II-2 (and XI-1 / XI-2) shared one section_number, and their chunks overwrote each other on upsert. The II-1 and II-2 Unified Interpretations collided the same way. Hyphenated regulations ("Regulation 3-1") were never split out.
+
+`825c62e` fixes both, with tests on the real `headers.txt` lines, and merges any repeated section_number instead of overwriting it.
+
+### Pruning and the cfr_49 scope (items 1 and 2, `1e41a87`)
+
+`ingest/prune.py` adds `--stale-report`, `--prune-stale` and `--prune`.
+- A prune is refused unless the parse yields no duplicate key and every key it yields is stored.
+- Removed rows are copied to `data/pruned/<source>-<stamp>.csv.gz` in the same transaction as the DELETE.
+
+cfr_49 now ingests hazmat 105–109, 171–173, 176, 178 and 180; Part 40; CSC 450–453; NTSB 831/850; and TSA 1520/1570/1572.
+- Answers had cited 49 CFR 228 (railroad hours of service) twice.
+- Until the out-of-scope rows were removed, the weekly update's 50% safeguard would have aborted cfr_49.
+
+### Cleanup applied
+
+Both sources were re-ingested with `run_ingest.sh --source <s> --fresh --prune --no-notify`, then `VACUUM (ANALYZE)`.
+
+| source | before | after | removed | copy |
+|---|---|---|---|---|
+| SOLAS | 1,739 | 848 | 1,273 | `solas-20260926-003706.csv.gz` |
+| cfr_49 | 15,967 | 3,145 | 12,823 | `cfr_49-20260926-003807.csv.gz` |
+| corpus | 106,049 | 92,336 | | |
+
+SOLAS details:
+- The parse yields 848 chunks across 326 sections, with no duplicate keys.
+- II-2 Reg.11 and Reg.19 appear twice in the source text and were merged.
+- New names include `SOLAS Ch.II-1 Reg.13-1`.
+
+The stale reports went to `data/pruned/*-report.json` before the apply.
+
+**Dense harness, expanded set, same code, before and after the cleanup:**
+
+| | strong recall@8 | MRR | p50 ms |
+|---|---|---|---|
+| before | 0.8451 | 0.7178 | 579 |
+| after | 0.8592 | 0.6924 | 504 |
+
+Two pairs gained (F1/V5; N-S1/V1, now SOLAS Ch.V Reg.20) and one lost (F1/V1).
+
+The MRR loss sits in three fire-equipment pairs (F1/V1, F2/V1, N-AUTH2/V1). Their rank-1 hit had been a stale short row: the May 1-chunk `SOLAS Ch.II-2 Reg.10` or the `Ch.II-2 Part G` Part-level row. That regulation is now its real 23 chunks, which rank lower before reranking. The containership SCBA top 8 now includes the FSS Code Ch.3 firefighter's-outfit text, which the gold pattern does not list.
+
+### Re-measured on the clean corpus (item 7)
+
+**Chapter-cited SOLAS questions** (dense `retrieve()`, the Captain's vessel profile). With the deployed code and no chapter identifier, **8 of 8** hit:
+
+| question | target | rank |
+|---|---|---|
+| II-2 fire detection | II-2 Reg.7 | 2 |
+| III drill frequency | III Reg.19 | 1 |
+| BNWAS | V Reg.19 | 1 |
+| bilge pumping | II-1 **Reg.35-1** (a hyphenated regulation, newly split out) | 1 |
+| ship security alert system | **XI-2 Reg.6** | 1 |
+| steering gear | II-1 Reg.29 | 2 |
+| two control questions with no chapter cited | II-2 Reg.7 / III Reg.19 | 1 / 1 |
+
+The within-chapter search variant also got 8 of 8. Two ranks improved (2 to 1), in-chapter noise rose (V/35, V/17 in the BNWAS top 4), and the harness was identical. **Held back.**
+
+**Group iterative HNSW scan**, dense harness on the clean corpus:
+
+| | strong recall@8 | MRR | p50 ms |
+|---|---|---|---|
+| scan off | 0.8592 | 0.6924 | 504–546 |
+| scan on | 0.8592 | 0.6975 | 640 |
+
+Its earlier −0.027 MRR loss (49 CFR 391) went away with the cfr_49 scope, but what remains doesn't pay for the latency. **Still off.**
+
+### Engine changes committed, not deployed (`7080fce`)
+
+These need Claude to verify:
+- The recovery gate counts citations in the answer text (§3.7), and the corpus oracle runs on `partial_miss`. The oracle's synthesis cap rises from 1500 to 8192.
+- The precautionary judge and the hedge audit run after the done event (§3.8).
+- The credential block applies only to credential questions (§3.9).
+
+Unit tests pass. The end-to-end probe (`done` latency, the oracle, and the credential A/B) is staged.
+
+### Incident: Anthropic credits exhausted, about 00:15 UTC 2026-09-26
+
+Every Claude call returns 400 "credit balance is too low". The GPT-4o fallback serves users:
+- 10.6 s, not streamed;
+- the router, rewrite, rerank and judge all fail open;
+- the message persists (migration 0115).
+
+There was no user traffic between the exhaustion and this writing. Blake to top up.
