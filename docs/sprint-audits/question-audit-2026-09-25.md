@@ -350,3 +350,76 @@ Every Claude call returned 400 "credit balance is too low". The GPT-4o fallback 
 No user asked a question during the outage. Credits were restored at about 02:10 UTC.
 
 `eval_retrieval.py`'s `-prod` arms now refuse to run without the API, because two runs during the outage silently measured dense retrieval instead.
+
+## 7. 2026-09-26 evening: MARPOL per regulation, MARPOL citations, IMDG, vessel flag (Blake: "Greenlight all")
+
+No Anthropic calls. Embeddings for the two re-ingests and five dense harness runs cost a few cents of OpenAI.
+
+### MARPOL
+
+The adapter splits each Annex chapter at "Regulation N" headings. A heading has a blank line above it and its title on the next line. The same line with a blank line after it is a page running head, and it is dropped.
+
+The D6.88 post-hoc split (`scripts/split_marpol_to_regulations.py`) had read those running heads as headings. As a result:
+- "Annex I Reg.2" was titled "39 Electronic Record Book ...";
+- an "Annex VI Reg.11" row existed, though the scan has no Regulation 11;
+- 12A's text sat under Reg.12, because the pattern missed "Regulation 12A*".
+
+The scan itself is damaged in five places, each fixed by a fix anchored on a line that occurs once:
+
+| regulation | problem | fix |
+|---|---|---|
+| Annex I Reg.10 | heading page not scanned | opens at 10.8.3, with a note |
+| Annex I Reg.26 | heading page not scanned | opens partway through, before paragraph 5, with a note |
+| Annex I Reg.27, Reg.28 | pages out of order | text moved behind their headings |
+| Annex VI Reg.13 (NOx) | heading page not scanned | opens at 13.5.1.2, with a note; without it the NOx text is labelled Reg.12 (ODS) |
+
+Also:
+- a P&A Manual page filed in the Annex III range moves to Annex II App.IV;
+- Annex VI Reg.24's title is fixed.
+
+Annex VI Regs 11, 19 and 20 are not in the scan at all.
+
+Re-ingested with `--enrich-cache-only`:
+- 610 rows, replacing 702;
+- 251 pruned: 250 chapter rows, plus the D6.88 "Annex VI Reg.11", whose regulation the scan lacks;
+- backup `data/pruned/marpol-20260926-171700.csv.gz`.
+
+### Dense harness (79 pairs: the 71 + A26-1..7)
+
+| run | corpus | retriever | strong recall@8 | MRR |
+|---|---|---|---|---|
+| B0 | chapter rows + D6.88 | text identifiers | 0.8354 | 0.6755 |
+| B1 | per regulation | text identifiers | 0.8608 | 0.6793 |
+| **B2 (shipped)** | per regulation | exact regulation + annex search | **0.8608** | **0.7046** |
+| B2 without annex search | per regulation | exact regulation only | 0.8608 | 0.7046 |
+
+- **B0 → B1:** A26-1 (Reg.14) and A26-2 (Reg.12A) go from no hit to rank 2. A26-6 (sewage, Reg.11) goes from 5 to 2.
+- **B1 → B2:** A26-1, A26-2, A26-7 and N-E3 go from rank 2 to rank 1. No pair was lost in either step.
+
+The annex search does not move the strong metric. A26-4 (2ndmate09's "annex V exemptions for throwing plastic overboard") misses Reg 3 and Reg 7 in every run. Its top 8 still differ:
+
+| run | Annex V text in the top 8 |
+|---|---|
+| without annex search | none: COLREGs Rule 38 twice, 46 CFR 108.597 (line-throwing appliance), IMDG Index, 49 CFR 172.101 — the D6.24 failure |
+| B1 (first 5 matching rows, storage order) | Reg.1 twice, Reg.6, Reg.10 |
+| B2 (5 chunks nearest the query) | Reg.4, Reg.6, Reg.5 |
+
+**Follow-up:** COLREGs Rule 38 still outranks the annex hits after `_rerank`'s boosts. Why Reg 3 and Reg 7 are not among the 5 nearest is the next thing to check. Neither needs any spend to investigate.
+
+### IMDG
+
+"Foreword" (the Vol.2 front matter) and "Part 3" (a Vol.1 placeholder) each came from two files. The later file overwrote the earlier file's chunks 0 and 1, so the Vol.1 foreword's opening chunks were missing. The parse now merges them.
+
+Re-ingested fresh, no prune: 5 chunks new or changed, net +1.
+
+### Vessel flag
+
+`create_vessel` wrote `flag_state = 'Unknown'` whatever the user did, and no API body accepted a flag. The only writer was the chat's VESSEL_UPDATE side channel. That is why the Captain typed "confirming flag state" into the chat box on 2026-09-09.
+
+Shipped:
+- `flag_state` on vessel create, update and list;
+- a one-click chat banner while the flag is Unknown, suggesting the flag from `jurisdiction_focus`;
+- a Flag field in the vessel editor.
+
+Verified in the deployed web bundle.
+

@@ -80,7 +80,7 @@ If a doc says "alembic head is 0045" but `alembic current` says `0092`, the doc 
 - 2026-06 (audit sprint): quality audit of live user questions shipped: follow-up retrieval composition (short mid-thread messages), CG-form identifier retrieval (Karynn's "835"), never-assert-non-existence prompt rule, **MLC 2006 ingested** (140 sections — the labour fourth pillar; Nirmal's provisions gap), IMO MEPC/MSC resolution harvest Phase 1 (12 resolutions, `imo_mepc`/`imo_msc`), SIRE 2.0 Q Library completed (Pt2, + `ocimf` affinity group it never had), whale-zones nav + 4-feature polish + opt-in GPS persistence (migration 0112).
 - **2026-07-18 model refresh (Fable audit session):** all Sonnet call sites → `claude-sonnet-5`, Opus → `claude-opus-4-8` (router MODEL_MAP, REGENERATION_MODEL, engine, web_fallback, checklists, study, documents, me, credentials, enricher, stcw/ism Vision). IDs live-validated against the prod key pre-ship. `chat.py _MODEL_ALIAS` got the new keys ADDED (old keys kept — D6.73 NULL-model_used lesson). Also fixed badly-rotted `chat.py _MISSING_SOURCES` that was telling users MARPOL/MLC/IMDG/IGC/IBC/CSS/BWM/Polar were "not in the database" (all long since ingested).
 - **2026-07-19 "Wk1-4" mega-wave (Blake greenlit the full 30-day plan):**
-  - **Hybrid verdict — DO NOT FLIP.** New `scripts/eval_retrieval.py` (retrieval-only recall@k/MRR, imports the eval_rag_baseline gold set). Dense 0.790 strong-recall@8 / 0.627 MRR vs hybrid RRF 0.548 / 0.416 — hybrid loses 16 pairs, gains 1 (lexical lane vetoes dense's correct hits via rank-blind RRF). ⛔ MEASURED comment on the config flag; evidence in `data/eval/retrieval/`; verdict doc `docs/hybrid-retrieval-verdict-2026-07-19.md`. ef_search 100 "measured zero effect" — invalid test (asyncpg RESET ALL wiped the pool-init SET; correction in the verdict doc, 2026-09-24). **Any retrieval change now runs this harness first.** Baselines to beat since 2026-09-26 (expanded 71-pair gold set, cleaned corpus): **dense 0.8592/0.6924, dense-prod 1.0000/0.7301**. The `dense` arm does not exercise query rewrite, reformulations or the reranker; a change to those must be measured with `--arm dense-prod`. A reformulation change shipped on dense-only probes on 2026-09-25 and was reverted the next day (−4 pairs on dense-prod). (The 2026-09-10 re-run gave 0.823/0.658, after prod was flipped back to dense; it had been serving hybrid since May against this verdict.)
+  - **Hybrid verdict — DO NOT FLIP.** New `scripts/eval_retrieval.py` (retrieval-only recall@k/MRR, imports the eval_rag_baseline gold set). Dense 0.790 strong-recall@8 / 0.627 MRR vs hybrid RRF 0.548 / 0.416 — hybrid loses 16 pairs, gains 1 (lexical lane vetoes dense's correct hits via rank-blind RRF). ⛔ MEASURED comment on the config flag; evidence in `data/eval/retrieval/`; verdict doc `docs/hybrid-retrieval-verdict-2026-07-19.md`. ef_search 100 "measured zero effect" — invalid test (asyncpg RESET ALL wiped the pool-init SET; correction in the verdict doc, 2026-09-24). **Any retrieval change now runs this harness first.** Baselines to beat: **dense 0.8608/0.7046** (79-pair gold set, after the 2026-09-26 MARPOL split); **dense-prod 1.0000/0.7301** (71-pair set, 2026-09-26; not re-run on 79). The `dense` arm does not exercise query rewrite, reformulations or the reranker; a change to those must be measured with `--arm dense-prod`. A reformulation change shipped on dense-only probes on 2026-09-25 and was reverted the next day (−4 pairs on dense-prod). (The 2026-09-10 re-run gave 0.823/0.658, after prod was flipped back to dense; it had been serving hybrid since May against this verdict.)
   - **Per-ingest REINDEX removed** (held ACCESS EXCLUSIVE during live traffic); weekly `REINDEX CONCURRENTLY` + VACUUM + backup-staleness gate via `regknots-db-maintenance.timer` (installed, first run green: 245s reindex, no locks). Opt-in per-run: `REGKNOTS_REINDEX_AFTER_INGEST=1`.
   - **Backups proven restorable** — first restore test in project history: 762MB dump → clean pgvector/pg16 container, 421s, 0 errors, embeddings + alembic head verified. Runbook `docs/runbooks/db-restore.md`. Offsite scaffolding installed (rclone script + disabled timer) — **awaiting Blake's 5-min DO Spaces bucket+keys step**. `smoke.sh` now probes backup age every deploy.
   - **Citation trust pack:** chips amber→teal (amber now = caution only), "Corpus-verified · N citations" badge, message timestamps, aria-live streaming, pinch-zoom unlock, prefers-reduced-motion.
@@ -144,9 +144,42 @@ If a doc says "alembic head is 0045" but `alembic current` says `0092`, the doc 
     | `cfr_33` | 68 | mostly expired temporary rules, e.g. 165.T01-0903 |
 
     Corpus is now **91,892**. Dense harness: recall unchanged; one ERG tie flipped.
-  - **Deliberately not pruned:**
+  - **Deliberately not pruned** (both fixed the same evening; next entry):
     - `imdg`: 30 manual rows, and 3 duplicate keys in its parse.
     - `marpol`: 131 one-chunk per-regulation rows are the only per-regulation MARPOL layer. The fix is per-regulation splitting in the MARPOL parser.
+- **2026-09-26 (evening; Blake: "Greenlight all"; no Anthropic spend).** Deployed `aaa6c3a`, `af7089f`, `7c4795d`. Evidence: audit doc §7.
+  - **MARPOL is split into regulations** (`aaa6c3a`). The adapter now emits one section per regulation: 140 across Annexes I–VI, e.g. "MARPOL Annex VI Reg.14".
+    - They replace 250 chapter-level rows and the 131 D6.88 one-chunk rows. D6.88 had read page running heads as headings and filed 12A's text under Reg.12.
+    - Five anchored fixes repair OCR damage. Annex I Reg.10, Annex I Reg.26 and Annex VI Reg.13 (NOx) open where their text resumes, with a note that the start is missing. Out-of-order Reg.27 and Reg.28 pages go back behind their headings. Without the fixes, the NOx text would sit under Reg.12 (ODS).
+    - A misfiled P&A Manual page moves to Annex II App.IV.
+    - Re-ingested with the new `--enrich-cache-only` flag (no API calls): 610 rows (288 regulation, 322 appendix / UI / articles). 251 pruned (backup `data/pruned/marpol-20260926-171700.csv.gz`).
+    - The 121 appendix / UI rows kept their aliases. The 288 regulation chunks are plain. Re-enriching them is one Batch-API run, under $1. Not run (spend rule).
+  - **Scan gaps (Karynn can re-capture the pages):**
+    - Annex VI Regs 11, 19 and 20 are absent from the scan.
+    - The opening pages of Annex I Regs 10 and 26 and of Annex VI Reg 13 are absent.
+  - **MARPOL citations resolve to the regulation** (`af7089f`).
+    - Before: "MARPOL Annex VI Regulation 14" became substring searches for "Annex VI" and "Regulation 14" over every source. That put 10 rows, in storage order, above every vector hit.
+    - Now a cited regulation is an exact-section identifier.
+    - An annex named without a regulation returns that annex's 5 chunks nearest the query. On 2ndmate09's "annex V exemptions" question, removing it leaves zero Annex V text in the top 8.
+    - The bare "Annex I Regulation 22" form counts only when no other instrument is named, because the Load Line Convention's Annex I numbers regulations too.
+  - **Dense harness, 79 pairs (71 + A26-1..7):**
+
+    | run | strong recall@8 | MRR |
+    |---|---|---|
+    | before | 0.8354 | 0.6755 |
+    | + corpus | 0.8608 | 0.6793 |
+    | + retriever | 0.8608 | **0.7046** |
+
+    The corpus change gains Reg.14 and Reg.12A. The retriever change moves four cited pairs from rank 2 to rank 1. No pair was lost. **New dense baseline: 0.8608 / 0.7046.** `dense-prod` was not re-run (spend rule).
+  - **IMDG** (`aaa6c3a`): the duplicate "Foreword" and "Part 3" headers now merge instead of overwriting, so the Vol.1 foreword's opening is back.
+    - Re-ingested fresh, no prune; the 551 sub-clause rows and 30 manual rows are kept.
+    - `merge_duplicate_sections` now lives in `ingest.models` (SOLAS, MARPOL and IMDG use it).
+  - **Vessel flag** (`7c4795d`). `create_vessel` hard-coded `flag_state = 'Unknown'`, and neither create nor update accepted a flag. That is why 51 of 56 vessels are Unknown.
+    - The API now takes and returns `flag_state`.
+    - Chat shows a one-click "confirm your flag" banner while the active vessel's flag is Unknown. The suggested flag comes from `jurisdiction_focus`.
+    - The vessel editor has a Flag field.
+    - IMO-number enrichment (roadmap item 6) remains.
+  - Corpus **91,801**.
 See `docs/PROJECT_STATE.md` for a fuller operational snapshot and `docs/roadmap.md` for the prioritized backlog.
 
 
@@ -182,4 +215,4 @@ Full audit report (models, retrieval, UX, product packaging): see the 2026-07-18
 
 ---
 
-*Last updated 2026-09-26 (question-audit follow-up deployed; SOLAS / cfr_49 cleanup; Anthropic credits exhausted, see the entry above). When this drifts from reality, fix it — that's the rule.*
+*Last updated 2026-09-26 evening (MARPOL per regulation + citations, IMDG duplicate headers, vessel flag prompt; earlier: question-audit follow-up, SOLAS / cfr_49 cleanup, Anthropic credits exhausted). When this drifts from reality, fix it — that's the rule.*
