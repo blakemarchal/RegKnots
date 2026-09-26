@@ -17,6 +17,7 @@ import logging
 import re
 import time
 from collections.abc import AsyncIterator
+from typing import NamedTuple
 from uuid import UUID
 
 import asyncpg
@@ -1108,9 +1109,17 @@ def _build_chat_messages(
 
     credential_block = ""
     if credential_context:
+        # 2026-09-26 — was "When relevant, tailor your answer to the user's
+        # credential situation." Opus 5.5 read an EXPIRED line as always
+        # relevant and closed a bunker-certificate answer with a note about
+        # the user's medical certificate (Karynn, 2026-09-25). Expiry
+        # reminders also reach users outside chat.
         credential_block = (
             f"{credential_context}\n"
-            "When relevant, tailor your answer to the user's credential situation.\n\n"
+            "Use these credentials only when the question is about the user's "
+            "own credentials, sea time, license or endorsement eligibility, or "
+            "fitness to sail. Do not add reminders about the user's certificates "
+            "to answers on other topics.\n\n"
         )
         logger.info("Including credential context in prompt")
 
@@ -1841,6 +1850,73 @@ def _done_payload_to_response(data: dict) -> ChatResponse:
 # ──────────────────────────────────────────────────────────────────────
 
 
+# 2026-09-26 — analytics no answer decision depends on (the precautionary
+# hedge judge, the hedge-audit classifier) run after the done event as
+# tracked background tasks. chat.py persists the assistant message once the
+# engine generator finishes, so awaiting them inline held both the client's
+# final render and the save for their duration.
+_BACKGROUND_TASKS: "set[asyncio.Task]" = set()
+_BACKGROUND_TIMEOUT_S = 90.0
+
+
+def _spawn_background(coro, label: str) -> None:
+    async def _run():
+        try:
+            await asyncio.wait_for(coro, timeout=_BACKGROUND_TIMEOUT_S)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning(
+                "background %s failed (non-fatal): %s: %s",
+                label, type(exc).__name__, str(exc)[:200],
+            )
+
+    task = asyncio.create_task(_run())
+    _BACKGROUND_TASKS.add(task)
+    task.add_done_callback(_BACKGROUND_TASKS.discard)
+
+
+class _RecoveryPlan(NamedTuple):
+    run_oracle: bool
+    run_web: bool
+    oracle_query: str | None
+    has_text_citations: bool
+    text_citation_count: int
+
+
+def _recovery_plan(
+    *,
+    judge_verdict: str | None,
+    judge_missing_topic: str | None,
+    answer: str,
+    citation_oracle_enabled: bool,
+    context_sections: list[str] | None = None,
+) -> _RecoveryPlan:
+    """What to run after a regex-triggered judge verdict (2026-09-26).
+
+    - Web card: a miss verdict and no citation in the answer text. Answers
+      that cite sections keep the D6.97 Phase 1a trust contract: no web
+      card stapled to them.
+    - Corpus citation oracle: whenever the web card would fire, and also on
+      a partial_miss that names what is missing, even when the answer has
+      citations. Its card comes from the verified corpus, not the web.
+    `answer` is the finalized answer, so unverified citations have already
+    been stripped and every citation left in it verified. A citation counts
+    when the regex extractor finds it (CFR, SOLAS, COLREGs, NVIC, ISM) or
+    when the answer names a retrieved section (MARPOL, IMDG, codes, flag
+    circulars), the same rule the UI's citation footer uses (D6.87).
+    """
+    miss = judge_verdict in ("complete_miss", "partial_miss")
+    low = (answer or "").lower()
+    named = {s for s in (context_sections or []) if s and s.lower() in low}
+    n_text = len(_extract_all_text_citations(answer or "")) + len(named)
+    run_web = miss and n_text == 0
+    partial_with_topic = judge_verdict == "partial_miss" and bool(judge_missing_topic)
+    run_oracle = citation_oracle_enabled and (run_web or partial_with_topic)
+    oracle_query = judge_missing_topic if partial_with_topic else None
+    return _RecoveryPlan(run_oracle, run_web, oracle_query, n_text > 0, n_text)
+
+
 async def _try_citation_oracle_intervention(
     *,
     query: str,
@@ -1947,7 +2023,11 @@ async def _try_citation_oracle_intervention(
             schema=_ORACLE_SYNTHESIS_SCHEMA,
             label="citation_oracle synthesis",
             model="claude-sonnet-5",
-            max_tokens=1500,
+            # 2026-09-26 — was 1500. Sonnet 5 thinks adaptively and the
+            # thinking counts against max_tokens (vessel-analysis used 96%
+            # of a 3,000 cap on 2026-09-23); a truncated reply parses to
+            # None and the oracle silently falls through.
+            max_tokens=8192,
             system=synthesis_prompt,
             messages=[{"role": "user", "content": user_payload}],
         )
@@ -2972,7 +3052,29 @@ async def chat_with_progress(
         or (judge_on_cited_enabled and len(verified_cited) >= 1)
     )
 
-    if should_run_judge:
+    if should_run_judge and not regex_matched:
+        # 2026-09-26 — a precautionary verdict drives no decision: web
+        # fallback and the oracle act only on the regex-triggered path, and
+        # the tier router it fed was removed in D6.97. It is logged by
+        # judge_hedge, after the done event, instead of holding the final
+        # render and the save for ~4-5 s on every cited answer.
+        from rag.hedge_judge import judge_hedge
+        _spawn_background(
+            judge_hedge(
+                question=query,
+                answer=cleaned_answer,
+                chunks=chunks,
+                citations=[
+                    {"source": c.source, "section_number": c.section_number,
+                     "section_title": c.section_title}
+                    for c in verified_cited
+                ],
+                anthropic_client=anthropic_client,
+                mode="precautionary",
+            ),
+            "precautionary hedge judge",
+        )
+    elif should_run_judge:
         # Sprint D6.74 — emit a status BEFORE the judge call so the
         # user sees the message change between "Verifying citations…"
         # and the post-judge oracle/fallback statuses.
@@ -2985,7 +3087,7 @@ async def chat_with_progress(
         # hedge; that mis-rated three cited-confident answers as
         # complete_miss in May 2026. The new prompt switches rubric
         # based on this parameter.
-        judge_mode = "regex_triggered" if regex_matched else "precautionary"
+        judge_mode = "regex_triggered"
         try:
             verdict = await judge_hedge(
                 question=query,
@@ -3048,12 +3150,24 @@ async def chat_with_progress(
         # citations, the Tier-1 trust contract is intact — don't dilute
         # it with a 🌐 web card based on a "What I Can't Confirm"
         # subsection that the judge mis-read as a partial miss.
-        has_verified_citations = bool(verified_cited)
-        should_fire_fallback = (
-            judge_verdict in ("complete_miss", "partial_miss")
-            and not has_verified_citations
+        #
+        # 2026-09-26 — `verified_cited` is every retrieved section that
+        # exists in the DB, so the gate read it as "the answer has verified
+        # citations" on essentially every answer and recovery never fired
+        # (0 oracle / web runs in the 30 days to 2026-09-25). See
+        # _recovery_plan: the gate now counts citations the answer text
+        # makes, and a partial_miss with a named missing topic runs the
+        # corpus-only oracle even when the answer has citations.
+        plan = _recovery_plan(
+            judge_verdict=judge_verdict,
+            judge_missing_topic=judge_missing_topic,
+            answer=cleaned_answer,
+            citation_oracle_enabled=citation_oracle_enabled,
+            context_sections=[c.section_number for c in verified_cited],
         )
-        if web_fallback_enabled and should_fire_fallback:
+        has_verified_citations = plan.has_text_citations
+        should_fire_fallback = plan.run_web
+        if web_fallback_enabled and (plan.run_web or plan.run_oracle):
             top_cosine = (
                 chunks[0].get("similarity", 0.0) if chunks else 0.0
             )
@@ -3071,14 +3185,14 @@ async def chat_with_progress(
             # 'verified' tier card and skip the web ensemble. On any
             # failure path the function returns None and we fall
             # through to the existing _dispatch_web_fallback below.
-            if citation_oracle_enabled:
+            if plan.run_oracle:
                 yield {
                     "event": "status",
                     "data": "Locating the relevant regulation…",
                 }
                 try:
                     web_fallback_card = await _try_citation_oracle_intervention(
-                        query=query,
+                        query=plan.oracle_query or query,
                         conversation_id=conversation_id,
                         user_id=user_id,
                         pool=pool,
@@ -3092,7 +3206,7 @@ async def chat_with_progress(
                     )
                     web_fallback_card = None
 
-            if web_fallback_card is None:
+            if web_fallback_card is None and plan.run_web:
                 yield {
                     "event": "status",
                     "data": "Searching authoritative sources…",
@@ -3121,21 +3235,23 @@ async def chat_with_progress(
                         type(exc).__name__,
                         str(exc)[:200],
                     )
-        elif not should_fire_fallback:
-            # D6.97 Phase 1a — see chat() twin above for rationale.
+        if not should_fire_fallback:
+            # D6.97 Phase 1a — web card suppressed.
             suppress_reason = (
                 "verified_citations" if has_verified_citations
                 else f"verdict={judge_verdict}"
             )
             logger.info(
-                "hedge_judge suppressed fallback (streaming): %s verified_cites=%d reasoning=%r",
-                suppress_reason, len(verified_cited),
+                "hedge_judge suppressed web fallback (streaming): %s text_cites=%d "
+                "oracle=%s reasoning=%r",
+                suppress_reason, plan.text_citation_count, plan.run_oracle,
                 (judge_reasoning or "")[:200],
             )
 
         # 4. Hedge classifier — fires on every hedge regardless of verdict.
-        try:
-            await _classify_and_persist_hedge(
+        # 2026-09-26 — analytics only; runs after the done event.
+        _spawn_background(
+            _classify_and_persist_hedge(
                 pool=pool,
                 conversation_id=conversation_id,
                 user_id=user_id,
@@ -3145,12 +3261,9 @@ async def chat_with_progress(
                 hedge_text=cleaned_answer,
                 anthropic_client=anthropic_client,
                 web_fallback_card=web_fallback_card,
-            )
-        except Exception as exc:
-            logger.warning(
-                "hedge audit failed (non-fatal): %s: %s",
-                type(exc).__name__, str(exc)[:200],
-            )
+            ),
+            "hedge audit",
+        )
 
     # Layer C — UX inversion (streaming-path twin of the chat() inversion
     # above). The user already saw the original answer streamed; the
