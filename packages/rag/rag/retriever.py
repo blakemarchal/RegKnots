@@ -879,16 +879,7 @@ _IDENTIFIER_PATTERNS: list[tuple[str, re.Pattern]] = [
     # SOLAS citations are parsed separately (_solas_citations below).
     ("nvic_number",  re.compile(r"\bNVIC\s+(\d{2}-\d{2})\b", re.IGNORECASE)),
     ("ism_section",  re.compile(r"\bISM\s+(?:Code\s+)?(\d+(?:\.\d+)?)\b", re.IGNORECASE)),
-    # MARPOL — explicit "MARPOL Annex <roman>" + optional Regulation number.
-    # The "MARPOL" prefix is required here so we don't false-match SOLAS or
-    # ISM annexes (each of those has its own annex structure). Bare "Annex"
-    # queries will still be served via the _MARPOL_TERMS source-affinity
-    # boost when other MARPOL keywords are present.
-    ("marpol_annex", re.compile(
-        r"\bMARPOL\s+Annex\s+([IVX]+)"
-        r"(?:\s+(?:Reg(?:ulation)?\.?\s*)?(\d+(?:\.\d+)?))?\b",
-        re.IGNORECASE,
-    )),
+    # MARPOL citations are parsed separately (_marpol_citations below).
     ("mepc_resolution", re.compile(r"\bMEPC\.(\d+)\((\d+)\)\b", re.IGNORECASE)),
     # IMDG — Special Provision number (SP119, SP163, etc.). These are
     # short cross-references in the Dangerous Goods List that point to
@@ -985,6 +976,48 @@ def _solas_citations(query: str) -> list[tuple[str, str]]:
     return out
 
 
+# 2026-09-26 — MARPOL citations. Every Annex chapter is split into
+# regulation sections ("MARPOL Annex VI Reg.14") since the same day's
+# re-parse. Without the word MARPOL, "Annex I Regulation 22" counts only
+# when the query names no other instrument: the Load Line Convention's
+# Annex I also numbers its regulations.
+_MARPOL_ANNEX = r"(?P<annex>VI|IV|V|III|II|I)\b"
+_MARPOL_REG = r"(?P<reg>\d{1,2}[A-Z]?)(?![\dA-Z])"                  # "14", "12A"
+_MARPOL_NAME = r"\bMARPOL\b(?:\s+73/78(?:/97)?)?"
+_MARPOL_OF = r"\bReg(?:ulation)?s?\.?\s*" + _MARPOL_REG + r"(?:\.\d+)*\s+of\s+(?:the\s+)?"
+_MARPOL_CITATION_RES: tuple[re.Pattern, ...] = (
+    # MARPOL Annex VI Regulation 14.1 · MARPOL 73/78 Annex I, reg. 12A
+    re.compile(_MARPOL_NAME + r"[\s,]+Annex\s+" + _MARPOL_ANNEX
+               + r"[\s,]+Reg(?:ulation)?s?\.?\s*" + _MARPOL_REG, re.IGNORECASE),
+    # regulation 14 of MARPOL Annex VI
+    re.compile(_MARPOL_OF + _MARPOL_NAME + r"[\s,]+Annex\s+" + _MARPOL_ANNEX, re.IGNORECASE),
+)
+_MARPOL_BARE_CITATION_RES: tuple[re.Pattern, ...] = (
+    # Annex V Reg 4 · regulation 12A of Annex I
+    re.compile(r"\bAnnex\s+" + _MARPOL_ANNEX + r"[\s,]+Reg(?:ulation)?s?\.?\s*" + _MARPOL_REG,
+               re.IGNORECASE),
+    re.compile(_MARPOL_OF + r"Annex\s+" + _MARPOL_ANNEX, re.IGNORECASE),
+)
+_MARPOL_ANNEX_NAMED_RE = re.compile(_MARPOL_NAME + r"[\s,]+Annex\s+" + _MARPOL_ANNEX, re.IGNORECASE)
+
+
+def _marpol_citations(query: str) -> list[tuple[str, str]]:
+    """(annex, regulation) for each MARPOL regulation citation, in query order."""
+    regexes = _MARPOL_CITATION_RES
+    if not any(m.group(0).upper() != "MARPOL" for m in _OTHER_INSTRUMENT_RE.finditer(query)):
+        regexes += _MARPOL_BARE_CITATION_RES
+    found: list[tuple[int, str, str]] = []
+    for regex in regexes:
+        for m in regex.finditer(query):
+            found.append((m.start(), m.group("annex").upper(), m.group("reg").upper()))
+    found.sort()
+    out: list[tuple[str, str]] = []
+    for _, annex, reg in found:
+        if (annex, reg) not in out:
+            out.append((annex, reg))
+    return out
+
+
 # Form-context words that, when present alongside a bare 3-4 digit
 # number, license treating that number as a USCG form reference (search
 # the corpus for the CG-prefixed form). Searching "CG-835" for a spurious
@@ -1034,7 +1067,9 @@ _BARE_ANNEX_RE = re.compile(
 _OTHER_INSTRUMENT_RE = re.compile(
     r"\b(?:MARPOL|SOLAS|STCW|ISM|IBC|IGC|HSC|BWM|IMDG|"
     r"MCA|AMSA|LISCR|IRI|MPA|HKMD|NMA|BMA|CFR|USCG|NVIC|"
-    r"NMC|MSM|MSIB|ALCOAST|Polar\s+Code)\b",
+    r"NMC|MSM|MSIB|ALCOAST|Polar\s+Code|"
+    # 2026-09-26 — the Load Line Convention's Annexes are Roman-numbered too.
+    r"Load\s*Lines?|ILLC)\b",
     re.IGNORECASE,
 )
 
@@ -1156,23 +1191,6 @@ def _extract_identifiers(query: str) -> list[dict]:
                     "value": f"ISM {m.group(1)}",
                     "pattern": m.group(1),
                 })
-            elif id_type == "marpol_annex":
-                annex_roman = m.group(1).upper()
-                reg_num = m.group(2)
-                # Always anchor on "Annex <roman>"; if a regulation
-                # number is also present, search for that too as a
-                # second identifier.
-                identifiers.append({
-                    "type": id_type,
-                    "value": f"Annex {annex_roman}",
-                    "pattern": f"Annex {annex_roman}",
-                })
-                if reg_num:
-                    identifiers.append({
-                        "type": "marpol_regulation",
-                        "value": f"Regulation {reg_num}",
-                        "pattern": f"Regulation {reg_num}",
-                    })
             elif id_type == "mepc_resolution":
                 ident = f"MEPC.{m.group(1)}({m.group(2)})"
                 identifiers.append({
@@ -1245,30 +1263,37 @@ def _extract_identifiers(query: str) -> list[dict]:
             "source_filter": ("solas",),
         })
 
-    # Sprint D6.24 — implicit MARPOL Annex inference. Runs AFTER the
-    # explicit pattern loop so we can check whether the explicit
-    # `marpol_annex` already matched (don't emit duplicates).
-    #
-    # IMPORTANT: uses regex with PostgreSQL `\m...\M` word boundaries
-    # + a source_filter to ('marpol', 'marpol_supplement'). Without
-    # word-bounds, "Annex V" substring-matches "Annex VI" chunks too,
-    # so a query about Annex V (garbage) would surface Annex VI (air
-    # pollution) content. Without the source filter, the bypass would
-    # also pull in AMSA Marine Order 95 / CFR sections that reference
-    # MARPOL Annex V, drowning out the convention text itself.
-    explicit_annex_values = {
-        i["value"] for i in identifiers if i.get("type") == "marpol_annex"
-    }
-    for annex_roman in _detect_implicit_marpol_annexes(query):
-        annex_value = f"Annex {annex_roman}"
-        if annex_value in explicit_annex_values:
-            continue
+    # 2026-09-26 — MARPOL citations. A regulation resolves to its exact
+    # section; one the corpus lacks finds nothing. An annex named without a
+    # regulation, as "MARPOL Annex V" or (Sprint D6.24) a bare "annex V"
+    # with no other instrument in the query, returns the chunks of that
+    # annex nearest the query. Before: the explicit form searched full_text
+    # for "Annex VI" and "Regulation 14" in every source, and the bare form
+    # "Annex V" in marpol; each returned the first 5 matching rows in
+    # storage order, merged above every vector hit.
+    marpol_regs = _marpol_citations(query)
+    for annex, reg in marpol_regs:
+        section = f"MARPOL Annex {annex} Reg.{reg}"
         identifiers.append({
-            "type": "marpol_annex_implicit",
-            "value": annex_value,
-            "pattern": annex_value,
-            "regex": True,
-            "source_filter": ("marpol", "marpol_supplement"),
+            "type": "marpol_reg",
+            "value": section,
+            "pattern": section,
+            "section_number": section,
+            "source_filter": ("marpol",),
+        })
+    cited_annexes = {annex for annex, _ in marpol_regs}
+    named = [(m.group("annex").upper(), "marpol_annex") for m in _MARPOL_ANNEX_NAMED_RE.finditer(query)]
+    bare = [(a, "marpol_annex_implicit") for a in _detect_implicit_marpol_annexes(query)]
+    for annex, id_type in named + bare:
+        if annex in cited_annexes:
+            continue
+        cited_annexes.add(annex)
+        identifiers.append({
+            "type": id_type,
+            "value": f"MARPOL Annex {annex}",
+            "pattern": f"MARPOL Annex {annex}",
+            "section_prefix": f"MARPOL Annex {annex} ",
+            "source_filter": ("marpol",),
         })
 
     # Sprint D6.97 audit (2026-06) — bare form numbers in form context.
