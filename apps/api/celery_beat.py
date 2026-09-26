@@ -62,4 +62,11 @@ celery.conf.beat_schedule = {
         # Sprint D6.58 Slice 2.
         "schedule": crontab(hour=13, minute=30, day_of_week="monday"),
     },
+    "reconcile-subscriptions-daily": {
+        "task": "app.tasks.reconcile_subscriptions",
+        # 2026-09-26 — paid users whose period ended without a Stripe
+        # update (customer.subscription.deleted is not delivered) are
+        # re-synced from Stripe. Daily at 12:30 UTC.
+        "schedule": crontab(hour=12, minute=30),
+    },
 }

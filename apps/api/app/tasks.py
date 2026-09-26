@@ -1234,3 +1234,25 @@ def _send_nmc_admin_digest(new_findings: list[dict], *, already_ingested_count: 
         )
     except Exception as exc:
         logger.error("Failed to send NMC admin digest: %s", exc)
+
+
+@celery.task(name="app.tasks.reconcile_subscriptions")
+def reconcile_subscriptions():
+    """2026-09-26 — daily re-sync of paid users whose billing period ended
+    without a Stripe update (the webhook endpoint does not receive
+    customer.subscription.deleted). See
+    stripe_service.reconcile_stale_subscriptions."""
+    _run_async(_reconcile_subscriptions_async())
+
+
+async def _reconcile_subscriptions_async():
+    import asyncpg
+    from app.config import settings
+    from app.stripe_service import reconcile_stale_subscriptions
+
+    dsn = settings.database_url.replace("postgresql+asyncpg://", "postgresql://")
+    conn = await asyncpg.connect(dsn)
+    try:
+        return await reconcile_stale_subscriptions(conn)
+    finally:
+        await conn.close()

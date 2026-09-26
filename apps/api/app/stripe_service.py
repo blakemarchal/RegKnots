@@ -64,6 +64,30 @@ _PLAN_TO_LOOKUP: dict[str, tuple[str, str, bool]] = {
 }
 
 
+def _price_and_interval(subscription) -> tuple[str | None, str | None]:
+    """(price_id, billing_interval) from a subscription's first item, or Nones.
+
+    2026-09-26 — used where the subscription is already in hand at first
+    purchase. The webhook endpoint is not subscribed to
+    customer.subscription.created, so _on_subscription_change (the only
+    writer of billing_interval until now) first ran at the first renewal:
+    the Captain's row and her first billing_events row have no interval.
+    """
+    try:
+        items = subscription["items"]["data"] if isinstance(subscription, dict) else subscription.items.data
+        if not items:
+            return None, None
+        price = items[0]["price"] if isinstance(items[0], dict) else items[0].price
+        price_id = price["id"] if isinstance(price, dict) else price.id
+        recurring = price["recurring"] if isinstance(price, dict) else price.recurring
+        interval = (recurring["interval"] if isinstance(recurring, dict) else recurring.interval) if recurring else None
+        return price_id, interval
+    except (AttributeError, IndexError, KeyError, TypeError) as exc:
+        logger.warning("Could not read price/interval from subscription: %s: %s",
+                       type(exc).__name__, str(exc)[:200])
+        return None, None
+
+
 async def create_checkout_session(
     user_id: str,
     email: str,
@@ -440,11 +464,16 @@ async def _on_checkout_completed(session, pool) -> None:
     # off the Stripe subscription object. Sprint D6.1 — tier is no longer
     # hardcoded to 'pro'; it's derived from the price_id via plans.py.
     plan_info: PlanInfo | None = None
+    billing_interval: str | None = None
+    current_period_end: datetime | None = None
     try:
         _configure()
         sub = stripe.Subscription.retrieve(subscription_id)
-        price_id = sub.items.data[0].price.id if sub.items.data else None
+        price_id, billing_interval = _price_and_interval(sub)
         plan_info = plan_info_from_price_id(price_id)
+        period_end_ts = _get_current_period_end_ts(sub)
+        if period_end_ts:
+            current_period_end = datetime.fromtimestamp(period_end_ts, tz=timezone.utc)
     except Exception as exc:
         logger.warning(
             "Could not resolve plan_info for subscription %s: %s",
@@ -478,13 +507,17 @@ async def _on_checkout_completed(session, pool) -> None:
         UPDATE users
         SET subscription_tier = $1,
             subscription_status = 'active',
-            stripe_subscription_id = $2
+            stripe_subscription_id = $2,
+            billing_interval = COALESCE($4, billing_interval),
+            current_period_end = COALESCE($5, current_period_end)
         WHERE stripe_customer_id = $3
         RETURNING email, full_name
         """,
         tier,
         subscription_id,
         customer_id,
+        billing_interval,
+        current_period_end,
     )
     if row:
         logger.info(
@@ -732,16 +765,20 @@ async def _on_invoice_paid(invoice, pool) -> None:
             if current_period_end_ts else None
         )
 
+        _, billing_interval = _price_and_interval(sub)
+
         # Try update by subscription_id first
         result = await pool.execute(
             """
             UPDATE users
             SET current_period_end = $1,
-                subscription_status = 'active'
+                subscription_status = 'active',
+                billing_interval = COALESCE($3, billing_interval)
             WHERE stripe_subscription_id = $2
             """,
             current_period_end,
             subscription_id,
+            billing_interval,
         )
         logger.info("Invoice paid UPDATE by subscription_id: %s", result)
 
@@ -751,11 +788,13 @@ async def _on_invoice_paid(invoice, pool) -> None:
                 """
                 UPDATE users
                 SET current_period_end = $1,
-                    subscription_status = 'active'
+                    subscription_status = 'active',
+                    billing_interval = COALESCE($3, billing_interval)
                 WHERE stripe_customer_id = $2
                 """,
                 current_period_end,
                 customer_id,
+                billing_interval,
             )
             logger.info("Invoice paid UPDATE by customer_id fallback: %s", result)
 
@@ -875,7 +914,7 @@ async def _record_billing_event(invoice, sub, subscription_id, customer_id, pool
             paid_at,
             row["referral_source"],
             row["subscription_tier"],
-            row["billing_interval"],
+            _price_and_interval(sub)[1] or row["billing_interval"],
         )
         logger.info(
             "billing_events: recorded invoice %s ($%.2f %s) for user %s referral=%s",
@@ -1212,3 +1251,62 @@ async def _on_workspace_invoice_payment_failed(invoice, pool) -> None:
         )
     except Exception as exc:
         logger.warning("workspace_billing_events log failed: %s", exc)
+
+
+async def reconcile_stale_subscriptions(pool, grace_days: int = 2) -> dict[str, int]:
+    """Re-sync paid users whose billing period ended without an update.
+
+    2026-09-26 — the webhook endpoint is not subscribed to
+    customer.subscription.deleted, so a subscription that ended never
+    downgraded its user: kdmarchal+test kept 'pro' for months after its
+    period ended on 2026-05-08. Whatever the endpoint config, this daily
+    pass catches it: one Subscription.retrieve per stale row, applied
+    through _on_subscription_change (a canceled subscription maps to
+    free / canceled; a renewed one refreshes current_period_end). A
+    subscription Stripe no longer has is treated as canceled. Comped
+    accounts without a stripe_subscription_id are never touched.
+    """
+    _configure()
+    rows = await pool.fetch(
+        """
+        SELECT id, stripe_subscription_id FROM users
+        WHERE stripe_subscription_id IS NOT NULL
+          AND subscription_tier <> 'free'
+          AND current_period_end IS NOT NULL
+          AND current_period_end < now() - make_interval(days => $1)
+        """,
+        grace_days,
+    )
+    counts = {"checked": 0, "synced": 0, "missing": 0, "errors": 0}
+    for r in rows:
+        counts["checked"] += 1
+        sub_id = r["stripe_subscription_id"]
+        try:
+            sub = stripe.Subscription.retrieve(sub_id)
+        except Exception as exc:
+            if getattr(exc, "code", None) == "resource_missing":
+                await pool.execute(
+                    """
+                    UPDATE users
+                    SET subscription_tier = 'free', subscription_status = 'canceled',
+                        cancel_at_period_end = false
+                    WHERE id = $1
+                    """,
+                    r["id"],
+                )
+                counts["missing"] += 1
+                logger.info("reconcile: subscription %s no longer exists; user set to free", sub_id)
+            else:
+                counts["errors"] += 1
+                logger.warning("reconcile: could not retrieve %s: %s: %s",
+                               sub_id, type(exc).__name__, str(exc)[:200])
+            continue
+        try:
+            await _on_subscription_change(sub, pool)
+            counts["synced"] += 1
+        except Exception as exc:
+            counts["errors"] += 1
+            logger.warning("reconcile: sync failed for %s: %s: %s",
+                           sub_id, type(exc).__name__, str(exc)[:200])
+    logger.info("reconcile_stale_subscriptions: %s", counts)
+    return counts
