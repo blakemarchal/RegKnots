@@ -8,7 +8,7 @@ Last updated: 2026-09-26 (question-audit follow-up deployed, SOLAS / cfr_49 clea
 
 ## TL;DR
 
-RegKnot is a maritime-compliance RAG at **https://regknots.com**. Production stack live and healthy. **92,336 chunks across 66 sources** (2026-09-26, after the SOLAS re-parse and the cfr_49 scope) with 100% embedding coverage. Retrieval pipeline now includes multi-query rewrite, Haiku reranker, citation oracle, source-diversified fetch, jurisdiction filter, vessel-profile boosts, synonym + intent expansion; hybrid BM25+dense built, measured 2026-07-19 and rejected (dense wins) — prod `.env` carried it switched on until the 2026-09-10 fix, now dense. **96.1% A-or-A−** on the latest 152-question regression eval. First organic Captain-tier subscriber 2026-09-09. See the 2026-09-10 audit for the pre-push list.
+RegKnot is a maritime-compliance RAG at **https://regknots.com**. Production stack live and healthy. **91,892 chunks across 66 sources** (2026-09-26, after the SOLAS re-parse, the cfr_49 scope and stale-row prunes) with 100% embedding coverage. Retrieval pipeline now includes multi-query rewrite, Haiku reranker, citation oracle, source-diversified fetch, jurisdiction filter, vessel-profile boosts, synonym + intent expansion; hybrid BM25+dense built, measured 2026-07-19 and rejected (dense wins) — prod `.env` carried it switched on until the 2026-09-10 fix, now dense. **96.1% A-or-A−** on the latest 152-question regression eval. First organic Captain-tier subscriber 2026-09-09. See the 2026-09-10 audit for the pre-push list.
 
 ## Live production
 
@@ -111,11 +111,12 @@ Full findings, evidence and the awaiting-go fix spec: `docs/sprint-audits/full-s
 **Fixed 2026-09-10 (same day, on go):** prod flipped to dense retrieval (`HYBRID_RETRIEVAL_ENABLED=false`; had been `true` since May against the July verdict); MAERSK Kinloss flag set to `United States`; scheduled Celery ingest wrapped in `run_ingest.sh`; non-concurrent monthly REINDEX task removed; `uv.lock` regenerated. Verification: her four questions 4/32 → 0/32 foreign-flag hits; harness 0.823 / 0.658 (July 0.790 / 0.627).
 
 **P1 remaining:**
-- `amount_paid = 3900` on the Captain purchase matches no configured price ($39.99 / $29.99). Confirm the price_id is in `plans.py` (Blake, Stripe dashboard).
+- ~~`amount_paid = 3900`~~ **Answered 2026-09-26:** the price is mapped, but it is the legacy Pro price at $39.00 while the site advertises $39.99. Blake decides which way to align.
+- **Stripe webhook endpoint** is missing `customer.subscription.created` and `.deleted`. The daily `reconcile_subscriptions` task covers deletions within ~3 days. Blake: add both events.
 - **51 of 56 vessel profiles have `flag_state = Unknown`.** Roadmap item 6 (derive scoping from `jurisdiction_focus`, confirm-your-flag prompt, IMO-number enrichment) is the top product item.
 
 **P2:**
-- Stripe `invoice.paid` processed before `checkout.session.completed` on first purchase → `UPDATE … WHERE stripe_subscription_id` matched 0 rows → `billing_interval` NULL for new subscribers.
+- ~~Stripe first-purchase `billing_interval` NULL~~ Fixed 2026-09-26 (`4f19025`), and the intervals were backfilled from Stripe.
 
 **From the 2026-09-25 question audit (details in the audit doc, §6 for 2026-09-26):**
 - **Done 2026-09-26:**
@@ -129,7 +130,7 @@ Full findings, evidence and the awaiting-go fix spec: `docs/sprint-audits/full-s
 - **Harness baselines** (71 pairs, clean corpus): dense 0.8592 / 0.6924, dense-prod 1.0000 / 0.7301.
 - **Incident, 2026-09-26 00:15 to ~02:10 UTC:** Anthropic credits were exhausted and the GPT-4o fallback served. No user traffic during the outage; resolved.
 
-**Still open from May:** `next@15.5.14` DoS CVE (bumped to 15.5.26 in `6976759`, awaiting push); Sentry `environment` tag; no CI; SpiritFlow co-tenancy; offsite backups (Blake's DO Spaces step); STCW 2017 / MARPOL 2022 / MSM 2021 bases; Load Lines 3 chunks; FSS / LSA resolution-only.
+**Still open from May:** `next@15.5.14` DoS CVE (bumped to 15.5.26 in `6976759`, awaiting push); ~~Sentry `environment` tag~~ (done 2026-09-26); ~~no CI~~ (GitHub Actions since 2026-09-26); SpiritFlow co-tenancy; offsite backups (Blake's DO Spaces step); STCW 2017 / MARPOL 2022 / MSM 2021 bases; Load Lines 3 chunks; FSS / LSA resolution-only.
 
 **Resolved since the May audit:** shared LLM helpers (`packages/rag/rag/llm.py`, 2026-09-22) and the first `apps/api` tests (`apps/api/tests/`), JWT secret, `.env` 600, daily + restore-tested backups, cgroup caps, swap, `run_ingest.sh`, Layer C, NVIC OCR, eval harness, migration 0115 (fallback persist), Anthropic key rotation.
 

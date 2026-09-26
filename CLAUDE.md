@@ -59,6 +59,7 @@ If a doc says "alembic head is 0045" but `alembic current` says `0092`, the doc 
 - The user (Blake) is fluent in the codebase — be terse, grounded, and skip over the obvious. When you find something interesting, surface it; don't bury it.
 - "Karynn says X" usually means a real user-found bug. Trust it and reproduce before second-guessing.
 - The product has paying users. Risk-rank changes accordingly: a frontend fix on `/study` is low-risk; an alembic migration that drops a column is high-risk.
+- **Anthropic spend (Blake, 2026-09-26): don't spend credits unless there is real value.** The product barely covers its VPS bill, and a day of audit probes helped drain the balance to zero. No Claude-calling probes, smokes, `--arm dense-prod` runs or model comparisons unless the result clearly matters, e.g. verifying a user-facing change that can't be checked any other way. Say what it costs first. Prefer code reading, unit tests, read-only SQL and the `dense` harness arm (OpenAI embeddings only).
 
 ## What was just done (last 14 days, headline only)
 
@@ -121,6 +122,31 @@ If a doc says "alembic head is 0045" but `alembic current` says `0092`, the doc 
   - **New baselines:** dense 0.8592 / 0.6924, dense-prod 1.0000 / 0.7301.
   - **INCIDENT: Anthropic credits exhausted from 00:15 to ~02:10 UTC 2026-09-26.** Every Claude call returned 400, and the GPT-4o fallback served (10.6 s, not streamed; messages persisted). No user traffic during the outage. `eval_retrieval.py` `-prod` arms now refuse to run without the API.
 
+- **2026-09-26 (later; no Anthropic spend, per Blake's new rule under Operating norms).**
+  - **Stripe** (`4f19025`): the webhook endpoint is subscribed to 8 events, but **not** `customer.subscription.created` or `.deleted` (read via the API).
+    - First purchases never recorded `billing_interval`. Checkout and invoice.paid now read it off the subscription, and the ledger takes it from the subscription too.
+    - Ended subscriptions never downgraded. The new daily Celery task `reconcile_subscriptions` (12:30 UTC) re-syncs any paid row whose period ended more than 2 days ago. It fixed the `kdmarchal+test` zombie (Stripe: canceled 05-08) on its first run.
+    - Intervals were backfilled from Stripe: the Captain → month, Karynn's comped pro → year.
+    - **Blake:** add the two events in the Stripe dashboard so downgrades are immediate.
+    - The Captain's **$39.00 charge** is a mapped price: `STRIPE_PRICE_CAPTAIN_MONTHLY` is the legacy Pro price id. Every page advertises $39.99, and the support FAQ still describes the old Pro plan. Blake decides which way to align.
+  - **CI** (`.github/workflows/tests.yml`, green from `fafc353`): the api, rag and ingest unit suites run on push to main and on PRs. No secrets and no paid APIs.
+  - **Sentry** `environment` tag on web client and server (`6ab370d`).
+  - **Ingest fixes** (`320e123`):
+    - IMO-code sources (`marpol_amend`, `stcw_amend`, `imo_mepc`, `imo_msc`) now keep their real source name in the pipeline. Hash dedup, the safeguard and prune had been looking at an empty source.
+    - The prune tool never removes `(manual)` rows. Other `manual_add` rows still show as stale and must be reviewed out of the report.
+  - **More stale rows pruned** (backups in `data/pruned/`):
+
+    | source | pruned | what |
+    |---|---|---|
+    | `marpol_amend` | 311 | 05-01 resolution-level duplicates of the per-regulation rows |
+    | `stcw_amend` | 14 | same pattern |
+    | `cfr_46` | 52 | 46 CFR 298, gone from eCFR |
+    | `cfr_33` | 68 | mostly expired temporary rules, e.g. 165.T01-0903 |
+
+    Corpus is now **91,892**. Dense harness: recall unchanged; one ERG tie flipped.
+  - **Deliberately not pruned:**
+    - `imdg`: 30 manual rows, and 3 duplicate keys in its parse.
+    - `marpol`: 131 one-chunk per-regulation rows are the only per-regulation MARPOL layer. The fix is per-regulation splitting in the MARPOL parser.
 See `docs/PROJECT_STATE.md` for a fuller operational snapshot and `docs/roadmap.md` for the prioritized backlog.
 
 
