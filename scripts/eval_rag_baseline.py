@@ -830,6 +830,59 @@ QUESTIONS: list[TestQuestion] = [
         ],
         naturalistic=True,
     ),
+
+    # ── 2026-09-25 question audit — citations and non-46 CFR parts ─────
+    # docs/sprint-audits/question-audit-2026-09-25.md. The gold set had no
+    # citation-bearing question and no pair expecting 33/49 CFR, so neither
+    # the citation-resolution fix nor the vessel-filter fix could register.
+    TestQuestion(
+        qid="A25-1",
+        # The Captain, 2026-09-23 — retrieved 0 of Reg.20's 5 chunks.
+        query="SOLAS Chapter III, Part B, Section I, Regulation 20",
+        vessels=["V1", "V0"],
+        expected=[r"SOLAS Ch\.III Reg\.20\b"],
+    ),
+    TestQuestion(
+        qid="A25-2",
+        # The follow-up Q1's own answer suggested.
+        query="SOLAS III/20 weekly and monthly inspections of life-saving appliances",
+        vessels=["V1"],
+        expected=[r"SOLAS Ch\.III Reg\.20\b"],
+    ),
+    TestQuestion(
+        qid="A25-3",
+        query="What does SOLAS Ch.V Reg.19 require for AIS carriage?",
+        vessels=["V1"],
+        expected=[r"SOLAS Ch\.V Reg\.19\b"],
+    ),
+    TestQuestion(
+        qid="A25-4",
+        query="What does 46 CFR 199.180 require for abandon-ship drills?",
+        vessels=["V1"],
+        expected=[r"46 CFR 199\.180\b"],
+    ),
+    TestQuestion(
+        qid="A25-5",
+        # 33 CFR 138 shares a part number with 46 CFR 138 (Subchapter M), so
+        # the vessel filter dropped it for every type but OSVs.
+        query="Certificate of financial responsibility (COFR) requirements under 33 CFR 138",
+        vessels=["V1", "V2"],
+        expected=[r"33 CFR 138\."],
+    ),
+    TestQuestion(
+        qid="A25-6",
+        # Inland Rules (33 CFR 83) collided with 46 CFR 70-89 (Subchapter H).
+        query="What lights must a vessel pushing ahead or towing alongside show under the Inland Navigation Rules?",
+        vessels=["V5"],
+        expected=[r"33 CFR 83\.24\b"],
+    ),
+    TestQuestion(
+        qid="A25-7",
+        # 49 CFR 176 (carriage by vessel) collided with 46 CFR 175-187 (Subchapter T).
+        query="49 CFR requirements for segregation of hazardous materials in containers aboard a container ship",
+        vessels=["V1"],
+        expected=[r"49 CFR 176\."],
+    ),
 ]
 
 
