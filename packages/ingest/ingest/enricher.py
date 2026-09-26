@@ -48,6 +48,11 @@ _MAX_ALIAS_TOKENS = 60  # hard cap on alias block token count
 # unchanged and covers whatever the batch did not (errored / expired /
 # canceled requests), plus runs too small to be worth a batch.
 # REGKNOTS_ENRICH_MODE=online restores the all-online path.
+# 2026-09-26 — REGKNOTS_ENRICH_MODE=cache applies cached aliases only and
+# makes no API call: a chunk with no cache entry stays un-enriched. For
+# re-ingests that must not spend Anthropic credits: without --enrich, an
+# enriched row (stored under its enriched hash) is overwritten with plain
+# text, so a plain re-parse strips aliases from sections it doesn't change.
 _BATCH_API_MIN_CHUNKS = 50
 _BATCH_POLL_SECONDS = 30
 _BATCH_MAX_WAIT_SECONDS = 24 * 3600  # the API's own ceiling
@@ -112,8 +117,11 @@ class AliasEnricher:
         self._source = source
         self._cache = self._load_cache(source)
 
-        if os.environ.get("REGKNOTS_ENRICH_MODE", "batch").strip().lower() == "batch":
+        mode = os.environ.get("REGKNOTS_ENRICH_MODE", "batch").strip().lower()
+        if mode == "batch":
             await self._prefill_cache_via_batch(chunks, source)
+        cache_only = mode == "cache"
+        cache_misses = 0
 
         enriched: list[Chunk] = []
         api_calls = 0
@@ -161,6 +169,11 @@ class AliasEnricher:
                     cache_hits += 1
                     continue
 
+                if cache_only:
+                    enriched.append(chunk)
+                    cache_misses += 1
+                    continue
+
                 to_generate.append(chunk)
 
             # Parallel API generation for the to_generate slice.
@@ -190,9 +203,9 @@ class AliasEnricher:
 
         logger.info(
             "enricher: %s — %d chunks: %d API calls, %d cache hits, "
-            "%d skipped (budget), %d skipped (errors)",
+            "%d skipped (budget), %d skipped (errors), %d left plain (cache-only mode)",
             source, len(chunks), api_calls, cache_hits,
-            skipped_budget, skipped_errors,
+            skipped_budget, skipped_errors, cache_misses,
         )
         return enriched
 

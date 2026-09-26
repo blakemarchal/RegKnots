@@ -21,7 +21,10 @@ Section number canonical forms:
   "MARPOL Protocol II"
   "MARPOL Protocol of 1978"
   "MARPOL Protocol of 1997"
-  "MARPOL Annex I Ch.1"               (Chapter 1 of Annex I)
+  "MARPOL Annex I Reg.12A"            (one regulation; chapters are split
+                                       into regulations, 2026-09-26)
+  "MARPOL Annex I Ch.1"               (Chapter 1 of Annex I; only for text
+                                       before a chapter's first regulation)
   "MARPOL Annex IV Ch.2"              (etc. through Annex VI)
   "MARPOL Annex I App.II"             (Appendix to an Annex)
   "MARPOL Annex III App."             (Single appendix, no number)
@@ -33,6 +36,7 @@ Section number canonical forms:
 Parent section number routing:
   Articles / Protocols / Introduction / Additional Information → "MARPOL"
   Annex I Ch.X / App.X / UI / UI App.X                          → "MARPOL Annex I"
+  Annex I Reg.N                                                 → "MARPOL Annex I Ch.X"
   ... and similarly for Annexes II–VI.
 
 Dry-run mode (no DB/API calls):
@@ -46,7 +50,7 @@ import sys
 from datetime import date
 from pathlib import Path
 
-from ingest.models import Section
+from ingest.models import Section, merge_duplicate_sections
 
 logger = logging.getLogger(__name__)
 
@@ -137,6 +141,7 @@ def parse_source(raw_dir: Path) -> list[Section]:
 
     sections: list[Section] = []
     unmatched: list[str] = []
+    moved: dict[str, list[str]] = {}
 
     for txt_path in txt_files:
         m = _FILE_RANGE.match(txt_path.name)
@@ -155,6 +160,19 @@ def parse_source(raw_dir: Path) -> list[Section]:
             logger.warning("marpol: %s is empty after cleaning — skipping", txt_path.name)
             continue
 
+        misfiled = _MISFILED_PAGES.get(meta["section_number"])
+        if misfiled:
+            text, page = _cut_at_line(text, misfiled[0])
+            if page:
+                moved.setdefault(misfiled[1], []).append(page)
+            else:
+                logger.warning("marpol: misfiled-page anchor not found once in %s", txt_path.name)
+
+        reg_sections = _split_into_regulations(text, meta)
+        if reg_sections:
+            sections.extend(reg_sections)
+            continue
+
         sections.append(Section(
             source                = SOURCE,
             title_number          = TITLE_NUMBER,
@@ -170,6 +188,20 @@ def parse_source(raw_dir: Path) -> list[Section]:
             "marpol: %d file(s) had no header entry: %s",
             len(unmatched), ", ".join(unmatched),
         )
+
+    for target, pages in moved.items():
+        home = next((s for s in sections if s.section_number == target), None)
+        if home is None:
+            logger.warning("marpol: no %s section for its misfiled page; kept on its own", target)
+            home = Section(
+                source=SOURCE, title_number=TITLE_NUMBER, section_number=target,
+                section_title="", full_text="", up_to_date_as_of=UP_TO_DATE_AS_OF,
+                parent_section_number="MARPOL",
+            )
+            sections.append(home)
+        home.full_text = "\n\n".join(t for t in (home.full_text, *pages) if t)
+
+    sections = merge_duplicate_sections(sections)
 
     logger.info(
         "marpol: %d txt files → %d sections (%d unmatched)",
@@ -430,6 +462,208 @@ def _clean_text(text: str) -> str:
     text = _DASH_LINE.sub("", text)
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
+
+
+# ── Per-regulation split (2026-09-26) ─────────────────────────────────────────
+#
+# D6.88 (scripts/split_marpol_to_regulations.py) split the stored chapter
+# chunks after the fact: one chunk per regulation (up to 24K chars, the
+# embedding truncated), the chapter rows left in place (the same text twice in
+# the corpus), page running heads read as headings ("Annex I Reg.2" titled
+# "39 Electronic Record Book ...") and "Regulation 12A*" missed, so 12A's text
+# sat under Reg.12. The adapter now splits the raw text itself and the chapter
+# rows go away.
+#
+# A heading is a "Regulation N" line (N may carry a letter: 12A, 43A; markdown
+# and footnote marks allowed) with a blank line above it and its title on the
+# next line. A page running head is the same line with a blank line after it
+# or a page head ("Annex I: ...", "Chapter 4 – ...") directly above it. Both
+# are dropped from regulation text, as are page heads elsewhere.
+
+_RE_REG_LINE = re.compile(r"^Regulation\s+(\d{1,2}[A-Z]?)$")
+_RE_REG_RUNNING = re.compile(
+    r"^Regulations?\s+\d{1,2}[A-Z]?(?:\s*(?:,|and|to|[-–—])\s*\d{1,2}[A-Z]?)*$"
+)
+_RE_RUNNING_HEAD = re.compile(r"^(?:Annex\s+[IVX]+\s*:|Chapter\s+\d+\s*[-–—])")
+_RE_NOTE_LINE = re.compile(r"^\[NOTE:[^\]]*\]$")
+_RE_MARKS = re.compile("[*†‡�]+")   # emphasis, footnote marks, OCR junk
+_RE_CHAPTER_SECTION = re.compile(r"^MARPOL (Annex [IVX]+) Ch\.\d+$")
+
+# Headings the scan lost and pages it put out of order, found by reading the
+# raw text (2026-09-26). ("start", N, title, anchor) opens regulation N at the
+# line beginning with `anchor`: the page with N's heading is not in the scan.
+# ("continue", N, None, anchor) moves the text from `anchor` to the next
+# heading into regulation N, after N's own text. An anchor that does not occur
+# exactly once is logged and skipped.
+_OCR_FIXES: dict[str, list[tuple[str, str, str | None, str]]] = {
+    "MARPOL Annex I Ch.2": [
+        ("start", "10", "Duration and validity of certificate",
+         ".3\tthe expiry date may remain unchanged"),
+    ],
+    "MARPOL Annex I Ch.4": [
+        ("continue", "27", None, ".2 indicate those cargo and ballast tanks"),
+        ("start", "26", "Limitation of size and arrangement of cargo tanks",
+         "b_s is the minimum distance from the ship's side"),
+        ("continue", "28", None, ".2 Bottom damage:"),
+    ],
+    "MARPOL Annex VI Ch.3": [
+        ("start", "13", "Nitrogen oxides (NOx)",
+         ".2 1 January 2021 and is operating in the Baltic Sea"),
+    ],
+}
+
+_MISSING_START_NOTE = "[The start of this regulation is missing from the scanned source.]"
+
+# Pages the scan filed under the wrong page range: the text from the line
+# beginning with `anchor` to the end of the file moves to the named section.
+_MISFILED_PAGES: dict[str, tuple[str, str]] = {
+    # The last page of the Annex III file is Section 2 of the Annex II
+    # Appendix IV (P&A Manual) format, which the App.IV file lacks.
+    "MARPOL Annex III Ch.1": (
+        "Section 2 – Description of the ship's equipment and arrangements",
+        "MARPOL Annex II App.IV",
+    ),
+}
+
+# Titles the scan got wrong.
+_TITLE_FIXES = {
+    "MARPOL Annex VI Reg.24": "Required EEDI",   # scan repeats Reg.25's "Required EEXI"
+}
+
+
+def _cut_at_line(text: str, anchor: str) -> tuple[str, str]:
+    """(text before, text from) the one line beginning with `anchor`;
+    (text, "") when there is not exactly one."""
+    hits = [m.start() for m in re.finditer("^" + re.escape(anchor), text, re.MULTILINE)]
+    if len(hits) != 1:
+        return text, ""
+    return text[: hits[0]].rstrip(), text[hits[0]:].strip()
+
+
+def _title_text(line: str) -> str:
+    t = line.strip().replace(" � ", " – ")
+    t = _RE_MARKS.sub("", t)
+    t = re.sub(r"(?<=[A-Z])_(?=[a-z]\b)", "", t)          # "SO_x" -> "SOx"
+    return re.sub(r"\s+", " ", t).strip()
+
+
+def _heading_at(lines: list[str], i: int) -> tuple[str, str] | None:
+    """(regulation number, title) when lines[i] opens a regulation."""
+    m = _RE_REG_LINE.match(_RE_MARKS.sub("", lines[i]).strip())
+    if not m or (i > 0 and lines[i - 1].strip()):
+        return None
+    title: list[str] = []
+    for line in lines[i + 1 : i + 4]:
+        t = _title_text(line)
+        if not t or (title and not t[0].islower()):
+            break
+        if not title and (not (t[0].isupper() or t[0] == "(") or _RE_REG_RUNNING.match(t)):
+            return None
+        title.append(t)
+    return (m.group(1), " ".join(title)) if title else None
+
+
+def _is_running_reg(lines: list[str], i: int) -> bool:
+    return bool(_RE_REG_RUNNING.match(_RE_MARKS.sub("", lines[i]).strip())) and not _heading_at(lines, i)
+
+
+def _span_text(lines: list[str], a: int, b: int) -> str:
+    """lines[a:b] without running heads and scan notes."""
+    keep: list[str] = []
+    for i in range(a, b):
+        s = _RE_MARKS.sub("", lines[i]).strip()
+        if _RE_NOTE_LINE.match(s) or _RE_RUNNING_HEAD.match(s) or _is_running_reg(lines, i):
+            continue
+        keep.append(lines[i])
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(keep)).strip()
+
+
+def _split_into_regulations(text: str, meta: dict) -> list[Section]:
+    """Split an Annex chapter into one Section per regulation.
+
+    Returns [] for everything that is not an Annex chapter (Articles,
+    Protocols, appendices, unified interpretations, Additional Information)
+    and for a chapter with no regulation headings; the caller keeps those
+    whole. Text before the first heading is kept under the chapter's own
+    section_number only when it is more than a chapter/part title.
+    """
+    chapter = meta["section_number"]
+    m = _RE_CHAPTER_SECTION.match(chapter)
+    if not m:
+        return []
+    annex = m.group(1)
+    lines = text.split("\n")
+
+    marks: list[tuple[int, str, str, str]] = []      # (line, number, title, kind)
+    for i in range(len(lines)):
+        h = _heading_at(lines, i)
+        if h:
+            marks.append((i, h[0], h[1], "heading"))
+    for kind, num, title, anchor in _OCR_FIXES.get(chapter, ()):
+        hits = [i for i, line in enumerate(lines) if line.startswith(anchor)]
+        if len(hits) != 1:
+            logger.warning("marpol: %s fix for Reg.%s: anchor found %d times; skipped",
+                           chapter, num, len(hits))
+            continue
+        marks.append((hits[0], num, title or "", kind))
+    if not marks:
+        return []
+    marks.sort()
+
+    out: list[Section] = []
+    preamble = _span_text(lines, 0, marks[0][0])
+    if len(preamble) > 300:
+        out.append(Section(
+            source                = SOURCE,
+            title_number          = TITLE_NUMBER,
+            section_number        = chapter,
+            section_title         = meta["section_title"],
+            full_text             = preamble,
+            up_to_date_as_of      = UP_TO_DATE_AS_OF,
+            parent_section_number = meta["parent_section_number"],
+        ))
+
+    regs: dict[str, tuple[str, list[str]]] = {}      # number -> (title, text parts)
+    continued: list[tuple[str, str]] = []
+    for k, (i, num, title, kind) in enumerate(marks):
+        end = marks[k + 1][0] if k + 1 < len(marks) else len(lines)
+        part = _span_text(lines, i, end)
+        if not part:
+            continue
+        if kind == "continue":
+            continued.append((num, part))
+            continue
+        if kind == "start":
+            part = f"Regulation {num}\n{title}\n\n{_MISSING_START_NOTE}\n\n{part}"
+        if num in regs:
+            logger.warning("marpol: %s has two headings for Reg.%s; merging", chapter, num)
+            regs[num][1].append(part)
+        else:
+            regs[num] = (title, [part])
+    for num, part in continued:
+        if num not in regs:
+            logger.warning("marpol: %s: text continued for Reg.%s, which has no heading", chapter, num)
+            regs[num] = ("", [])
+        regs[num][1].append(part)
+
+    ints = sorted({int(re.match(r"\d+", n).group()) for n in regs})
+    missing = sorted(set(range(ints[0], ints[-1] + 1)) - set(ints))
+    if missing:
+        logger.warning("marpol: %s has no heading for Reg.%s; that text, if scanned, is "
+                       "inside the regulation before it", chapter, ", ".join(map(str, missing)))
+
+    for num, (title, parts) in regs.items():
+        section_number = f"MARPOL {annex} Reg.{num}"
+        out.append(Section(
+            source                = SOURCE,
+            title_number          = TITLE_NUMBER,
+            section_number        = section_number,
+            section_title         = _TITLE_FIXES.get(section_number, title),
+            full_text             = "\n\n".join(parts),
+            up_to_date_as_of      = UP_TO_DATE_AS_OF,
+            parent_section_number = chapter,
+        ))
+    return out
 
 
 # ── CLI entry point (dry-run) ─────────────────────────────────────────────────

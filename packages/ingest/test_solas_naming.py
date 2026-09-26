@@ -62,6 +62,6 @@ def test_duplicate_sections_are_merged_not_overwritten():
     def sec(num, text):
         return Section(source="solas", title_number=0, section_number=num, section_title="",
                        full_text=text, up_to_date_as_of=date(2026, 5, 22))
-    out = S._merge_duplicate_sections([sec("SOLAS Articles", "a"), sec("SOLAS Ch.V", "v"), sec("SOLAS Articles", "b")])
+    out = S.merge_duplicate_sections([sec("SOLAS Articles", "a"), sec("SOLAS Ch.V", "v"), sec("SOLAS Articles", "b")])
     assert [s.section_number for s in out] == ["SOLAS Articles", "SOLAS Ch.V"]
     assert out[0].full_text == "a\n\nb"

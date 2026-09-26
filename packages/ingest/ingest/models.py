@@ -1,6 +1,9 @@
+import logging
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 # ── Source constants ────────────────────────────────────────────────────────
 
@@ -44,6 +47,24 @@ class Section:
     # ISO 639-1 language code (added migration 0070). Defaults to "en"
     # so existing English-only adapters keep working unchanged.
     language: str = "en"
+
+
+def merge_duplicate_sections(sections: list[Section]) -> list[Section]:
+    """Two Sections with one section_number chunk from index 0 and overwrite
+    each other on upsert. Merge a repeat into the first occurrence instead,
+    and warn: it means a header or split needs fixing. (SOLAS 2026-09-25;
+    shared with MARPOL and IMDG 2026-09-26.)"""
+    first: dict[str, Section] = {}
+    out: list[Section] = []
+    for s in sections:
+        prev = first.get(s.section_number)
+        if prev is None:
+            first[s.section_number] = s
+            out.append(s)
+            continue
+        logger.warning("%s: duplicate section_number %r; merging its text", s.source, s.section_number)
+        prev.full_text = f"{prev.full_text}\n\n{s.full_text}"
+    return out
 
 
 @dataclass

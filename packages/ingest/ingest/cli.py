@@ -559,6 +559,16 @@ Examples:
         action="store_true",
         help="Skip alias enrichment (default).",
     )
+    enrich_grp.add_argument(
+        "--enrich-cache-only",
+        action="store_true",
+        help=(
+            "Apply cached aliases only; never call the API (chunks without a "
+            "cache entry stay plain). Use on re-ingests of enriched sources "
+            "that must not spend Anthropic credits: without it an enriched "
+            "row is overwritten with plain text."
+        ),
+    )
 
     parser.add_argument(
         "--verbose",
@@ -604,7 +614,11 @@ Examples:
 
     sources = _SOURCES if args.all else [args.source]
     mode = "update" if args.update else "fresh"
-    enrich = args.enrich and not args.no_enrich
+    enrich = (args.enrich or args.enrich_cache_only) and not args.no_enrich
+    if args.enrich_cache_only:
+        # Set in-process: run_ingest.sh's transient unit does not inherit
+        # the caller's environment, and the enricher's default is batch mode.
+        os.environ["REGKNOTS_ENRICH_MODE"] = "cache"
     prune = ("report" if args.stale_report else "apply" if args.prune_stale
              else "after" if args.prune else None)
 

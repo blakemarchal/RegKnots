@@ -43,7 +43,7 @@ import sys
 from datetime import date
 from pathlib import Path
 
-from ingest.models import Section
+from ingest.models import Section, merge_duplicate_sections
 
 logger = logging.getLogger(__name__)
 
@@ -143,6 +143,13 @@ def parse_source(raw_dir: Path) -> list[Section]:
             "imdg: %d file(s) had no header entry: %s",
             len(unmatched), ", ".join(unmatched),
         )
+
+    # 2026-09-26 — two header lines map to one section_number: "Foreword"
+    # (the Vol.2 front matter and contents, 284-285) and "Part 3" (the
+    # Vol.1 "Part 3 is in volume 2" placeholder, 80-80). Each pair chunked
+    # from index 0 and the later file overwrote the earlier file's chunk 0,
+    # so the Vol.1 foreword's opening chunk was not in the corpus.
+    sections = merge_duplicate_sections(sections)
 
     logger.info(
         "imdg: %d txt files → %d sections (%d unmatched)",

@@ -30,7 +30,7 @@ import sys
 from datetime import date
 from pathlib import Path
 
-from ingest.models import Section
+from ingest.models import Section, merge_duplicate_sections
 
 logger = logging.getLogger(__name__)
 
@@ -194,7 +194,7 @@ def parse_source(raw_dir: Path) -> list[Section]:
             len(unmatched), ", ".join(unmatched),
         )
 
-    sections = _merge_duplicate_sections(sections)
+    sections = merge_duplicate_sections(sections)
 
     logger.info(
         "solas: %d txt files → %d sections (%d unmatched)",
@@ -273,23 +273,6 @@ def dry_run(raw_dir: Path) -> None:
 
 
 # ── Internal helpers ──────────────────────────────────────────────────────────
-
-def _merge_duplicate_sections(sections: list[Section]) -> list[Section]:
-    """2026-09-25 — two Sections with one section_number chunk from index 0
-    and overwrite each other on upsert. Merge a repeat into the first
-    occurrence instead, and warn: it means a header or split needs fixing."""
-    first: dict[str, Section] = {}
-    out: list[Section] = []
-    for s in sections:
-        prev = first.get(s.section_number)
-        if prev is None:
-            first[s.section_number] = s
-            out.append(s)
-            continue
-        logger.warning("solas: duplicate section_number %r; merging its text", s.section_number)
-        prev.full_text = f"{prev.full_text}\n\n{s.full_text}"
-    return out
-
 
 def _parse_headers(headers_path: Path) -> dict[tuple[int, int], dict]:
     """Parse headers.txt into a dict keyed by (start_page, end_page).

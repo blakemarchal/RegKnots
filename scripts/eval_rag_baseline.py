@@ -883,6 +883,55 @@ QUESTIONS: list[TestQuestion] = [
         vessels=["V1"],
         expected=[r"49 CFR 176\."],
     ),
+
+    # ── 2026-09-26: MARPOL per-regulation sections ──────────────────────
+    # The adapter now splits every Annex chapter into regulations. Before:
+    # chapter rows plus the D6.88 one-chunk regulation rows (no Reg.12A
+    # row; its text sat under Reg.12), and cited regulations became text
+    # searches for "Annex VI" / "Regulation 14" across every source.
+    TestQuestion(
+        qid="A26-1",
+        query="What does MARPOL Annex VI Regulation 14 require for sulphur content inside an emission control area?",
+        vessels=["V1"],
+        expected=[r"MARPOL Annex VI Reg\.14\b"],
+    ),
+    TestQuestion(
+        qid="A26-2",
+        query="MARPOL Annex I Regulation 12A oil fuel tank protection: which ships does it apply to?",
+        vessels=["V1"],
+        expected=[r"MARPOL Annex I Reg\.12A\b"],
+    ),
+    TestQuestion(
+        qid="A26-3",
+        query="When do a ship's diesel engines have to meet the NOx Tier III limits?",
+        vessels=["V1", "V0"],
+        expected=[r"MARPOL Annex VI Reg\.13\b"],
+    ),
+    TestQuestion(
+        qid="A26-4",
+        # 2ndmate09, 2026-04-29: the question behind the D6.24 bare-annex rule.
+        query="What are the annex V exemptions for throwing plastic overboard",
+        vessels=["V0"],
+        expected=[r"MARPOL Annex V Reg\.(3|7)\b"],
+    ),
+    TestQuestion(
+        qid="A26-5",
+        query="Which ships need a shipboard oil pollution emergency plan?",
+        vessels=["V0"],
+        expected=[r"MARPOL Annex I Reg\.37\b", r"33 CFR 151\.26\b"],
+    ),
+    TestQuestion(
+        qid="A26-6",
+        query="How far from the nearest land can a ship discharge comminuted and disinfected sewage?",
+        vessels=["V0"],
+        expected=[r"MARPOL Annex IV Reg\.11\b"],
+    ),
+    TestQuestion(
+        qid="A26-7",
+        query="Regulation 17 of MARPOL Annex I: what operations must be recorded in the Oil Record Book Part I?",
+        vessels=["V1"],
+        expected=[r"MARPOL Annex I Reg\.17\b", r"MARPOL Annex I App\.III\b"],
+    ),
 ]
 
 
