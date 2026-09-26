@@ -859,7 +859,11 @@ async def _run_pdf_source(
         # to the adapter so it knows which curated doc set to fetch.
         if "imo_code" in cfg:
             imo_code = cfg["imo_code"]
-            imo_source = f"imo_{imo_code}"
+            # 2026-09-26 — the rows' source is the adapter's _CODE_TO_SOURCE value;
+            # for marpol_amend, stcw_amend, imo_mepc (mepc_res) and imo_msc (msc_res)
+            # it is not f"imo_{code}", so hash dedup, the chunk-loss safeguard and
+            # --prune looked at a source with no rows.
+            imo_source = getattr(adapter, "_CODE_TO_SOURCE", {}).get(imo_code, source)
             console.print(
                 f"  [cyan]Phase 1:[/cyan] Downloading IMO {imo_code.upper()} into {raw_dir}…"
             )

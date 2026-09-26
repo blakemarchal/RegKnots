@@ -20,11 +20,17 @@ The rows are copied to data/pruned/<source>-<UTC stamp>.csv (embeddings
 included; gzipped after the commit) inside the same transaction as the
 DELETE, so a failed copy deletes nothing. Restore with COPY ... FROM ... CSV
 HEADER.
+
+Rows added by ingest/manual_add.py are produced by no parse, so they show up
+as stale. Rows whose section_number contains "(manual)" (the convention the
+IMDG manual additions use) are never pruned; any other manual addition must
+be spotted in the report before --prune-stale / --prune is run.
 """
 
 from __future__ import annotations
 
 import gzip
+import re
 import json
 import logging
 import shutil
@@ -41,6 +47,7 @@ logger = logging.getLogger(__name__)
 PRUNED_DIR = Path(__file__).resolve().parents[3] / "data" / "pruned"
 
 Key = tuple[str, int]
+_KEEP = re.compile(r"\(manual\)", re.IGNORECASE)
 
 
 class PruneRefused(RuntimeError):
@@ -55,6 +62,7 @@ class StaleReport:
     stored: int = 0                                   # rows stored for the source
     missing: list[Key] = field(default_factory=list)  # produced but not stored
     stale: list[dict] = field(default_factory=list)   # stored but not produced
+    kept_manual: int = 0                              # stored, not produced, kept
 
     @property
     def safe(self) -> bool:
@@ -75,7 +83,8 @@ class StaleReport:
         lines = [
             f"{self.source}: parse yields {self.produced} keys; {self.stored} rows stored; "
             f"{len(self.stale)} stored rows not produced (stale); "
-            f"{len(self.missing)} produced keys missing; {len(self.duplicates)} duplicate keys",
+            f"{len(self.missing)} produced keys missing; {len(self.duplicates)} duplicate keys"
+            + (f"; {self.kept_manual} manual rows kept" if self.kept_manual else ""),
         ]
         by_created = Counter(str(r["created"]) for r in self.stale)
         for created, n in sorted(by_created.items()):
@@ -102,6 +111,8 @@ async def build_report(pool: asyncpg.Pool, source: str, chunks) -> StaleReport:
         source,
     )
     stored = {(r["section_number"], r["chunk_index"]) for r in rows}
+    not_produced = [r for r in rows if (r["section_number"], r["chunk_index"]) not in keys]
+    manual = [r for r in not_produced if _KEEP.search(r["section_number"] or "")]
     return StaleReport(
         source=source,
         produced=len(keys),
@@ -111,8 +122,9 @@ async def build_report(pool: asyncpg.Pool, source: str, chunks) -> StaleReport:
         stale=[
             {"id": str(r["id"]), "section_number": r["section_number"],
              "chunk_index": r["chunk_index"], "created": str(r["created"])}
-            for r in rows if (r["section_number"], r["chunk_index"]) not in keys
+            for r in not_produced if not _KEEP.search(r["section_number"] or "")
         ],
+        kept_manual=len(manual),
     )
 
 

@@ -85,3 +85,20 @@ def test_other_sources_are_unscoped():
     assert cfr_scope.in_scope("cfr_33", "33 CFR 165.1")
     secs = [SimpleNamespace(section_number=s) for s in ("49 CFR 176.83", "49 CFR 391.41")]
     assert [s.section_number for s in cfr_scope.scope_sections("cfr_49", secs)] == ["49 CFR 176.83"]
+
+
+def test_manual_rows_are_never_stale():
+    stored = [_row("IMDG 3.2 UN 3480 (manual)", 0, "2026-05-01"), _row("IMDG 3.2", 0), _row("OLD", 0)]
+    report = asyncio.run(prune.build_report(_Pool(stored), "imdg", [_chunk("IMDG 3.2", 0)]))
+    assert [r["section_number"] for r in report.stale] == ["OLD"]
+    assert report.kept_manual == 1 and "1 manual rows kept" in report.summary_lines()[0]
+
+
+def test_imo_code_configs_resolve_to_the_rows_source():
+    """2026-09-26 — the CLI used f"imo_{code}" as the pipeline source; for four
+    codes that is not where the adapter writes, so bookkeeping saw no rows."""
+    from ingest import cli
+    from ingest.sources import imo_codes
+    for key, cfg in cli._PDF_SOURCE_CONFIG.items():
+        if "imo_code" in cfg:
+            assert imo_codes._CODE_TO_SOURCE.get(cfg["imo_code"], key) == key, key
