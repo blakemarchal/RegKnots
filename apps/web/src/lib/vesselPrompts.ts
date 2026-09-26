@@ -15,6 +15,9 @@ export interface VesselProfileForPrompts {
   subchapter: string | null
   route_types: string[]
   cargo_types: string[]
+  // 2026-09-26 — read by the chat's "confirm your flag" prompt.
+  flag_state?: string | null
+  workspace_id?: string | null
 }
 
 const GENERIC_PROMPTS = [

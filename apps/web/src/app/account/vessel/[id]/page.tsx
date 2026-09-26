@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import AuthGuard from '@/components/AuthGuard'
 import { apiRequest, apiUpload } from '@/lib/api'
+import { FLAG_OPTIONS, isFlagUnknown } from '@/lib/flags'
 
 const VESSEL_TYPES = [
   'Containership',
@@ -92,6 +93,8 @@ interface VesselData {
   // D6.94 — class society routing.
   classification_society: string | null
   classification_society_source: string | null
+  // 2026-09-26 — retrieval scopes answers to the flag.
+  flag_state: string | null
 }
 
 // D6.94 — IACS member societies plus 'other' / 'unclassed' sentinels.
@@ -403,6 +406,7 @@ function VesselEditContent() {
   const [name, setName] = useState('')
   const [vesselType, setVesselType] = useState('')
   const [grossTonnage, setGrossTonnage] = useState('')
+  const [flagState, setFlagState] = useState('')
   const [routeTypes, setRouteTypes] = useState<string[]>([])
   const [cargoTypes, setCargoTypes] = useState<string[]>([])
 
@@ -454,6 +458,7 @@ function VesselEditContent() {
           setName(v.name)
           setVesselType(v.vessel_type)
           setGrossTonnage(v.gross_tonnage ? String(v.gross_tonnage) : '')
+          setFlagState(isFlagUnknown(v.flag_state) ? '' : (v.flag_state ?? ''))
           setRouteTypes(v.route_types)
           setCargoTypes(v.cargo_types)
           setSubchapter(v.subchapter ?? '')
@@ -500,6 +505,8 @@ function VesselEditContent() {
           name: name.trim(),
           vessel_type: vesselType,
           gross_tonnage: grossTonnage ? parseFloat(grossTonnage) : null,
+          // null leaves the stored flag as it is
+          flag_state: flagState || null,
           route_types: routeTypes,
           cargo_types: cargoTypes,
           subchapter: subchapter.trim() || null,
@@ -659,6 +666,27 @@ function VesselEditContent() {
               {VESSEL_TYPES.map((t) => (
                 <option key={t} value={t} style={{ backgroundColor: '#111827', color: '#f0ece4' }}>
                   {t}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Flag */}
+          <div className="flex flex-col gap-1">
+            <label className="font-mono text-xs text-[#6b7594] uppercase tracking-wider">Flag</label>
+            <select
+              value={flagState}
+              onChange={(e) => setFlagState(e.target.value)}
+              className="font-mono w-full border border-white/10 rounded-lg px-3 py-2.5 text-sm
+                outline-none focus:border-[#2dd4bf] transition-colors"
+              style={{ backgroundColor: '#0d1225', color: '#f0ece4' }}
+            >
+              <option value="" style={{ backgroundColor: '#111827', color: '#f0ece4' }}>
+                Not set — answers are not scoped to a flag
+              </option>
+              {(flagState && !FLAG_OPTIONS.includes(flagState) ? [flagState, ...FLAG_OPTIONS] : FLAG_OPTIONS).map((f) => (
+                <option key={f} value={f} style={{ backgroundColor: '#111827', color: '#f0ece4' }}>
+                  {f}
                 </option>
               ))}
             </select>

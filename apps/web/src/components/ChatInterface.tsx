@@ -21,6 +21,8 @@ import { PilotSurveyModal } from './PilotSurveyModal'
 import { NotificationBanner } from './NotificationBanner'
 import { VerificationBanner } from './VerificationBanner'
 import { ComingUpWidget } from './ComingUpWidget'
+import { FlagConfirmBanner } from './FlagConfirmBanner'
+import { flagForFocus, isFlagUnknown, readFlagPromptDismissed, writeFlagPromptDismissed } from '@/lib/flags'
 import type { VesselProfileForPrompts } from '@/lib/vesselPrompts'
 import { useViewMode } from '@/lib/useViewMode'
 import { resizeImageForChat, ImageRejectedError, type ResizedImage } from '@/utils/image_resize'
@@ -277,6 +279,39 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
       .catch(() => { if (!cancelled) setActiveVesselProfile(null) })
     return () => { cancelled = true }
   }, [activeVesselId, activeWorkspaceId])
+
+  // 2026-09-26 — "confirm your flag". Retrieval scopes answers to the
+  // vessel's flag, but vessels were created "Unknown" (51 of 56 on prod)
+  // and users typed their flag into chat, which cannot write the profile.
+  // Shown to whoever can edit the vessel; "Not now" sticks per vessel.
+  const [flagFocus, setFlagFocus] = useState<string | null>(null)   // null = not fetched
+  const [flagDismissedFor, setFlagDismissedFor] = useState<string | null>(null)
+  const [flagSavedMsg, setFlagSavedMsg] = useState<string | null>(null)
+  const flagVessel = (
+    activeVesselProfile
+    && isFlagUnknown(activeVesselProfile.flag_state)
+    && (!activeVesselProfile.workspace_id || workspaceRole === 'owner' || workspaceRole === 'admin')
+    && flagDismissedFor !== activeVesselProfile.id
+    && !readFlagPromptDismissed(activeVesselProfile.id)
+  ) ? activeVesselProfile : null
+
+  useEffect(() => {
+    if (!flagVessel || flagFocus !== null) return
+    apiRequest<{ jurisdiction_focus: string | null }>('/onboarding/persona')
+      .then((r) => setFlagFocus(r.jurisdiction_focus ?? ''))
+      .catch(() => setFlagFocus(''))
+  }, [flagVessel, flagFocus])
+
+  function handleFlagSaved(flag: string) {
+    setActiveVesselProfile((p) => (p ? { ...p, flag_state: flag } : p))
+    setFlagSavedMsg(`Flag set to ${flag}. You can change it in the vessel editor.`)
+    setTimeout(() => setFlagSavedMsg(null), 5000)
+  }
+
+  function handleFlagDismiss(vesselId: string) {
+    setFlagDismissedFor(vesselId)
+    writeFlagPromptDismissed(vesselId)
+  }
 
   function openVesselSheet() {
     setMenuOpen(false)
@@ -1272,6 +1307,22 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
               </svg>
             </button>
           </div>
+        )}
+
+        {flagVessel && flagFocus !== null && (
+          <FlagConfirmBanner
+            vesselId={flagVessel.id}
+            vesselName={flagVessel.name}
+            suggested={flagForFocus(flagFocus)}
+            onSaved={handleFlagSaved}
+            onDismiss={() => handleFlagDismiss(flagVessel.id)}
+          />
+        )}
+        {flagSavedMsg && (
+          <p role="status" className="px-4 py-2 font-mono text-[11px] text-[#2dd4bf]
+            bg-[#2dd4bf]/6 border-t border-[#2dd4bf]/15">
+            {flagSavedMsg}
+          </p>
         )}
 
         {/* Sprint D6.77 — VesselPill + VerbosityDropdown + Log pill on a

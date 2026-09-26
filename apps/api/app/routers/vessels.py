@@ -52,6 +52,8 @@ class VesselListItem(BaseModel):
     # iacs_lookup so the mariner can correct an upstream stale value.
     classification_society: str | None = None
     classification_society_source: str | None = None
+    # 2026-09-26 — the chat UI asks for the flag when this is "Unknown".
+    flag_state: str | None = None
 
 
 async def _require_workspace_member(
@@ -93,7 +95,7 @@ async def list_vessels(
                 SELECT id, name, vessel_type, route_types, cargo_types,
                        gross_tonnage, subchapter, inspection_certificate_type,
                        manning_requirement, route_limitations, workspace_id,
-                       additional_details,
+                       additional_details, flag_state,
                        classification_society, classification_society_source,
                        (
                          SELECT extracted_data
@@ -116,7 +118,7 @@ async def list_vessels(
                 SELECT id, name, vessel_type, route_types, cargo_types,
                        gross_tonnage, subchapter, inspection_certificate_type,
                        manning_requirement, route_limitations, workspace_id,
-                       additional_details,
+                       additional_details, flag_state,
                        classification_society, classification_society_source,
                        (
                          SELECT extracted_data
@@ -169,6 +171,7 @@ async def list_vessels(
             latest_coi_extracted=coi_ex if isinstance(coi_ex, dict) else None,
             classification_society=r["classification_society"],
             classification_society_source=r["classification_society_source"],
+            flag_state=r["flag_state"],
         ))
     return out
 
@@ -195,6 +198,10 @@ class VesselCreate(BaseModel):
     # locks out the IACS auto-lookup. Leave None to let the create
     # path try the auto-populate from imo_mmsi.
     classification_society: str | None = None
+    # 2026-09-26 — the flag was never accepted here: every vessel was
+    # created "Unknown" (51 of 56 on prod), which switches off
+    # jurisdiction scoping unless the chat side channel set it later.
+    flag_state: str | None = None
     # D6.55 — when set, this vessel belongs to a workspace; only
     # Owner/Admin members may create. Personal users / regular members
     # leave this null and create personal vessels (legacy path).
@@ -212,6 +219,24 @@ class VesselResponse(BaseModel):
     # D6.94 — class society routing.
     classification_society: str | None = None
     classification_society_source: str | None = None
+    flag_state: str | None = None
+
+
+_MAX_FLAG_LEN = 60
+
+
+def _clean_flag(value: str | None) -> str | None:
+    """A flag as the user gave it ("United States"), or None when blank.
+    rag.jurisdiction.flag_to_jurisdiction maps it for retrieval scoping."""
+    if value is None:
+        return None
+    flag = " ".join(value.split())
+    if len(flag) > _MAX_FLAG_LEN:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"flag_state must be at most {_MAX_FLAG_LEN} characters",
+        )
+    return flag or None
 
 
 def _validate_route_types(route_types: list[str]) -> None:
@@ -279,7 +304,7 @@ async def create_vessel(
                  classification_society, classification_society_source)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
             RETURNING id, name, vessel_type, gross_tonnage, route_types,
-                      cargo_types, workspace_id,
+                      cargo_types, workspace_id, flag_state,
                       classification_society, classification_society_source
             """,
             uuid.UUID(user.user_id),
@@ -288,7 +313,7 @@ async def create_vessel(
             body.imo_mmsi.strip() if body.imo_mmsi else None,
             body.vessel_type,
             body.gross_tonnage,
-            "Unknown",
+            _clean_flag(body.flag_state) or "Unknown",
             body.route_types,
             body.cargo_types,
             body.subchapter,
@@ -333,6 +358,7 @@ async def create_vessel(
         workspace_id=str(row["workspace_id"]) if row["workspace_id"] else None,
         classification_society=society_after,
         classification_society_source=society_source_after,
+        flag_state=row["flag_state"],
     )
 
 
@@ -350,6 +376,7 @@ class VesselUpdate(BaseModel):
     # D6.94 — user-facing edit of class society. Setting this stamps
     # source='user', overriding any prior auto-populated value.
     classification_society: str | None = None
+    flag_state: str | None = None
 
 
 async def _authorize_vessel_write(
@@ -423,6 +450,7 @@ async def update_vessel(
         ("inspection_certificate_type", body.inspection_certificate_type),
         ("manning_requirement", body.manning_requirement),
         ("route_limitations", body.route_limitations),
+        ("flag_state", _clean_flag(body.flag_state)),
     ]:
         if value is not None:
             sets.append(f"{field} = ${idx}")
@@ -448,7 +476,7 @@ async def update_vessel(
             UPDATE vessels SET {', '.join(sets)}
             WHERE id = ${idx}
             RETURNING id, name, vessel_type, gross_tonnage, route_types,
-                      cargo_types, workspace_id,
+                      cargo_types, workspace_id, flag_state,
                       classification_society, classification_society_source
             """,
             *params,
@@ -467,6 +495,7 @@ async def update_vessel(
         workspace_id=str(row["workspace_id"]) if row["workspace_id"] else None,
         classification_society=row["classification_society"],
         classification_society_source=row["classification_society_source"],
+        flag_state=row["flag_state"],
     )
 
 
