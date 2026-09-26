@@ -27,6 +27,7 @@ from rich.progress import (
 
 from ingest import store
 from ingest.chunker import chunk_section
+from ingest.prune import run_prune_step
 from ingest.config import IngestSettings, settings as _default_settings
 from ingest.embedder import EmbedderClient
 from ingest.models import IngestResult, Section
@@ -45,6 +46,7 @@ async def run_pdf_pipeline(
     cfg: IngestSettings | None = None,
     console: Console | None = None,
     enrich: bool = False,
+    prune: str | None = None,
 ) -> IngestResult:
     """Run the ingest pipeline for a PDF-sourced regulation.
 
@@ -56,6 +58,10 @@ async def run_pdf_pipeline(
         pool:            asyncpg connection pool.
         cfg:             IngestSettings; defaults to module-level singleton.
         console:         Rich console; defaults to a new Console().
+        prune:           2026-09-25 (ingest/prune.py). "report" / "apply":
+                         parse and chunk only, then list / remove stored rows
+                         the parse no longer produces. "after": remove them
+                         after a successful run. None: no pruning.
     """
     cfg     = cfg or _default_settings
     console = console or Console()
@@ -85,7 +91,7 @@ async def run_pdf_pipeline(
     try:
         with progress:
             # ── 1. Short-circuit if up-to-date (update mode only) ────────────
-            if mode == "update":
+            if mode == "update" and prune not in ("report", "apply"):
                 prev_as_of = await store.get_previous_as_of(pool, source)
                 if prev_as_of and prev_as_of >= source_date:
                     console.print(
@@ -136,6 +142,12 @@ async def run_pdf_pipeline(
                 chunk_task,
                 description=f"Chunked: {len(all_chunks):,} chunks",
             )
+
+            # ── 3a. Prune-only run: no embedding, no upsert ──────────────────
+            if prune in ("report", "apply"):
+                progress.stop()
+                await run_prune_step(pool, source, all_chunks, prune, result, console)
+                return result
 
             # ── 3b. Chunk-loss safeguard (update mode only) ──────────────────
             if mode == "update":
@@ -255,6 +267,11 @@ async def run_pdf_pipeline(
             # Capture net chunk delta (additions/removals at the row level)
             chunks_after_count = await store.get_existing_chunk_count(pool, source)
             result.net_chunk_delta = chunks_after_count - chunks_before_count
+
+            # ── 7. Prune rows the parse no longer produces (opt-in) ──────────
+            if prune == "after":
+                progress.stop()
+                await run_prune_step(pool, source, all_chunks, "apply", result, console)
 
     finally:
         await embedder.close()

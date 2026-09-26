@@ -572,6 +572,31 @@ Examples:
         help="Suppress all notifications and email alerts (use for dev/maintenance ingest).",
     )
 
+    # 2026-09-25 — rows a re-parse no longer produces (ingest/prune.py).
+    prune_grp = parser.add_mutually_exclusive_group()
+    prune_grp.add_argument(
+        "--stale-report",
+        action="store_true",
+        help=(
+            "Parse and chunk only (no embedding, no writes): list stored rows the "
+            "current parse no longer produces. Report in data/pruned/."
+        ),
+    )
+    prune_grp.add_argument(
+        "--prune-stale",
+        action="store_true",
+        help=(
+            "As --stale-report, then remove those rows (copied to "
+            "data/pruned/<source>-<stamp>.csv.gz first). Refused unless the parse "
+            "yields no duplicate keys and every key it yields is stored."
+        ),
+    )
+    prune_grp.add_argument(
+        "--prune",
+        action="store_true",
+        help="After a successful ingest run, remove stored rows the parse no longer produces.",
+    )
+
     args = parser.parse_args()
 
     if args.verbose:
@@ -580,6 +605,8 @@ Examples:
     sources = _SOURCES if args.all else [args.source]
     mode = "update" if args.update else "fresh"
     enrich = args.enrich and not args.no_enrich
+    prune = ("report" if args.stale_report else "apply" if args.prune_stale
+             else "after" if args.prune else None)
 
     asyncio.run(_run(
         sources, mode,
@@ -589,6 +616,7 @@ Examples:
         enrich=enrich,
         notify=not args.no_notify,
         ids_file=args.ids_file,
+        prune=prune,
     ))
 
 
@@ -601,6 +629,7 @@ async def _run(
     enrich: bool = False,
     notify: bool = True,
     ids_file: Path | None = None,
+    prune: str | None = None,
 ) -> None:
     import importlib
 
@@ -681,7 +710,7 @@ async def _run(
             if source in PDF_SOURCES:
                 result = await _run_pdf_source(
                     source, mode, pool, console,
-                    enrich=enrich, ids_file=ids_file,
+                    enrich=enrich, ids_file=ids_file, prune=prune,
                 )
             else:
                 result = await run_pipeline(
@@ -691,6 +720,7 @@ async def _run(
                     cfg=settings,
                     console=console,
                     enrich=enrich,
+                    prune=prune,
                 )
             all_results.append(result)
 
@@ -748,6 +778,7 @@ async def _run_pdf_source(
     console: Console,
     enrich: bool = False,
     ids_file: Path | None = None,
+    prune: str | None = None,
 ) -> IngestResult:
     """Dispatch a PDF/text-sourced ingest run.
 
@@ -790,11 +821,12 @@ async def _run_pdf_source(
             cfg=settings,
             console=console,
             enrich=enrich,
+            prune=prune,
         )
 
     # ── Text-dir path (e.g. solas) ────────────────────────────────────────────
     if "text_dir" in cfg:
-        return await _run_text_source(source, mode, cfg, adapter, pool, console, enrich=enrich)
+        return await _run_text_source(source, mode, cfg, adapter, pool, console, enrich=enrich, prune=prune)
 
     # ── Multi-PDF path (e.g. nvic, nmc) ───────────────────────────────────────
     if "raw_dir" in cfg:
@@ -819,6 +851,7 @@ async def _run_pdf_source(
                 cfg=settings,
                 console=console,
                 enrich=enrich,
+                prune=prune,
             )
 
         # Sprint D6.23 — IMO codes: single adapter, code-keyed. Each
@@ -847,6 +880,7 @@ async def _run_pdf_source(
                 cfg=settings,
                 console=console,
                 enrich=enrich,
+                prune=prune,
             )
             result.errors += dl_failures
             return result
@@ -878,6 +912,7 @@ async def _run_pdf_source(
                 cfg=settings,
                 console=console,
                 enrich=enrich,
+                prune=prune,
             )
             result.errors += dl_failures
             return result
@@ -904,6 +939,7 @@ async def _run_pdf_source(
             cfg=settings,
             console=console,
             enrich=enrich,
+            prune=prune,
         )
         # Surface download failures in the summary error count
         result.errors += dl_failures
@@ -929,6 +965,7 @@ async def _run_pdf_source(
         cfg=settings,
         console=console,
         enrich=enrich,
+        prune=prune,
     )
 
 
@@ -940,6 +977,7 @@ async def _run_text_source(
     pool: asyncpg.Pool,
     console: Console,
     enrich: bool = False,
+    prune: str | None = None,
 ) -> IngestResult:
     """Ingest a pre-extracted text-dir source (e.g. SOLAS).
 
@@ -999,6 +1037,7 @@ async def _run_text_source(
         cfg=settings,
         console=console,
         enrich=enrich,
+        prune=prune,
     )
 
 

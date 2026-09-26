@@ -102,5 +102,8 @@ class IngestResult:
     # Positive = net adds, negative = net removals, 0 = pure updates or no-op.
     net_chunk_delta: int = 0
     version_changes: int = 0
+    # 2026-09-25 — rows removed because the parse no longer produces them
+    # (ingest/prune.py; --prune / --prune-stale).
+    pruned: int = 0
     errors: int = 0
     error_details: list[str] = field(default_factory=list)

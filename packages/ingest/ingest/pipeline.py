@@ -23,12 +23,14 @@ from rich.progress import (
 )
 
 from ingest import store
+from ingest.cfr_scope import scope_sections
 from ingest.chunker import chunk_section
 from ingest.config import IngestSettings, settings as _default_settings
 from ingest.ecfr_client import ECFRClient
 from ingest.embedder import EmbedderClient
 from ingest.models import IngestResult, SOURCE_TO_TITLE
 from ingest.parser import parse_title_xml
+from ingest.prune import run_prune_step
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +44,7 @@ async def run_pipeline(
     cfg: IngestSettings | None = None,
     console: Console | None = None,
     enrich: bool = False,
+    prune: str | None = None,
 ) -> IngestResult:
     """Run the full ingest pipeline for one CFR source.
 
@@ -51,6 +54,9 @@ async def run_pipeline(
         pool:    asyncpg connection pool (caller owns lifecycle).
         cfg:     IngestSettings; defaults to module-level singleton.
         console: Rich console; defaults to a new Console().
+        prune:   2026-09-25 (ingest/prune.py). "report" / "apply": fetch, parse
+                 and chunk only, then list / remove stored rows the parse no
+                 longer produces. "after": remove them after a successful run.
     """
     cfg = cfg or _default_settings
     console = console or Console()
@@ -88,7 +94,7 @@ async def run_pipeline(
             )
 
             # ── 2. Short-circuit if up-to-date (update mode only) ────────────
-            if mode == "update":
+            if mode == "update" and prune not in ("report", "apply"):
                 prev_as_of = await store.get_previous_as_of(pool, source)
                 if prev_as_of and prev_as_of >= as_of:
                     console.print(
@@ -111,6 +117,8 @@ async def run_pipeline(
             # ── 4. Parse sections ────────────────────────────────────────────
             parse_task = progress.add_task("Parsing sections…", total=1)
             sections = parse_title_xml(xml_bytes, title_number, as_of)
+            # 2026-09-25 — keep only the parts this source carries (cfr_scope.py).
+            sections = scope_sections(source, sections)
             result.sections_found = len(sections)
             progress.update(
                 parse_task,
@@ -144,6 +152,12 @@ async def run_pipeline(
                 chunk_task,
                 description=f"Chunked: {len(all_chunks):,} chunks",
             )
+
+            # ── 5a. Prune-only run: no embedding, no upsert ──────────────────
+            if prune in ("report", "apply"):
+                progress.stop()
+                await run_prune_step(pool, source, all_chunks, prune, result, console)
+                return result
 
             # ── 5b. Chunk-loss safeguard (update mode only) ──────────────────
             if mode == "update":
@@ -250,6 +264,11 @@ async def run_pipeline(
                         pool, source, prev_as_of, as_of, changed
                     )
                     result.version_changes = 1
+
+            # ── 10. Prune rows the parse no longer produces (opt-in) ─────────
+            if prune == "after":
+                progress.stop()
+                await run_prune_step(pool, source, all_chunks, "apply", result, console)
 
     finally:
         await embedder.close()
