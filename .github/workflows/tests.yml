@@ -1,0 +1,36 @@
+# Unit tests on every push to main and every pull request (2026-09-26).
+# No secrets: every setting in apps/api/app/config.py has a default, and the
+# suites use fakes for Postgres, Stripe and the LLM clients. No step calls a
+# paid API.
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: apps/api
+        working-directory: apps/api
+        run: uv run python -m pytest tests -q
+
+      - name: packages/rag
+        working-directory: apps/api
+        # test_hybrid_retrieve needs a live database
+        run: >-
+          uv run python -m pytest ../../packages/rag -q
+          --deselect ../../packages/rag/test_hybrid_search.py::test_hybrid_retrieve
+
+      - name: packages/ingest
+        working-directory: packages/ingest
+        # test_erg.py and test_search.py are DB scripts, not pytest suites
+        run: uv run --with pytest python -m pytest test_prune.py test_solas_naming.py -q
