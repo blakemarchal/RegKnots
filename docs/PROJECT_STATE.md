@@ -130,7 +130,7 @@ Full findings, evidence and the awaiting-go fix spec: `docs/sprint-audits/full-s
 - **Harness baselines** (71 pairs, clean corpus): dense 0.8592 / 0.6924, dense-prod 1.0000 / 0.7301.
 - **Incident, 2026-09-26 00:15 to ~02:10 UTC:** Anthropic credits were exhausted and the GPT-4o fallback served. No user traffic during the outage; resolved.
 
-**Still open from May:** `next@15.5.14` DoS CVE (bumped to 15.5.26 in `6976759`, awaiting push); ~~Sentry `environment` tag~~ (done 2026-09-26); ~~no CI~~ (GitHub Actions since 2026-09-26); SpiritFlow co-tenancy; offsite backups (Blake's DO Spaces step); STCW 2017 / MARPOL 2022 / MSM 2021 bases; Load Lines 3 chunks; FSS / LSA resolution-only.
+**Still open from May:** ~~`next@15.5.14` DoS CVE~~ (15.5.26, deployed 2026-09-26); ~~Sentry `environment` tag~~ (done 2026-09-26); ~~no CI~~ (GitHub Actions since 2026-09-26); SpiritFlow co-tenancy; offsite backups (Blake's DO Spaces step); STCW 2017 / MARPOL 2022 / MSM 2021 bases; Load Lines 3 chunks; FSS / LSA resolution-only.
 
 **Resolved since the May audit:** shared LLM helpers (`packages/rag/rag/llm.py`, 2026-09-22) and the first `apps/api` tests (`apps/api/tests/`), JWT secret, `.env` 600, daily + restore-tested backups, cgroup caps, swap, `run_ingest.sh`, Layer C, NVIC OCR, eval harness, migration 0115 (fallback persist), Anthropic key rotation.
 
