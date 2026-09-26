@@ -82,8 +82,11 @@ _DASH_LINE = re.compile(r"^[\-\u2013\u2014]{4,}\s*$", re.MULTILINE)
 # start with optional leading whitespace, then "Regulation" + integer
 # + at-least-one-word title starting with uppercase (avoids matching
 # "1.1 regulation applies to..." mid-sentence prose).
+# 2026-09-25 — also hyphenated numbers ("Regulation 3-1", "Regulation 35-1"
+# in Chapter II-1). Without them those regulations were not split out and
+# their text ran on inside the preceding regulation.
 _REGULATION_HEADER = re.compile(
-    r"^[ \t]*Regulation\s+(\d{1,3})\s+([A-Z][^\n]{2,200}?)\s*$",
+    r"^[ \t]*Regulation\s+(\d{1,3}(?:-\d{1,2})?)\s+([A-Z][^\n]{2,200}?)\s*$",
     re.MULTILINE,
 )
 
@@ -191,6 +194,8 @@ def parse_source(raw_dir: Path) -> list[Section]:
             len(unmatched), ", ".join(unmatched),
         )
 
+    sections = _merge_duplicate_sections(sections)
+
     logger.info(
         "solas: %d txt files → %d sections (%d unmatched)",
         len(txt_files), len(sections), len(unmatched),
@@ -269,6 +274,23 @@ def dry_run(raw_dir: Path) -> None:
 
 # ── Internal helpers ──────────────────────────────────────────────────────────
 
+def _merge_duplicate_sections(sections: list[Section]) -> list[Section]:
+    """2026-09-25 — two Sections with one section_number chunk from index 0
+    and overwrite each other on upsert. Merge a repeat into the first
+    occurrence instead, and warn: it means a header or split needs fixing."""
+    first: dict[str, Section] = {}
+    out: list[Section] = []
+    for s in sections:
+        prev = first.get(s.section_number)
+        if prev is None:
+            first[s.section_number] = s
+            out.append(s)
+            continue
+        logger.warning("solas: duplicate section_number %r; merging its text", s.section_number)
+        prev.full_text = f"{prev.full_text}\n\n{s.full_text}"
+    return out
+
+
 def _parse_headers(headers_path: Path) -> dict[tuple[int, int], dict]:
     """Parse headers.txt into a dict keyed by (start_page, end_page).
 
@@ -320,48 +342,61 @@ def _parse_headers(headers_path: Path) -> dict[tuple[int, int], dict]:
 # identifier: "Chapter I Part A - General" — we strip that for section_number
 # but keep it in section_title.
 
-_RE_CHAPTER_PART = re.compile(
-    r"^chapter\s+([IVXivx0-9\-]+)"          # chapter number (Roman or digit)
-    r"(?:\s+part\s+([A-Za-z0-9\-]+))?",     # optional Part
-    re.IGNORECASE,
-)
+# 2026-09-25 — headers.txt titles read "Chapter II-1: Construction – Structure,
+# …; Part B-1: Stability". The old formatter cut the title at its first hyphen
+# of any kind, so "Chapter II-1" became "Chapter II" and the Part was lost:
+# every Part of II-1 and II-2 (and XI-1 / XI-2) got the one section_number
+# "SOLAS Ch.II", whose chunks overwrote each other on upsert, and whose
+# per-Regulation split gave II-1 and II-2 regulations of the same number one
+# name ("SOLAS Ch.II Reg.10" held II-2 fire fighting over II-1 bulkheads).
+# Titles with a hyphenated word ("Life-saving appliances") lost their Part the
+# same way. The chapter and Part are now read directly; a description is cut
+# only at a colon or a spaced dash.
+_RE_CHAPTER = re.compile(r"^chapter\s+([IVX]+(?:-\d+)?)\b", re.IGNORECASE)
+_RE_PART = re.compile(r"\bpart\s+([A-Z](?:-\d+)?)\b", re.IGNORECASE)
 _RE_ANNEX   = re.compile(r"^annex\s+([IVXivx0-9]+)", re.IGNORECASE)
+_RE_PROTOCOL_ARTICLES = re.compile(r"^articles\s+of\s+the\s+protocol\s+of\s+(\d{4})", re.IGNORECASE)
 _RE_ARTICLES = re.compile(r"^(articles|preamble)", re.IGNORECASE)
 _RE_APPENDIX = re.compile(r"^appendix", re.IGNORECASE)
 
-# Strip trailing "- description" or "— description" from the structural identifier
-_RE_DESC_SUFFIX = re.compile(r"\s*[\-\u2013\u2014].*$")
+# A description follows a colon or a dash with spaces around it.
+_RE_DESC_SUFFIX = re.compile(r"(?::|\s[\-\u2013\u2014]\s).*$")
 
 
 def _structural_part(raw: str) -> str:
-    """Return just the structural identifier of a header title (before any dash + description)."""
+    """Return just the structural identifier of a header title (before its description)."""
     return _RE_DESC_SUFFIX.sub("", raw).strip()
 
 
 def _format_section_number(raw: str) -> str:
-    struct = _structural_part(raw)
+    m = _RE_PROTOCOL_ARTICLES.match(raw)
+    if m:
+        return f"SOLAS Protocol {m.group(1)} Articles"
 
-    if _RE_ARTICLES.match(struct):
+    if _RE_ARTICLES.match(raw):
         return "SOLAS Articles"
 
-    if _RE_APPENDIX.match(struct):
-        return "SOLAS Appendix"
+    if _RE_APPENDIX.match(raw):
+        # "Appendix: Certificates: Records of equipment" -> "SOLAS Appendix
+        # Certificates: Records of equipment" (the appendix has two ranges).
+        rest = [s.strip() for s in raw.split(":")[1:] if s.strip()]
+        return "SOLAS Appendix" + (" " + ": ".join(rest) if rest else "")
 
-    m = _RE_ANNEX.match(struct)
+    m = _RE_ANNEX.match(raw)
     if m:
         roman = m.group(1).upper()
         return f"SOLAS Annex {roman}"
 
-    m = _RE_CHAPTER_PART.match(struct)
+    m = _RE_CHAPTER.match(raw)
     if m:
-        ch   = m.group(1).upper()
-        part = m.group(2)
+        ch = m.group(1).upper()
+        part = _RE_PART.search(raw, m.end())
         if part:
-            return f"SOLAS Ch.{ch} Part {part.upper()}"
+            return f"SOLAS Ch.{ch} Part {part.group(1).upper()}"
         return f"SOLAS Ch.{ch}"
 
-    # Fallback: prefix with SOLAS and normalise whitespace
-    return f"SOLAS {struct.strip()}"
+    # Fallback ("Unified interpretations for chapter II-1"): prefix with SOLAS
+    return f"SOLAS {_structural_part(raw)}"
 
 
 def _format_section_title(raw: str) -> str:
@@ -382,7 +417,7 @@ def _format_parent(raw: str) -> str:
     if _RE_ANNEX.match(struct):
         return "SOLAS Annexes"
 
-    m = _RE_CHAPTER_PART.match(struct)
+    m = _RE_CHAPTER.match(raw)
     if m:
         ch = m.group(1).upper()
         return f"SOLAS Ch.{ch}"
