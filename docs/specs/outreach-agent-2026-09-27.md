@@ -2,9 +2,9 @@
 
 **Status: live 2026-09-27.** Scheduled task `regknots-outreach` (weekdays 06:38 local).
 Blake's decisions: hello@regknots.com in the signature, the La Marque address in the footer, and the
-30-day fleet trial as the offer. Drafts go into blakemarchal@gmail.com. Sending *as* hello@ needs an
-SMTP relay for the Gmail alias (ImprovMX Premium or Google Workspace); until then, emails go out from
-the Gmail address with hello@ in the signature.
+30-day fleet trial as the offer. regknots.com moved to Google Workspace the same evening: one mailbox,
+blake@regknots.com, with hello@ and support@ as aliases, root DKIM and DMARC. Drafts go into the
+account the Gmail connector uses: blakemarchal@gmail.com until Blake switches it to blake@regknots.com.
 
 **Goal:** a steady stream of personal first emails to U.S. towing operators, with Blake approving
 every send, at no new monthly cost.
@@ -25,24 +25,22 @@ and no signup had a recorded source.
 | Approval | The agent only creates **Gmail drafts**. Blake reviews, edits, and presses Send. Nothing sends automatically. |
 | Follow-ups | Two, in the same thread, 5 and 12 business days after Blake sends, only if there is no reply. Any reply or "no thanks" stops everything for that address. |
 | Tracking | Status lives in `leads.csv` (new, drafted, sent, replied, opted_out, no_contact, closed). Each email links to `regknots.com/landing?src=ob-NNNN&utm_source=outreach...`, so a signup shows under "Signups by source" on the admin Traffic page (shipped 2026-09-27, `4abf1a6`). |
-| Volume | 10 drafts per weekday to start: safe for a personal Gmail and about four months of runway on the towing list. |
+| Volume | 5 drafts per weekday through 2026-10-02 while the new regknots.com mailbox warms up, then 10: about four months of runway on the towing list. |
 | Compliance | CAN-SPAM: honest From and subject lines, a physical postal address, a working opt-out that is honored at once. U.S. businesses only (no EU or Canada). |
 
 The full task instructions are in `scripts/outreach/task_prompt.md`.
 
 ## Blake decides
 
-1. **Sending account.** Which Gmail account the drafts go into and send from. regknots.com has
-   no outgoing mailbox: its mail is forwarded by ImprovMX, and Resend (our transactional
-   provider) forbids cold email and carries our verification and password-reset mail. A
-   regknots.com mailbox would be Google Workspace at about $7 a month. It's optional, and it can
-   come later.
+1. **Sending account.** Decided 2026-09-27: Google Workspace, one license ($8.40 a month on the
+   flexible plan), mailbox blake@regknots.com with hello@ and support@ as aliases. Resend (our
+   transactional provider) forbids cold email and carries our verification and password-reset
+   mail, so it stays out of outreach.
 2. **Postal address** for the footer (CAN-SPAM requires one).
 3. **The offer.** The fleet plan (Wheelhouse) is $99.99 per vessel per month. Suggested:
    "your first boat free for 30 days, no card", then list price, or a founding-operator discount.
 
 ## Later (not v1)
 
-- A regknots.com sending mailbox once replies justify it.
 - Passenger (467) and OSV (459) operators from the same Army Corps file, with their own hooks.
 - Public "shared answer" pages so an email can link to a full cited answer.

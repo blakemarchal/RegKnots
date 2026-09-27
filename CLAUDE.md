@@ -195,10 +195,14 @@ If a doc says "alembic head is 0045" but `alembic current` says `0092`, the doc 
     - A draft-only Claude desktop scheduled task: Gmail drafts, Blake sends.
     - Waiting on Blake: sending account, postal address, offer.
   - **Outreach LIVE** (`7f26670`): Claude desktop scheduled task `regknots-outreach`, weekdays 06:38 local, running on Blake's laptop while the app is open.
-    - It writes up to 10 Gmail drafts a day into blakemarchal@gmail.com and never sends. The signature carries hello@regknots.com and 20 N Sandpiper St, La Marque, TX 77568.
+    - It writes Gmail drafts into the account the Gmail connector uses (blake@regknots.com once Blake switches it from blakemarchal@gmail.com) and never sends: 5 a day through 2026-10-02 while the new mailbox warms up, then 10. The signature carries hello@regknots.com and 20 N Sandpiper St, La Marque, TX 77568.
     - The offer is the existing 30-day fleet (Wheelhouse) trial, no card. Prod has `CREW_TIER_ENABLED=true` and `CREW_TIER_INTERNAL_ONLY=false`.
     - The link is `/register?next=/workspaces&src=ob-NNNN&utm_...`. `?next=` now survives AuthGuard → login → register; before, a new signup always landed in chat and never saw workspace creation.
-  - **Sending, for the record:** regknots.com has no outgoing mailbox. ImprovMX free plan forwards only; there's no root DKIM and no DMARC. Resend is transactional only (`mail.regknots.com`) and must never carry cold email. Sending *as* hello@ from Gmail needs an SMTP relay for the alias (ImprovMX Premium or Google Workspace).
+  - **Email: Google Workspace since 2026-09-27** (Business Starter, flexible plan, **one** license at $8.40/mo; paid service starts 2026-10-11).
+    - `blake@regknots.com` is the only user and the admin. `hello@` and `support@` are its aliases. `captain@` is a Google Group whose member is Karynn's Gmail; outside senders may post to it.
+    - DNS (Namecheap): MX `smtp.google.com` (ImprovMX removed), root DKIM `google._domainkey` (authenticating), DMARC `p=none` with reports to blake@. SPF was already `include:_spf.google.com include:amazonses.com`.
+    - Resend stays transactional only, on `mail.regknots.com` (`send.mail` MX + SPF, `resend._domainkey.mail`, `_dmarc.mail`, all untouched), and must never carry cold email.
+    - Any address other than blake@, hello@, support@ and captain@ now bounces. There is no catch-all.
   - **Company documents SHIPPED** (`baf500f`, migration **0117**): a fleet's SMS / TSMS manuals in workspace chat.
     - Tables `workspace_documents` + `workspace_document_chunks`, never `regulations`, every read filtered by workspace_id.
     - Local extraction (pypdf / python-docx); Celery `process_company_document`; the engine's `company_context` callback folds a COMPANY DOCUMENTS block into `context_str`.

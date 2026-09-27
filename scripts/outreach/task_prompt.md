@@ -1,9 +1,10 @@
 # Outreach task prompt
 
-Installed as the Claude desktop scheduled task `regknots-outreach` (weekdays, 6:30 local).
+Installed as the Claude desktop scheduled task `regknots-outreach` (weekdays, 6:38 local).
 Blake's decisions of 2026-09-27: hello@regknots.com in the signature, 20 N Sandpiper St,
 La Marque, TX 77568 in the footer, and the fleet trial as the offer. The task drafts and Blake
-sends. Nothing is ever sent automatically.
+sends. Nothing is ever sent automatically. Drafts land in the account the Gmail connector uses,
+which should be blake@regknots.com (Google Workspace; hello@ is its alias).
 
 ---
 
@@ -34,7 +35,8 @@ Step 2: follow-ups, for rows with status `sent` and no reply:
   same thread ("Last note from me ..."). Set `followups` = 2.
 - `followups` = 2 and 7+ business days since: set status `closed`.
 
-Step 3: new drafts. Take the next 10 rows with status `new`, preferring Gulf states
+Step 3: new drafts. Take the next rows with status `new` (5 per run through 2026-10-02, while
+the new regknots.com mailbox warms up; 10 per run after that), preferring Gulf states
 (LA, TX, MS, AL, FL) and companies with 3 to 15 towing vessels (`towboats` + `tugs`). For each:
 1. Research with web search and the company's own website: is it still operating, what is the
    website, and is there a published email address, ideally for operations, safety, crewing or
