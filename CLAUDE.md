@@ -180,6 +180,22 @@ If a doc says "alembic head is 0045" but `alembic current` says `0092`, the doc 
     - The vessel editor has a Flag field.
     - IMO-number enrichment (roadmap item 6) remains.
   - Corpus **91,801**.
+- **2026-09-27 (Blake: "all 4 in order"; Karynn approves; "free before any new spend").**
+  - **Usage (read-only SQL, 2026-09-26):** 64 external users; 40 ever asked a question; **1 active in the last 30 days** (the Captain). Signups by month: Apr 36, May 22, Jun 4, Jul 1, Aug 1, Sep 0. No source recorded for anyone. Distribution is the bottleneck, not answer quality.
+  - **Signup attribution** (`4abf1a6`, migration **0116**): `users.signup_source` + `users.signup_attribution` record the first campaign touch (utm_*, `?src=` outreach code, `?ref=`, referrer, landing page).
+    - Deliberately **not** `referral_source`, which drives the tithe split and grants promo pricing.
+    - The `/` → `/landing` redirect used to drop the query string; it now keeps it.
+    - Admin: signup source on each user, and a "Signups by source" card on the Traffic page.
+  - **Model-led grounding ON** (`7ed5364`): Opus may answer from its own knowledge where the excerpts are incomplete, marked as not in the retrieved excerpts (`rag.prompts.MODEL_LED_GROUNDING`).
+    - `compare_synthesis_models --prompt-ab`, 18 questions, $3.66: judges 7.94 → 8.61 (Opus) and 9.44 → 9.67 (GPT-4o); accuracy flat; errors flagged 17 → 15; first token +1.7 s.
+    - Flag `MODEL_LED_GROUNDING_ENABLED`, default on. Precision Mode users keep the strict posture. Audit doc §8.
+  - **Outreach v1 (free) staged** (`9ea3964`): spec `docs/specs/outreach-agent-2026-09-27.md`.
+    - Leads: 705 towing operators from the public-domain Army Corps 2017 operator file (`scripts/outreach/build_leads.py` → `data/outreach/leads.csv`, gitignored).
+    - Six Subchapter M hooks checked against the corpus.
+    - A draft-only Claude desktop scheduled task: Gmail drafts, Blake sends.
+    - Waiting on Blake: sending account, postal address, offer.
+  - **Company documents** (fleet SMS/TSMS manuals in workspace chat): spec `docs/specs/company-documents-2026-09-27.md`, awaiting go.
+  - **Corpus bug:** a CO2 NVIC chunk is OCR'd as "35% within 2 minutes"; the standard is 85%. Spawned as a separate task.
 See `docs/PROJECT_STATE.md` for a fuller operational snapshot and `docs/roadmap.md` for the prioritized backlog.
 
 
@@ -215,4 +231,4 @@ Full audit report (models, retrieval, UX, product packaging): see the 2026-07-18
 
 ---
 
-*Last updated 2026-09-26 evening (MARPOL per regulation + citations, IMDG duplicate headers, vessel flag prompt; earlier: question-audit follow-up, SOLAS / cfr_49 cleanup, Anthropic credits exhausted). When this drifts from reality, fix it — that's the rule.*
+*Last updated 2026-09-27 (signup attribution, model-led grounding on, outreach v1 staged; earlier: MARPOL per regulation, IMDG, vessel flag prompt). When this drifts from reality, fix it — that's the rule.*
