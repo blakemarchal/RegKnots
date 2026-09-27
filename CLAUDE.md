@@ -205,7 +205,21 @@ If a doc says "alembic head is 0045" but `alembic current` says `0092`, the doc 
     - `[Company: title §section]` chips resolve via `/workspaces/{id}/documents/citation`.
     - Prod smoke test on an archived workspace: processed, retrieved, looked up, isolated from other workspaces, cleaned up. Spec: `docs/specs/company-documents-2026-09-27.md`.
   - MARPOL chip regex now keeps letter suffixes ("Regulation 12A" → Reg.12A).
-  - **Corpus bug:** a CO2 NVIC chunk is OCR'd as "35% within 2 minutes"; the standard is 85%. Spawned as a separate task.
+  - **NVIC 06-72 CO2 figure FIXED** (`cda8a87`, deployed as `8330814`). "Discharge of 35% of the required quantity of CO2 … within two minutes" is printed in USCG's own PDF of NVIC 6-72, a retype of the 1972 circular that kept the scanner's misreads. Our OCR never touched it: this NVIC goes through the pdfplumber adapter. 46 CFR 34.15-5, 76.15-5 and 95.15-5 require at least 85 percent within 2 minutes.
+    - `ingest/sources/nvic_fixes.py`: anchored fixes applied to the extracted text before the section split, so the Sunday `nvic --update` keeps them. An anchor not found exactly once is logged and skipped.
+    - 37 fixes for 06-72:
+      - the 85% figure;
+      - "213" for 2/3;
+      - a 5/8-inch sprinkler that the guide's own K-factor makes 3/8;
+      - a deck foam rate of 0.16 for 0.016 gpm/ft²;
+      - 23 temperatures whose degree sign became a trailing 0 ("l300F" is 130°F);
+      - footnote numbers run into figures.
+    - The three plausible-looking wrong figures (35%, 0.16, 5/8") carry a `[corrected: …]` note.
+    - `ingest.cli --source nvic --nvic 06-72` re-ingests one NVIC from the files on disk: no discovery, fresh mode, implies `--no-notify`.
+    - Re-ingested on prod: 38 rows written, the exact set a local parse predicted (that parse reproduces prod's hashes). 32 rows carry fixes; 6 are collision flip-backs (next item). Backup `data/pruned/nvic-06-72-before-textfix-20260927-140953.csv.gz`.
+    - Dense harness: 0.8608 / 0.7105 before, **0.8608 / 0.7168** after, no pair gained or lost. Weak recall 0.9114 both runs; the 09-26 run had 0.9241, so that dip predates the fix.
+    - **Found, spawned as a task:** NVIC section numbers collide, because numbered lists inside enclosures restart at "1.". The Sunday run parsed 6,805 chunks for 4,202 rows. It re-embeds about 3,500 chunks a week and flips the colliding rows; the bulk gate suppresses the notification.
+    - Same misread signatures, not reviewed: NVIC 03-06, 11-84, 03-94, 02-88, 05-87 and 08-87 (degree as 0); 11-63 and 11-82 (letter in a figure). 10 rows in all.
 See `docs/PROJECT_STATE.md` for a fuller operational snapshot and `docs/roadmap.md` for the prioritized backlog.
 
 
@@ -241,4 +255,4 @@ Full audit report (models, retrieval, UX, product packaging): see the 2026-07-18
 
 ---
 
-*Last updated 2026-09-27 (signup attribution, model-led grounding on, outreach v1 staged; earlier: MARPOL per regulation, IMDG, vessel flag prompt). When this drifts from reality, fix it — that's the rule.*
+*Last updated 2026-09-27 (NVIC 06-72 misread figures fixed; company documents shipped, outreach live; signup attribution, model-led grounding on; earlier: MARPOL per regulation, IMDG, vessel flag prompt). When this drifts from reality, fix it — that's the rule.*

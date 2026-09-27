@@ -459,7 +459,11 @@ Evidence: `data/eval/model_compare/20260927-051746-prompt-ab/`.
   be landed ashore outside special areas. On the MODU question it cited an HSC Code flare rule.
   The rest were marked minor.
 - **Corpus bug found:** both arms repeated an OCR-garbled "35% of the charge within 2 minutes" from
-  a CO2 NVIC chunk. The standard (46 CFR 95.15 / 76.15) is 85%.
+  a CO2 NVIC chunk. The standard (46 CFR 95.15 / 76.15) is 85%. **Fixed 2026-09-27** (`cda8a87`).
+  The misread is in USCG's own PDF of NVIC 6-72, a retype of the 1972 circular, not in our OCR.
+  `packages/ingest/ingest/sources/nvic_fixes.py` corrects it and 36 other misread figures at parse
+  time. NVIC 06-72 was re-ingested with `ingest.cli --nvic 06-72`. The dense harness went from
+  0.8608 / 0.7105 to 0.8608 / 0.7168.
 
 **Decision (the agreed rule: ship if both judges prefer it):** shipped behind
 `MODEL_LED_GROUNDING_ENABLED`, default on. Setting it false reverts without a deploy. Precision
