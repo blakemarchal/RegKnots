@@ -1,5 +1,11 @@
 # Outreach agent, v1 (spec, 2026-09-27)
 
+**Status: live 2026-09-27.** Scheduled task `regknots-outreach` (weekdays 06:38 local).
+Blake's decisions: hello@regknots.com in the signature, the La Marque address in the footer, and the
+30-day fleet trial as the offer. Drafts go into blakemarchal@gmail.com. Sending *as* hello@ needs an
+SMTP relay for the Gmail alias (ImprovMX Premium or Google Workspace); until then, emails go out from
+the Gmail address with hello@ in the signature.
+
 **Goal:** a steady stream of personal first emails to U.S. towing operators, with Blake approving
 every send, at no new monthly cost.
 

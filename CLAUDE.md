@@ -194,7 +194,17 @@ If a doc says "alembic head is 0045" but `alembic current` says `0092`, the doc 
     - Six Subchapter M hooks checked against the corpus.
     - A draft-only Claude desktop scheduled task: Gmail drafts, Blake sends.
     - Waiting on Blake: sending account, postal address, offer.
-  - **Company documents** (fleet SMS/TSMS manuals in workspace chat): spec `docs/specs/company-documents-2026-09-27.md`, awaiting go.
+  - **Outreach LIVE** (`7f26670`): Claude desktop scheduled task `regknots-outreach`, weekdays 06:38 local, running on Blake's laptop while the app is open.
+    - It writes up to 10 Gmail drafts a day into blakemarchal@gmail.com and never sends. The signature carries hello@regknots.com and 20 N Sandpiper St, La Marque, TX 77568.
+    - The offer is the existing 30-day fleet (Wheelhouse) trial, no card. Prod has `CREW_TIER_ENABLED=true` and `CREW_TIER_INTERNAL_ONLY=false`.
+    - The link is `/register?next=/workspaces&src=ob-NNNN&utm_...`. `?next=` now survives AuthGuard → login → register; before, a new signup always landed in chat and never saw workspace creation.
+  - **Sending, for the record:** regknots.com has no outgoing mailbox. ImprovMX free plan forwards only; there's no root DKIM and no DMARC. Resend is transactional only (`mail.regknots.com`) and must never carry cold email. Sending *as* hello@ from Gmail needs an SMTP relay for the alias (ImprovMX Premium or Google Workspace).
+  - **Company documents SHIPPED** (`baf500f`, migration **0117**): a fleet's SMS / TSMS manuals in workspace chat.
+    - Tables `workspace_documents` + `workspace_document_chunks`, never `regulations`, every read filtered by workspace_id.
+    - Local extraction (pypdf / python-docx); Celery `process_company_document`; the engine's `company_context` callback folds a COMPANY DOCUMENTS block into `context_str`.
+    - `[Company: title §section]` chips resolve via `/workspaces/{id}/documents/citation`.
+    - Prod smoke test on an archived workspace: processed, retrieved, looked up, isolated from other workspaces, cleaned up. Spec: `docs/specs/company-documents-2026-09-27.md`.
+  - MARPOL chip regex now keeps letter suffixes ("Regulation 12A" → Reg.12A).
   - **Corpus bug:** a CO2 NVIC chunk is OCR'd as "35% within 2 minutes"; the standard is 85%. Spawned as a separate task.
 See `docs/PROJECT_STATE.md` for a fuller operational snapshot and `docs/roadmap.md` for the prioritized backlog.
 

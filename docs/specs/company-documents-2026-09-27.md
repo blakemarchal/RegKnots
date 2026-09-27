@@ -1,5 +1,7 @@
 # Company documents in fleet chat (spec, 2026-09-27)
 
+**Status: shipped 2026-09-27 (`baf500f`, migration 0117).** A prod smoke test on an archived workspace covered processing, retrieval, chip lookup, cross-workspace isolation and cleanup.
+
 **Goal:** a fleet uploads its own SMS / TSMS manual and procedures. Chat then answers from the
 regulations *and* the company's own procedures, citing both, and says when a procedure is
 stricter than, differs from or doesn't cover what the regulation requires.
