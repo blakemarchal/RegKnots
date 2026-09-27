@@ -570,6 +570,19 @@ Examples:
         ),
     )
 
+    # 2026-09-27 — re-ingest one NVIC after a text fix (sources/nvic_fixes.py).
+    parser.add_argument(
+        "--nvic",
+        action="append",
+        metavar="NUMBER",
+        help=(
+            "With --source nvic: re-ingest only this NVIC (e.g. 06-72; repeatable) from "
+            "the index.json and PDF already on disk, with no discovery or download. Its "
+            "chunks are re-embedded; only rows whose text changed are written. Implies "
+            "--no-notify. Not with --update, --dry-run or the prune options."
+        ),
+    )
+
     parser.add_argument(
         "--verbose",
         action="store_true",
@@ -621,6 +634,11 @@ Examples:
         os.environ["REGKNOTS_ENRICH_MODE"] = "cache"
     prune = ("report" if args.stale_report else "apply" if args.prune_stale
              else "after" if args.prune else None)
+    # A subset of NVICs cannot be pruned against (every other NVIC would read as
+    # stale), and --update's chunk-loss safeguard counts the whole source.
+    if args.nvic and (args.source != "nvic" or args.update or prune or args.dry_run):
+        parser.error("--nvic needs --source nvic and cannot be combined with --update, "
+                     "--dry-run or the prune options")
 
     asyncio.run(_run(
         sources, mode,
@@ -628,9 +646,11 @@ Examples:
         extract=args.extract,
         force=args.force,
         enrich=enrich,
-        notify=not args.no_notify,
+        # a text-fix re-ingest is maintenance, not a regulation update for users
+        notify=not (args.no_notify or args.nvic),
         ids_file=args.ids_file,
         prune=prune,
+        nvic_numbers=args.nvic,
     ))
 
 
@@ -644,6 +664,7 @@ async def _run(
     notify: bool = True,
     ids_file: Path | None = None,
     prune: str | None = None,
+    nvic_numbers: list[str] | None = None,
 ) -> None:
     import importlib
 
@@ -725,6 +746,7 @@ async def _run(
                 result = await _run_pdf_source(
                     source, mode, pool, console,
                     enrich=enrich, ids_file=ids_file, prune=prune,
+                    nvic_numbers=nvic_numbers,
                 )
             else:
                 result = await run_pipeline(
@@ -793,6 +815,7 @@ async def _run_pdf_source(
     enrich: bool = False,
     ids_file: Path | None = None,
     prune: str | None = None,
+    nvic_numbers: list[str] | None = None,
 ) -> IngestResult:
     """Dispatch a PDF/text-sourced ingest run.
 
@@ -934,6 +957,27 @@ async def _run_pdf_source(
             )
             result.errors += dl_failures
             return result
+
+        # 2026-09-27 — --nvic: only the named NVICs, from the files already on
+        # disk. Fresh mode, because update mode's short-circuit and chunk-loss
+        # safeguard compare against the whole source; the upsert still writes
+        # only rows whose content_hash changed.
+        if nvic_numbers:
+            console.print(
+                f"  [cyan]Reading:[/cyan] NVIC {', '.join(nvic_numbers)} from {raw_dir} "
+                f"(no discovery or download)"
+            )
+            section_loader = lambda: adapter.parse_source(raw_dir, only=nvic_numbers)  # noqa: E731
+            return await run_pdf_pipeline(
+                source=source,
+                mode="fresh",
+                section_loader=section_loader,
+                source_date=adapter.get_source_date(raw_dir),
+                pool=pool,
+                cfg=settings,
+                console=console,
+                enrich=enrich,
+            )
 
         # NVIC-style: adapter-driven discovery + download before parsing.
         console.print(f"  [cyan]Phase 1:[/cyan] Discovering and downloading {source.upper()} documents…")

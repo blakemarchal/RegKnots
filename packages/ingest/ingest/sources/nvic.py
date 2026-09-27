@@ -38,6 +38,7 @@ import pdfplumber
 from bs4 import BeautifulSoup
 
 from ingest.models import Section
+from ingest.sources.nvic_fixes import apply_text_fixes
 
 logger = logging.getLogger(__name__)
 
@@ -322,12 +323,15 @@ def _extract_table_nvics(
             logger.debug("Discovered NVIC %s from %s", nvic_num, source_url)
 
 
-def parse_source(raw_dir: Path) -> list[Section]:
+def parse_source(raw_dir: Path, only: list[str] | None = None) -> list[Section]:
     """Parse all downloaded NVIC PDFs into Section objects.
 
     Reads the index.json cache written by discover_nvics(), iterates every
     downloaded PDF, and calls _parse_nvic_pdf() for each.  PDFs that are
     missing or produce 0 sections are logged and skipped — they do not raise.
+
+    only: 2026-09-27 — parse just these NVIC numbers (cli --nvic). A number
+    not in index.json, or without its PDF, raises instead of being skipped.
     """
     cache_path = raw_dir / "index.json"
     if not cache_path.exists():
@@ -338,6 +342,15 @@ def parse_source(raw_dir: Path) -> list[Section]:
 
     with open(cache_path, encoding="utf-8") as fh:
         metas = [NvicMeta.from_dict(d) for d in json.load(fh)]
+
+    if only is not None:
+        metas = [m for m in metas if m.number in only]
+        found = {m.number for m in metas if (raw_dir / f"{m.number}.pdf").exists()}
+        missing = sorted(set(only) - found)
+        if missing:
+            raise FileNotFoundError(
+                f"NVIC {', '.join(missing)}: not in {cache_path}, or no PDF in {raw_dir}"
+            )
 
     sections: list[Section] = []
     parsed_docs = 0
@@ -468,6 +481,9 @@ def _parse_nvic_pdf(pdf_path: Path, meta: NvicMeta) -> list[Section]:
     except Exception as exc:
         logger.warning("NVIC %s: pdfplumber error — %s", meta.number, exc)
         return []
+
+    # 2026-09-27 — misreads in USCG's retyped text layer (nvic_fixes.py).
+    lines = apply_text_fixes(meta.number, lines)
 
     if not lines:
         logger.warning("NVIC %s: no text extracted from %s", meta.number, pdf_path.name)
