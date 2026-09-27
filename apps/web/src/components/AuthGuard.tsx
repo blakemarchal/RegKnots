@@ -17,7 +17,9 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (hydrated && !isAuthenticated) {
-      router.replace('/login')
+      // 2026-09-27 — come back here after signing in or up (lib/nextPath.ts)
+      const here = window.location.pathname + window.location.search
+      router.replace(here === '/' ? '/login' : `/login?next=${encodeURIComponent(here)}`)
     }
   }, [hydrated, isAuthenticated, router])
 

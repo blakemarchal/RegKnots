@@ -21,8 +21,18 @@ export function middleware(request: NextRequest) {
     return NextResponse.redirect(url)
   }
 
-  // Authenticated users hitting guest-only pages → send to app
+  // Authenticated users hitting guest-only pages → send to app, or to the
+  // same-site page they were headed for (?next=, e.g. /workspaces from the
+  // fleet trial link; 2026-09-27)
   if (GUEST_ONLY.includes(pathname) && hasSession) {
+    const next = request.nextUrl.searchParams.get('next') ?? ''
+    const safe = next.startsWith('/') && !next.startsWith('//') && !next.startsWith('/\\') && next.length <= 200
+    if (safe) {
+      const url = request.nextUrl.clone()
+      url.pathname = next.split('?')[0]
+      url.search = ''
+      return NextResponse.redirect(url)
+    }
     return redirectTo('/')
   }
 

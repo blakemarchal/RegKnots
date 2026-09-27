@@ -2,6 +2,7 @@
 
 import { useState, useEffect, FormEvent, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
+import { safeNext, withNext } from '@/lib/nextPath'
 import Link from 'next/link'
 import { useAuthStore } from '@/lib/auth'
 import { CompassRose } from '@/components/CompassRose'
@@ -37,6 +38,8 @@ function RegisterForm() {
   // present — changing it would break the auto-claim match.
   const inviteToken = searchParams.get('invite')
   const inviteEmail = searchParams.get('email')
+  // 2026-09-27 — return path, e.g. /register?next=/workspaces from the fleet trial (lib/nextPath.ts)
+  const next = safeNext(searchParams.get('next'))
 
   const [fullName, setFullName] = useState('')
   const [email, setEmail] = useState(inviteEmail ?? '')
@@ -145,8 +148,9 @@ function RegisterForm() {
         return
       }
       // Vessel onboarding is optional — shore-side users can skip it and
-      // add a vessel later from the vessel sheet. Go straight to chat.
-      router.replace('/')
+      // add a vessel later from the vessel sheet. Go straight to chat,
+      // or to the page they were headed for (e.g. the fleet trial).
+      router.replace(next ?? '/')
     } catch (err) {
       if (err instanceof TypeError) {
         const diag = await diagnoseNetworkError()
@@ -318,7 +322,7 @@ function RegisterForm() {
 
         <p className="mt-4 text-center text-xs text-[--color-muted] font-mono">
           Already have an account?{' '}
-          <Link href="/login" className="text-[--color-teal] hover:underline">
+          <Link href={withNext('/login', next)} className="text-[--color-teal] hover:underline">
             Sign in
           </Link>
         </p>

@@ -1,7 +1,9 @@
-# Outreach task prompt (template)
+# Outreach task prompt
 
-Filled in and installed as a Claude desktop scheduled task (weekdays, morning). Placeholders in
-`{{...}}` are Blake's decisions. The task drafts; Blake sends. Nothing is ever sent automatically.
+Installed as the Claude desktop scheduled task `regknots-outreach` (weekdays, 6:30 local).
+Blake's decisions of 2026-09-27: hello@regknots.com in the signature, 20 N Sandpiper St,
+La Marque, TX 77568 in the footer, and the fleet trial as the offer. The task drafts and Blake
+sends. Nothing is ever sent automatically.
 
 ---
 
@@ -32,7 +34,7 @@ Step 2: follow-ups, for rows with status `sent` and no reply:
   same thread ("Last note from me ..."). Set `followups` = 2.
 - `followups` = 2 and 7+ business days since: set status `closed`.
 
-Step 3: new drafts. Take the next {{DAILY_COUNT}} rows with status `new`, preferring Gulf states
+Step 3: new drafts. Take the next 10 rows with status `new`, preferring Gulf states
 (LA, TX, MS, AL, FL) and companies with 3 to 15 towing vessels (`towboats` + `tugs`). For each:
 1. Research with web search and the company's own website: is it still operating, what is the
    website, and is there a published email address, ideally for operations, safety, crewing or
@@ -49,11 +51,12 @@ Step 3: new drafts. Take the next {{DAILY_COUNT}} rows with status `new`, prefer
      substance or citation.
    - One line on RegKnots: compliance answers in seconds with the exact CFR and SOLAS citations,
      tailored to each boat, built with Captain Karynn Marchal, USCG Master Unlimited.
-   - The offer: {{OFFER}}
-   - The link: `https://regknots.com/landing?src=<id>&utm_source=outreach&utm_medium=email&utm_campaign=towing`
+   - The offer: their first boat is free for 30 days on the fleet plan, no card needed.
+   - The link (the fleet trial signup): `https://regknots.com/register?next=/workspaces&src=<id>&utm_source=outreach&utm_medium=email&utm_campaign=towing`
      (`<id>` is the row's id, e.g. ob-0042).
-   - Sign-off: {{FROM_NAME}}, {{FROM_TITLE}}, RegKnots. Then the postal address {{POSTAL_ADDRESS}}
-     and the line "If this isn't useful, reply 'no thanks' and I won't write again."
+   - Sign-off, one item per line: Blake Marchal / Co-founder, RegKnots / hello@regknots.com /
+     20 N Sandpiper St, La Marque, TX 77568. Then the line "If this isn't useful, reply 'no
+     thanks' and I won't write again."
 4. Create a Gmail draft to the contact address with that subject and body.
 5. Update the row: status `drafted`, `drafted_at` = today, `website`, `contact_name`,
    `contact_role`, `contact_email`, and a one-line note (what you verified, which hook).

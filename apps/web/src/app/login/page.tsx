@@ -2,6 +2,7 @@
 
 import { useState, FormEvent, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
+import { safeNext, withNext } from '@/lib/nextPath'
 import Link from 'next/link'
 import { useAuthStore } from '@/lib/auth'
 import { CompassRose } from '@/components/CompassRose'
@@ -24,6 +25,8 @@ function LoginForm() {
   // ?invite=<token>. After successful login we forward back so the
   // landing page can show the Accept button with the user signed in.
   const inviteToken = searchParams.get('invite')
+  // 2026-09-27 — return path (lib/nextPath.ts)
+  const next = safeNext(searchParams.get('next'))
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -36,7 +39,7 @@ function LoginForm() {
         router.replace(`/invite/${inviteToken}`)
         return
       }
-      router.replace('/')
+      router.replace(next ?? '/')
     } catch (err) {
       // TypeError means a network-level failure (DNS, firewall, offline, etc.)
       if (err instanceof TypeError) {
@@ -138,7 +141,7 @@ function LoginForm() {
 
         <p className="mt-4 text-center text-xs text-[--color-muted] font-mono">
           No account?{' '}
-          <Link href="/register" className="text-[--color-teal] hover:underline">
+          <Link href={withNext('/register', next)} className="text-[--color-teal] hover:underline">
             Register
           </Link>
         </p>
