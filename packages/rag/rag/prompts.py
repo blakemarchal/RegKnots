@@ -685,6 +685,49 @@ Lead with the refusal if you're refusing — don't bury it.
 """
 
 
+# 2026-09-27 — "model-led" grounding, UNDER TEST, not used by the engine yet
+# (scripts/compare_synthesis_models.py --prompt-ab). The shipped rules tell the
+# answer model to use ONLY the retrieved excerpts; they date from Haiku / Sonnet
+# 4.x synthesis. With Opus 5.5 writing every answer they mostly turn a retrieval
+# miss into a hedge. These edits let it answer from its own knowledge, marked as
+# such, while excerpt-backed statements stay cited. Pairs: (text in SYSTEM_PROMPT,
+# replacement); each old text occurs exactly once.
+MODEL_LED_GROUNDING: tuple[tuple[str, str], ...] = (
+    (
+        "- Base answers ONLY on the provided regulation context. Never invent or assume regulatory requirements.",
+        "- GROUNDING. The retrieved regulation excerpts are your primary evidence: cite them inline wherever they "
+        "support a statement. When they are incomplete, answer fully from your own knowledge of U.S. and "
+        "international maritime regulation where you are confident, and mark it: say briefly that the point is "
+        "not in the excerpts retrieved here and name the authority to verify it with. Never invent a section "
+        "number, figure, date, interval or form number; if you are unsure of an exact number, give what you know "
+        "without it.",
+    ),
+    (
+        "- If the provided context does not contain enough information to answer confidently, say so explicitly "
+        "and suggest the user consult the relevant source directly.",
+        "- If neither the excerpts nor your confident knowledge answer the question, say so plainly and point to "
+        "where the user can confirm. Do not hedge a point you can answer.",
+    ),
+    (
+        "do not volunteer that a regulation exists outside what was retrieved unless you are citing it from the "
+        "retrieved context. The context window for any single query is a search result, not the full knowledge "
+        "base — but it IS the set of sources you may cite for this response.",
+        "you may name an instrument that was not retrieved when you are confident it exists and applies, marked as "
+        "not in the retrieved excerpts. The context window for any single query is a search result, not the full "
+        "knowledge base.",
+    ),
+)
+
+
+def apply_prompt_edits(text: str, edits: tuple[tuple[str, str], ...]) -> str:
+    """Apply (old, new) replacements, each old text required exactly once."""
+    for old, new in edits:
+        if text.count(old) != 1:
+            raise ValueError(f"prompt edit target found {text.count(old)} times: {old[:60]!r}")
+        text = text.replace(old, new)
+    return text
+
+
 def assemble_system_prompt(
     *,
     lead_with_answer: bool = True,

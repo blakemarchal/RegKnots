@@ -25,6 +25,11 @@ Opus answers is a known self-preference risk, which is why GPT-4o judges too.
 
 Run on the VPS (~35 min, ~$6 for 16 questions); results land in data/eval/model_compare/:
     cd /opt/RegKnots/apps/api && /root/.local/bin/uv run python /opt/RegKnots/scripts/compare_synthesis_models.py
+
+2026-09-27 — `--prompt-ab` compares prompts instead of models: the shipped system prompt
+(opus_low) against the model-led grounding in rag.prompts.MODEL_LED_GROUNDING (opus_led),
+both on the production default, Opus 5.5 at effort low. Questions: 10 gold, the Captain's
+two, and real user questions whose answers hedged (HEDGED). ~$6-7.
 """
 import asyncio
 import copy
@@ -54,9 +59,12 @@ from app.config import settings  # noqa: E402
 import rag.engine as E  # noqa: E402
 from rag.hedge import detect_hedge  # noqa: E402
 from rag.llm import INT, STR, arr, create_json, enum, obj, text_of  # noqa: E402
+from rag.prompts import MODEL_LED_GROUNDING  # noqa: E402
 import eval_rag_baseline as G  # noqa: E402
 
-OUT = REPO / "data" / "eval" / "model_compare" / time.strftime("%Y%m%d-%H%M%S", time.gmtime())
+PROMPT_AB = "--prompt-ab" in sys.argv
+OUT = REPO / "data" / "eval" / "model_compare" / (
+    time.strftime("%Y%m%d-%H%M%S", time.gmtime()) + ("-prompt-ab" if PROMPT_AB else ""))
 OUT.mkdir(parents=True, exist_ok=True)
 
 HAIKU, SONNET, OPUS = "claude-haiku-4-5-20251001", "claude-sonnet-5", "claude-opus-5-5"
@@ -68,6 +76,11 @@ VARIANTS: dict[str, dict] = {
     "opus_low": {"model": OPUS, "max_tokens": 16384, "output_config": {"effort": "low"}},
     "opus_medium": {"model": OPUS, "max_tokens": 16384, "output_config": {"effort": "medium"}},
 }
+if PROMPT_AB:
+    VARIANTS = {
+        "opus_low": VARIANTS["opus_low"],
+        "opus_led": {**VARIANTS["opus_low"], "system_edits": MODEL_LED_GROUNDING},
+    }
 ROUTER = {HAIKU: "haiku", SONNET: "sonnet_today", OPUS: "opus_low"}
 # $/MTok: input, output, 5-minute cache write, cache read (claude-api skill, 2026-09-23)
 PRICES = {HAIKU: (1.00, 5.00, 1.25, 0.10), SONNET: (2.00, 10.00, 2.50, 0.20), OPUS: (4.00, 20.00, 5.00, 0.20)}
@@ -76,6 +89,18 @@ GOLD = [("F1", "V2"), ("F2", "V1"), ("F5", "V5"), ("C1", "V3"), ("C3", "V1"), ("
         ("N1", "V5"), ("V1q", "V1"), ("N-O1", "V2"), ("N-S3", "V1"), ("N-F2", "V1"),
         ("M-2", "V1"), ("N-E4", "V1"), ("C4", "V3")]
 REAL = ["what is the man overboard alarm", "confirming flag state"]   # the Captain's own
+# --prompt-ab: real user questions whose answers hedged (hedge_audits), as (query, gold vessel)
+HEDGED: list[tuple[str, str]] = [
+    ("intrinstrically safe smoke detectors in paint locker", "V1"),                       # 2026-09-16
+    ("garbage receptacle requirements", "V1"),                                            # 2026-09-15
+    ("what rules are there that apply to storage of bilge slops in a container on deck", "V1"),  # 06-22
+    ("What is the regulation with regards to expiry of provisions. Does it specify how provisions "
+     "which have gone past the \"best before\" dates be treated?", "V1"),                  # 06-04
+    ("What is the maximum allowable difference in time from UTC on 15 ppm Oil content monitor?", "V1"),  # 06-03
+    ("I am on a Panamian flagged MODU. The fast rescue craft is not equipped with distress flares, or "
+     "smoke signals as required by SOLAS. Does the MODU code not require distress signals in the the "
+     "fast recuse craft?", "V0"),                                                         # 05-14, no profile
+]
 LABELS = ["A", "B", "C", "D", "E", "F"]
 
 JUDGE_SCHEMA = obj({
@@ -164,9 +189,28 @@ def cost(model: str, u: dict) -> tuple[float, float]:
     return (base + prefix * p_cw) / 1e6, (base + prefix * p_cr) / 1e6
 
 
+def edit_system(system, edits):
+    """Apply prompt edits to the captured system (a string or a list of text blocks);
+    each old text must occur exactly once across the blocks."""
+    if isinstance(system, str):
+        system = [{"type": "text", "text": system}]
+        as_str = True
+    else:
+        system, as_str = copy.deepcopy(system), False
+    for old, new in edits:
+        hits = [b for b in system if old in b.get("text", "")]
+        if len(hits) != 1 or hits[0]["text"].count(old) != 1:
+            raise ValueError(f"prompt edit target not found exactly once: {old[:60]!r}")
+        hits[0]["text"] = hits[0]["text"].replace(old, new)
+    return system[0]["text"] if as_str else system
+
+
 async def run_variant(client, base: dict, name: str) -> dict:
     kw = {k: v for k, v in base.items() if k not in ("model", "max_tokens", "output_config", "thinking")}
     kw.update(copy.deepcopy(VARIANTS[name]))
+    edits = kw.pop("system_edits", None)
+    if edits:
+        kw["system"] = edit_system(kw["system"], edits)
     t0 = time.perf_counter()
     first_text = first_think = None
     kinds: list[str] = []
@@ -326,7 +370,7 @@ def ranks(scores: dict[str, float]) -> dict[str, float]:
 def summarize(recs: list[dict]) -> dict:
     done = [r for r in recs if "runs" in r]
     rows = {}
-    for name in list(VARIANTS) + ["router_mix"]:
+    for name in list(VARIANTS) + ([] if PROMPT_AB else ["router_mix"]):
         per = []
         for r in done:
             v = ROUTER.get(r.get("route_model"), "sonnet_today") if name == "router_mix" else name
@@ -391,7 +435,8 @@ async def main() -> None:
     okey = getattr(settings, "openai_api_key", "") or os.environ.get("OPENAI_API_KEY", "")
     oai = AsyncOpenAI(api_key=okey)
     Q = {q.qid: q for q in G.QUESTIONS}
-    items = [(qid, Q[qid].query, gold_profile(vc), Q[qid], vc) for qid, vc in GOLD]
+    gold = GOLD[:10] if PROMPT_AB else GOLD
+    items = [(qid, Q[qid].query, gold_profile(vc), Q[qid], vc) for qid, vc in gold]
     row = await pool.fetchrow("SELECT * FROM vessels WHERE imo_mmsi = '9333022'")
     cap_profile = {k: v for k, v in {
         "vessel_name": row["name"], "vessel_type": row["vessel_type"], "flag_state": row["flag_state"],
@@ -399,6 +444,9 @@ async def main() -> None:
         "route_types": list(row["route_types"] or []), "cargo_types": list(row["cargo_types"] or []),
     }.items() if v not in (None, [], {})}
     items += [(f"REAL{i + 1}", qq, cap_profile, None, "captain") for i, qq in enumerate(REAL)]
+    if PROMPT_AB:
+        items += [(f"HEDGE{i + 1}", qq, gold_profile(vc) if vc != "V0" else None, None, vc)
+                  for i, (qq, vc) in enumerate(HEDGED)]
 
     user_id = await pool.fetchval("SELECT id FROM users WHERE email = 'blakemarchal@gmail.com'")
     conv_id = uuid4()
