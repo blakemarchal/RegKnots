@@ -713,6 +713,8 @@ def _source_affinity(
     # Part 138 lives (138.225, 138.305, 138.310, 138.315 — the actual
     # TSMS framework). NVIC also gets a boost since NVIC 01-89 §8 is
     # the canonical guidance and was already retrieving correctly.
+    # (2026-09-27: that text, on unclassed inspected towing vessels, is
+    # now "NVIC 01-89 Encl.2 §8"; §8 is the circular's MAJOR CHANGES.)
     if any(t in q for t in _SUBCHAPTER_M_TERMS):
         boosts["cfr"] = max(boosts.get("cfr", 0.0), 0.30)
         boosts.setdefault("nvic", 0.20)

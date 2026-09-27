@@ -18,13 +18,20 @@ A prune runs only when it is provably safe:
 
 The rows are copied to data/pruned/<source>-<UTC stamp>.csv (embeddings
 included; gzipped after the commit) inside the same transaction as the
-DELETE, so a failed copy deletes nothing. Restore with COPY ... FROM ... CSV
-HEADER.
+DELETE, so a failed copy deletes nothing. The copy leaves out the generated
+full_text_tsv column (2026-09-27; copies made before then include it), so
+restore with COPY regulations (<the CSV's header columns>) FROM ... CSV HEADER.
 
 Rows added by ingest/manual_add.py are produced by no parse, so they show up
 as stale. Rows whose section_number contains "(manual)" (the convention the
 IMDG manual additions use) are never pruned; any other manual addition must
 be spotted in the report before --prune-stale / --prune is run.
+
+2026-09-27 — a source whose parse can leave out whole documents (nvic: a
+single --nvic, a PDF that fails to parse, an NVIC that left the USCG index)
+passes `scope`, which maps a section_number to its document. Only stored rows
+of documents this parse produced can then be stale; the rest are reported as
+kept.
 """
 
 from __future__ import annotations
@@ -39,6 +46,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Callable
 
 import asyncpg
 
@@ -47,6 +55,7 @@ logger = logging.getLogger(__name__)
 PRUNED_DIR = Path(__file__).resolve().parents[3] / "data" / "pruned"
 
 Key = tuple[str, int]
+Scope = Callable[[str], "str | None"]
 _KEEP = re.compile(r"\(manual\)", re.IGNORECASE)
 
 
@@ -63,6 +72,10 @@ class StaleReport:
     missing: list[Key] = field(default_factory=list)  # produced but not stored
     stale: list[dict] = field(default_factory=list)   # stored but not produced
     kept_manual: int = 0                              # stored, not produced, kept
+    # 2026-09-27 — produced keys stored with other text (an --update re-embeds
+    # these and the missing ones), and rows of documents outside the scope.
+    changed: int = 0
+    kept_out_of_scope: Counter = field(default_factory=Counter)
 
     @property
     def safe(self) -> bool:
@@ -80,12 +93,19 @@ class StaleReport:
         return None
 
     def summary_lines(self) -> list[str]:
+        kept_out = sum(self.kept_out_of_scope.values())
         lines = [
             f"{self.source}: parse yields {self.produced} keys; {self.stored} rows stored; "
             f"{len(self.stale)} stored rows not produced (stale); "
-            f"{len(self.missing)} produced keys missing; {len(self.duplicates)} duplicate keys"
-            + (f"; {self.kept_manual} manual rows kept" if self.kept_manual else ""),
+            f"{len(self.missing)} produced keys missing; {self.changed} stored with other text; "
+            f"{len(self.duplicates)} duplicate keys"
+            + (f"; {self.kept_manual} manual rows kept" if self.kept_manual else "")
+            + (f"; {kept_out} rows of documents this parse did not produce kept" if kept_out else ""),
         ]
+        if kept_out:
+            lines.append("  kept: " + ", ".join(
+                f"{doc} ({n})" for doc, n in self.kept_out_of_scope.most_common(8))
+                + (" …" if len(self.kept_out_of_scope) > 8 else ""))
         by_created = Counter(str(r["created"]) for r in self.stale)
         for created, n in sorted(by_created.items()):
             lines.append(f"  stale rows created {created}: {n}")
@@ -103,29 +123,31 @@ def produced_keys(chunks) -> tuple[set[Key], list[Key]]:
     return set(counts), sorted(k for k, n in counts.items() if n > 1)
 
 
-async def build_report(pool: asyncpg.Pool, source: str, chunks) -> StaleReport:
+async def build_report(pool: asyncpg.Pool, source: str, chunks, scope: Scope | None = None) -> StaleReport:
     keys, duplicates = produced_keys(chunks)
+    produced_hash = {(c.section_number, c.chunk_index): getattr(c, "content_hash", None) for c in chunks}
+    documents = {scope(c.section_number) for c in chunks} if scope else None
     rows = await pool.fetch(
-        "SELECT id, section_number, chunk_index, created_at::date AS created "
+        "SELECT id, section_number, chunk_index, content_hash, created_at::date AS created "
         "FROM regulations WHERE source = $1",
         source,
     )
     stored = {(r["section_number"], r["chunk_index"]) for r in rows}
-    not_produced = [r for r in rows if (r["section_number"], r["chunk_index"]) not in keys]
-    manual = [r for r in not_produced if _KEEP.search(r["section_number"] or "")]
-    return StaleReport(
-        source=source,
-        produced=len(keys),
-        duplicates=duplicates,
-        stored=len(rows),
-        missing=sorted(keys - stored),
-        stale=[
-            {"id": str(r["id"]), "section_number": r["section_number"],
-             "chunk_index": r["chunk_index"], "created": str(r["created"])}
-            for r in not_produced if not _KEEP.search(r["section_number"] or "")
-        ],
-        kept_manual=len(manual),
-    )
+    report = StaleReport(source=source, produced=len(keys), duplicates=duplicates,
+                         stored=len(rows), missing=sorted(keys - stored))
+    for r in rows:
+        key, sec = (r["section_number"], r["chunk_index"]), r["section_number"] or ""
+        if key in keys:
+            if produced_hash[key] and r.get("content_hash") != produced_hash[key]:
+                report.changed += 1
+        elif documents is not None and scope(sec) not in documents:
+            report.kept_out_of_scope[scope(sec) or sec] += 1
+        elif _KEEP.search(sec):
+            report.kept_manual += 1
+        else:
+            report.stale.append({"id": str(r["id"]), "section_number": r["section_number"],
+                                 "chunk_index": r["chunk_index"], "created": str(r["created"])})
+    return report
 
 
 def write_report(report: StaleReport, out_dir: Path = PRUNED_DIR) -> Path:
@@ -134,12 +156,14 @@ def write_report(report: StaleReport, out_dir: Path = PRUNED_DIR) -> Path:
     path = out_dir / f"{report.source}-{stamp}-report.json"
     path.write_text(json.dumps({
         "source": report.source, "produced": report.produced, "stored": report.stored,
-        "duplicates": report.duplicates, "missing": report.missing, "stale": report.stale,
+        "duplicates": report.duplicates, "missing": report.missing, "changed": report.changed,
+        "stale": report.stale, "kept_out_of_scope": dict(report.kept_out_of_scope),
     }, indent=1), encoding="utf-8")
     return path
 
 
-async def run_prune_step(pool: asyncpg.Pool, source: str, chunks, mode: str, result, console) -> None:
+async def run_prune_step(pool: asyncpg.Pool, source: str, chunks, mode: str, result, console,
+                         scope: Scope | None = None) -> None:
     """Pipeline hook. mode "report" lists stale rows; "apply" also removes them.
 
     Skipped when this run had parse or chunk errors: a section that failed
@@ -148,7 +172,7 @@ async def run_prune_step(pool: asyncpg.Pool, source: str, chunks, mode: str, res
     if result.errors:
         console.print(f"  [yellow]prune skipped: {result.errors} parse/chunk error(s) this run[/yellow]")
         return
-    report = await build_report(pool, source, chunks)
+    report = await build_report(pool, source, chunks, scope)
     for line in report.summary_lines():
         console.print(f"  {line}")
     console.print(f"  report: {write_report(report)}")
@@ -180,9 +204,15 @@ async def apply_prune(pool: asyncpg.Pool, report: StaleReport, out_dir: Path = P
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     csv_path = out_dir / f"{report.source}-{stamp}.csv"
     async with pool.acquire() as conn:
+        # every column but the generated full_text_tsv, which COPY cannot write back
+        columns = await conn.fetchval(
+            "SELECT string_agg(quote_ident(column_name), ', ' ORDER BY ordinal_position) "
+            "FROM information_schema.columns WHERE table_schema = current_schema() "
+            "AND table_name = 'regulations' AND is_generated = 'NEVER'"
+        )
         async with conn.transaction():
             await conn.copy_from_query(
-                "SELECT * FROM regulations WHERE source = $1 AND id = ANY($2::uuid[])",
+                f"SELECT {columns} FROM regulations WHERE source = $1 AND id = ANY($2::uuid[])",
                 report.source, ids, output=str(csv_path), format="csv", header=True,
             )
             status = await conn.execute(

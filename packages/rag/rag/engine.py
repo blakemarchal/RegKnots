@@ -241,9 +241,13 @@ _COLREGS_RE = re.compile(
     re.IGNORECASE,
 )
 
-# NVIC: "NVIC 01-20", optionally with "§3" section suffix.
+# NVIC: "NVIC 01-20", optionally with "§3" section suffix. 2026-09-27 — also a
+# change and an enclosure, as the corpus names them ("NVIC 04-08 Ch-2 §3",
+# "NVIC 06-72 Encl.1", "NVIC 04-03 Encl.3 §12"), or "NVIC 06-72, Enclosure (1)".
 _NVIC_RE = re.compile(
-    r"NVIC\s+(\d{1,2}-\d{2})(?:\s*(?:§|Sec(?:tion)?\.?\s*)(\d+))?",
+    r"NVIC\s+(\d{1,2}-\d{2})(?:\s+Ch-(\d+))?"
+    r"(?:,?\s+Encl(?:osure)?\.?\s*(?:\((\d{1,2})\)|(\d{1,2})))?"
+    r"(?:\s*(?:§|Sec(?:tion)?\.?\s*)(\d+))?",
     re.IGNORECASE,
 )
 
@@ -556,9 +560,13 @@ def _extract_all_text_citations(answer: str) -> list[_TextCitation]:
     # The 2026-05-09 eval V1/S-012 hit this. We try both forms in the
     # candidates list — the verifier succeeds if either matches.
     for m in _NVIC_RE.finditer(answer):
-        num = m.group(1)
-        sec = m.group(2)
+        num, change, encl_paren, encl, sec = m.groups()
+        encl = encl_paren or encl
         display = f"NVIC {num}"
+        if change:
+            display += f" Ch-{change}"
+        if encl:
+            display += f" Encl.{encl}"
         if sec:
             display += f" §{sec}"
         if display not in found:

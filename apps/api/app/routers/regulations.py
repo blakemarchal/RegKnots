@@ -355,6 +355,7 @@ async def _load_regulation(pool, source: str, section_number: str) -> Regulation
     #   - marpol/MARPOL Annex I — annexes are stored subdivided
     #     (MARPOL Annex I Ch.1, App.I, ...); bare annex has no row.
     #   - nvic/NVIC 10-97 — NVICs stored per §; bare ID has no row.
+    #     (2026-09-27: the bare ID is now the circular's opening.)
     # Search the corpus for any row whose body mentions the identifier
     # and return up to 8 as `references`. Frontend renders them as
     # clickable cards so the user can pivot to the surrounding context.

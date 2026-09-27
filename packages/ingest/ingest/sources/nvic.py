@@ -9,14 +9,18 @@ inspectors enforce CFR regulations.  This module handles three phases:
                   write data/raw/nvic/index.json as a cache.
   2. Download   — fetch each PDF to data/raw/nvic/{number}.pdf; idempotent
                   (already-present files are skipped).
-  3. Parse      — extract text from each PDF, split on top-level numbered
-                  section boundaries (1., 2., 3. …), build one Section per
-                  numbered section (or one Section for the whole document
-                  when no numbered sections are detected).
+  3. Parse      — extract text from each PDF (a scanned PDF with no text
+                  layer is read from its OCR text, data/ocr/nvic/{number}.txt)
+                  and split it into the circular and its enclosures; see
+                  _split_sections.
 
-Section numbering convention:
-  section_number = "NVIC {number} §{n}"    e.g. "NVIC 01-23 §3"
-  parent_section_number = "NVIC {number}"  e.g. "NVIC 01-23"
+Section numbering convention (2026-09-27):
+  "NVIC 06-72"            the circular's opening (subject, references), or the
+                          whole circular when it has no numbered paragraphs
+  "NVIC 06-72 §4"         the circular's numbered paragraphs
+  "NVIC 06-72 Encl.1"     an enclosure; "NVIC 04-03 Encl.3 §12" when the
+                          enclosure's own paragraphs are numbered 1..k
+  parent_section_number = "NVIC {number}"  e.g. "NVIC 06-72"
 
 Error handling:
   - A failed download is logged to data/failed/nvic_{number}.json; the rest
@@ -37,7 +41,7 @@ import httpx
 import pdfplumber
 from bs4 import BeautifulSoup
 
-from ingest.models import Section
+from ingest.models import Section, merge_duplicate_sections
 from ingest.sources.nvic_fixes import apply_text_fixes
 
 logger = logging.getLogger(__name__)
@@ -97,6 +101,41 @@ _MONTH_MAP: dict[str, int] = {
 # Pure page-number lines (digits only, optional trailing ‡)
 _PAGE_NUMBER = re.compile(r"^\d+\s*[‡]?\s*$")
 
+# ── Circular and enclosures (2026-09-27) ──────────────────────────────────────
+# Numbered lines inside an enclosure restart at 1, so splitting the whole
+# document on "N." gave one NVIC several sections with one section_number, and
+# chunks with the same (source, section_number, chunk_index) overwrite each
+# other on upsert: 3,487 of 6,805 chunks were stored nowhere on 2026-09-27, and
+# each weekly --update re-embedded the losers. See _split_sections.
+
+# A running head or title naming an enclosure: "Enclosure (1) to NVIC 6-72",
+# "Encl. (2) to NVIC No. 5-93", "Enclosure 1 to COMDTPUB P16700.4" (the NVIC
+# series), "Enclosure (1) to NAVIGATION AND VESSEL INSPECTION CIRCULAR 01-18".
+# A lone "l" or "I" is a scan's misread 1.
+_ENCL_HEAD = re.compile(
+    r"^encl(?:osure)?\.?\s*(?:no\.?\s*)?\(?\s*(\d{1,2}|[lI])\s*\)?\s*,?\s+(?:to\s+)?(?:the\s+)?"
+    r"(?:nvic|n\.\s*v\.\s*i\.\s*c|navigation\s+and\s+(?:vessel\s+)?inspection\s+circular"
+    r"|comdtpub\s+p?\s*16700\.4)",
+    re.IGNORECASE,
+)
+# "ENCLOSURE 1 – REPORTING, …", "Enclosure (1): Underwater Survey …", "ENCLOSURE (2)"
+_ENCL_TITLE = re.compile(
+    r"^(?:ENCLOSURE|Enclosure)\s*\(?\s*(\d{1,2}|[lI])\s*\)?\s*(?:$|[-–—:]\s*\S)"
+)
+# The circular's list of its enclosures: "Encl: (1) …", "Enclosures: (1) …" (with a
+# colon: "Encl. (2) to NVIC 4-97" is a running head, "enclosure. Ventilation …" text)
+_ENCL_LIST = re.compile(r"^encl(?:osure)?s?\.?\s*:", re.IGNORECASE)
+# A table-of-contents line: dot leaders, maybe a page number
+_TOC_LINE = re.compile(r"(?:\.\s*){4,}\S{0,6}\s*$")
+# Running heads sit in a page's first or last lines
+_EDGE_LINES = 3
+# The page-range label scripts/ocr_scanned_nvics.py writes between OCR batches
+_OCR_PAGE_RANGE = re.compile(r"^\[--- pages \d+-\d+ ---\]$")
+# The NVIC a section_number belongs to: "NVIC 06-72 Encl.1 §3" -> "NVIC 06-72"
+_SECTION_NVIC = re.compile(
+    r"^(NVIC \d{1,2}-\d{2}(?: Ch-\d+)?)(?: §\d+| Encl\.\d*(?: §\d+)?)?$"
+)
+
 
 # ── Data model ────────────────────────────────────────────────────────────────
 
@@ -124,6 +163,21 @@ class NvicMeta:
             effective_date = date.fromisoformat(d["effective_date"]),
             pdf_url        = d["pdf_url"],
         )
+
+
+# Documents the USCG index does not list, parsed with the NVICs: (meta, PDF file
+# name in data/raw/nvic). 2026-09-27 — until now ingested once by a separate script.
+_EXTRA_DOCS: list[tuple[NvicMeta, str]] = [
+    # NVIC 04-08 Change 2, medical and physical evaluation guidelines: the index
+    # never listed it, and Akamai blocks the PDF from the VPS, so a copy from the
+    # seamenschurch.org mirror was placed in data/raw/nvic/ (2026-04-18).
+    (NvicMeta(
+        number         = "04-08 Ch-2",
+        title          = "Medical and Physical Evaluation Guidelines for Merchant Mariner Credentials",
+        effective_date = date(2016, 4, 25),
+        pdf_url        = "https://www.dco.uscg.mil/Portals/9/DCO%20Documents/5p/5ps/NVIC/2008/NVIC%2004-08%20Ch-2.pdf",
+    ), "NVIC 04-08 Ch-2.pdf"),
+]
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
@@ -323,15 +377,22 @@ def _extract_table_nvics(
             logger.debug("Discovered NVIC %s from %s", nvic_num, source_url)
 
 
-def parse_source(raw_dir: Path, only: list[str] | None = None) -> list[Section]:
+def parse_source(
+    raw_dir: Path, only: list[str] | None = None, ocr_dir: Path | None = None,
+) -> list[Section]:
     """Parse all downloaded NVIC PDFs into Section objects.
 
-    Reads the index.json cache written by discover_nvics(), iterates every
-    downloaded PDF, and calls _parse_nvic_pdf() for each.  PDFs that are
-    missing or produce 0 sections are logged and skipped — they do not raise.
+    Reads the index.json cache written by discover_nvics() plus _EXTRA_DOCS,
+    and calls _parse_nvic_pdf() for each PDF. Documents that are missing or
+    produce 0 sections are logged and skipped — they do not raise.
+
+    2026-09-27 — a scanned NVIC with OCR text in ocr_dir (default
+    data/ocr/nvic, written by scripts/ocr_scanned_nvics.py) is parsed from that
+    text instead of its PDF, which has no text layer.
 
     only: 2026-09-27 — parse just these NVIC numbers (cli --nvic). A number
-    not in index.json, or without its PDF, raises instead of being skipped.
+    that is not listed, or has neither a PDF nor OCR text, raises instead of
+    being skipped.
     """
     cache_path = raw_dir / "index.json"
     if not cache_path.exists():
@@ -343,26 +404,34 @@ def parse_source(raw_dir: Path, only: list[str] | None = None) -> list[Section]:
     with open(cache_path, encoding="utf-8") as fh:
         metas = [NvicMeta.from_dict(d) for d in json.load(fh)]
 
+    ocr_dir = ocr_dir or raw_dir.parent.parent / "ocr" / "nvic"
+    docs = [(m, raw_dir / f"{m.number}.pdf") for m in metas]
+    docs += [(m, raw_dir / name) for m, name in _EXTRA_DOCS]
+
     if only is not None:
-        metas = [m for m in metas if m.number in only]
-        found = {m.number for m in metas if (raw_dir / f"{m.number}.pdf").exists()}
+        docs = [(m, p) for m, p in docs if m.number in only]
+        found = {m.number for m, p in docs if p.exists() or (ocr_dir / f"{m.number}.txt").exists()}
         missing = sorted(set(only) - found)
         if missing:
             raise FileNotFoundError(
-                f"NVIC {', '.join(missing)}: not in {cache_path}, or no PDF in {raw_dir}"
+                f"NVIC {', '.join(missing)}: not in {cache_path}, or no PDF in {raw_dir} "
+                f"and no OCR text in {ocr_dir}"
             )
 
     sections: list[Section] = []
     parsed_docs = 0
 
-    for meta in metas:
-        pdf_path = raw_dir / f"{meta.number}.pdf"
-        if not pdf_path.exists():
+    for meta, pdf_path in docs:
+        ocr_path = ocr_dir / f"{meta.number}.txt"
+        if not pdf_path.exists() and not ocr_path.exists():
             logger.warning("NVIC %s: PDF not found at %s, skipping", meta.number, pdf_path)
             continue
 
         try:
-            secs = _parse_nvic_pdf(pdf_path, meta)
+            if ocr_path.exists():
+                secs = _parse_nvic_text(ocr_path.read_text(encoding="utf-8"), meta)
+            else:
+                secs = _parse_nvic_pdf(pdf_path, meta)
         except Exception as exc:
             logger.warning("NVIC %s: parse error — %s", meta.number, exc)
             continue
@@ -376,9 +445,21 @@ def parse_source(raw_dir: Path, only: list[str] | None = None) -> list[Section]:
 
     logger.info(
         "NVIC: parsed %d sections from %d/%d documents",
-        len(sections), parsed_docs, len(metas),
+        len(sections), parsed_docs, len(docs),
     )
     return sections
+
+
+def prune_scope(section_number: str) -> str | None:
+    """The NVIC a stored row belongs to ("NVIC 06-72 Encl.1 §3" -> "NVIC 06-72"),
+    or None for a name this adapter does not produce.
+
+    2026-09-27 — ingest/prune.py only considers stored rows of NVICs the
+    current parse produced, so rows of an NVIC that left the USCG index or
+    failed to parse this run are kept.
+    """
+    m = _SECTION_NVIC.match(section_number or "")
+    return m.group(1) if m else None
 
 
 def get_source_date(raw_dir: Path) -> date:
@@ -456,101 +537,182 @@ def _write_download_failure(meta: NvicMeta, exc: Exception, failed_dir: Path) ->
 
 
 def _parse_nvic_pdf(pdf_path: Path, meta: NvicMeta) -> list[Section]:
-    """Extract Section objects from a single NVIC PDF.
-
-    Splits the document on top-level numbered section boundaries (lines
-    matching "^\\d{1,2}\\. <text>").  Returns one Section per numbered section,
-    or a single Section for the whole document if no boundaries are found.
-    """
-    # ── Extract lines from all pages ─────────────────────────────────────────
-    lines: list[str] = []
+    """Extract Section objects from a single NVIC PDF (see _split_sections)."""
+    pages: list[list[str]] = []
     try:
         with pdfplumber.open(str(pdf_path)) as pdf:
             for page in pdf.pages:
-                raw = page.extract_text() or ""
-                for ln in raw.splitlines():
-                    # Strip null bytes — older scanned PDFs sometimes contain
-                    # them; PostgreSQL UTF-8 rejects 0x00 at insert time.
-                    stripped = ln.strip().replace("\x00", "")
-                    if not stripped:
-                        continue
-                    # Drop bare page numbers
-                    if _PAGE_NUMBER.match(stripped):
-                        continue
-                    lines.append(stripped)
+                pages.append(_clean_lines((page.extract_text() or "").splitlines()))
     except Exception as exc:
         logger.warning("NVIC %s: pdfplumber error — %s", meta.number, exc)
         return []
 
-    # 2026-09-27 — misreads in USCG's retyped text layer (nvic_fixes.py).
-    lines = apply_text_fixes(meta.number, lines)
-
+    lines = [ln for pl in pages for ln in pl]
     if not lines:
         logger.warning("NVIC %s: no text extracted from %s", meta.number, pdf_path.name)
         return []
 
-    # ── Split on numbered section boundaries ──────────────────────────────────
-    # Each bucket: (section_number_str, heading_text, [content_lines])
-    buckets: list[tuple[str, str, list[str]]] = []
-    cur_num:  str | None    = None
-    cur_head: str           = ""
-    cur_body: list[str]     = []
+    # 2026-09-27 — misreads in USCG's retyped text layer (nvic_fixes.py).
+    fixed = apply_text_fixes(meta.number, lines)
+    if len(fixed) == len(lines):
+        rest = iter(fixed)
+        return _split_sections([[next(rest) for _ in pl] for pl in pages], meta, paged=True)
+    # The fix table keeps line counts (test_nvic_fixes.py); if a fix ever does
+    # not, the page edges are lost and enclosures are found by line instead.
+    logger.warning("NVIC %s: a text fix changed the line count; finding enclosures by line",
+                   meta.number)
+    return _split_sections([fixed], meta, paged=False)
 
+
+def _parse_nvic_text(text: str, meta: NvicMeta) -> list[Section]:
+    """Sections from the OCR text of a scanned NVIC (data/ocr/nvic/{number}.txt).
+
+    2026-09-27 — until now ingested by scripts/ingest_ocr_nvics.py with its own
+    copy of the old split. The OCR has no page breaks and dropped most running
+    heads, so enclosures are found by line.
+    """
+    lines = apply_text_fixes(meta.number, _clean_lines(text.splitlines()))
+    if not any(lines):
+        return []
+    return _split_sections([lines], meta, paged=False)
+
+
+def _clean_lines(raw_lines: list[str]) -> list[str]:
+    out: list[str] = []
+    for ln in raw_lines:
+        # Strip null bytes — older scanned PDFs sometimes contain them;
+        # PostgreSQL UTF-8 rejects 0x00 at insert time.
+        stripped = ln.strip().replace("\x00", "")
+        # Drop bare page numbers and the OCR's page-range labels
+        if stripped and not _PAGE_NUMBER.match(stripped) and not _OCR_PAGE_RANGE.match(stripped):
+            out.append(stripped)
+    return out
+
+
+def _split_sections(pages: list[list[str]], meta: NvicMeta, paged: bool) -> list[Section]:
+    """One NVIC's sections (2026-09-27). Every line lands in one section.
+
+      "NVIC 06-72"          the circular's opening (subject, references), or the
+                            whole circular when it has no numbered paragraphs
+      "NVIC 06-72 §4"       the circular's paragraphs, taken 1, 2, 3… in order;
+                            a numbered line out of order (a list item) is text
+      "NVIC 06-72 Encl.1"   an enclosure, split into "Encl.1 §1"…"§k" only when
+                            its numbered lines run exactly 1..k
+
+    A numbered line with no text of its own keeps its line as its text.
+    """
+    circular, enclosures = _segments(pages, paged)
+    base = f"NVIC {meta.number}"
+    opening, parts = _number_split(circular, first_any=True)
+    out = [_section(meta, base, meta.title, opening)]
+    out += [_section(meta, f"{base} §{n}", f"{meta.title} — {head}", body or [head])
+            for n, head, body in parts]
+    for k, lines in enclosures:
+        name, label = (f"{base} Encl.{k}", f"Enclosure ({k})") if k else (f"{base} Encl.", "Enclosure")
+        numbers = [s[0] for ln in lines if (s := _numbered(ln))]
+        if len(numbers) > 1 and numbers == list(range(1, len(numbers) + 1)):
+            opening, parts = _number_split(lines, first_any=False)
+        else:
+            opening, parts = lines, []
+        out.append(_section(meta, name, f"{meta.title} — {label}", opening))
+        out += [_section(meta, f"{name} §{n}", f"{meta.title} — {label}: {head}", body or [head])
+                for n, head, body in parts]
+    # the names are unique by construction; merging is a safety net that warns
+    return merge_duplicate_sections([s for s in out if s.full_text])
+
+
+def _segments(pages: list[list[str]], paged: bool) -> tuple[list[str], list[tuple[int, list[str]]]]:
+    """(the circular's lines, [(enclosure number, its lines)]); number 0 = unknown.
+
+    Paged (pdfplumber): the enclosures start at the first page whose first or
+    last lines name the lowest enclosure number (earlier marks are the
+    circular's own list of enclosures); with no running heads, at the page
+    after the circular's "Encl:" list. Unpaged (OCR text): at the first line
+    naming the lowest number. A page naming an enclosure already seen (a CH-1
+    replacement page filed at the end) joins that enclosure.
+    """
+    if paged:
+        units = pages
+        marks = [next((m for ln in pl[:_EDGE_LINES] + pl[-_EDGE_LINES:]
+                       if (m := _encl_marker(ln)) is not None), None) for pl in pages]
+    else:
+        units = [[ln] for ln in pages[0]]
+        marks = [_encl_marker(ln) for ln in pages[0]]
+    named = [m for m in marks if m is not None]
+    # One enclosure number from the first page with text on is the whole PDF's
+    # running head (NVIC 2-88 and 4-97 carry it on the circular's own pages),
+    # not an enclosure that follows the circular.
+    first_text = next((i for i, u in enumerate(units) if u), None)
+    if named and len(set(named)) == 1 and marks[first_text] is not None:
+        named = []
+    if named:
+        first = marks.index(min(named))
+    else:
+        listed = next((i for i, pl in enumerate(pages) if any(_ENCL_LIST.match(ln) for ln in pl)),
+                      None) if paged else None
+        if listed is None or not any(pages[listed + 1:]):
+            return [ln for u in units for ln in u], []
+        first = listed + 1
+        marks = [None] * len(pages)
+        marks[first] = 0
+    enclosures: dict[int, list[str]] = {}
+    current = marks[first]
+    for unit, mark in zip(units[first:], marks[first:]):
+        if mark is not None:
+            current = mark
+        enclosures.setdefault(current, []).extend(unit)
+    return [ln for u in units[:first] for ln in u], list(enclosures.items())
+
+
+def _encl_marker(line: str) -> int | None:
+    """The enclosure a running head or title line names: "Enclosure (1) to NVIC 6-72" -> 1."""
+    if _TOC_LINE.search(line):
+        return None
+    m = _ENCL_HEAD.match(line) or _ENCL_TITLE.match(line)
+    if not m:
+        return None
+    return (int(m.group(1)) if m.group(1).isdigit() else 1) or None
+
+
+def _numbered(line: str) -> tuple[int, str] | None:
+    """(n, heading) for a line that may open a numbered section, "4. Revisions. It …":
+    n in 1..30, not a table-of-contents line, not a list item in lower case."""
+    m = _SECTION_START.match(line)
+    if not m or not 1 <= int(m.group(1)) <= 30:
+        return None
+    heading = m.group(2).strip()
+    if heading[0].islower() or _TOC_LINE.search(line):
+        return None
+    return int(m.group(1)), heading
+
+
+def _number_split(
+    lines: list[str], first_any: bool,
+) -> tuple[list[str], list[tuple[int, str, list[str]]]]:
+    """(opening lines, [(n, heading, body lines)]), taking numbered lines in
+    order: the first (any number if first_any, else 1), then only the next.
+    Any other numbered line (a list item, a restart) stays in the text."""
+    opening: list[str] = []
+    parts: list[tuple[int, str, list[str]]] = []
     for ln in lines:
-        m = _SECTION_START.match(ln)
-        if m:
-            n = int(m.group(1))
-            # Sanity bounds: real NVIC sections are 1–30; reject higher numbers
-            # to avoid false positives from list items or CFR paragraph numbers.
-            if 1 <= n <= 30:
-                if cur_num is not None:
-                    buckets.append((cur_num, cur_head, cur_body))
-                cur_num  = m.group(1)
-                cur_head = m.group(2).strip()
-                cur_body = []
-                continue
-
-        if cur_num is not None:
-            cur_body.append(ln)
-
-    # Flush last section
-    if cur_num is not None:
-        buckets.append((cur_num, cur_head, cur_body))
-
-    # ── Fallback: whole document as one section ───────────────────────────────
-    if not buckets:
-        logger.debug(
-            "NVIC %s: no numbered sections detected — storing as single section",
-            meta.number,
-        )
-        return [Section(
-            source                = SOURCE,
-            title_number          = TITLE_NUMBER,
-            section_number        = f"NVIC {meta.number}",
-            section_title         = meta.title,
-            full_text             = "\n".join(lines),
-            up_to_date_as_of      = meta.effective_date,
-            parent_section_number = f"NVIC {meta.number}",
-        )]
-
-    # ── Build one Section per bucket ──────────────────────────────────────────
-    result: list[Section] = []
-    for sec_num, heading, body_lines in buckets:
-        body = "\n".join(body_lines).strip()
-        if not body:
+        s = _numbered(ln)
+        if s and (s[0] == parts[-1][0] + 1 if parts else first_any or s[0] == 1):
+            parts.append((s[0], s[1], []))
             continue
-        sec_title = f"{meta.title} — {heading}" if heading else meta.title
-        result.append(Section(
-            source                = SOURCE,
-            title_number          = TITLE_NUMBER,
-            section_number        = f"NVIC {meta.number} \u00a7{sec_num}",
-            section_title         = sec_title[:500],
-            full_text             = body,
-            up_to_date_as_of      = meta.effective_date,
-            parent_section_number = f"NVIC {meta.number}",
-        ))
+        (parts[-1][2] if parts else opening).append(ln)
+    return opening, parts
 
-    return result
+
+def _section(meta: NvicMeta, number: str, title: str, lines: list[str]) -> Section:
+    return Section(
+        source                = SOURCE,
+        title_number          = TITLE_NUMBER,
+        section_number        = number,
+        section_title         = title[:500],
+        full_text             = "\n".join(lines).strip(),
+        up_to_date_as_of      = meta.effective_date,
+        parent_section_number = f"NVIC {meta.number}",
+    )
 
 
 # ── URL / text utilities ──────────────────────────────────────────────────────

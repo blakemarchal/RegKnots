@@ -87,6 +87,30 @@ def test_other_sources_are_unscoped():
     assert [s.section_number for s in cfr_scope.scope_sections("cfr_49", secs)] == ["49 CFR 176.83"]
 
 
+def test_a_scoped_report_keeps_rows_of_documents_the_parse_did_not_produce():
+    """2026-09-27 — nvic: OCR'd NVICs, NVIC 04-08 Ch-2 or an NVIC that left the
+    USCG index are not in a --nvic run (or failed to parse); their rows stay."""
+    from ingest.sources import nvic
+    stored = [_row("NVIC 06-72 §4", 0), _row("NVIC 06-72 §4", 5),        # stale tail
+              _row("NVIC 07-68 §1", 0), _row("NVIC 04-08 Ch-2 §1", 0), _row("odd name", 0)]
+    chunks = [_chunk("NVIC 06-72 §4", 0), _chunk("NVIC 06-72 Encl.1", 0)]
+    report = asyncio.run(prune.build_report(_Pool(stored), "nvic", chunks, nvic.prune_scope))
+    assert [(r["section_number"], r["chunk_index"]) for r in report.stale] == [("NVIC 06-72 §4", 5)]
+    assert report.kept_out_of_scope == {"NVIC 07-68": 1, "NVIC 04-08 Ch-2": 1, "odd name": 1}
+    assert report.missing == [("NVIC 06-72 Encl.1", 0)]
+    assert "3 rows of documents this parse did not produce kept" in report.summary_lines()[0]
+    unscoped = asyncio.run(prune.build_report(_Pool(stored), "nvic", chunks))
+    assert len(unscoped.stale) == 4
+
+
+def test_report_counts_produced_keys_stored_with_other_text():
+    stored = [dict(_row("A", 0), content_hash="h1"), dict(_row("A", 1), content_hash="old")]
+    chunks = [SimpleNamespace(section_number="A", chunk_index=0, content_hash="h1"),
+              SimpleNamespace(section_number="A", chunk_index=1, content_hash="h2")]
+    report = asyncio.run(prune.build_report(_Pool(stored), "s", chunks))
+    assert report.changed == 1 and "1 stored with other text" in report.summary_lines()[0]
+
+
 def test_manual_rows_are_never_stale():
     stored = [_row("IMDG 3.2 UN 3480 (manual)", 0, "2026-05-01"), _row("IMDG 3.2", 0), _row("OLD", 0)]
     report = asyncio.run(prune.build_report(_Pool(stored), "imdg", [_chunk("IMDG 3.2", 0)]))

@@ -12,8 +12,10 @@ This script:
   3. Sends the PDF to Anthropic's vision API (Claude is good at maritime
      regulatory text extraction; preserves section structure).
   4. Saves the extracted text to data/ocr/nvic/{number}.txt.
-  5. Optionally injects the extracted text back through the existing
-     parser via manual_add to land in the DB.
+  5. 2026-09-27 — the nvic adapter reads data/ocr/nvic/{number}.txt for a
+     PDF with no text layer, so the weekly ingest picks the text up; to
+     ingest one now: scripts/run_ingest.sh --source nvic --nvic NN-NN.
+     (scripts/ingest_ocr_nvics.py, which split the text its own way, is gone.)
 
 Cost: each NVIC averages 8-15 pages; vision API is roughly $0.01-0.03
 per page (input) + tiny output. Total budget for the full 55-PDF batch

@@ -22,6 +22,9 @@ def test_fix_table_keeps_line_structure_and_section_starts():
             assert old.count("\n") == new.count("\n"), old
             starts = lambda s: [ln for ln in s.split("\n") if nvic._SECTION_START.match(ln)]  # noqa: E731
             assert starts(old) == starts(new), old
+            # nor move where an enclosure starts (nvic._split_sections)
+            marks = lambda s: [nvic._encl_marker(ln) for ln in s.split("\n")]  # noqa: E731
+            assert marks(old) == marks(new), old
 
 
 def test_co2_discharge_figure_is_corrected_with_a_note(caplog):

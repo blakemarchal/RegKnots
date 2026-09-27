@@ -47,6 +47,7 @@ async def run_pdf_pipeline(
     console: Console | None = None,
     enrich: bool = False,
     prune: str | None = None,
+    prune_scope: Callable[[str], str | None] | None = None,
 ) -> IngestResult:
     """Run the ingest pipeline for a PDF-sourced regulation.
 
@@ -62,6 +63,9 @@ async def run_pdf_pipeline(
                          parse and chunk only, then list / remove stored rows
                          the parse no longer produces. "after": remove them
                          after a successful run. None: no pruning.
+        prune_scope:     2026-09-27. section_number -> its document; only
+                         stored rows of documents this parse produced can be
+                         pruned (nvic.prune_scope).
     """
     cfg     = cfg or _default_settings
     console = console or Console()
@@ -146,7 +150,7 @@ async def run_pdf_pipeline(
             # ── 3a. Prune-only run: no embedding, no upsert ──────────────────
             if prune in ("report", "apply"):
                 progress.stop()
-                await run_prune_step(pool, source, all_chunks, prune, result, console)
+                await run_prune_step(pool, source, all_chunks, prune, result, console, prune_scope)
                 return result
 
             # ── 3b. Chunk-loss safeguard (update mode only) ──────────────────
@@ -271,7 +275,7 @@ async def run_pdf_pipeline(
             # ── 7. Prune rows the parse no longer produces (opt-in) ──────────
             if prune == "after":
                 progress.stop()
-                await run_prune_step(pool, source, all_chunks, "apply", result, console)
+                await run_prune_step(pool, source, all_chunks, "apply", result, console, prune_scope)
 
     finally:
         await embedder.close()

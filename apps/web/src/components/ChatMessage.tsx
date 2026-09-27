@@ -351,10 +351,16 @@ const CITATION_PATTERNS: CitationPattern[] = [
     toSection: m => `MSC.${m[1]}`,
   },
   // NVIC 10-97 / NVIC 10-97 §5 / NVIC 01-20
+  // 2026-09-27 — enclosures and changes as the corpus names them:
+  // NVIC 06-72 Encl.1 / NVIC 04-03 Encl.3 §12 / NVIC 04-08 Ch-2 §3, and
+  // "NVIC 06-72, Enclosure (1)". A bare "NVIC 06-72" is the circular's opening.
   {
-    re: /\bNVIC\s+(\d{2}-\d{2})(?:\s+§\s*(\d+))?\b/g,
+    re: /\bNVIC\s+(\d{2}-\d{2})(?:\s+Ch-(\d+))?(?:,?\s+Encl(?:osure)?\.?\s*(?:\((\d{1,2})\)|(\d{1,2})))?(?:\s+§\s*(\d+))?(?!\w)/g,
     sourceHint: 'nvic',
-    toSection: m => m[2] ? `NVIC ${m[1]} §${m[2]}` : `NVIC ${m[1]}`,
+    toSection: m => {
+      const encl = m[3] || m[4]
+      return `NVIC ${m[1]}${m[2] ? ` Ch-${m[2]}` : ''}${encl ? ` Encl.${encl}` : ''}${m[5] ? ` §${m[5]}` : ''}`
+    },
   },
   // STCW Code A-II/3 / STCW Code B-I/2 / STCW Reg.II/1
   // The STCW corpus stores Convention regulations under the canonical

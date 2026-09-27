@@ -579,7 +579,8 @@ Examples:
             "With --source nvic: re-ingest only this NVIC (e.g. 06-72; repeatable) from "
             "the index.json and PDF already on disk, with no discovery or download. Its "
             "chunks are re-embedded; only rows whose text changed are written. Implies "
-            "--no-notify. Not with --update, --dry-run or the prune options."
+            "--no-notify. Not with --update or --dry-run; the prune options only touch "
+            "the named NVICs."
         ),
     )
 
@@ -634,11 +635,11 @@ Examples:
         os.environ["REGKNOTS_ENRICH_MODE"] = "cache"
     prune = ("report" if args.stale_report else "apply" if args.prune_stale
              else "after" if args.prune else None)
-    # A subset of NVICs cannot be pruned against (every other NVIC would read as
-    # stale), and --update's chunk-loss safeguard counts the whole source.
-    if args.nvic and (args.source != "nvic" or args.update or prune or args.dry_run):
-        parser.error("--nvic needs --source nvic and cannot be combined with --update, "
-                     "--dry-run or the prune options")
+    # --update's chunk-loss safeguard counts the whole source. (A prune is scoped
+    # to the named NVICs, nvic.prune_scope, so the prune options are allowed.)
+    if args.nvic and (args.source != "nvic" or args.update or args.dry_run):
+        parser.error("--nvic needs --source nvic and cannot be combined with --update "
+                     "or --dry-run")
 
     asyncio.run(_run(
         sources, mode,
@@ -961,7 +962,8 @@ async def _run_pdf_source(
         # 2026-09-27 — --nvic: only the named NVICs, from the files already on
         # disk. Fresh mode, because update mode's short-circuit and chunk-loss
         # safeguard compare against the whole source; the upsert still writes
-        # only rows whose content_hash changed.
+        # only rows whose content_hash changed. A prune option only reaches
+        # the named NVICs (adapter.prune_scope).
         if nvic_numbers:
             console.print(
                 f"  [cyan]Reading:[/cyan] NVIC {', '.join(nvic_numbers)} from {raw_dir} "
@@ -977,6 +979,8 @@ async def _run_pdf_source(
                 cfg=settings,
                 console=console,
                 enrich=enrich,
+                prune=prune,
+                prune_scope=getattr(adapter, "prune_scope", None),
             )
 
         # NVIC-style: adapter-driven discovery + download before parsing.
@@ -1002,6 +1006,8 @@ async def _run_pdf_source(
             console=console,
             enrich=enrich,
             prune=prune,
+            # 2026-09-27 — nvic: a prune keeps rows of NVICs this parse did not produce
+            prune_scope=getattr(adapter, "prune_scope", None),
         )
         # Surface download failures in the summary error count
         result.errors += dl_failures
