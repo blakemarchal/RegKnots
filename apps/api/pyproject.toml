@@ -37,6 +37,8 @@ dependencies = [
     # Monitoring
     "sentry-sdk[fastapi]>=2.0.0",
     "regknots-rag",
+    "pypdf>=5.0",
+    "python-docx>=1.1",
 ]
 
 [tool.uv.sources]

@@ -268,6 +268,14 @@ interface CitationPattern {
 }
 
 const CITATION_PATTERNS: CitationPattern[] = [
+  // 2026-09-27 — the fleet's own documents in workspace chats:
+  // [Company: TSMS Manual §4.2 Emergency Drills]. The sheet resolves the
+  // label inside the chat's workspace (GET /workspaces/{id}/documents/citation).
+  {
+    re: /\[Company:\s*([^\]§]+?)\s*§\s*([^\]]+?)\s*\]/g,
+    sourceHint: 'company',
+    toSection: m => `Company: ${m[1].trim()} §${m[2].trim()}`,
+  },
   // 46 CFR 91.60-10 / (33 CFR 153) / 49 CFR 172.101
   //
   // Sprint D6.90 — sourceHint is now Title-aware. The regulations.cfr_*
@@ -399,7 +407,7 @@ const CITATION_PATTERNS: CitationPattern[] = [
   // (Appendix -> App., Chapter -> Ch., Regulation -> Reg.) when the
   // exact-match lookup misses.
   {
-    re: /\bMARPOL\s+Annex\s+([IVX]+)(?:\s+(Reg(?:ulation|\.?)\s*\d+(?:\.\d+)*|Ch(?:apter|\.?)\s*\d+|App(?:endix|\.?)\s*[IVX]+(?:\s+Part\s+[IVX]+)?))?/g,
+    re: /\bMARPOL\s+Annex\s+([IVX]+)(?:\s+(Reg(?:ulation|\.?)\s*\d+[A-Z]?(?:\.\d+)*|Ch(?:apter|\.?)\s*\d+|App(?:endix|\.?)\s*[IVX]+(?:\s+Part\s+[IVX]+)?))?/g,
     sourceHint: 'marpol',
     toSection: m =>
       m[2]

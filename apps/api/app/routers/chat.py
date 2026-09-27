@@ -940,6 +940,7 @@ async def chat_endpoint(
         precision_mode=precision_mode_enabled,
         # 2026-07-19 Wk3 — API-layer live data (active whale-zone SMAs).
         live_context_block=_build_whale_live_block(body.query),
+        company_context=await _company_context(pool, conversation_id, openai_api_key),
         # 2026-09-23 — minimum synthesis model (default Opus 5.5).
         synthesis_model_floor=settings.synthesis_model_floor or None,
     )
@@ -1111,6 +1112,7 @@ async def chat_stream_endpoint(
                 # 2026-07-19 Wk3 — API-layer live data (active whale-zone
                 # SMAs). None unless the query has whale-zone intent.
                 live_context_block=_build_whale_live_block(body.query),
+                company_context=await _company_context(pool, conversation_id, openai_api_key),
                 # 2026-09-23 — minimum synthesis model (default Opus 5.5).
                 synthesis_model_floor=settings.synthesis_model_floor or None,
             ):
@@ -1339,6 +1341,20 @@ async def _apply_vessel_update(pool: asyncpg.Pool, vessel_id: uuid.UUID, update:
         query = f"UPDATE vessels SET {', '.join(sets)} WHERE id = ${idx}"
         await pool.execute(query, *params)
         logger.info("Updated vessel profile %s with: %s", vessel_id, list(update.keys()))
+
+
+async def _company_context(pool: asyncpg.Pool, conversation_id: uuid.UUID, openai_api_key: str):
+    """2026-09-27 — for a workspace chat, the callback that adds the fleet's own
+    documents to the answer context (app/company_docs.py); None for a personal
+    chat. The preflight has already checked the caller's workspace membership."""
+    workspace_id = await pool.fetchval("SELECT workspace_id FROM conversations WHERE id = $1", conversation_id)
+    if workspace_id is None:
+        return None
+    from app import company_docs
+
+    async def provide(query: str) -> str | None:
+        return await company_docs.context_block(pool, workspace_id, openai_api_key, query)
+    return provide
 
 
 def _build_whale_live_block(message: str) -> str | None:

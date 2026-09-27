@@ -19,7 +19,7 @@ if settings.sentry_dsn:
         environment=settings.environment,
     )
 from app.db import init_pool, close_pool, close_redis
-from app.routers import admin, auth, billing, checklists, coming_up, contact, credentials, documents, dossier, export, health, chat, logs, me, onboarding, preferences, sea_service, sea_time, study, transcribe, vessels, regulations, conversations, notifications, support, survey, waitlist, web_fallback, whale_zones, workspaces
+from app.routers import admin, auth, billing, checklists, coming_up, company_documents, contact, credentials, documents, dossier, export, health, chat, logs, me, onboarding, preferences, sea_service, sea_time, study, transcribe, vessels, regulations, conversations, notifications, support, survey, waitlist, web_fallback, whale_zones, workspaces
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +95,7 @@ app.include_router(admin.router)
 app.include_router(web_fallback.router)
 app.include_router(workspaces.router)
 app.include_router(workspaces.me_router)
+app.include_router(company_documents.router)   # 2026-09-27 — company documents in fleet chat
 # Sprint D6.83 — Study Tools (quiz / guide generators + take-the-quiz sessions)
 app.include_router(study.router)
 # Sprint D6.97 #49 (2026-05-25) — public whale-zone map endpoint.

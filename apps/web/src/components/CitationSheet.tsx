@@ -114,7 +114,11 @@ interface Props {
   sectionNumber: string
   sectionTitle: string
   onClose: () => void
+  // 2026-09-27 — the chat's workspace, for [Company: ...] citations
+  workspaceId?: string | null
 }
+
+interface CompanyCitation { title: string; section: string; text: string }
 
 function getSourceLink(source: string, sectionNumber: string): { url: string; label: string } | null {
   if (source.startsWith('cfr_')) {
@@ -151,7 +155,7 @@ function getSourceLink(source: string, sectionNumber: string): { url: string; la
   return null
 }
 
-export function CitationSheet({ source, sectionNumber, sectionTitle, onClose }: Props) {
+export function CitationSheet({ source, sectionNumber, sectionTitle, onClose, workspaceId }: Props) {
   // Sprint D6.90 — references-fallback navigation.
   //
   // The sheet now tracks "currently viewed" state internally. When the
@@ -179,6 +183,22 @@ export function CitationSheet({ source, sectionNumber, sectionTitle, onClose }: 
     // reverse proxy into extra path segments.
     setLoading(true)
     setError(false)
+    // 2026-09-27 — a company citation resolves inside the chat's workspace.
+    if (viewing.source === 'company') {
+      if (!workspaceId) { setError(true); setLoading(false); return }
+      apiRequest<CompanyCitation>(
+        `/workspaces/${workspaceId}/documents/citation?ref=${encodeURIComponent(viewing.sectionNumber)}`,
+      )
+        .then((c) => {
+          setDetail({
+            source: 'company', section_number: `${c.title} §${c.section}`, section_title: c.section,
+            full_text: c.text, effective_date: null, up_to_date_as_of: null, copyrighted: false, references: [],
+          })
+          setLoading(false)
+        })
+        .catch(() => { setError(true); setLoading(false) })
+      return
+    }
     const qs = new URLSearchParams({
       source: viewing.source,
       section_number: viewing.sectionNumber,
@@ -186,7 +206,7 @@ export function CitationSheet({ source, sectionNumber, sectionTitle, onClose }: 
     apiRequest<RegulationDetail>(`/regulations/lookup?${qs.toString()}`)
       .then((d) => { setDetail(d); setLoading(false) })
       .catch(() => { setError(true); setLoading(false) })
-  }, [viewing.source, viewing.sectionNumber])
+  }, [viewing.source, viewing.sectionNumber, workspaceId])
 
   /** Navigate to a referenced regulation. Pushes current view onto
    *  the back stack so the user can return. */
@@ -325,7 +345,9 @@ export function CitationSheet({ source, sectionNumber, sectionTitle, onClose }: 
 
           {error && !loading && (
             <p className="font-mono text-sm text-[--color-muted] italic">
-              Regulation text unavailable.
+              {viewing.source === 'company'
+                ? "This section isn't in your fleet's documents any more."
+                : 'Regulation text unavailable.'}
             </p>
           )}
 

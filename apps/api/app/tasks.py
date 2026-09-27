@@ -1256,3 +1256,25 @@ async def _reconcile_subscriptions_async():
         return await reconcile_stale_subscriptions(conn)
     finally:
         await conn.close()
+
+
+@celery.task(name="app.tasks.process_company_document")
+def process_company_document(document_id: str):
+    """2026-09-27 — extract, chunk and embed one uploaded company document
+    (app/company_docs.py). Status ends as ready or failed; never raises."""
+    _run_async(_process_company_document_async(document_id))
+
+
+async def _process_company_document_async(document_id: str):
+    import uuid
+
+    import asyncpg
+    from app import company_docs
+    from app.config import settings
+
+    dsn = settings.database_url.replace("postgresql+asyncpg://", "postgresql://")
+    pool = await asyncpg.create_pool(dsn, min_size=1, max_size=2)
+    try:
+        await company_docs.process_document(pool, uuid.UUID(document_id), settings.openai_api_key)
+    finally:
+        await pool.close()

@@ -6,6 +6,7 @@ import Link from 'next/link'
 import AuthGuard from '@/components/AuthGuard'
 import { AppHeader } from '@/components/AppHeader'
 import { AuditReadinessCard } from '@/components/AuditReadinessCard'
+import { CompanyDocuments } from '@/components/CompanyDocuments'
 import { WorkspaceAuditLog } from '@/components/WorkspaceAuditLog'
 import { apiRequest, ApiError } from '@/lib/api'
 
@@ -329,6 +330,16 @@ function DetailContent() {
         <div className="mb-6">
           <AuditReadinessCard workspaceId={ws.id} workspaceName={ws.name} />
         </div>
+      )}
+
+      {/* 2026-09-27 — company documents: the fleet's own manuals, cited
+          in this workspace's chats. */}
+      {ws.status !== 'archived' && ws.status !== 'canceled' && (
+        <CompanyDocuments
+          workspaceId={ws.id}
+          canManage={canManageMembers}
+          writable={ws.status === 'trialing' || ws.status === 'active'}
+        />
       )}
 
       {/* 2026-07-19 Wk4 — team audit log (renders only when the

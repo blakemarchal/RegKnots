@@ -1496,6 +1496,7 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
           sectionNumber={citation.sectionNumber}
           sectionTitle={citation.sectionTitle}
           onClose={() => setCitation(null)}
+          workspaceId={activeWorkspaceId}
         />
       )}
 

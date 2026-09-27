@@ -16,7 +16,7 @@ import asyncio
 import logging
 import re
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import NamedTuple
 from uuid import UUID
 
@@ -1703,6 +1703,9 @@ async def chat(
     # 2026-07-19 Wk3 — caller-supplied live-data block; see
     # chat_with_progress for the contract.
     live_context_block: str | None = None,
+    # 2026-09-27 — company documents for workspace chats: called with the
+    # retrieval query, returns a COMPANY DOCUMENTS block or None.
+    company_context: Callable[[str], Awaitable[str | None]] | None = None,
     # 2026-09-23 — minimum synthesis model; see chat_with_progress.
     synthesis_model_floor: str | None = None,
 ) -> ChatResponse:
@@ -1769,6 +1772,7 @@ async def chat(
         images=images,
         precision_mode=precision_mode,
         live_context_block=live_context_block,
+        company_context=company_context,
         synthesis_model_floor=synthesis_model_floor,
     ):
         # Discard status/delta/delta_reset — non-streaming caller only
@@ -2649,6 +2653,18 @@ async def _log_retrieval_miss(
 # tier_router_shadow_log table is preserved for 90-day archival.
 
 
+async def _await_company_block(task) -> str | None:
+    """2026-09-27 — the company-documents block for this turn, or None. A
+    failure or a slow lookup skips it; it never fails the answer."""
+    if task is None:
+        return None
+    try:
+        return await asyncio.wait_for(task, timeout=8)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("company documents skipped: %s: %s", type(exc).__name__, str(exc)[:200])
+        return None
+
+
 async def chat_with_progress(
     query: str,
     conversation_history: list[ChatMessage],
@@ -2706,6 +2722,9 @@ async def chat_with_progress(
     # reg-change intent (see rag/live_context.py) — that one needs only
     # the pool, so no caller involvement.
     live_context_block: str | None = None,
+    # 2026-09-27 — company documents for workspace chats: called with the
+    # retrieval query, returns a COMPANY DOCUMENTS block or None.
+    company_context: Callable[[str], Awaitable[str | None]] | None = None,
     # 2026-09-23 — minimum model for the answer. The router's pick (and
     # the followup escalation) is lifted to this tier when it is lower;
     # None = pure complexity routing. chat.py passes
@@ -2737,6 +2756,7 @@ async def chat_with_progress(
     yield {"event": "status", "data": "Analyzing your question…"}
     route_task = asyncio.create_task(route_query(query, anthropic_client))
     retrieval_task = None
+    company_task = None
     try:
         # Sprint D6.4 — followup detection. NARROW pattern match
         # (followup_match) drives the Opus model escalation below. Sprint
@@ -2804,6 +2824,10 @@ async def chat_with_progress(
             # focus when the vessel's flag is Unknown (roadmap item 6).
             jurisdiction_focus=user_jurisdiction_focus,
         ))
+        # 2026-09-27 — company documents (workspace chats) are searched
+        # alongside the regulations and folded into the same context below.
+        if company_context is not None:
+            company_task = asyncio.create_task(company_context(retrieval_query))
         route = await route_task
     except BaseException:
         # Client disconnect (GeneratorExit / CancelledError) or a router
@@ -2812,6 +2836,8 @@ async def chat_with_progress(
         route_task.cancel()
         if retrieval_task is not None:
             retrieval_task.cancel()
+        if company_task is not None:
+            company_task.cancel()
         raise
     logger.info(f"Routed query to {route.model} (score={route.score})")
 
@@ -2849,7 +2875,9 @@ async def chat_with_progress(
     # masking a cancellation of this generator itself.)
     if route.is_off_topic:
         retrieval_task.cancel()
-        await asyncio.gather(retrieval_task, return_exceptions=True)
+        if company_task is not None:
+            company_task.cancel()
+        await asyncio.gather(retrieval_task, *([company_task] if company_task else []), return_exceptions=True)
         async for event in _handle_off_topic_stream(
             pool=pool,
             user_id=user_id,
@@ -2891,6 +2919,12 @@ async def chat_with_progress(
             logger.info("live-context: injected reg-changes block")
     if _live_blocks:
         context_str = "\n\n".join(_live_blocks) + "\n\n" + context_str
+    # 2026-09-27 — company documents go INTO context_str for the same reason:
+    # the judge, the citation checks and regeneration must see them.
+    company_block = await _await_company_block(company_task)
+    if company_block:
+        context_str = context_str + "\n\n" + company_block
+        logger.info("company documents: added %d chars to the context", len(company_block))
 
     found_sources = _summarize_found_sources(chunks)
     if found_sources:
