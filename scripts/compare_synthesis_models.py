@@ -169,6 +169,9 @@ async def capture(query, profile, pool, client, okey, conv_id, user_id) -> dict:
             anthropic_client=client, openai_api_key=okey, conversation_id=conv_id,
             user_id=user_id, subscription_tier="captain", user_jurisdiction_focus="us",
             web_fallback_enabled=False, hedge_judge_enabled=False,
+            # 2026-09-27 — capture with the shipped prompt; --prompt-ab captures the
+            # strict baseline and applies the edits itself (opus_led).
+            model_led_grounding_enabled=(not PROMPT_AB) and settings.model_led_grounding_enabled,
             query_rewrite_enabled=settings.query_rewrite_enabled,
             reranker_enabled=settings.reranker_enabled,
         ):

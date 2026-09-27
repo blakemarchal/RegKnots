@@ -269,6 +269,14 @@ class Settings(BaseSettings):
         default=True, validation_alias="LEAD_WITH_ANSWER_ENABLED",
     )
 
+    # 2026-09-27 — model-led grounding: the answer model may use its own
+    # knowledge where the retrieved excerpts are incomplete, marked as not
+    # in the excerpts (rag.prompts.MODEL_LED_GROUNDING). Precision Mode users
+    # keep the strict posture. Set false to revert without a deploy.
+    model_led_grounding_enabled: bool = Field(
+        default=True, validation_alias="MODEL_LED_GROUNDING_ENABLED",
+    )
+
     # ── D6.84 Sprint A — Confidence tier router ──────────────────────────
     # Three-mode flag controlling the additive tier_router layer.
     #

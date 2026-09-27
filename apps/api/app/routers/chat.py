@@ -930,6 +930,7 @@ async def chat_endpoint(
         # via env if regressions appear.
         judge_on_cited_enabled=settings.judge_on_cited_enabled,
         lead_with_answer_enabled=settings.lead_with_answer_enabled,
+        model_led_grounding_enabled=settings.model_led_grounding_enabled,
         # D6.97 Phase 2 — image attachments parsed by the preflight.
         # Empty list when no images uploaded; engine routes to multimodal
         # Claude only when non-empty.
@@ -1100,6 +1101,7 @@ async def chat_stream_endpoint(
                 confidence_tiers_mode=settings.confidence_tiers_mode,
                 judge_on_cited_enabled=settings.judge_on_cited_enabled,
                 lead_with_answer_enabled=settings.lead_with_answer_enabled,
+                model_led_grounding_enabled=settings.model_led_grounding_enabled,
                 # D6.97 Phase 2 — image attachments parsed by preflight.
                 images=parsed_images,
                 # D6.97 (C) — Precision Mode flag from

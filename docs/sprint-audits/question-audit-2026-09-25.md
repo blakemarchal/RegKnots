@@ -423,3 +423,45 @@ Shipped:
 
 Verified in the deployed web bundle.
 
+## 8. 2026-09-27: model-led grounding (Blake: "$5-8 is worth it")
+
+The shipped rule said "Base answers ONLY on the provided regulation context", written when Haiku
+and Sonnet 4.x wrote answers. `rag.prompts.MODEL_LED_GROUNDING` changes three rules: Opus may answer
+from its own knowledge where the excerpts are incomplete, marked as not in the retrieved excerpts;
+it may name an instrument that wasn't retrieved when confident; and it must not invent a section
+number, figure, date, interval or form number. The safety rules are unchanged: never assert
+non-existence, no unverified numbered instruments as places to look, UN numbers grounded.
+
+`scripts/compare_synthesis_models.py --prompt-ab` replayed each captured synthesis request both
+ways on Opus 5.5 low. The judges were blind: Opus 5.5 and GPT-4o. The questions were 10 gold, the
+Captain's two, and six real questions whose answers had hedged (`hedge_audits`). Spend: $3.66.
+Evidence: `data/eval/model_compare/20260927-051746-prompt-ab/`.
+
+| metric | shipped | model-led |
+|---|---|---|
+| Opus judge, overall | 7.94 | **8.61** |
+| GPT-4o judge, overall | 9.44 | **9.67** |
+| judged best (Opus / GPT-4o) | 4 / 7 | **14 / 11** |
+| accuracy (Opus / GPT-4o) | 8.50 / 9.89 | 8.44 / 9.94 |
+| errors flagged (Opus / GPT-4o) | 17 / 1 | 15 / 0 |
+| hedged answers | 6 | 5 |
+| citations not in the corpus | 3 | 5 |
+| first token, median / p90 | 5.3 / 8.5 s | 7.0 / 10.1 s |
+| output tokens, mean | 1,732 | 1,991 |
+| cost per answer, cold | $0.130 | $0.136 |
+
+- **The six hedged questions:** the Opus judge preferred model-led on all six, GPT-4o on four.
+  The regex hedge flag fired on 4 of 6 shipped answers and 2 of 6 model-led.
+- **Citations outside the corpus:** three are the same in both arms and are real instruments (APHIS
+  7 CFR 330.400 and 9 CFR 94.5, MSC.48(66)). Model-led added MSC.98(73), the real FSS Code
+  resolution, and NVIC 03-16, which I could not confirm. The engine's citation check still applies.
+- **Substantive judge errors on model-led:** on the provisions question it implied food waste must
+  be landed ashore outside special areas. On the MODU question it cited an HSC Code flare rule.
+  The rest were marked minor.
+- **Corpus bug found:** both arms repeated an OCR-garbled "35% of the charge within 2 minutes" from
+  a CO2 NVIC chunk. The standard (46 CFR 95.15 / 76.15) is 85%.
+
+**Decision (the agreed rule: ship if both judges prefer it):** shipped behind
+`MODEL_LED_GROUNDING_ENABLED`, default on. Setting it false reverts without a deploy. Precision
+Mode users keep the strict posture. Costs: about +1.7 s to first token and 15% longer answers.
+

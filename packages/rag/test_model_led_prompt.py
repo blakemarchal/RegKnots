@@ -24,3 +24,20 @@ def test_safety_rules_survive_the_edits():
 def test_a_missing_target_is_an_error():
     with pytest.raises(ValueError, match="found 0 times"):
         apply_prompt_edits("unrelated text", MODEL_LED_GROUNDING)
+
+
+def test_assembly_applies_model_led_except_in_precision_mode():
+    led = assemble_system_prompt(model_led=True)
+    assert "not in the excerpts retrieved here" in led
+    assert "Base answers ONLY on the provided regulation context" not in led
+    strict = assemble_system_prompt(model_led=True, precision_mode=True)
+    assert "Base answers ONLY on the provided regulation context" in strict
+    assert assemble_system_prompt() == assemble_system_prompt(model_led=False)
+
+
+def test_engine_and_config_carry_the_flag():
+    import inspect
+
+    import rag.engine as E
+    for fn in (E.chat, E.chat_with_progress):
+        assert "model_led_grounding_enabled" in inspect.signature(fn).parameters

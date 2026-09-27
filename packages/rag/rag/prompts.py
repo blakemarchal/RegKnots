@@ -685,8 +685,9 @@ Lead with the refusal if you're refusing — don't bury it.
 """
 
 
-# 2026-09-27 — "model-led" grounding, UNDER TEST, not used by the engine yet
-# (scripts/compare_synthesis_models.py --prompt-ab). The shipped rules tell the
+# 2026-09-27 — "model-led" grounding. Shipped behind MODEL_LED_GROUNDING_ENABLED
+# (default on) after scripts/compare_synthesis_models.py --prompt-ab; see
+# docs/sprint-audits/question-audit-2026-09-25.md §8. The shipped rules tell the
 # answer model to use ONLY the retrieved excerpts; they date from Haiku / Sonnet
 # 4.x synthesis. With Opus 5.5 writing every answer they mostly turn a retrieval
 # miss into a hedge. These edits let it answer from its own knowledge, marked as
@@ -732,6 +733,7 @@ def assemble_system_prompt(
     *,
     lead_with_answer: bool = True,
     precision_mode: bool = False,
+    model_led: bool = False,
 ) -> str:
     """Return the system prompt with optional D6.86 lead-with-answer
     block + D6.97 AUTHORITY HIERARCHY DECISION block (always) +
@@ -744,6 +746,10 @@ def assemble_system_prompt(
     users.precision_mode_enabled at request time.
     """
     prompt = SYSTEM_PROMPT
+    # 2026-09-27 — model-led grounding, except for Precision Mode users, who
+    # asked for the strict posture.
+    if model_led and not precision_mode:
+        prompt = apply_prompt_edits(prompt, MODEL_LED_GROUNDING)
     prompt = prompt + "\n\n" + AUTHORITY_HIERARCHY_BLOCK
     if precision_mode:
         prompt = prompt + "\n\n" + PRECISION_MODE_OVERLAY

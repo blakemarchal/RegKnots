@@ -1687,6 +1687,8 @@ async def chat(
     # conclusion before vessel/regulatory framing. Helps mariners who
     # skim first paragraphs (Blake's gasket observation).
     lead_with_answer_enabled: bool = True,
+    # 2026-09-27 — model-led grounding (rag.prompts.MODEL_LED_GROUNDING)
+    model_led_grounding_enabled: bool = False,
     # Sprint D6.97 Phase 2 — image attachments for this turn. Empty list
     # = today's behavior (text-only). When non-empty, the engine forces
     # a vision-capable model (Sonnet/Opus, not Haiku) and builds a
@@ -1763,6 +1765,7 @@ async def chat(
         confidence_tiers_mode=confidence_tiers_mode,
         judge_on_cited_enabled=judge_on_cited_enabled,
         lead_with_answer_enabled=lead_with_answer_enabled,
+        model_led_grounding_enabled=model_led_grounding_enabled,
         images=images,
         precision_mode=precision_mode,
         live_context_block=live_context_block,
@@ -2683,6 +2686,8 @@ async def chat_with_progress(
     # Sprint D6.86 — see chat() docstring.
     judge_on_cited_enabled: bool = True,
     lead_with_answer_enabled: bool = True,
+    # 2026-09-27 — model-led grounding (rag.prompts.MODEL_LED_GROUNDING)
+    model_led_grounding_enabled: bool = False,
     # Sprint D6.97 Phase 2 — see chat() for full contract. Streaming
     # path consumes images identically; the only difference is the
     # synthesis call uses messages.stream() instead of messages.create().
@@ -2833,6 +2838,7 @@ async def chat_with_progress(
     effective_system_prompt = assemble_system_prompt(
         lead_with_answer=lead_with_answer_enabled,
         precision_mode=precision_mode,
+        model_led=model_led_grounding_enabled,
     )
 
     # D6.58 — off-topic short-circuit (streaming path). Same gate as
