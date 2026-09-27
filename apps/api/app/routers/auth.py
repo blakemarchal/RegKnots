@@ -1,4 +1,5 @@
 import hashlib
+import json
 import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -8,6 +9,7 @@ from fastapi import APIRouter, Cookie, Depends, HTTPException, Response, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
+from app import attribution as signup_attribution
 from app.auth.deps import get_current_user
 from app.auth.schemas import CurrentUser, LoginRequest, RegisterRequest, TokenResponse
 from app.auth.service import (
@@ -143,6 +145,14 @@ async def register(data: RegisterRequest, response: Response) -> TokenResponse:
     )
     if is_internal_check:
         await pool.execute("UPDATE users SET is_internal = TRUE WHERE id = $1", user["id"])
+
+    # 2026-09-26 — first campaign touch from the web client (app/attribution.py).
+    first_touch = signup_attribution.clean(data.attribution)
+    if first_touch:
+        await pool.execute(
+            "UPDATE users SET signup_source = $1, signup_attribution = $2::jsonb WHERE id = $3",
+            signup_attribution.source_label(first_touch), json.dumps(first_touch), user["id"],
+        )
 
     # Generate and store email verification token
     verification_token = secrets.token_urlsafe(32)

@@ -1,6 +1,7 @@
 'use client'
 
 import { create } from 'zustand'
+import { readAttribution } from './attribution'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'
 
@@ -152,7 +153,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
-      body: JSON.stringify({ email, password, full_name: fullName, role }),
+      // 2026-09-26 — first campaign touch (lib/attribution.ts)
+      body: JSON.stringify({ email, password, full_name: fullName, role, attribution: readAttribution() ?? undefined }),
     })
 
     if (!res.ok) {

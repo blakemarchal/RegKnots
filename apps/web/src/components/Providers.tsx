@@ -4,6 +4,7 @@ import { useEffect } from 'react'
 import { HydrationGate } from './HydrationGate'
 import { NavigationProgress } from './NavigationProgress'
 import { apiRequest } from '@/lib/api'
+import { captureFirstTouch } from '@/lib/attribution'
 import { useAuthStore } from '@/lib/auth'
 
 // Sprint D6.37 — light/dark theme application.
@@ -23,6 +24,11 @@ function applyTheme(pref: ThemePref) {
 }
 
 export function Providers({ children }: { children: React.ReactNode }) {
+  // 2026-09-26 — record the first campaign touch for signup attribution.
+  useEffect(() => {
+    captureFirstTouch()
+  }, [])
+
   // Sprint D6.23e — HOTFIX: PWA service worker was caching stale page
   // content under the start-url cache, sending some users to /womenoffshore
   // when they visited / after login. The next-pwa config was already a

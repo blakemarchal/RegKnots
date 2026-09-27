@@ -613,6 +613,8 @@ class AdminUser(BaseModel):
     created_at: str
     last_active_at: str | None
     is_admin: bool
+    # 2026-09-26 — first-touch attribution label (app/attribution.py).
+    signup_source: str | None = None
 
 
 @router.get("/users", response_model=list[AdminUser])
@@ -629,7 +631,7 @@ async def list_users(
         SELECT u.id, u.email, u.full_name, u.role, u.subscription_tier,
                u.subscription_status, u.billing_interval, u.cancel_at_period_end,
                u.current_period_end, u.message_count, u.trial_ends_at,
-               u.created_at, u.is_admin,
+               u.created_at, u.is_admin, u.signup_source,
                (SELECT COUNT(*) FROM vessels v WHERE v.user_id = u.id) AS vessel_count,
                (
                  SELECT MAX(m.created_at)
@@ -662,9 +664,47 @@ async def list_users(
             created_at=r["created_at"].isoformat() if r["created_at"] else None,
             last_active_at=r["last_active_at"].isoformat() if r["last_active_at"] else None,
             is_admin=r["is_admin"],
+            signup_source=r["signup_source"],
         )
         for r in rows
     ]
+
+
+class SignupSourceRow(BaseModel):
+    source: str
+    signups: int
+    asked: int       # asked at least one question
+    paying: int
+
+
+@router.get("/signup-sources", response_model=list[SignupSourceRow])
+async def signup_sources(
+    _admin: Annotated[CurrentUser, Depends(require_admin)],
+    days: int = Query(default=90, ge=1, le=3650),
+) -> list[SignupSourceRow]:
+    """2026-09-26 — external signups grouped by first-touch source, with how
+    many went on to ask a question and how many pay. "(not recorded)" is
+    everyone who signed up before attribution existed."""
+    pool = await get_pool()
+    rows = await pool.fetch(
+        """
+        SELECT COALESCE(u.signup_source, '(not recorded)') AS source,
+               COUNT(*) AS signups,
+               COUNT(*) FILTER (WHERE EXISTS (
+                   SELECT 1 FROM conversations c
+                   JOIN messages m ON m.conversation_id = c.id
+                   WHERE c.user_id = u.id AND m.role = 'user')) AS asked,
+               COUNT(*) FILTER (WHERE u.subscription_tier IN ('cadet', 'mate', 'captain', 'pro')) AS paying
+        FROM users u
+        WHERE u.is_internal IS NOT TRUE AND u.is_admin IS NOT TRUE
+          AND u.created_at > NOW() - ($1 || ' days')::INTERVAL
+        GROUP BY 1
+        ORDER BY signups DESC, source
+        """,
+        str(days),
+    )
+    return [SignupSourceRow(source=r["source"], signups=r["signups"], asked=r["asked"], paying=r["paying"])
+            for r in rows]
 
 
 # ── Model usage ──────────────────────────────────────────────────────────────────

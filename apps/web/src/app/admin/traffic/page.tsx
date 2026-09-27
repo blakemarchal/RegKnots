@@ -20,6 +20,8 @@ interface CampaignRow { campaign: string; count: number }
 interface StatusRow { status: number; count: number }
 interface DayRow { day: string; human: number; bot: number }
 interface SlowRow { ts: string; uri: string; duration_ms: number; status: number }
+// 2026-09-26 — signups by first-touch source (users.signup_source)
+interface SignupSourceRow { source: string; signups: number; asked: number; paying: number }
 
 interface TrafficSummary {
   since: string
@@ -62,6 +64,14 @@ function TrafficContent() {
   const [summary, setSummary] = useState<TrafficSummary | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [signupSources, setSignupSources] = useState<SignupSourceRow[] | null>(null)
+
+  useEffect(() => {
+    if (!hydrated || !isAdmin) return
+    apiRequest<SignupSourceRow[]>('/admin/signup-sources?days=90')
+      .then(setSignupSources)
+      .catch(() => setSignupSources([]))
+  }, [hydrated, isAdmin])
 
   useEffect(() => {
     if (hydrated && !isAdmin) {
@@ -123,6 +133,12 @@ function TrafficContent() {
         <div className="flex flex-col gap-6">
           <Totals s={summary} />
           <ByDayChart rows={summary.by_day} />
+          <Card title="Signups by source (90 days, external users)">
+            <CountTable
+              rows={(signupSources ?? []).map(r => ({ key: r.source, count: r.signups, sub: `${r.asked} asked a question · ${r.paying} paying` }))}
+              empty={signupSources === null ? 'Loading…' : 'No signups in the last 90 days.'}
+            />
+          </Card>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <Card title="Top pages (humans)">
               <CountTable

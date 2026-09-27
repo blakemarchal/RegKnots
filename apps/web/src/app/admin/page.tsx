@@ -93,6 +93,8 @@ interface AdminUser {
   created_at: string
   last_active_at: string | null
   is_admin: boolean
+  // 2026-09-26 — first-touch attribution label
+  signup_source?: string | null
 }
 
 interface SentryIssue {
@@ -2340,6 +2342,10 @@ function AdminContent() {
                         <div>
                           <p className="font-mono text-[9px] text-[#6b7594] uppercase tracking-wider">Vessels</p>
                           <p className="font-mono text-xs text-[#f0ece4]/85">{u.vessel_count}</p>
+                        </div>
+                        <div>
+                          <p className="font-mono text-[9px] text-[#6b7594] uppercase tracking-wider">Signup source</p>
+                          <p className="font-mono text-xs text-[#f0ece4]/85 break-all">{u.signup_source ?? 'not recorded'}</p>
                         </div>
                       </div>
 

@@ -12,14 +12,23 @@ export function middleware(request: NextRequest) {
   // browser has an active session.
   const hasSession = request.cookies.has('refresh_token')
 
+  // 2026-09-26 — redirects keep the query string. `new URL('/landing', url)`
+  // dropped it, so a link to regknots.com/?utm_source=... lost its
+  // attribution before the page loaded.
+  const redirectTo = (path: string) => {
+    const url = request.nextUrl.clone()
+    url.pathname = path
+    return NextResponse.redirect(url)
+  }
+
   // Authenticated users hitting guest-only pages → send to app
   if (GUEST_ONLY.includes(pathname) && hasSession) {
-    return NextResponse.redirect(new URL('/', request.url))
+    return redirectTo('/')
   }
 
   // Unauthenticated users hitting the app root → send to landing
   if (pathname === '/' && !hasSession) {
-    return NextResponse.redirect(new URL('/landing', request.url))
+    return redirectTo('/landing')
   }
 
   return NextResponse.next()
