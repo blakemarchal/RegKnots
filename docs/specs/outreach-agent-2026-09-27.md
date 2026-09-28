@@ -34,7 +34,7 @@ and no signup had a recorded source.
 | Agent | A Claude desktop scheduled task (weekdays, morning) using the Gmail connector and web search. It runs on Blake's Claude plan: no API credits, no new service. It runs while the desktop app is open; a missed run fires on the next launch. |
 | Approval | The agent only creates **Gmail drafts**. Blake reviews, edits, and presses Send. Nothing sends automatically. |
 | Follow-ups | Two, in the same thread, 5 and 12 business days after Blake sends, only if there is no reply. Any reply or "no thanks" stops everything for that address. |
-| Tracking | Status lives in `leads.csv` (new, drafted, sent, replied, opted_out, no_contact, closed). Each email links to `regknots.com/fleet?src=ob-NNNN`, which redirects to the fleet-trial signup with `utm_source=outreach`, so a signup shows under "Signups by source" on the admin Traffic page (shipped 2026-09-27, `4abf1a6`). |
+| Tracking | Status lives in `leads.csv` (new, drafted, sent, replied, opted_out, bounced, no_contact, skipped, closed). Each email links to `regknots.com/fleet?src=ob-NNNN`, which redirects to the fleet-trial signup with `utm_source=outreach`, so a signup shows under "Signups by source" on the admin Traffic page (shipped 2026-09-27, `4abf1a6`). |
 | Volume | 5 drafts per weekday through 2026-10-02 while the new regknots.com mailbox warms up, then 10: about four months of runway on the towing list. |
 | Compliance | CAN-SPAM: honest From and subject lines, a physical postal address, a working opt-out that is honored at once. U.S. businesses only (no EU or Canada). |
 

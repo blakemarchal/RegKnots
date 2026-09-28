@@ -49,6 +49,8 @@ Step 1: update statuses from Gmail (read with the connector). For each row with 
 - If there is a message from `contact_email` after we wrote, set status `replied` and
   `replied_at`. If it asks to stop ("no thanks", "unsubscribe", "remove me", "not interested"),
   set status `opted_out` instead. Never draft anything else to that address.
+- If a delivery failure (from mailer-daemon or postmaster, or "Undeliverable" / "Delivery Status
+  Notification") names `contact_email`, set status `bounced` with the reason in the note.
 - If a draft you made 7+ days ago was neither sent nor kept, set status `skipped`.
 
 Step 2: follow-ups, for rows with status `sent` and no reply. Save each with the script, with
@@ -87,10 +89,11 @@ the new regknots.com mailbox warms up; 10 per run after that), preferring Gulf s
 Rules:
 - U.S. companies only.
 - Never use personal addresses from social media or data brokers.
-- Never send. Never draft to a row that is `opted_out`, `replied` or `closed`.
+- Never send. Never draft to a row that is `opted_out`, `replied`, `bounced` or `closed`.
 - Never create or edit drafts with the Gmail connector.
 - Never write regulatory content beyond the hooks.
 - If Gmail, the script or web search is unavailable, stop and log the error.
 
 Step 4: append to log.md, and end the run with the same summary: drafts created
-(company, hook), follow-ups drafted, replies and opt-outs found, and the `no_contact` count.
+(company, hook), follow-ups drafted, replies, opt-outs and bounces found, and the `no_contact`
+count.
