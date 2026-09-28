@@ -2,7 +2,20 @@ import type { NextConfig } from "next";
 import { withSentryConfig } from "@sentry/nextjs";
 import withPWA from "@ducanh2912/next-pwa";
 
-const nextConfig: NextConfig = {};
+const nextConfig: NextConfig = {
+  // Outreach short link (2026-09-28): regknots.com/fleet?src=ob-NNNN opens the fleet-trial
+  // signup. Next passes the request's own query (src) through to the destination.
+  async redirects() {
+    return [
+      {
+        source: "/fleet",
+        destination:
+          "/register?next=/workspaces&utm_source=outreach&utm_medium=email&utm_campaign=towing",
+        permanent: false,
+      },
+    ];
+  },
+};
 
 // Sprint D6.23f — DISABLE next-pwa entirely. The generated workbox SW
 // was caching `/` content under a NetworkFirst start-url cache, and
