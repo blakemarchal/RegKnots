@@ -135,6 +135,8 @@ _OCR_PAGE_RANGE = re.compile(r"^\[--- pages \d+-\d+ ---\]$")
 _SECTION_NVIC = re.compile(
     r"^(NVIC \d{1,2}-\d{2}(?: Ch-\d+)?)(?: §\d+| Encl\.\d*(?: §\d+)?)?$"
 )
+# section_title is cut here; a numbered line that does not fit also stays in the text
+_TITLE_MAX = 500
 
 
 # ── Data model ────────────────────────────────────────────────────────────────
@@ -599,14 +601,15 @@ def _split_sections(pages: list[list[str]], meta: NvicMeta, paged: bool) -> list
       "NVIC 06-72 Encl.1"   an enclosure, split into "Encl.1 §1"…"§k" only when
                             its numbered lines run exactly 1..k
 
-    A numbered line with no text of its own keeps its line as its text.
+    A numbered line with no text of its own keeps its line as its text, and one
+    too long for the title stays in the text as well (_paragraph).
     """
     circular, enclosures = _segments(pages, paged)
     base = f"NVIC {meta.number}"
     opening, parts = _number_split(circular, first_any=True)
     out = [_section(meta, base, meta.title, opening)]
-    out += [_section(meta, f"{base} §{n}", f"{meta.title} — {head}", body or [head])
-            for n, head, body in parts]
+    out += [_paragraph(meta, f"{base} §{n}", f"{meta.title} — {head}", head, line, body)
+            for n, head, body, line in parts]
     for k, lines in enclosures:
         name, label = (f"{base} Encl.{k}", f"Enclosure ({k})") if k else (f"{base} Encl.", "Enclosure")
         numbers = [s[0] for ln in lines if (s := _numbered(ln))]
@@ -615,8 +618,8 @@ def _split_sections(pages: list[list[str]], meta: NvicMeta, paged: bool) -> list
         else:
             opening, parts = lines, []
         out.append(_section(meta, name, f"{meta.title} — {label}", opening))
-        out += [_section(meta, f"{name} §{n}", f"{meta.title} — {label}: {head}", body or [head])
-                for n, head, body in parts]
+        out += [_paragraph(meta, f"{name} §{n}", f"{meta.title} — {label}: {head}", head, line, body)
+                for n, head, body, line in parts]
     # the names are unique by construction; merging is a safety net that warns
     return merge_duplicate_sections([s for s in out if s.full_text])
 
@@ -688,19 +691,34 @@ def _numbered(line: str) -> tuple[int, str] | None:
 
 def _number_split(
     lines: list[str], first_any: bool,
-) -> tuple[list[str], list[tuple[int, str, list[str]]]]:
-    """(opening lines, [(n, heading, body lines)]), taking numbered lines in
-    order: the first (any number if first_any, else 1), then only the next.
-    Any other numbered line (a list item, a restart) stays in the text."""
+) -> tuple[list[str], list[tuple[int, str, list[str], str]]]:
+    """(opening lines, [(n, heading, body lines, the numbered line)]), taking
+    numbered lines in order: the first (any number if first_any, else 1), then
+    only the next. Any other numbered line (a list item, a restart) stays in the text."""
     opening: list[str] = []
-    parts: list[tuple[int, str, list[str]]] = []
+    parts: list[tuple[int, str, list[str], str]] = []
     for ln in lines:
         s = _numbered(ln)
         if s and (s[0] == parts[-1][0] + 1 if parts else first_any or s[0] == 1):
-            parts.append((s[0], s[1], []))
+            parts.append((s[0], s[1], [], ln))
             continue
         (parts[-1][2] if parts else opening).append(ln)
     return opening, parts
+
+
+def _paragraph(meta: NvicMeta, number: str, title: str, head: str, line: str,
+               body: list[str]) -> Section:
+    """A numbered paragraph: its heading is in the title, and a paragraph with no
+    text of its own keeps its heading as its text.
+
+    2026-09-28 — a numbered line longer than the title holds stays in the text
+    too. OCR text keeps a whole paragraph on one line ("5. DISCUSSION. The Coast
+    Guard, ..."), and everything past the title's 500 chars was in no chunk:
+    17,606 chars in 59 sections of 24 of the 52 OCR NVICs. PDF text lines fit.
+    """
+    if len(title) > _TITLE_MAX:
+        body = [line] + body
+    return _section(meta, number, title, body or [head])
 
 
 def _section(meta: NvicMeta, number: str, title: str, lines: list[str]) -> Section:
@@ -708,7 +726,7 @@ def _section(meta: NvicMeta, number: str, title: str, lines: list[str]) -> Secti
         source                = SOURCE,
         title_number          = TITLE_NUMBER,
         section_number        = number,
-        section_title         = title[:500],
+        section_title         = title[:_TITLE_MAX],
         full_text             = "\n".join(lines).strip(),
         up_to_date_as_of      = meta.effective_date,
         parent_section_number = f"NVIC {meta.number}",

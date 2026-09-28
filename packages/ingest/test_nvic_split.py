@@ -74,6 +74,25 @@ def test_every_line_lands_in_one_section():
     assert {s.section_number: s.full_text for s in secs}["NVIC 06-72 §2"] == "Cancellation. None."
 
 
+def test_a_numbered_line_too_long_for_the_title_stays_in_the_text():
+    """2026-09-28 — OCR text keeps a paragraph on one line (NVIC 08-01 §5); past
+    the title's 500 chars it was in no chunk."""
+    text = ("DISCUSSION. The Coast Guard is establishing this interim approval program. "
+            + "Most navigation equipment approved under this NVIC is expected to be covered "
+              "by a Mutual Recognition Agreement with the European Union. " * 6
+            + "Details on the MRA may be obtained from:")
+    secs = nvic._split_sections([["1. PURPOSE. Short.", "2. " + text, "Commandant (G-MSE-4)"]],
+                                META, paged=False)
+    by = {s.section_number: s for s in secs}
+    assert len(by["NVIC 06-72 §2"].section_title) == 500
+    assert by["NVIC 06-72 §2"].full_text == "2. " + text + "\nCommandant (G-MSE-4)"
+    # a heading that fits is only in the title, as before
+    assert by["NVIC 06-72 §1"].full_text == "PURPOSE. Short."
+    # an enclosure's numbered paragraphs too
+    secs = _split(["1. PURPOSE. Short.", f"Enclosure (1) to NVIC 6-72\n1. {text}\n2. Next."])
+    assert {s.section_number: s.full_text for s in secs}["NVIC 06-72 Encl.1 §1"] == "1. " + text
+
+
 def test_out_of_order_toc_and_lowercase_numbered_lines_are_text():
     secs = _split(["""1. PURPOSE. This circular clarifies training requirements.
 2. DISCUSSION. The training covers:
