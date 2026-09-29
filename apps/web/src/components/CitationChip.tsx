@@ -2,6 +2,9 @@
 
 interface Props {
   sectionNumber: string
+  // 2026-09-29 — chip text when it names more than the section it opens,
+  // e.g. "46 CFR 140.410(b)" opening 46 CFR 140.410
+  label?: string
   sectionTitle: string
   source: string
   onTap: (source: string, sectionNumber: string, sectionTitle: string) => void
@@ -15,7 +18,7 @@ interface Props {
 // not-in-corpus warning inside the citation sheet. Before this change
 // verified citations and "verify this yourself" warnings shared the
 // same amber hue — a trust-signal inversion for compliance users.
-export function CitationChip({ sectionNumber, sectionTitle, source, onTap }: Props) {
+export function CitationChip({ sectionNumber, label = sectionNumber, sectionTitle, source, onTap }: Props) {
   return (
     <button
       onClick={() => onTap(source, sectionNumber, sectionTitle)}
@@ -23,9 +26,9 @@ export function CitationChip({ sectionNumber, sectionTitle, source, onTap }: Pro
         bg-teal-950/70 text-teal-300 border border-teal-800/60
         hover:bg-teal-900/70 hover:border-teal-500/60 hover:text-teal-200
         transition-colors duration-150 cursor-pointer leading-none align-baseline mx-0.5"
-      aria-label={`View verified regulation: ${sectionNumber}`}
+      aria-label={`View verified regulation: ${label}`}
     >
-      {sectionNumber}
+      {label}
     </button>
   )
 }
