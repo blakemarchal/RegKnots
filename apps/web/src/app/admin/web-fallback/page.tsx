@@ -18,8 +18,6 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import AuthGuard from '@/components/AuthGuard'
-import { AppHeader } from '@/components/AppHeader'
 import { apiRequest } from '@/lib/api'
 
 type Tier = 'verified' | 'consensus' | 'reference' | 'blocked'
@@ -87,15 +85,11 @@ const TIER_INFO: Record<Tier, { label: string; color: string }> = {
 
 
 export default function WebFallbackAdminPage() {
+  // 2026-09-29 — the admin layout supplies the auth gate, sidebar and background.
   return (
-    <AuthGuard>
-      <div className="min-h-screen bg-[#050811] text-[#f0ece4]">
-        <AppHeader title="Web fallback audit" />
-        <main className="max-w-6xl mx-auto px-4 sm:px-6 py-8">
-          <Content />
-        </main>
-      </div>
-    </AuthGuard>
+    <div className="px-4 md:px-8 py-6 md:py-8 max-w-[1500px] mx-auto">
+      <Content />
+    </div>
   )
 }
 
@@ -133,11 +127,8 @@ function Content() {
   return (
     <>
       <header className="mb-6">
-        <div className="text-xs font-mono uppercase tracking-wider text-[#6b7594] mb-2">
-          <Link href="/admin" className="text-[#2dd4bf] hover:underline">← Admin</Link>
-        </div>
-        <h1 className="text-2xl font-bold mb-1">Web fallback events</h1>
-        <p className="text-sm text-[#6b7594]">
+        <h1 className="font-display text-2xl md:text-3xl font-bold tracking-wide text-[#f0ece4] mb-1">Web fallback</h1>
+        <p className="font-mono text-xs text-[#8b93ad] leading-relaxed">
           Every fallback fire — single-LLM (Slice 1) and Big-3 ensemble (Slice 3).
           Use to audit which queries fired, which tier surfaced, and why blocked
           ones blocked.
@@ -452,7 +443,7 @@ function EventRow({
           {ev.conversation_id && (
             <div className="pt-2 border-t border-white/8">
               <Link
-                href={`/admin?tab=chats&conversation_id=${ev.conversation_id}`}
+                href={`/admin/chats?conversation_id=${ev.conversation_id}`}
                 className="px-3 py-1.5 rounded-md border border-white/10
                            text-xs font-medium text-[#f0ece4]/80 hover:bg-white/5
                            transition-colors inline-block"

@@ -1,3838 +1,457 @@
 'use client'
 
-import { useEffect, useState, useCallback, useMemo, Suspense } from 'react'
+// 2026-09-29 — admin dashboard. Replaces the Overview tab of the old
+// single-page admin (16 same-looking counters, 4 charts, no trends) with:
+// what needs attention, four KPIs with 26-week trends, growth and the
+// signup funnel, answer quality, money, and recent activity.
+// Data: /admin/stats (shared via AdminContext) + /admin/dashboard.
+// Old deep links (/admin?tab=chats&conversation_id=…) forward to the
+// section's own route.
+
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
-import AuthGuard from '@/components/AuthGuard'
-import { AppHeader } from '@/components/AppHeader'
-import { useAuthStore } from '@/lib/auth'
-import { apiRequest } from '@/lib/api'
-import { PilotSurveyModal } from '@/components/PilotSurveyModal'
-import { MilestoneCelebration } from '@/components/MilestoneCelebration'
-import { PartnersPanel } from '@/components/admin/PartnersPanel'
 import {
-  LineChart, Line, BarChart, Bar, PieChart, Pie, Cell,
-  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
+  Bar, CartesianGrid, ComposedChart, Legend, Line, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts'
+import { apiRequest } from '@/lib/api'
+import { useAdmin } from './_lib/AdminContext'
+import { fmtMoney, fmtRelative, fmtWeek, pct, plural } from './_lib/format'
+import type { DashboardData, RoleUsage, TopCitation } from './_lib/types'
+import { Card, Kpi, MeterBar, Page, Pill, Skeleton, TEXT_MUTED, btn } from './_components/ui'
 
-// ── Types ───────────────────────────────────────────────────────────────────────
-
-// Sprint D6.32 — restructured shape. See backend AdminStats model for the
-// section breakdown rationale. Frontend cards group by these sections.
-interface TierBreakdown {
-  // Sprint D6.91 — `cadet` joined the schema (entry-level tier).
-  // Optional on the frontend type for compatibility with any cached
-  // pre-D6.91 responses; backend always returns it (defaults to 0).
-  cadet?: number
-  mate: number
-  captain: number
-  pro_legacy: number
+const LEGACY_TABS: Record<string, string> = {
+  overview: '/admin',
+  users: '/admin/users',
+  chats: '/admin/chats',
+  partners: '/admin/partners',
+  features: '/admin/features',
+  data: '/admin/data',
+  jobs: '/admin/jobs',
+  email: '/admin/email',
+  system: '/admin/system',
+  content: '/admin/support',
 }
 
-interface HedgeEvent {
-  created_at: string
-  user_email: string | null
-  query: string
-  hedge_phrase: string
+const JUDGE_LABELS: Record<string, string> = {
+  complete_miss: 'complete miss',
+  partial_miss: 'partial miss',
+  precision_callout: 'precision callout',
+  false_hedge: 'false hedge',
+  unjudged: 'not judged yet',
 }
 
-interface AdminStats {
-  // Headline KPIs (Sprint D6.92 Overview redesign — totals row)
-  total_users: number
-  total_questions: number  // NEW D6.92
-  active_users_7d: number
-  questions_7d: number
-  bad_answer_rate_7d: number
-  // Subscriptions
-  subs_active: TierBreakdown
-  subs_past_due: number
-  subs_paused: number
-  trial_active: number
-  trial_expired: number
-  subs_monthly: number
-  subs_annual: number
-  paid_users_alltime: number
-  // Engagement
-  questions_today: number
-  avg_questions_per_active_user_7d: number
-  total_conversations: number
-  conversations_today: number
-  conversations_7d: number
-  active_users_24h: number
-  // Quality
-  citation_errors_7d: number
-  retrieval_misses_7d: number
-  hedge_rate_7d: number  // legacy regex-match rate
-  hedges_presented_7d?: number    // NEW D6.92 — judge-verified hedge count
-  hedges_presented_rate_7d?: number  // NEW D6.92 — rate
-  message_limit_reached: number
-  recent_hedges: HedgeEvent[]  // back-compat; UI no longer renders
-  // Business / cap signals (Sprint D6.92)
-  conversion_rate?: number    // 0–100; paid / total
-  cap_saturation_rate?: number  // 0–100; cadet+mate at ≥75% of cap
-  // Content awareness (Sprint D6.92)
-  support_tickets_open?: number
-  survey_responses_7d?: number
-  // Knowledge base
-  total_chunks: number
-  chunks_by_source: Record<string, number>
+const CAUSE_LABELS: Record<string, string> = {
+  CORPUS_GAP: 'corpus gap',
+  INTENT: 'intent',
+  VOCAB: 'vocabulary',
+  JURISDICTION: 'jurisdiction',
+  RANKING: 'ranking',
+  COSINE: 'similarity',
 }
 
-interface AdminUser {
-  id: string
-  email: string
-  full_name: string | null
-  role: string
-  subscription_tier: string
-  subscription_status: string
-  billing_interval: string | null
-  cancel_at_period_end: boolean
-  current_period_end: string | null
-  message_count: number
-  vessel_count: number
-  trial_ends_at: string | null
-  created_at: string
-  last_active_at: string | null
-  is_admin: boolean
-  // 2026-09-26 — first-touch attribution label
-  signup_source?: string | null
-}
+const TIER_LABELS: Record<string, string> = { cadet: 'Cadet', mate: 'Mate', captain: 'Captain', pro: 'Captain (legacy)' }
 
-interface SentryIssue {
-  id: string
-  title: string
-  level: string
-  count: number
-  first_seen: string | null
-  last_seen: string
-  permalink: string
-  link: string  // legacy alias, same value as permalink
-  project: string
-}
-
-interface CitationError {
-  id: string
-  conversation_id: string
-  unverified_citation: string
-  model_used: string | null
-  message_preview: string
-  created_at: string
-}
-
-interface SurveyResponse {
-  id: string
-  email: string
-  full_name: string | null
-  overall_rating: number
-  usefulness: string | null
-  favorite_feature: string | null
-  missing_feature: string | null
-  would_subscribe: boolean | null
-  price_feedback: string | null
-  vessel_type_used: string | null
-  additional_comments: string | null
-  created_at: string
-}
-
-interface SurveyAggregates {
-  total_responses: number
-  average_rating: number
-  would_subscribe_pct: number
-  top_missing_feature: string | null
-  responses: SurveyResponse[]
-}
-
-interface DayMessageCount {
-  day: string
-  message_count: number
-}
-
-interface TopCitation {
-  source: string
-  section_number: string
-  section_title: string | null
-  cite_count: number
-}
-
-interface VesselTypeUsage {
-  vessel_type: string
-  message_count: number
-  user_count: number
-}
-
-// Sprint D6.92 — Usage by role replaces Usage by vessel type on Overview.
-interface RoleUsage {
-  role: string
-  message_count: number
-  user_count: number
-}
-
-interface ModelUsageItem {
-  model: string
-  message_count: number
-  total_input_tokens: number
-  total_output_tokens: number
-}
-
-interface SupportTicket {
-  id: string
-  user_id: string
-  user_email: string
-  user_name: string | null
-  subject: string
-  message: string
-  status: 'open' | 'replied' | 'closed'
-  admin_reply: string | null
-  replied_at: string | null
-  created_at: string
-}
-
-interface FoundingEmailPreview {
-  subject: string
-  recipients: { email: string; name: string | null }[]
-  total_count: number
-  sample_html: string
-}
-
-interface AdminNotification {
-  id: string
-  title: string
-  body: string
-  notification_type: string
-  source: string | null
-  is_active: boolean
-  created_at: string
-}
-
-type TicketFilter = 'all' | 'open' | 'replied' | 'closed'
-
-// Sprint D6.92 — UserFilter type/list updated for D6.91 tier expansion.
-// 'pro' filter key kept for URL/state back-compat but now matches ANY
-// paying tier (cadet / mate / captain / pro / solo). Label flipped to
-// "Paid" to reflect the broader semantic. Per-tier filters (cadet /
-// mate / captain) added so admins can drill into a specific tier.
-type UserFilter =
-  | 'all'
-  | 'pro'      // ← back-compat key; now means "any paid tier"
-  | 'cadet'
-  | 'mate'
-  | 'captain'
-  | 'trial'
-  | 'expired'
-  | 'paused'
-  | 'canceled'
-  | 'monthly'
-  | 'annual'
-  | 'admin'
-
-const USER_FILTERS: { value: UserFilter; label: string }[] = [
-  { value: 'all', label: 'All' },
-  { value: 'pro', label: 'Paid' },
-  { value: 'cadet', label: 'Cadet' },
-  { value: 'mate', label: 'Mate' },
-  { value: 'captain', label: 'Captain' },
-  { value: 'trial', label: 'Trial' },
-  { value: 'expired', label: 'Expired' },
-  { value: 'monthly', label: 'Monthly' },
-  { value: 'annual', label: 'Annual' },
-  { value: 'paused', label: 'Paused' },
-  { value: 'canceled', label: 'Canceled' },
-  { value: 'admin', label: 'Admin' },
-]
-
-// Sprint D6.92 — colorblind-safe chart palette.
-//
-// Pre-D6.92 palette had three teals/greens (#2dd4bf, #1d9e75, #0f6e56)
-// in the first three slots, indistinguishable to deuteranope viewers
-// (~5% of mariners). Blake flagged: "I cannot see the difference
-// between Opus and Sonnet well." Replaced with the Okabe-Ito palette
-// (Okabe & Ito 2008) which is the industry standard for colorblind-safe
-// categorical color sets — explicitly designed to be distinguishable
-// across all three major color-vision deficiency types.
-//
-// Color names in order:  orange, sky blue, bluish green, yellow, blue,
-//                        vermillion, reddish purple, black-substitute.
-// The yellow is light enough that we substitute a darker gold (#dbab09)
-// for legibility on the dark dashboard. Final 8th slot is teal-gray
-// (rather than literal black) for the same reason.
-const CHART_COLORS = [
-  '#e69f00',  // orange
-  '#56b4e9',  // sky blue
-  '#009e73',  // bluish green
-  '#dbab09',  // gold (darker yellow for dark theme)
-  '#0072b2',  // blue
-  '#d55e00',  // vermillion
-  '#cc79a7',  // reddish purple
-  '#94a3b8',  // teal-gray (replaces literal black for dark theme)
-]
-
-// Read-only admin emails — mirrors backend READONLY_ADMIN_EMAILS
-// (Karynn promoted to full admin 2026-04-12)
-const READONLY_ADMIN_EMAILS = new Set<string>([])
-
-// ── Stat card ───────────────────────────────────────────────────────────────────
-
-function StatCard({ label, value, wide }: { label: string; value: string | number; wide?: boolean }) {
-  return (
-    <div className={`bg-[#111827] rounded-xl border border-white/8 px-4 py-3 ${wide ? 'col-span-full' : ''}`}>
-      <p className="font-mono text-[10px] text-[#6b7594] uppercase tracking-wider">{label}</p>
-      <p className="font-mono text-2xl font-bold text-[#2dd4bf] mt-1">{typeof value === 'number' ? value.toLocaleString() : value}</p>
-    </div>
-  )
-}
-
-// Sprint D6.77 — replaces the previous flex-wrap inline-text dump with a
-// sorted grid that surfaces the largest sources first and collapses the
-// long tail. Karynn's UX request: quick-glance insight, not a dense
-// slab of text. Top-12 by chunk count visible by default; remaining
-// sources behind a single "Show all" toggle.
-function RegulationChunksCard({
-  total, bySource,
-}: { total: number; bySource: Record<string, number> }) {
-  const [expanded, setExpanded] = useState(false)
-  const sorted = useMemo(
-    () =>
-      Object.entries(bySource)
-        .sort((a, b) => b[1] - a[1]),
-    [bySource],
-  )
-  const visible = expanded ? sorted : sorted.slice(0, 12)
-  const hiddenCount = sorted.length - 12
-  const maxCount = sorted.length > 0 ? sorted[0][1] : 1
-
-  return (
-    <div className="bg-[#111827] rounded-xl border border-white/8 px-4 py-3">
-      <div className="flex items-baseline justify-between gap-3">
-        <div>
-          <p className="font-mono text-[10px] text-[#6b7594] uppercase tracking-wider">
-            Regulation Chunks
-          </p>
-          <p className="font-mono text-2xl font-bold text-[#2dd4bf] mt-1">
-            {total.toLocaleString()}
-            <span className="font-mono text-xs font-normal text-[#6b7594] ml-2">
-              across {sorted.length} sources
-            </span>
-          </p>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-x-3 gap-y-1.5 mt-3">
-        {visible.map(([src, cnt]) => {
-          const widthPct = Math.max(4, Math.round((cnt / maxCount) * 100))
-          return (
-            <div key={src} className="min-w-0">
-              <div className="flex items-baseline justify-between gap-2">
-                <span className="font-mono text-[11px] text-[#2dd4bf]/85 truncate" title={src}>
-                  {src}
-                </span>
-                <span className="font-mono text-[11px] text-[#f0ece4]/70 tabular-nums flex-shrink-0">
-                  {cnt.toLocaleString()}
-                </span>
-              </div>
-              {/* Quick visual proportion — bar tracks how dominant this source is. */}
-              <div className="h-0.5 bg-white/5 rounded-full overflow-hidden mt-0.5">
-                <div
-                  className="h-full bg-[#2dd4bf]/40 rounded-full"
-                  style={{ width: `${widthPct}%` }}
-                />
-              </div>
-            </div>
-          )
-        })}
-      </div>
-
-      {hiddenCount > 0 && (
-        <button
-          onClick={() => setExpanded(e => !e)}
-          className="mt-3 font-mono text-[11px] text-[#2dd4bf] hover:underline"
-        >
-          {expanded ? `Show top 12 only` : `Show all ${sorted.length} sources (+${hiddenCount} more)`}
-        </button>
-      )}
-    </div>
-  )
-}
-
-// ── Date formatting ─────────────────────────────────────────────────────────────
-
-function fmtDate(iso: string | null): string {
-  if (!iso) return '-'
-  return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' })
-}
-
-function fmtRelative(iso: string | null): string {
-  if (!iso) return '-'
-  const then = new Date(iso).getTime()
-  const diffSec = Math.max(0, Math.round((Date.now() - then) / 1000))
-  if (diffSec < 60) return `${diffSec}s ago`
-  const diffMin = Math.round(diffSec / 60)
-  if (diffMin < 60) return `${diffMin} min ago`
-  const diffHr = Math.round(diffMin / 60)
-  if (diffHr < 24) return `${diffHr}h ago`
-  const diffDay = Math.round(diffHr / 24)
-  if (diffDay < 30) return `${diffDay}d ago`
-  // Fall back to absolute for older items
-  return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' })
-}
-
-// ── Admin content ───────────────────────────────────────────────────────────────
-
-function AdminContent() {
+function useLegacyTabRedirect() {
   const router = useRouter()
-  const user = useAuthStore((s) => s.user)
-  const isAdmin = user?.is_admin ?? false
-  const isReadOnly = READONLY_ADMIN_EMAILS.has(user?.email ?? '')
-  const hydrated = useAuthStore((s) => s.hydrated)
-  const [isOwner, setIsOwner] = useState(false)
-
-  // Fetch role from backend to determine owner vs admin
+  const params = useSearchParams()
   useEffect(() => {
-    apiRequest<{ is_owner: boolean }>('/admin/role')
-      .then((r) => setIsOwner(r.is_owner))
-      .catch(() => setIsOwner(false))
-  }, [])
+    const tab = params.get('tab')
+    if (!tab || !(tab in LEGACY_TABS) || tab === 'overview') return
+    const cid = params.get('conversation_id')
+    router.replace(cid ? `${LEGACY_TABS[tab]}?conversation_id=${encodeURIComponent(cid)}` : LEGACY_TABS[tab])
+  }, [params, router])
+}
 
-  const [stats, setStats] = useState<AdminStats | null>(null)
-  const [users, setUsers] = useState<AdminUser[]>([])
-  const [usersOffset, setUsersOffset] = useState(0)
-  const [hasMore, setHasMore] = useState(true)
-  const [userSearch, setUserSearch] = useState('')
-  const [userFilter, setUserFilter] = useState<UserFilter>('all')
-  const [loading, setLoading] = useState(true)
-  const [resetting, setResetting] = useState<string | null>(null)
-  const [actionLoading, setActionLoading] = useState<string | null>(null)
-  const [expandedUser, setExpandedUser] = useState<string | null>(null)
-  const [deletingUser, setDeletingUser] = useState<string | null>(null)
-  const [emailSending, setEmailSending] = useState<string | null>(null)
-  const [emailToast, setEmailToast] = useState<{ msg: string; ok: boolean } | null>(null)
-  const [sentryIssues, setSentryIssues] = useState<SentryIssue[]>([])
-  const [sentryLoading, setSentryLoading] = useState(true)
-  const [exporting, setExporting] = useState<string | null>(null)
-  const [citationErrors, setCitationErrors] = useState<CitationError[]>([])
-  const [citationLoading, setCitationLoading] = useState(true)
-  const [expandedCitation, setExpandedCitation] = useState<string | null>(null)
-  const [surveyData, setSurveyData] = useState<SurveyAggregates | null>(null)
-  const [surveyLoading, setSurveyLoading] = useState(true)
-  const [surveyPreview, setSurveyPreview] = useState(false)
+interface AttentionItem {
+  key: string
+  text: string
+  href: string
+  tone: 'amber' | 'red'
+}
 
-  // Internal filtering toggle
-  const [excludeInternal, setExcludeInternal] = useState(true)
-
-  useEffect(() => {
-    const stored = localStorage.getItem('admin_exclude_internal')
-    if (stored === 'false') setExcludeInternal(false)
-  }, [])
-
-  // ── Tab state ───────────────────────────────────────────────────────────
-  type AdminTab = 'overview' | 'users' | 'chats' | 'content' | 'email' | 'data' | 'jobs' | 'system' | 'partners' | 'features'
-  const ADMIN_TABS: ReadonlySet<AdminTab> = new Set([
-    'overview', 'users', 'chats', 'content', 'email',
-    'data', 'jobs', 'system', 'partners', 'features',
-  ])
-  const [activeTab, setActiveTab] = useState<AdminTab>(() => {
-    if (typeof window === 'undefined') return 'overview'
-    const stored = window.localStorage.getItem('admin_active_tab') as AdminTab | null
-    return stored || 'overview'
-  })
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      window.localStorage.setItem('admin_active_tab', activeTab)
-    }
-  }, [activeTab])
-
-  // ── Deep-link support: /admin?tab=chats&conversation_id=<id> ────────────
-  // Used by /admin/hedge-audit + /admin/web-fallback to jump straight to a
-  // conversation. The searchParams are read once on mount; the tab switch
-  // wins over the localStorage-restored tab.
-  const searchParams = useSearchParams()
-  const [initialChatId, setInitialChatId] = useState<string | null>(null)
-  useEffect(() => {
-    const tabParam = searchParams.get('tab') as AdminTab | null
-    if (tabParam && ADMIN_TABS.has(tabParam)) {
-      setActiveTab(tabParam)
-    }
-    const cidParam = searchParams.get('conversation_id')
-    if (cidParam) {
-      setInitialChatId(cidParam)
-    }
-    // Intentionally not including ADMIN_TABS in deps — it's a stable Set
-    // declared in render, but we only want to react to URL changes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams])
-
-  // Analytics state
-  const [messagesPerDay, setMessagesPerDay] = useState<DayMessageCount[]>([])
+export default function AdminDashboard() {
+  useLegacyTabRedirect()
+  const { stats, sentry, ei, excludeInternal, refresh, updatedAt } = useAdmin()
+  const [dash, setDash] = useState<DashboardData | null>(null)
+  const [dashError, setDashError] = useState(false)
   const [topCitations, setTopCitations] = useState<TopCitation[]>([])
-  const [vesselUsage, setVesselUsage] = useState<VesselTypeUsage[]>([])
-  // Sprint D6.92 — role usage replaces vessel usage on Overview.
-  const [roleUsage, setRoleUsage] = useState<RoleUsage[]>([])
-  const [modelUsage, setModelUsage] = useState<ModelUsageItem[]>([])
-  const [analyticsLoading, setAnalyticsLoading] = useState(true)
+  const [roles, setRoles] = useState<RoleUsage[]>([])
 
-  // Support tickets state
-  const [tickets, setTickets] = useState<SupportTicket[]>([])
-  const [ticketsLoading, setTicketsLoading] = useState(true)
-  const [ticketFilter, setTicketFilter] = useState<TicketFilter>('all')
-  const [expandedTicket, setExpandedTicket] = useState<string | null>(null)
+  const load = useCallback(() => {
+    setDashError(false)
+    apiRequest<DashboardData>(`/admin/dashboard?exclude_internal=${ei}&weeks=26`)
+      .then(setDash)
+      .catch(() => setDashError(true))
+    apiRequest<TopCitation[]>(`/admin/analytics/top-citations?exclude_internal=${ei}`).then(setTopCitations).catch(() => {})
+    apiRequest<RoleUsage[]>(`/admin/analytics/usage-by-role?exclude_internal=${ei}`).then(setRoles).catch(() => {})
+  }, [ei])
 
-  // Founding member email state
-  const [foundingPreview, setFoundingPreview] = useState<FoundingEmailPreview | null>(null)
-  const [foundingLoading, setFoundingLoading] = useState(true)
-  const [foundingAction, setFoundingAction] = useState<'test' | 'send' | null>(null)
-  const [foundingResult, setFoundingResult] = useState<{ msg: string; ok: boolean } | null>(null)
+  useEffect(() => { setDash(null); load() }, [load])
 
-  // Notifications state
-  const [notifications, setNotifications] = useState<AdminNotification[]>([])
-  const [notifTitle, setNotifTitle] = useState('')
-  const [notifBody, setNotifBody] = useState('')
-  const [notifType, setNotifType] = useState<'regulation_update' | 'system' | 'announcement'>('regulation_update')
-  const [notifSource, setNotifSource] = useState('')
-  const [notifSending, setNotifSending] = useState(false)
-  const [notifToast, setNotifToast] = useState<{ msg: string; ok: boolean } | null>(null)
-  const [notifFilter, setNotifFilter] = useState<'active' | 'all'>('active')
-  const [notifFormOpen, setNotifFormOpen] = useState(false)
+  const weeks = dash?.weeks ?? []
+  const last4 = weeks.slice(-4)
+  const signups30 = last4.reduce((n, w) => n + w.signups, 0)
+  const paying = stats
+    ? (stats.subs_active.cadet ?? 0) + stats.subs_active.mate + stats.subs_active.captain + stats.subs_active.pro_legacy
+    : null
 
-  // Custom email state
-  const [customSubject, setCustomSubject] = useState('')
-  const [customBody, setCustomBody] = useState('')
-  // Sprint D6.91 — added expired/cadet/mate/captain/wheelhouse so the
-  // admin sender can target each paid tier and the trial-expired bucket
-  // without hand-pasting email lists.
-  const [customFilter, setCustomFilter] = useState<
-    'all' | 'pro' | 'trial' | 'expired' |
-    'cadet' | 'mate' | 'captain' | 'wheelhouse' | 'custom'
-  >('all')
-  const [customEmails, setCustomEmails] = useState('')
-  const [customSending, setCustomSending] = useState(false)
-  const [customToast, setCustomToast] = useState<{ msg: string; ok: boolean } | null>(null)
-  const [customCount, setCustomCount] = useState<number | null>(null)
-  const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({})
-  const [ticketActionId, setTicketActionId] = useState<string | null>(null)
-  const [ticketToast, setTicketToast] = useState<{ msg: string; ok: boolean } | null>(null)
+  const attention = useMemo<AttentionItem[]>(() => {
+    if (!stats) return []
+    const items: AttentionItem[] = []
+    const tickets = stats.support_tickets_open ?? 0
+    if (tickets) items.push({ key: 'tickets', text: `${plural(tickets, 'support ticket')} waiting for a reply`, href: '/admin/support', tone: 'amber' })
+    const surveys = stats.survey_responses_7d ?? 0
+    if (surveys) items.push({ key: 'surveys', text: `${plural(surveys, 'new survey response')} this week`, href: '/admin/support#surveys', tone: 'amber' })
+    if (sentry?.length) items.push({ key: 'sentry', text: `${plural(sentry.length, 'unresolved app error')} in Sentry`, href: '/admin/system#errors', tone: 'red' })
+    if (stats.citation_errors_7d) items.push({ key: 'cites', text: `${plural(stats.citation_errors_7d, 'unverified citation')} this week`, href: '/admin/citations', tone: 'red' })
+    if (dash && dash.quality.hedged_7d) {
+      items.push({
+        key: 'hedged',
+        text: `${dash.quality.hedged_7d} of ${plural(dash.quality.answers_7d, 'answer')} hedged this week`,
+        href: '/admin/hedge-audit',
+        tone: 'amber',
+      })
+    }
+    const pastDue = stats.subs_past_due + stats.subs_paused
+    if (pastDue) items.push({ key: 'pastdue', text: `${plural(pastDue, 'subscription')} past due or paused`, href: '/admin/users?filter=paused', tone: 'red' })
+    if (dash?.attention.trials_ending_7d) {
+      items.push({ key: 'trials', text: `${plural(dash.attention.trials_ending_7d, 'trial')} ending in the next 7 days`, href: '/admin/users?filter=trial', tone: 'amber' })
+    }
+    if (stats.web_fallback_thumbs_down_7d) {
+      items.push({ key: 'wf', text: `${plural(stats.web_fallback_thumbs_down_7d, 'thumbs-down')} on web answers this week`, href: '/admin/web-fallback', tone: 'amber' })
+    }
+    return items
+  }, [stats, sentry, dash])
 
-  const ei = excludeInternal ? 'true' : 'false'
-
-  const filteredUsers = useMemo(() => {
-    const q = userSearch.trim().toLowerCase()
-    const now = Date.now()
-    return users.filter((u) => {
-      if (q) {
-        const hay = `${u.email} ${u.full_name ?? ''}`.toLowerCase()
-        if (!hay.includes(q)) return false
+  return (
+    <Page
+      title="Dashboard"
+      description={
+        <>
+          {excludeInternal ? 'Real users only: admin, internal and test accounts are left out.' : 'Including internal and test accounts.'}
+          {updatedAt ? ` Updated ${fmtRelative(new Date(updatedAt).toISOString())}.` : ''}
+        </>
       }
-      if (userFilter === 'all') return true
-      const trialTs = u.trial_ends_at ? new Date(u.trial_ends_at).getTime() : null
-      // Sprint D6.92 — paid tier recognition fix. Pre-fix this was narrow
-      // to `tier === 'pro'`, which mis-classified the first Cadet customer
-      // (Nathaniel Leachman, 2026-05-14) as "Expired" because his account
-      // dropped into the `isExpired` fallthrough. The five paying tiers
-      // are cadet (D6.91), mate, captain, and legacy pro/solo.
-      const isPaid =
-        u.subscription_status === 'active' &&
-        (u.subscription_tier === 'cadet' ||
-         u.subscription_tier === 'mate' ||
-         u.subscription_tier === 'captain' ||
-         u.subscription_tier === 'pro' ||
-         u.subscription_tier === 'solo')
-      const isPaused = u.subscription_status === 'paused'
-      const isCanceled = u.subscription_status === 'canceled' || u.subscription_status === 'canceling'
-      const isTrial = !isPaid && !isPaused && !isCanceled && trialTs !== null && trialTs > now
-      const isExpired = !isPaid && !isPaused && !isCanceled && (trialTs === null || trialTs <= now)
-      switch (userFilter) {
-        // 'pro' filter keeps its name for URL/state back-compat but
-        // matches any paying tier now (label updated to "Paid" in the
-        // USER_FILTERS array).
-        case 'pro': return isPaid
-        // Sprint D6.92 — per-tier filters added for parity with the
-        // admin custom-email filter row. Lets admins drill into a
-        // specific paid tier without scrolling the whole table.
-        case 'cadet':   return u.subscription_tier === 'cadet'   && u.subscription_status === 'active'
-        case 'mate':    return u.subscription_tier === 'mate'    && u.subscription_status === 'active'
-        case 'captain': return (u.subscription_tier === 'captain' || u.subscription_tier === 'pro')
-                              && u.subscription_status === 'active'
-        case 'trial': return isTrial
-        case 'expired': return isExpired
-        case 'paused': return isPaused
-        case 'canceled': return isCanceled
-        case 'monthly': return isPaid && u.billing_interval === 'month'
-        case 'annual': return isPaid && u.billing_interval === 'year'
-        case 'admin': return u.is_admin
-        default: return true
-      }
-    })
-  }, [users, userSearch, userFilter])
-
-  const [statsError, setStatsError] = useState(false)
-
-  const fetchStats = useCallback(() => {
-    setStatsError(false)
-    apiRequest<AdminStats>(`/admin/stats?exclude_internal=${ei}`)
-      .then(setStats)
-      .catch((err) => {
-        console.error('Failed to fetch admin stats:', err)
-        setStatsError(true)
-      })
-  }, [ei])
-
-  // Sprint D6.92 — page size bumped 50 → 200 (matches backend's max).
-  // Pre-bump: with 55+ total users, position-#51-and-back fell off page
-  // 1, including Nate (the first Cadet conversion at created_at=#61 in
-  // the DESC order). His row was invisible in the admin Users panel
-  // even though Overview stats correctly counted him. 200 covers us
-  // comfortably until ~3-4x current user count; the existing Load More
-  // button still wires through if we ever exceed it.
-  const fetchUsers = useCallback((offset: number, append: boolean) => {
-    apiRequest<AdminUser[]>(`/admin/users?limit=200&offset=${offset}&exclude_internal=${ei}`)
-      .then((data) => {
-        setUsers((prev) => append ? [...prev, ...data] : data)
-        setHasMore(data.length === 200)
-      })
-      .catch(() => {})
-  }, [ei])
-
-  const fetchSentry = useCallback(() => {
-    apiRequest<SentryIssue[]>('/admin/sentry-issues')
-      .then(setSentryIssues)
-      .catch(() => {})
-      .finally(() => setSentryLoading(false))
-  }, [])
-
-  const fetchCitations = useCallback(() => {
-    apiRequest<CitationError[]>(`/admin/citation-errors?limit=50&exclude_internal=${ei}`)
-      .then(setCitationErrors)
-      .catch(() => {})
-      .finally(() => setCitationLoading(false))
-  }, [ei])
-
-  const fetchSurvey = useCallback(() => {
-    apiRequest<SurveyAggregates>('/survey/admin/responses')
-      .then(setSurveyData)
-      .catch(() => {})
-      .finally(() => setSurveyLoading(false))
-  }, [])
-
-  const fetchAnalytics = useCallback(() => {
-    setAnalyticsLoading(true)
-    Promise.all([
-      apiRequest<DayMessageCount[]>(`/admin/analytics/messages-per-day?exclude_internal=${ei}`).catch(() => []),
-      apiRequest<TopCitation[]>(`/admin/analytics/top-citations?exclude_internal=${ei}`).catch(() => []),
-      // Sprint D6.92 — Vessel-type swapped for Role on Overview. Keep
-      // vessel-type fetch in case any other view references it later;
-      // both endpoints exist on the backend.
-      apiRequest<VesselTypeUsage[]>(`/admin/analytics/usage-by-vessel-type?exclude_internal=${ei}`).catch(() => []),
-      apiRequest<ModelUsageItem[]>('/admin/model-usage').catch(() => []),
-      apiRequest<RoleUsage[]>(`/admin/analytics/usage-by-role?exclude_internal=${ei}`).catch(() => []),
-    ]).then(([mpd, tc, vu, mu, ru]) => {
-      setMessagesPerDay(mpd)
-      setTopCitations(tc)
-      setVesselUsage(vu)
-      setModelUsage(mu)
-      setRoleUsage(ru)
-    }).finally(() => setAnalyticsLoading(false))
-  }, [ei])
-
-  const fetchTickets = useCallback(() => {
-    apiRequest<SupportTicket[]>('/admin/support-tickets')
-      .then(setTickets)
-      .catch(() => {})
-      .finally(() => setTicketsLoading(false))
-  }, [])
-
-  const fetchFoundingPreview = useCallback(() => {
-    apiRequest<FoundingEmailPreview>('/admin/founding-email/preview')
-      .then(setFoundingPreview)
-      .catch(() => {})
-      .finally(() => setFoundingLoading(false))
-  }, [])
-
-  const fetchNotifications = useCallback(() => {
-    apiRequest<AdminNotification[]>('/admin/notifications')
-      .then(setNotifications)
-      .catch(() => {})
-  }, [])
-
-  async function createNotification() {
-    if (!notifTitle.trim() || !notifBody.trim()) {
-      setNotifToast({ msg: 'Title and body are required', ok: false })
-      setTimeout(() => setNotifToast(null), 4000)
-      return
-    }
-    setNotifSending(true)
-    try {
-      await apiRequest('/admin/notifications', {
-        method: 'POST',
-        body: JSON.stringify({
-          title: notifTitle.trim(),
-          body: notifBody.trim(),
-          notification_type: notifType,
-          source: notifSource.trim() || null,
-        }),
-      })
-      setNotifTitle('')
-      setNotifBody('')
-      setNotifSource('')
-      setNotifToast({ msg: 'Notification published', ok: true })
-      fetchNotifications()
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Failed to publish'
-      setNotifToast({ msg, ok: false })
-    }
-    setNotifSending(false)
-    setTimeout(() => setNotifToast(null), 4000)
-  }
-
-  async function toggleNotification(id: string) {
-    try {
-      await apiRequest(`/admin/notifications/${id}`, { method: 'PATCH' })
-      fetchNotifications()
-    } catch {
-      setNotifToast({ msg: 'Failed to toggle', ok: false })
-      setTimeout(() => setNotifToast(null), 4000)
-    }
-  }
-
-  // Custom email: fetch recipient count when filter changes
-  useEffect(() => {
-    if (customFilter === 'custom') { setCustomCount(null); return }
-    apiRequest<{ count: number }>(`/admin/custom-email-count?filter=${customFilter}`)
-      .then((r) => setCustomCount(r.count))
-      .catch(() => setCustomCount(null))
-  }, [customFilter])
-
-  async function sendCustomEmail() {
-    if (!customSubject.trim() || !customBody.trim()) {
-      setCustomToast({ msg: 'Subject and body are required', ok: false })
-      setTimeout(() => setCustomToast(null), 4000)
-      return
-    }
-    const emails = customFilter === 'custom'
-      ? customEmails.split(/[,\n]+/).map(e => e.trim()).filter(Boolean)
-      : undefined
-    if (customFilter === 'custom' && (!emails || emails.length === 0)) {
-      setCustomToast({ msg: 'Enter at least one email address', ok: false })
-      setTimeout(() => setCustomToast(null), 4000)
-      return
-    }
-    setCustomSending(true)
-    try {
-      const result = await apiRequest<{ sent: number; failed: number; failed_emails: string[] }>(
-        '/admin/send-custom-email',
-        {
-          method: 'POST',
-          body: JSON.stringify({
-            subject: customSubject.trim(),
-            body_text: customBody.trim(),
-            recipient_filter: customFilter,
-            custom_emails: emails,
-          }),
-        }
-      )
-      setCustomToast({
-        msg: `Sent to ${result.sent} user${result.sent !== 1 ? 's' : ''}${result.failed ? ` (${result.failed} failed)` : ''}`,
-        ok: result.failed === 0,
-      })
-      if (result.failed === 0) { setCustomSubject(''); setCustomBody(''); setCustomEmails('') }
-    } catch (e) {
-      setCustomToast({ msg: e instanceof Error ? e.message : 'Send failed', ok: false })
-    }
-    setCustomSending(false)
-    setTimeout(() => setCustomToast(null), 6000)
-  }
-
-  useEffect(() => {
-    if (hydrated && !isAdmin) {
-      router.replace('/')
-      return
-    }
-    if (!hydrated) return
-
-    setLoading(true)
-    fetchStats()
-    fetchUsers(0, false)
-    fetchSentry()
-    fetchCitations()
-    fetchSurvey()
-    fetchAnalytics()
-    fetchTickets()
-    fetchFoundingPreview()
-    fetchNotifications()
-
-    const interval = setInterval(() => { fetchStats(); fetchSentry(); fetchCitations(); fetchSurvey(); fetchAnalytics(); fetchTickets() }, 60_000)
-    return () => clearInterval(interval)
-  }, [hydrated, isAdmin, router, fetchStats, fetchUsers, fetchSentry, fetchCitations, fetchSurvey, fetchAnalytics, fetchTickets, fetchFoundingPreview, fetchNotifications])
-
-  function toggleExcludeInternal() {
-    const next = !excludeInternal
-    setExcludeInternal(next)
-    setStats(null)
-    localStorage.setItem('admin_exclude_internal', String(next))
-  }
-
-  function loadMore() {
-    const next = usersOffset + 50
-    setUsersOffset(next)
-    fetchUsers(next, true)
-  }
-
-  async function resetUser(userId: string, email: string) {
-    if (!confirm(`Reset pilot account for ${email}? This deletes all their conversations and restarts their trial.`)) return
-    setResetting(userId)
-    try {
-      await apiRequest(`/admin/reset-user/${userId}`, { method: 'POST' })
-      fetchUsers(0, false)
-      setUsersOffset(0)
-      fetchStats()
-    } catch { /* ignore */ }
-    setResetting(null)
-  }
-
-  async function deleteUser(userId: string, email: string) {
-    if (!confirm(
-      `Permanently delete ${email}? This removes all their conversations, vessels, and account data. This cannot be undone.`
-    )) return
-    setDeletingUser(userId)
-    try {
-      await apiRequest<{ deleted: boolean; email: string }>(
-        `/admin/users/${userId}`,
-        { method: 'DELETE' },
-      )
-      setExpandedUser((prev) => (prev === userId ? null : prev))
-      fetchUsers(0, false)
-      setUsersOffset(0)
-      fetchStats()
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Failed to delete user'
-      alert(msg)
-    }
-    setDeletingUser(null)
-  }
-
-  async function resetAllPilots() {
-    if (!confirm('Reset ALL non-admin pilot accounts? This deletes all their conversations and restarts their trials.')) return
-    setResetting('all')
-    try {
-      const res = await apiRequest<{ reset_count: number }>('/admin/reset-all-pilots', { method: 'POST' })
-      alert(`Reset ${res.reset_count} pilot accounts.`)
-      fetchUsers(0, false)
-      setUsersOffset(0)
-      fetchStats()
-    } catch { /* ignore */ }
-    setResetting(null)
-  }
-
-  async function adminAction(userId: string, action: string, label: string) {
-    if (!confirm(`${label} for this user?`)) return
-    setActionLoading(`${userId}-${action}`)
-    try {
-      await apiRequest(`/admin/${action}/${userId}`, { method: 'POST' })
-      fetchUsers(0, false)
-      setUsersOffset(0)
-      fetchStats()
-    } catch { /* ignore */ }
-    setActionLoading(null)
-  }
-
-  // Sprint D6.3c — Owner can set/clear referral_source on a user.
-  // Used to test referral-aware pricing or correct lost attribution.
-  async function setReferralSource(userId: string, currentEmail: string) {
-    const next = window.prompt(
-      `Set referral source for ${currentEmail}.\n\n` +
-      `Examples: womenoffshore, mercyships, mission-to-seafarers\n` +
-      `Leave blank to clear.`,
-    )
-    if (next === null) return // user cancelled
-    setActionLoading(`${userId}-referral-source`)
-    try {
-      await apiRequest(`/admin/users/${userId}/referral-source`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ referral_source: next.trim() || null }),
-      })
-      fetchUsers(0, false)
-      setUsersOffset(0)
-    } catch {
-      // Silent — admin can re-try; existing pattern in this file.
-    }
-    setActionLoading(null)
-  }
-
-  async function sendTestEmail(type: string) {
-    setEmailSending(type)
-    setEmailToast(null)
-    try {
-      const res = await apiRequest<{ success: boolean; type: string; recipient: string }>(
-        '/admin/test-email',
-        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type }) },
-      )
-      setEmailToast({ msg: `Sent ${res.type} email to ${res.recipient}`, ok: true })
-    } catch {
-      setEmailToast({ msg: `Failed to send ${type} email`, ok: false })
-    }
-    setEmailSending(null)
-    setTimeout(() => setEmailToast(null), 4000)
-  }
-
-  async function simulateExpiry(userId: string, email: string) {
-    if (!confirm(`Simulate trial expiry for ${email}? This sets their trial to yesterday.`)) return
-    setActionLoading(`${userId}-simulate-expiry`)
-    try {
-      await apiRequest(`/admin/simulate-expiry/${userId}`, { method: 'POST' })
-      fetchUsers(0, false)
-      setUsersOffset(0)
-      fetchStats()
-    } catch { /* ignore */ }
-    setActionLoading(null)
-  }
-
-  async function exportChats(userId: string, email: string) {
-    setExporting(userId)
-    try {
-      const data = await apiRequest<Record<string, unknown>>(`/admin/export-chats/${userId}`)
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `regknots_export_${email}_${new Date().toISOString().slice(0, 10)}.json`
-      a.click()
-      URL.revokeObjectURL(url)
-    } catch { /* ignore */ }
-    setExporting(null)
-  }
-
-  async function sendTicketReply(ticketId: string) {
-    const reply = (replyDrafts[ticketId] ?? '').trim()
-    if (!reply) {
-      setTicketToast({ msg: 'Reply text is required', ok: false })
-      setTimeout(() => setTicketToast(null), 3000)
-      return
-    }
-    setTicketActionId(`${ticketId}-reply`)
-    try {
-      await apiRequest(`/admin/support-tickets/${ticketId}/reply`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reply }),
-      })
-      setTickets((prev) => prev.map((t) =>
-        t.id === ticketId
-          ? { ...t, status: 'replied', admin_reply: reply, replied_at: new Date().toISOString() }
-          : t,
-      ))
-      setReplyDrafts((prev) => {
-        const next = { ...prev }
-        delete next[ticketId]
-        return next
-      })
-      setTicketToast({ msg: 'Reply sent', ok: true })
-    } catch {
-      setTicketToast({ msg: 'Failed to send reply', ok: false })
-    }
-    setTicketActionId(null)
-    setTimeout(() => setTicketToast(null), 4000)
-  }
-
-  async function sendFoundingTest() {
-    setFoundingAction('test')
-    setFoundingResult(null)
-    try {
-      const res = await apiRequest<{ sent_to: string }>(
-        '/admin/founding-email/test',
-        { method: 'POST' },
-      )
-      setFoundingResult({ msg: `Test sent to ${res.sent_to}`, ok: true })
-    } catch {
-      setFoundingResult({ msg: 'Failed to send test email', ok: false })
-    }
-    setFoundingAction(null)
-    setTimeout(() => setFoundingResult(null), 6000)
-  }
-
-  async function sendFoundingToAll() {
-    if (!foundingPreview || foundingPreview.total_count === 0) return
-    if (!confirm(`Send early-user thank-you email to ${foundingPreview.total_count} users?`)) return
-    setFoundingAction('send')
-    setFoundingResult(null)
-    try {
-      const res = await apiRequest<{
-        sent: number
-        failed: number
-        failed_emails: string[]
-      }>(
-        '/admin/founding-email/send',
-        { method: 'POST' },
-      )
-      const failedNote = res.failed > 0
-        ? ` · ${res.failed} failed${res.failed_emails.length > 0 ? ` (${res.failed_emails.slice(0, 3).join(', ')}${res.failed_emails.length > 3 ? '…' : ''})` : ''}`
-        : ''
-      setFoundingResult({
-        msg: `Sent to ${res.sent} users${failedNote}`,
-        ok: res.failed === 0,
-      })
-      fetchFoundingPreview()
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Failed to send'
-      setFoundingResult({ msg, ok: false })
-    }
-    setFoundingAction(null)
-    setTimeout(() => setFoundingResult(null), 10000)
-  }
-
-  async function closeTicket(ticketId: string) {
-    const ticket = tickets.find((t) => t.id === ticketId)
-    const prompt = ticket?.status === 'replied'
-      ? 'Close this ticket?'
-      : 'Close this ticket without replying?'
-    if (!confirm(prompt)) return
-    setTicketActionId(`${ticketId}-close`)
-    try {
-      await apiRequest(`/admin/support-tickets/${ticketId}/close`, { method: 'POST' })
-      setTickets((prev) => prev.map((t) =>
-        t.id === ticketId ? { ...t, status: 'closed' } : t,
-      ))
-      setTicketToast({ msg: 'Ticket closed', ok: true })
-    } catch {
-      setTicketToast({ msg: 'Failed to close ticket', ok: false })
-    }
-    setTicketActionId(null)
-    setTimeout(() => setTicketToast(null), 4000)
-  }
-
-  if (!hydrated || !isAdmin) return null
-
-  return (
-    <div className="flex flex-col min-h-dvh bg-[#0a0e1a]">
-      <MilestoneCelebration paidUsersAlltime={stats?.paid_users_alltime ?? null} />
-      <AppHeader title="Admin" trailing={
-        isReadOnly ? (
-          <span className="font-mono text-[10px] font-bold px-2 py-0.5 rounded-full
-            bg-amber-500/20 text-amber-400 border border-amber-500/30">
-            Read Only
-          </span>
+      actions={<button className={btn.quiet} onClick={() => { refresh(); load() }}>Refresh</button>}
+    >
+      {/* ── Needs attention ─────────────────────────────────────────── */}
+      <section aria-label="Needs attention" className="mb-6">
+        {!stats ? (
+          <Skeleton className="h-[64px]" />
+        ) : attention.length === 0 ? (
+          <div className="flex items-center gap-3 rounded-xl border border-[#2dd4bf]/25 bg-[#2dd4bf]/[0.06] px-4 py-3.5">
+            <span className="w-2 h-2 rounded-full bg-[#2dd4bf]" aria-hidden="true" />
+            <p className="font-mono text-sm text-[#f0ece4]/90">Nothing needs you right now. No open tickets, errors or unverified citations.</p>
+          </div>
         ) : (
-          <span className={`font-mono text-[10px] font-bold px-2 py-0.5 rounded-full border ${
-            isOwner
-              ? 'bg-[#2dd4bf]/20 text-[#2dd4bf] border-[#2dd4bf]/30'
-              : 'bg-purple-500/20 text-purple-400 border-purple-500/30'
-          }`}>
-            {isOwner ? 'Owner' : 'Admin'}
-          </span>
-        )
-      } />
-
-      <main className="flex-1 overflow-y-auto">
-        {/* Sprint D6.77 — Karynn UX: admin page goes full-width on desktop
-            so analytics charts + counters land above the fold instead of
-            forced into a 1024px column. Mobile keeps comfortable margins. */}
-        <div className="w-full mx-auto px-4 md:px-6 py-6">
-
-          {/* ── Internal filter toggle ────────────────────────────────── */}
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-3">
-              <button
-                onClick={toggleExcludeInternal}
-                className={`relative w-10 h-5 rounded-full transition-colors duration-200
-                  ${excludeInternal ? 'bg-[#2dd4bf]' : 'bg-[#6b7594]/40'}`}
-              >
-                <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full
-                  transition-transform duration-200 ${excludeInternal ? 'translate-x-5' : 'translate-x-0'}`} />
-              </button>
-              <span className="font-mono text-xs text-[#f0ece4]/80">Hide internal data</span>
-              {excludeInternal && (
-                <span className="hidden sm:inline-flex font-mono text-[9px] text-[#6b7594] bg-[#6b7594]/10
-                  border border-[#6b7594]/20 rounded px-1.5 py-0.5">
-                  Filtering: Blake, Karynn, test accounts
-                </span>
-              )}
-            </div>
-            <div className="flex items-center gap-4">
-              <a
-                href="/admin/hedge-audit"
-                className="font-mono text-xs text-[#2dd4bf] hover:underline"
-                title="Hedge classifier queue — see why corpus answers hedged and tag the cause"
-              >
-                Hedge Audit →
-              </a>
-              <a
-                href="/admin/web-fallback"
-                className="font-mono text-xs text-[#2dd4bf] hover:underline"
-                title="Web fallback events — single-LLM + Big-3 ensemble surfaces"
-              >
-                Web Fallback →
-              </a>
-              <a
-                href="/admin/traffic"
-                className="font-mono text-xs text-[#2dd4bf] hover:underline"
-              >
-                Traffic →
-              </a>
-            </div>
-          </div>
-
-          {/* ── Tab bar ──────────────────────────────────────────────── */}
-          <div className="flex gap-1 mb-6 overflow-x-auto border-b border-white/8 -mx-4 px-4 pb-0">
-            {([
-              { key: 'overview', label: 'Overview' },
-              { key: 'users', label: 'Users' },
-              { key: 'chats', label: 'Chats' },
-              { key: 'partners', label: 'Partners' },
-              { key: 'features', label: 'Features' },
-              { key: 'data', label: 'Data' },
-              { key: 'jobs', label: 'Jobs' },
-              { key: 'email', label: 'Email' },
-              { key: 'system', label: 'System' },
-              { key: 'content', label: 'Content' },
-            ] as const).map((t) => (
-              <button
-                key={t.key}
-                onClick={() => setActiveTab(t.key)}
-                className={`font-mono text-xs uppercase tracking-wider px-3 py-2 rounded-t-md
-                  transition-colors duration-150 whitespace-nowrap
-                  ${activeTab === t.key
-                    ? 'text-[#2dd4bf] bg-[#2dd4bf]/5 border-b-2 border-[#2dd4bf]'
-                    : 'text-[#6b7594] hover:text-[#f0ece4] border-b-2 border-transparent'
-                  }`}
-              >
-                {t.label}
-              </button>
-            ))}
-          </div>
-
-          {activeTab === 'overview' && (
-          <>
-          {/* ── Stats grid ───────────────────────────────────────────── */}
-          {!stats && !statsError && (
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-8">
-              {Array.from({ length: 12 }).map((_, i) => (
-                <div key={i} className="bg-[#111827] rounded-xl border border-white/8 px-4 py-3 h-[72px] animate-pulse" />
+          <div className="rounded-xl border border-amber-400/25 bg-amber-400/[0.05] px-4 py-3">
+            <p className="font-mono text-[11px] uppercase tracking-wider text-amber-300/90 mb-2">Needs attention</p>
+            <ul className="flex flex-col sm:flex-row sm:flex-wrap gap-x-6 gap-y-2">
+              {attention.map((a) => (
+                <li key={a.key}>
+                  <Link href={a.href} className="group inline-flex items-center gap-2 font-mono text-sm text-[#f0ece4]/90 hover:text-[#f0ece4]">
+                    <span className={`w-2 h-2 rounded-full flex-shrink-0 ${a.tone === 'red' ? 'bg-red-400' : 'bg-amber-400'}`} aria-hidden="true" />
+                    <span className="group-hover:underline underline-offset-4">{a.text}</span>
+                    <span aria-hidden="true" className="text-[#8b93ad]">→</span>
+                  </Link>
+                </li>
               ))}
-            </div>
-          )}
-
-          {statsError && !stats && (
-            <div className="bg-[#111827] rounded-xl border border-red-500/30 px-6 py-5 mb-8 text-center">
-              <p className="font-mono text-sm text-red-400 mb-3">Failed to load stats</p>
-              <button
-                onClick={fetchStats}
-                className="font-mono text-xs font-bold uppercase tracking-wider
-                  bg-[#2dd4bf] text-[#0a0e1a] rounded-lg px-4 py-2
-                  hover:brightness-110 transition-[filter] duration-150"
-              >
-                Retry
-              </button>
-            </div>
-          )}
-
-          {stats && (
-            <div className="flex flex-col gap-3 mb-8">
-              {/* ─── Row 1 — Headline TOTALS (Sprint D6.92 redesign) ─────
-                  Pre-D6.92 mixed totals + 7d in the top row. Blake's
-                  redesign promotes the four topline TOTALS to row 1 so
-                  the dashboard headline shows the company's size at a
-                  glance: Users · Questions · Conversations · Bad-Answer
-                  Rate. 7d / 24h metrics moved to the engagement row.
-                  (Bad-Answer Rate stays a rate, not a count, since
-                  "total bad answers ever" isn't actionable.) */}
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                <StatCard label="Total Users" value={stats.total_users} />
-                <StatCard label="Total Questions" value={stats.total_questions} />
-                <StatCard label="Total Conversations" value={stats.total_conversations} />
-                <StatCard
-                  label="Bad-answer rate (7d)"
-                  value={`${stats.bad_answer_rate_7d}%`}
-                />
-              </div>
-
-              {/* ─────────── Row 2 — Subscriptions (consolidated) ─────────── */}
-              <div className="bg-[#111827] rounded-xl border border-[#2dd4bf]/20 px-5 py-4">
-                <p className="font-mono text-[10px] text-[#6b7594] uppercase tracking-wider mb-3">
-                  Subscriptions
-                </p>
-                {/* Sprint D6.92 — Pro (legacy) stat card removed per
-                    Blake's call: 0 users on pro/solo today, no
-                    actionable signal. Any legacy pro user still rolls
-                    up into "Total active paid" below. Grid back to
-                    5 columns: Cadet · Mate · Captain · Trial active ·
-                    Past-due/paused. */}
-                <div className="grid grid-cols-2 md:grid-cols-5 gap-x-4 gap-y-2">
-                  <div>
-                    <p className="font-mono text-[10px] text-[#2dd4bf]/70 uppercase tracking-wider">Cadet</p>
-                    <p className="font-display text-2xl font-bold text-[#2dd4bf]">{stats.subs_active.cadet ?? 0}</p>
-                  </div>
-                  <div>
-                    <p className="font-mono text-[10px] text-[#2dd4bf]/70 uppercase tracking-wider">Mate</p>
-                    <p className="font-display text-2xl font-bold text-[#2dd4bf]">{stats.subs_active.mate}</p>
-                  </div>
-                  <div>
-                    <p className="font-mono text-[10px] text-[#2dd4bf]/70 uppercase tracking-wider">Captain</p>
-                    <p className="font-display text-2xl font-bold text-[#2dd4bf]">{stats.subs_active.captain}</p>
-                  </div>
-                  <div>
-                    <p className="font-mono text-[10px] text-[#f59e0b]/80 uppercase tracking-wider">Trial active</p>
-                    <p className="font-display text-2xl font-bold text-[#f59e0b]">{stats.trial_active}</p>
-                  </div>
-                  <div>
-                    <p className="font-mono text-[10px] text-[#ef4444]/80 uppercase tracking-wider">Past-due / paused</p>
-                    <p className="font-display text-2xl font-bold text-[#ef4444]">{stats.subs_past_due + stats.subs_paused}</p>
-                  </div>
-                </div>
-                <div className="border-t border-white/8 mt-4 pt-3 flex flex-wrap gap-x-6 gap-y-1 font-mono text-xs text-[#f0ece4]/70">
-                  <span>
-                    <span className="text-[#6b7594] uppercase tracking-wider text-[10px]">Total active paid:</span>{' '}
-                    <span className="font-bold text-[#f0ece4]">
-                      {(stats.subs_active.cadet ?? 0) + stats.subs_active.mate + stats.subs_active.captain + stats.subs_active.pro_legacy}
-                    </span>
-                  </span>
-                  <span>
-                    <span className="text-[#6b7594] uppercase tracking-wider text-[10px]">Monthly:</span>{' '}
-                    <span className="font-bold text-[#f0ece4]">{stats.subs_monthly}</span>
-                  </span>
-                  <span>
-                    <span className="text-[#6b7594] uppercase tracking-wider text-[10px]">Annual:</span>{' '}
-                    <span className="font-bold text-[#f0ece4]">{stats.subs_annual}</span>
-                  </span>
-                  <span>
-                    <span className="text-[#6b7594] uppercase tracking-wider text-[10px]">Trial expired:</span>{' '}
-                    <span className="font-bold text-[#f0ece4]">{stats.trial_expired}</span>
-                  </span>
-                  <span>
-                    <span className="text-[#6b7594] uppercase tracking-wider text-[10px]">Limit reached:</span>{' '}
-                    <span className="font-bold text-[#f0ece4]">{stats.message_limit_reached}</span>
-                  </span>
-                </div>
-              </div>
-
-              {/* ─── Row 3 — Engagement (Sprint D6.92) ───
-                  Active windows + avg engagement. Active% is shown
-                  inline as it's the most useful "is this growing or
-                  is everyone churning" signal. */}
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                <StatCard label="Active (24h)" value={stats.active_users_24h} />
-                <StatCard
-                  label="Active (7d)"
-                  value={
-                    stats.total_users > 0
-                      ? `${stats.active_users_7d} (${Math.round(100 * stats.active_users_7d / stats.total_users)}%)`
-                      : stats.active_users_7d
-                  }
-                />
-                <StatCard label="Questions (24h)" value={stats.questions_today} />
-                <StatCard
-                  label="Avg Q / active user"
-                  value={stats.avg_questions_per_active_user_7d}
-                />
-              </div>
-
-              {/* ─── Row 4 — Quality + Business (Sprint D6.92) ───
-                  Mixes AI-quality signals (real hedge rate, retrieval
-                  misses) with business funnel signals (conversion rate,
-                  cap saturation). Recent Hedges card removed — drill
-                  into individual hedges via the Chats tab if any of
-                  these numbers move. */}
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                <StatCard
-                  label="Hedge Rate (7d)"
-                  value={`${stats.hedges_presented_rate_7d ?? stats.hedge_rate_7d}%`}
-                />
-                <StatCard label="Retrieval Misses (7d)" value={stats.retrieval_misses_7d} />
-                <StatCard
-                  label="Conversion Rate"
-                  value={`${stats.conversion_rate ?? 0}%`}
-                />
-                <StatCard
-                  label="Cap Saturation"
-                  value={`${stats.cap_saturation_rate ?? 0}%`}
-                />
-              </div>
-
-              {/* ─── Row 5 — Content awareness (Sprint D6.92) ───
-                  Surfaces "you have stuff to look at" signals so the
-                  admin doesn't have to tab-hop to know there's work
-                  pending. Open support tickets count is real, survey
-                  responses are last-7d new ones. */}
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                <StatCard
-                  label="Open Support Tickets"
-                  value={stats.support_tickets_open ?? 0}
-                />
-                <StatCard
-                  label="New Surveys (7d)"
-                  value={stats.survey_responses_7d ?? 0}
-                />
-                <StatCard
-                  label="System Errors"
-                  value={sentryIssues.length}
-                />
-              </div>
-            </div>
-          )}
-
-          {/* ─── Analytics charts — promoted ABOVE the Chunks card per
-              Blake's D6.92 redesign. Pre-D6.92 these lived at the very
-              bottom of the Overview, after the chunks list. */}
-          {stats && (
-            <div className="mb-8">
-              <h2 className="font-display text-lg font-bold text-[#f0ece4] tracking-wide mb-3">Analytics</h2>
-              {analyticsLoading ? (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                  {[1, 2, 3, 4].map(i => (
-                    <div key={i} className="bg-[#111827] rounded-xl border border-white/8 h-[280px] animate-pulse" />
-                  ))}
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                  {/* Chart 1: Messages per day */}
-                  <div className="bg-[#111827] rounded-xl border border-white/8 p-4">
-                    <p className="font-mono text-[10px] text-[#6b7594] uppercase tracking-wider mb-3">Messages per Day (30d)</p>
-                    {messagesPerDay.length > 0 ? (
-                      <ResponsiveContainer width="100%" height={220}>
-                        <LineChart data={messagesPerDay}>
-                          <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
-                          <XAxis
-                            dataKey="day"
-                            tick={{ fontSize: 10, fill: '#6b7594' }}
-                            tickFormatter={(v: string) => new Date(v).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                            interval="preserveStartEnd"
-                          />
-                          <YAxis tick={{ fontSize: 10, fill: '#6b7594' }} allowDecimals={false} />
-                          <Tooltip
-                            contentStyle={{ backgroundColor: '#1a2332', border: '1px solid #2dd4bf33', borderRadius: '8px', fontSize: '11px', fontFamily: 'monospace' }}
-                            labelStyle={{ color: '#6b7594' }}
-                            itemStyle={{ color: '#2dd4bf' }}
-                            labelFormatter={(v) => new Date(String(v)).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-                          />
-                          <Line type="monotone" dataKey="message_count" stroke="#2dd4bf" strokeWidth={2} dot={false} />
-                        </LineChart>
-                      </ResponsiveContainer>
-                    ) : (
-                      <p className="font-mono text-xs text-[#6b7594] text-center py-16">No data yet</p>
-                    )}
-                  </div>
-
-                  {/* Chart 2: Top cited regulations */}
-                  <div className="bg-[#111827] rounded-xl border border-white/8 p-4">
-                    <p className="font-mono text-[10px] text-[#6b7594] uppercase tracking-wider mb-3">Top Cited Regulations</p>
-                    {topCitations.length > 0 ? (
-                      <ResponsiveContainer width="100%" height={Math.max(220, topCitations.slice(0, 10).length * 28)}>
-                        <BarChart
-                          data={topCitations.slice(0, 10)}
-                          layout="vertical"
-                          margin={{ top: 4, right: 12, bottom: 4, left: 4 }}
-                        >
-                          <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
-                          <XAxis type="number" tick={{ fontSize: 10, fill: '#6b7594' }} allowDecimals={false} />
-                          <YAxis
-                            type="category"
-                            dataKey="section_number"
-                            tick={{ fontSize: 10, fill: '#6b7594' }}
-                            width={Math.min(
-                              140,
-                              Math.max(
-                                64,
-                                topCitations.slice(0, 10).reduce((m, c) => Math.max(m, (c.section_number || '').length), 0) * 7,
-                              ),
-                            )}
-                            tickFormatter={(v: string) => (v.length > 18 ? v.slice(0, 17) + '…' : v)}
-                          />
-                          <Tooltip
-                            content={(props: { active?: boolean; payload?: ReadonlyArray<{ payload?: unknown; value?: unknown }> }) => {
-                              if (!props.active || !props.payload || !props.payload[0]) return null
-                              const entry = props.payload[0]
-                              const row = entry.payload as TopCitation | undefined
-                              if (!row) return null
-                              const count = typeof entry.value === 'number' ? entry.value : Number(entry.value) || 0
-                              return (
-                                <div style={{
-                                  backgroundColor: '#1a2332',
-                                  border: '1px solid #2dd4bf33',
-                                  borderRadius: '8px',
-                                  padding: '8px 12px',
-                                  fontSize: '11px',
-                                  fontFamily: 'monospace',
-                                  maxWidth: 320,
-                                }}>
-                                  <div style={{ color: '#f0ece4', fontWeight: 700 }}>{row.section_number}</div>
-                                  {row.section_title && (
-                                    <div style={{ color: '#6b7594', marginTop: 2 }}>{row.section_title}</div>
-                                  )}
-                                  <div style={{ color: '#2dd4bf', marginTop: 4 }}>
-                                    {count} citation{count === 1 ? '' : 's'}
-                                  </div>
-                                </div>
-                              )
-                            }}
-                          />
-                          <Bar dataKey="cite_count" fill="#2dd4bf" radius={[0, 4, 4, 0]} />
-                        </BarChart>
-                      </ResponsiveContainer>
-                    ) : (
-                      <p className="font-mono text-xs text-[#6b7594] text-center py-16">No data yet</p>
-                    )}
-                  </div>
-
-                  {/* Chart 3: Usage by role (Sprint D6.92 — replaces Vessel Type)
-                      Role is more actionable at our scale: cadets/students vs
-                      working mariners vs other gives a TAM mix signal that
-                      vessel-type (dominated by 1-2 categories) doesn't. */}
-                  <div className="bg-[#111827] rounded-xl border border-white/8 p-4">
-                    <p className="font-mono text-[10px] text-[#6b7594] uppercase tracking-wider mb-3">Usage by Role</p>
-                    {roleUsage.length > 0 ? (
-                      <ResponsiveContainer width="100%" height={220}>
-                        <PieChart>
-                          <Pie
-                            data={roleUsage}
-                            dataKey="message_count"
-                            nameKey="role"
-                            cx="50%"
-                            cy="50%"
-                            innerRadius={50}
-                            outerRadius={80}
-                            paddingAngle={2}
-                          >
-                            {roleUsage.map((_, i) => (
-                              <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
-                            ))}
-                          </Pie>
-                          <Tooltip
-                            contentStyle={{ backgroundColor: '#1a2332', border: '1px solid #2dd4bf33', borderRadius: '8px', fontSize: '11px', fontFamily: 'monospace' }}
-                          />
-                          <Legend
-                            wrapperStyle={{ fontSize: '10px', fontFamily: 'monospace' }}
-                            formatter={(value) => <span style={{ color: '#6b7594' }}>{String(value)}</span>}
-                          />
-                        </PieChart>
-                      </ResponsiveContainer>
-                    ) : (
-                      <p className="font-mono text-xs text-[#6b7594] text-center py-16">No data yet</p>
-                    )}
-                  </div>
-
-                  {/* Chart 4: Model usage distribution */}
-                  <div className="bg-[#111827] rounded-xl border border-white/8 p-4">
-                    <p className="font-mono text-[10px] text-[#6b7594] uppercase tracking-wider mb-3">Model Usage Distribution</p>
-                    {modelUsage.length > 0 ? (
-                      <ResponsiveContainer width="100%" height={220}>
-                        <PieChart>
-                          <Pie
-                            data={modelUsage}
-                            dataKey="message_count"
-                            nameKey="model"
-                            cx="50%"
-                            cy="50%"
-                            innerRadius={50}
-                            outerRadius={80}
-                            paddingAngle={2}
-                          >
-                            {modelUsage.map((_, i) => (
-                              <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
-                            ))}
-                          </Pie>
-                          <Tooltip
-                            contentStyle={{ backgroundColor: '#1a2332', border: '1px solid #2dd4bf33', borderRadius: '8px', fontSize: '11px', fontFamily: 'monospace' }}
-                            formatter={(value) => [Number(value).toLocaleString(), 'Messages']}
-                          />
-                          <Legend
-                            wrapperStyle={{ fontSize: '10px', fontFamily: 'monospace' }}
-                            formatter={(value) => <span style={{ color: '#6b7594' }}>{String(value)}</span>}
-                          />
-                        </PieChart>
-                      </ResponsiveContainer>
-                    ) : (
-                      <p className="font-mono text-xs text-[#6b7594] text-center py-16">No data yet</p>
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* ─── Knowledge base (Sprint D6.92 — now last on Overview) ───
-              Sprint D6.77 — Karynn UX: replaced the wall-of-text
-              "source: count" inline list with a sorted grid + a
-              collapse-all-below-top-12 control. Sprint D6.92 demoted
-              this below Analytics per Blake's call. */}
-          {stats && (
-            <RegulationChunksCard
-              total={stats.total_chunks}
-              bySource={stats.chunks_by_source}
-            />
-          )}
-
-          </>
-          )}
-
-          {activeTab === 'content' && (
-          <>
-          {/* ── System Errors (Sentry) ─────────────────────────────────── */}
-          <div className="mb-8">
-            <h2 className="font-display text-lg font-bold text-[#f0ece4] tracking-wide mb-3">System Errors</h2>
-            {sentryLoading ? (
-              <div className="bg-[#111827] rounded-xl border border-white/8 px-4 py-6 h-[72px] animate-pulse" />
-            ) : sentryIssues.length === 0 ? (
-              <div className="bg-[#111827] rounded-xl border border-white/8 px-4 py-4 text-center">
-                <p className="font-mono text-sm text-[#2dd4bf]">No recent issues</p>
-              </div>
-            ) : (
-              <div className="rounded-xl border border-white/8 max-h-64 overflow-y-auto scrollbar-thin scrollbar-track-transparent scrollbar-thumb-[#2dd4bf]/30">
-                <table className="w-full table-fixed text-left font-mono text-xs">
-                  <thead>
-                    <tr className="bg-red-500/10 text-red-400">
-                      <th className="px-3 py-2.5 font-medium w-[8%]">Sev</th>
-                      <th className="px-3 py-2.5 font-medium w-[14%]">Project</th>
-                      <th className="px-3 py-2.5 font-medium w-[48%]">Issue</th>
-                      <th className="px-3 py-2.5 font-medium text-right w-[10%]">Count</th>
-                      <th className="px-3 py-2.5 font-medium w-[20%]">Last Seen</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {sentryIssues.map((issue, i) => {
-                      const isFatal = issue.level === 'fatal' || issue.level === 'error'
-                      return (
-                        <tr key={issue.id}
-                          className={`border-t border-white/5 ${i % 2 === 0 ? 'bg-[#111827]' : 'bg-[#0f1629]'}`}>
-                          <td className="px-3 py-2">
-                            <span className={`inline-block text-[10px] font-bold px-1.5 py-0.5 rounded ${
-                              isFatal
-                                ? 'bg-red-500/20 text-red-400 border border-red-500/30'
-                                : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
-                            }`}>
-                              {issue.level}
-                            </span>
-                          </td>
-                          <td className="px-3 py-2 text-[#6b7594] truncate overflow-hidden">{issue.project}</td>
-                          <td className="px-3 py-2 truncate overflow-hidden">
-                            <a href={issue.link} target="_blank" rel="noopener noreferrer"
-                              className="text-[#f0ece4]/90 hover:text-[#2dd4bf] transition-colors"
-                              title={issue.title}>
-                              {issue.title}
-                            </a>
-                          </td>
-                          <td className="px-3 py-2 text-right text-[#f0ece4]/80">{issue.count.toLocaleString()}</td>
-                          <td className="px-3 py-2 text-[#6b7594]" title={new Date(issue.last_seen).toLocaleString()}>
-                            {fmtRelative(issue.last_seen)}
-                          </td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
+            </ul>
           </div>
-
-          {/* ── Support Tickets ─────────────────────────────────────────── */}
-          <div className="mb-8">
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="font-display text-lg font-bold text-[#f0ece4] tracking-wide">
-                Support Tickets
-                {tickets.length > 0 && (
-                  <span className="ml-2 font-mono text-xs text-[#6b7594] font-normal">
-                    ({tickets.filter((t) => t.status === 'open').length} open)
-                  </span>
-                )}
-              </h2>
-              <div className="flex items-center gap-1">
-                {(['all', 'open', 'replied', 'closed'] as const).map((f) => (
-                  <button
-                    key={f}
-                    onClick={() => setTicketFilter(f)}
-                    className={`font-mono text-[10px] uppercase tracking-wider px-2.5 py-1 rounded-md
-                      transition-colors ${
-                        ticketFilter === f
-                          ? 'bg-[#2dd4bf]/15 text-[#2dd4bf] border border-[#2dd4bf]/30'
-                          : 'text-[#6b7594] border border-transparent hover:text-[#f0ece4]/80'
-                      }`}
-                  >
-                    {f}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {ticketsLoading ? (
-              <div className="bg-[#111827] rounded-xl border border-white/8 px-4 py-6 h-[72px] animate-pulse" />
-            ) : (() => {
-              const filtered = ticketFilter === 'all'
-                ? tickets
-                : tickets.filter((t) => t.status === ticketFilter)
-              if (filtered.length === 0) {
-                return (
-                  <div className="bg-[#111827] rounded-xl border border-white/8 px-4 py-4 text-center">
-                    <p className="font-mono text-sm text-[#6b7594]">
-                      {ticketFilter === 'all' ? 'No support tickets yet' : `No ${ticketFilter} tickets`}
-                    </p>
-                  </div>
-                )
-              }
-              return (
-                <div className="space-y-2">
-                  {filtered.map((t) => {
-                    const isExpanded = expandedTicket === t.id
-                    const statusStyles =
-                      t.status === 'open'
-                        ? 'bg-amber-500/15 text-amber-400 border-amber-500/30'
-                        : t.status === 'replied'
-                        ? 'bg-[#2dd4bf]/15 text-[#2dd4bf] border-[#2dd4bf]/30'
-                        : 'bg-[#6b7594]/15 text-[#6b7594] border-[#6b7594]/30'
-                    return (
-                      <div key={t.id} className="bg-[#111827] rounded-xl border border-white/8 overflow-hidden">
-                        <button
-                          onClick={() => setExpandedTicket(isExpanded ? null : t.id)}
-                          className="w-full px-4 py-3 text-left hover:bg-white/[0.02] transition-colors"
-                        >
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-2 mb-1">
-                                <span className={`font-mono text-[9px] font-bold uppercase tracking-wider
-                                  px-1.5 py-0.5 rounded border ${statusStyles}`}>
-                                  {t.status}
-                                </span>
-                                <span className="font-mono text-[10px] text-[#6b7594] truncate">
-                                  {t.user_email}
-                                </span>
-                              </div>
-                              <p className="font-mono text-sm text-[#f0ece4]/90 truncate">{t.subject}</p>
-                              {!isExpanded && (
-                                <p className="font-mono text-xs text-[#6b7594] truncate mt-0.5">
-                                  {t.message.slice(0, 120)}{t.message.length > 120 ? '…' : ''}
-                                </p>
-                              )}
-                            </div>
-                            <span className="font-mono text-[10px] text-[#6b7594] whitespace-nowrap pt-0.5">
-                              {fmtDate(t.created_at)}
-                            </span>
-                          </div>
-                        </button>
-
-                        {isExpanded && (
-                          <div className="border-t border-white/8 px-4 py-3 space-y-3">
-                            <div>
-                              <p className="font-mono text-[10px] text-[#6b7594] uppercase tracking-wider mb-1">
-                                Message
-                              </p>
-                              <p className="font-mono text-xs text-[#f0ece4]/85 leading-relaxed whitespace-pre-wrap">
-                                {t.message}
-                              </p>
-                            </div>
-
-                            {t.admin_reply && (
-                              <div>
-                                <p className="font-mono text-[10px] text-[#2dd4bf] uppercase tracking-wider mb-1">
-                                  Your reply{t.replied_at ? ` · ${fmtDate(t.replied_at)}` : ''}
-                                </p>
-                                <p className="font-mono text-xs text-[#f0ece4]/85 leading-relaxed whitespace-pre-wrap
-                                  bg-[#0d1225] border-l-2 border-[#2dd4bf]/40 pl-3 py-2 rounded">
-                                  {t.admin_reply}
-                                </p>
-                              </div>
-                            )}
-
-                            {!isReadOnly && t.status !== 'closed' && (
-                              <div>
-                                <p className="font-mono text-[10px] text-[#6b7594] uppercase tracking-wider mb-1">
-                                  {t.status === 'replied' ? 'Send another reply' : 'Reply'}
-                                </p>
-                                <textarea
-                                  value={replyDrafts[t.id] ?? ''}
-                                  onChange={(e) => setReplyDrafts((prev) => ({ ...prev, [t.id]: e.target.value }))}
-                                  placeholder="Write your reply…"
-                                  rows={4}
-                                  className="w-full bg-[#0d1225] border border-white/10 rounded-lg px-3 py-2
-                                    font-mono text-xs text-[#f0ece4] placeholder:text-[#6b7594]
-                                    focus:outline-none focus:border-[#2dd4bf]/40 resize-y"
-                                />
-                                <div className="flex items-center gap-2 mt-2">
-                                  <button
-                                    onClick={() => sendTicketReply(t.id)}
-                                    disabled={ticketActionId === `${t.id}-reply`}
-                                    className="font-mono text-xs font-bold uppercase tracking-wider px-4 py-1.5
-                                      rounded-lg bg-[#2dd4bf] text-[#0a0e1a] hover:brightness-110
-                                      disabled:opacity-50 disabled:cursor-not-allowed transition-[filter] duration-150"
-                                  >
-                                    {ticketActionId === `${t.id}-reply` ? 'Sending…' : 'Send Reply'}
-                                  </button>
-                                  <button
-                                    onClick={() => closeTicket(t.id)}
-                                    disabled={ticketActionId === `${t.id}-close`}
-                                    className="font-mono text-xs font-bold uppercase tracking-wider px-4 py-1.5
-                                      rounded-lg border border-[#6b7594]/40 text-[#6b7594]
-                                      hover:bg-[#6b7594]/10 disabled:opacity-50 transition-colors"
-                                  >
-                                    {ticketActionId === `${t.id}-close` ? 'Closing…' : 'Close'}
-                                  </button>
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    )
-                  })}
-                </div>
-              )
-            })()}
-
-            {ticketToast && (
-              <div className={`mt-3 font-mono text-xs px-3 py-2 rounded-lg border ${
-                ticketToast.ok
-                  ? 'bg-[#2dd4bf]/10 border-[#2dd4bf]/30 text-[#2dd4bf]'
-                  : 'bg-red-500/10 border-red-500/30 text-red-400'
-              }`}>
-                {ticketToast.msg}
-              </div>
-            )}
-          </div>
-
-          {/* ── Survey Responses ────────────────────────────────────────── */}
-          <div className="mb-8">
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="font-display text-lg font-bold text-[#f0ece4] tracking-wide">Survey Responses</h2>
-              {!isReadOnly && (
-                <button
-                  onClick={() => setSurveyPreview(true)}
-                  className="font-mono text-xs px-3 py-1.5 rounded-lg border border-[#2dd4bf]/30
-                    text-[#2dd4bf] hover:bg-[#2dd4bf]/10 transition-colors"
-                >
-                  Preview Survey
-                </button>
-              )}
-            </div>
-
-            {surveyLoading ? (
-              <div className="bg-[#111827] rounded-xl border border-white/8 px-4 py-6 h-[72px] animate-pulse" />
-            ) : !surveyData || surveyData.total_responses === 0 ? (
-              <div className="bg-[#111827] rounded-xl border border-white/8 px-4 py-4 text-center">
-                <p className="font-mono text-sm text-[#6b7594]">No survey responses yet</p>
-              </div>
-            ) : (
-              <>
-                {/* Aggregate stats */}
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
-                  <StatCard label="Responses" value={surveyData.total_responses} />
-                  <StatCard label="Avg Rating" value={`${surveyData.average_rating} / 5`} />
-                  <StatCard label="Would Subscribe" value={`${surveyData.would_subscribe_pct}%`} />
-                  <StatCard label="Top Request" value={surveyData.top_missing_feature ?? '-'} />
-                </div>
-
-                {/* Responses table */}
-                <div className="rounded-xl border border-white/8 overflow-x-auto">
-                  <table className="w-full text-left font-mono text-xs" style={{ minWidth: '800px' }}>
-                    <thead>
-                      <tr className="bg-[#2dd4bf]/10 text-[#2dd4bf]">
-                        <th className="px-3 py-2.5 font-medium">User</th>
-                        <th className="px-3 py-2.5 font-medium">Rating</th>
-                        <th className="px-3 py-2.5 font-medium">Useful?</th>
-                        <th className="px-3 py-2.5 font-medium">Favorite</th>
-                        <th className="px-3 py-2.5 font-medium">Missing</th>
-                        <th className="px-3 py-2.5 font-medium">Subscribe?</th>
-                        <th className="px-3 py-2.5 font-medium">Comments</th>
-                        <th className="px-3 py-2.5 font-medium">Date</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {surveyData.responses.map((r, i) => (
-                        <tr key={r.id}
-                          className={`border-t border-white/5 ${i % 2 === 0 ? 'bg-[#111827]' : 'bg-[#0f1629]'}`}>
-                          <td className="px-3 py-2 text-[#f0ece4]/90 max-w-[160px] truncate" title={r.email}>
-                            {r.full_name ?? r.email}
-                          </td>
-                          <td className="px-3 py-2 text-[#2dd4bf] whitespace-nowrap">
-                            {'★'.repeat(r.overall_rating)}{'☆'.repeat(5 - r.overall_rating)}
-                          </td>
-                          <td className="px-3 py-2 text-[#f0ece4]/60 whitespace-nowrap">{r.usefulness ?? '-'}</td>
-                          <td className="px-3 py-2 text-[#f0ece4]/60 max-w-[120px] truncate" title={r.favorite_feature ?? ''}>
-                            {r.favorite_feature ?? '-'}
-                          </td>
-                          <td className="px-3 py-2 text-[#f0ece4]/60 max-w-[120px] truncate" title={r.missing_feature ?? ''}>
-                            {r.missing_feature ?? '-'}
-                          </td>
-                          <td className="px-3 py-2 whitespace-nowrap">
-                            <span className={r.would_subscribe === true ? 'text-[#2dd4bf]' : r.would_subscribe === false ? 'text-red-400/70' : 'text-[#6b7594]'}>
-                              {r.would_subscribe === true ? 'Yes' : r.would_subscribe === false ? 'No' : '-'}
-                            </span>
-                          </td>
-                          <td className="px-3 py-2 text-[#f0ece4]/60 max-w-[160px] truncate"
-                            title={[r.price_feedback, r.additional_comments].filter(Boolean).join(' | ')}>
-                            {r.additional_comments || r.price_feedback || '-'}
-                          </td>
-                          <td className="px-3 py-2 text-[#6b7594] whitespace-nowrap">{fmtDate(r.created_at)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </>
-            )}
-          </div>
-
-          {/* ── Citation Errors ──────────────────────────────────────────── */}
-          <div className="mb-8">
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="font-display text-lg font-bold text-[#f0ece4] tracking-wide">Citation Errors</h2>
-              {isOwner && citationErrors.length > 0 && (
-                <button
-                  onClick={async () => {
-                    if (!confirm(`Permanently delete all ${citationErrors.length} citation error(s)?\n\nThis action cannot be undone.`)) return
-                    try {
-                      await apiRequest('/admin/citation-errors/purge', { method: 'DELETE' })
-                      setCitationErrors([])
-                    } catch {
-                      alert('Failed to purge citation errors')
-                    }
-                  }}
-                  className="font-mono text-[10px] font-bold uppercase tracking-wider
-                    text-red-400/80 hover:text-red-400 border border-red-400/30 hover:border-red-400/60
-                    rounded px-2.5 py-1 transition-colors"
-                >
-                  Purge All
-                </button>
-              )}
-            </div>
-            {citationLoading ? (
-              <div className="bg-[#111827] rounded-xl border border-white/8 px-4 py-6 h-[72px] animate-pulse" />
-            ) : citationErrors.length === 0 ? (
-              <div className="bg-[#111827] rounded-xl border border-white/8 px-4 py-4 text-center">
-                <p className="font-mono text-sm text-[#2dd4bf]">No citation errors</p>
-              </div>
-            ) : (
-              <div className="rounded-xl border border-white/8 overflow-auto max-h-[280px]">
-                <table className="w-full text-left font-mono text-xs" style={{ minWidth: '600px' }}>
-                  <thead className="sticky top-0 z-10">
-                    <tr className="bg-[#111827] text-amber-400">
-                      <th className="px-3 py-2.5 font-medium bg-amber-500/10">Citation</th>
-                      <th className="px-3 py-2.5 font-medium bg-amber-500/10">Model</th>
-                      <th className="px-3 py-2.5 font-medium bg-amber-500/10">Preview</th>
-                      <th className="px-3 py-2.5 font-medium bg-amber-500/10">Date</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {citationErrors.map((ce, i) => {
-                      const isExpanded = expandedCitation === ce.id
-                      const rowBg = i % 2 === 0 ? 'bg-[#111827]' : 'bg-[#0f1629]'
-                      return (
-                        <tr key={ce.id}
-                          onClick={() => setExpandedCitation(isExpanded ? null : ce.id)}
-                          className={`border-t border-white/5 ${rowBg} cursor-pointer
-                            hover:bg-white/[0.03] transition-colors`}>
-                          <td className="px-3 py-2 text-[#f0ece4]/90 whitespace-nowrap font-bold">
-                            {ce.unverified_citation}
-                          </td>
-                          <td className="px-3 py-2 text-[#6b7594] whitespace-nowrap">
-                            {ce.model_used ?? 'unknown'}
-                          </td>
-                          <td className="px-3 py-2 text-[#f0ece4]/60" colSpan={isExpanded ? 1 : 1}>
-                            {isExpanded ? (
-                              <div className="whitespace-pre-wrap break-words text-[#f0ece4]/80 leading-relaxed">
-                                {ce.message_preview}
-                              </div>
-                            ) : (
-                              <div className="truncate max-w-[300px]">
-                                {ce.message_preview.slice(0, 120)}{ce.message_preview.length > 120 ? '...' : ''}
-                                {ce.message_preview.length > 120 && (
-                                  <span className="text-[#2dd4bf]/60 ml-1">tap to expand</span>
-                                )}
-                              </div>
-                            )}
-                          </td>
-                          <td className="px-3 py-2 text-[#6b7594] whitespace-nowrap align-top">
-                            {fmtDate(ce.created_at)}
-                          </td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-
-          {/* ── Notifications (demoted) ─────────────────────────────────── */}
-          <div className="mb-8">
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="font-display text-lg font-bold text-[#f0ece4] tracking-wide">
-                In-App Notifications
-              </h2>
-              <div className="flex items-center gap-2">
-                {(['active', 'all'] as const).map((f) => (
-                  <button
-                    key={f}
-                    onClick={() => setNotifFilter(f)}
-                    className={`font-mono text-[10px] font-bold uppercase tracking-wider
-                      px-2.5 py-1 rounded-md border transition-colors
-                      ${notifFilter === f
-                        ? 'bg-[#2dd4bf]/15 border-[#2dd4bf]/40 text-[#2dd4bf]'
-                        : 'border-white/10 text-[#6b7594] hover:bg-white/5'}`}
-                  >
-                    {f}
-                  </button>
-                ))}
-                {isOwner && (
-                  <button
-                    onClick={() => setNotifFormOpen(!notifFormOpen)}
-                    className="font-mono text-[10px] font-bold uppercase tracking-wider
-                      border border-[#2dd4bf]/30 text-[#2dd4bf]
-                      hover:bg-[#2dd4bf]/10 rounded-md px-2.5 py-1
-                      transition-colors ml-1"
-                  >
-                    {notifFormOpen ? '− Close' : '+ Create'}
-                  </button>
-                )}
-              </div>
-            </div>
-            {isOwner && notifFormOpen && (
-              <div className="bg-[#111827] rounded-xl border border-white/8 px-5 py-4 mb-3">
-                <div className="flex flex-col gap-3">
-                  <input
-                    type="text"
-                    value={notifTitle}
-                    onChange={(e) => setNotifTitle(e.target.value)}
-                    placeholder="Title (e.g. 'SOLAS January 2026 Amendments Available')"
-                    className="w-full font-mono text-sm px-3 py-2 rounded-lg
-                      bg-[#0a0e1a] border border-white/10 text-[#f0ece4]
-                      placeholder:text-[#6b7594] focus:border-[#2dd4bf]/50 focus:outline-none"
-                  />
-                  <textarea
-                    value={notifBody}
-                    onChange={(e) => setNotifBody(e.target.value)}
-                    placeholder="Body — short summary of the update"
-                    rows={3}
-                    className="w-full font-mono text-xs px-3 py-2 rounded-lg resize-y
-                      bg-[#0a0e1a] border border-white/10 text-[#f0ece4]
-                      placeholder:text-[#6b7594] focus:border-[#2dd4bf]/50 focus:outline-none"
-                  />
-                  <div className="flex flex-col sm:flex-row gap-3">
-                    <select
-                      value={notifType}
-                      onChange={(e) => setNotifType(e.target.value as typeof notifType)}
-                      className="font-mono text-xs px-3 py-2 rounded-lg
-                        bg-[#0a0e1a] border border-white/10 text-[#f0ece4]
-                        focus:border-[#2dd4bf]/50 focus:outline-none"
-                    >
-                      <option value="regulation_update">Regulation Update</option>
-                      <option value="system">System</option>
-                      <option value="announcement">Announcement</option>
-                    </select>
-                    <input
-                      type="text"
-                      value={notifSource}
-                      onChange={(e) => setNotifSource(e.target.value)}
-                      placeholder="Source (optional, e.g. 'solas_supplement')"
-                      className="flex-1 font-mono text-xs px-3 py-2 rounded-lg
-                        bg-[#0a0e1a] border border-white/10 text-[#f0ece4]
-                        placeholder:text-[#6b7594] focus:border-[#2dd4bf]/50 focus:outline-none"
-                    />
-                    <button
-                      onClick={createNotification}
-                      disabled={notifSending}
-                      className="font-mono text-xs font-bold uppercase tracking-wider
-                        bg-[#2dd4bf] text-[#0a0e1a]
-                        hover:brightness-110 rounded-lg px-4 py-2
-                        transition-[filter] duration-150 disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      {notifSending ? 'Publishing…' : 'Send Notification'}
-                    </button>
-                  </div>
-                  {notifToast && (
-                    <div className={`font-mono text-xs px-3 py-2 rounded
-                      ${notifToast.ok
-                        ? 'bg-[#2dd4bf]/10 text-[#2dd4bf] border border-[#2dd4bf]/30'
-                        : 'bg-red-500/10 text-red-400 border border-red-500/30'}`}>
-                      {notifToast.msg}
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-            {(() => {
-              const filtered = notifFilter === 'active'
-                ? notifications.filter((n) => n.is_active)
-                : notifications
-              return filtered.length === 0 ? (
-                <div className="bg-[#111827] rounded-xl border border-white/8 px-4 py-4 text-center">
-                  <p className="font-mono text-xs text-[#6b7594]">
-                    {notifFilter === 'active' ? 'No active notifications.' : 'No notifications yet.'}
-                  </p>
-                </div>
-              ) : (
-                <div className="flex flex-col gap-2 max-h-[400px] overflow-y-auto
-                  scrollbar-thin scrollbar-track-transparent scrollbar-thumb-[#2dd4bf]/30 pr-1">
-                  {filtered.map((n) => (
-                    <div
-                      key={n.id}
-                      className="bg-[#111827] rounded-lg border border-white/8 px-4 py-3
-                        flex items-start justify-between gap-3"
-                    >
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <p className="font-display font-bold text-sm text-[#f0ece4] uppercase tracking-wide">
-                            {n.title}
-                          </p>
-                          <span className={`inline-block text-[9px] font-bold px-1.5 py-0.5 rounded uppercase
-                            ${n.is_active
-                              ? 'bg-[#2dd4bf]/15 text-[#2dd4bf] border border-[#2dd4bf]/30'
-                              : 'bg-white/5 text-[#6b7594] border border-white/10'}`}>
-                            {n.is_active ? 'Active' : 'Inactive'}
-                          </span>
-                        </div>
-                        <p className="font-mono text-xs text-[#6b7594] mt-1 line-clamp-2">
-                          {n.body}
-                        </p>
-                        <p className="font-mono text-[10px] text-[#6b7594]/70 mt-1">
-                          {n.notification_type}
-                          {n.source ? ` · ${n.source}` : ''}
-                          {` · ${fmtDate(n.created_at)}`}
-                        </p>
-                      </div>
-                      {isOwner && (
-                        <button
-                          onClick={() => toggleNotification(n.id)}
-                          className="font-mono text-[10px] font-bold uppercase tracking-wider
-                            border border-white/10 text-[#f0ece4]/80
-                            hover:bg-white/5 rounded-md px-2.5 py-1.5 whitespace-nowrap
-                            transition-colors"
-                        >
-                          {n.is_active ? 'Deactivate' : 'Activate'}
-                        </button>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )
-            })()}
-          </div>
-
-          {/* ── Audit Log ──────────────────────────────────────────── */}
-          <AuditLogSection />
-
-          </>
-          )}
-
-          {/* Sprint D6.92 — old standalone Analytics block REMOVED.
-              Analytics charts are now rendered inline above the
-              RegulationChunksCard in the first activeTab === 'overview'
-              block. Old block was a duplicate render path that lived
-              after Notifications/AuditLog; merging into the main
-              Overview render makes the visual hierarchy match Blake's
-              redesign and prevents two-render-path drift. */}
-
-          {activeTab === 'email' && (
-          <>
-          {/* ── Email Testing ─────────────────────────────────────────── */}
-          {!isReadOnly && (
-          <EmailCatalogSection
-            emailSending={emailSending}
-            emailToast={emailToast}
-            sendTestEmail={sendTestEmail}
-          />
-          )}
-
-          {/* ── Custom Email Sender ──────────────────────────────────── */}
-          {isOwner && (
-          <div className="mb-8">
-            <h2 className="font-display text-lg font-bold text-[#f0ece4] tracking-wide mb-3">
-              Send Custom Email
-            </h2>
-            <div className="bg-[#111827] rounded-xl border border-white/8 px-5 py-4">
-              <div className="flex flex-col gap-3">
-                <input
-                  type="text"
-                  value={customSubject}
-                  onChange={(e) => setCustomSubject(e.target.value)}
-                  placeholder="Subject line"
-                  className="w-full font-mono text-sm px-3 py-2 rounded-lg
-                    bg-[#0a0e1a] border border-white/10 text-[#f0ece4]
-                    placeholder:text-[#6b7594] focus:border-[#2dd4bf]/50 focus:outline-none"
-                />
-                <textarea
-                  value={customBody}
-                  onChange={(e) => setCustomBody(e.target.value)}
-                  placeholder="Email body (plain text — line breaks preserved)"
-                  rows={5}
-                  className="w-full font-mono text-xs px-3 py-2 rounded-lg resize-y
-                    bg-[#0a0e1a] border border-white/10 text-[#f0ece4]
-                    placeholder:text-[#6b7594] focus:border-[#2dd4bf]/50 focus:outline-none"
-                />
-                <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center">
-                  {/* Sprint D6.91 — wrapped to flex-wrap so all nine
-                      filter buttons line up cleanly even on narrow
-                      admin viewports. Ordered: tier states (paid),
-                      lifecycle (all/trial/expired), legacy (pro),
-                      manual (custom). */}
-                  <div className="flex flex-wrap gap-1.5">
-                    {([
-                      'all', 'expired',
-                      'cadet', 'mate', 'captain', 'wheelhouse',
-                      'trial', 'pro', 'custom',
-                    ] as const).map((f) => (
-                      <button
-                        key={f}
-                        onClick={() => setCustomFilter(f)}
-                        className={`font-mono text-[10px] font-bold uppercase tracking-wider
-                          px-2.5 py-1 rounded-md border transition-colors
-                          ${customFilter === f
-                            ? 'bg-[#2dd4bf]/15 border-[#2dd4bf]/40 text-[#2dd4bf]'
-                            : 'border-white/10 text-[#6b7594] hover:bg-white/5'}`}
-                      >
-                        {f}
-                      </button>
-                    ))}
-                  </div>
-                  {customFilter !== 'custom' && customCount !== null && (
-                    <span className="font-mono text-[10px] text-[#6b7594]">
-                      {customCount} recipient{customCount !== 1 ? 's' : ''}
-                    </span>
-                  )}
-                </div>
-                {customFilter === 'custom' && (
-                  <textarea
-                    value={customEmails}
-                    onChange={(e) => setCustomEmails(e.target.value)}
-                    placeholder="Email addresses (comma or newline separated)"
-                    rows={2}
-                    className="w-full font-mono text-xs px-3 py-2 rounded-lg resize-y
-                      bg-[#0a0e1a] border border-white/10 text-[#f0ece4]
-                      placeholder:text-[#6b7594] focus:border-[#2dd4bf]/50 focus:outline-none"
-                  />
-                )}
-                <div className="flex items-center gap-3">
-                  <button
-                    onClick={sendCustomEmail}
-                    disabled={customSending}
-                    className="font-mono text-xs font-bold uppercase tracking-wider
-                      bg-[#2dd4bf] text-[#0a0e1a]
-                      hover:brightness-110 rounded-lg px-4 py-2
-                      transition-[filter] duration-150 disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    {customSending ? 'Sending…' : 'Send Email'}
-                  </button>
-                  {customToast && (
-                    <span className={`font-mono text-xs px-3 py-1.5 rounded
-                      ${customToast.ok
-                        ? 'bg-[#2dd4bf]/10 text-[#2dd4bf] border border-[#2dd4bf]/30'
-                        : 'bg-red-500/10 text-red-400 border border-red-500/30'}`}>
-                      {customToast.msg}
-                    </span>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-          )}
-
-          </>
-          )}
-
-          {activeTab === 'users' && (
-          <>
-          {/* ── Users table ──────────────────────────────────────────── */}
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="font-display text-lg font-bold text-[#f0ece4] tracking-wide">
-              Users
-              <span className="ml-2 font-mono text-xs font-normal text-[#6b7594]">
-                {filteredUsers.length === users.length
-                  ? `(${users.length})`
-                  : `(${filteredUsers.length} / ${users.length})`}
-              </span>
-            </h2>
-            {!isReadOnly && (
-            <button
-              onClick={resetAllPilots}
-              disabled={resetting === 'all'}
-              className="font-mono text-xs px-3 py-1.5 rounded-lg border border-red-500/40
-                text-red-400 hover:bg-red-500/10 disabled:opacity-50 transition-colors"
-            >
-              {resetting === 'all' ? 'Resetting...' : 'Reset All Pilots'}
-            </button>
-            )}
-          </div>
-
-          {/* Search + filter bar */}
-          <div className="mb-3 space-y-2">
-            <div className="relative">
-              <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#6b7594] pointer-events-none"
-                viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
-                <circle cx="7" cy="7" r="5" />
-                <path d="M11 11l3 3" strokeLinecap="round" />
-              </svg>
-              <input
-                type="text"
-                value={userSearch}
-                onChange={(e) => setUserSearch(e.target.value)}
-                placeholder="Search by email or name…"
-                className="w-full bg-[#111827] border border-white/8 rounded-lg
-                  pl-9 pr-9 py-2 font-mono text-sm text-[#f0ece4]
-                  placeholder:text-[#6b7594] focus:outline-none focus:border-[#2dd4bf]/40
-                  transition-colors"
-              />
-              {userSearch && (
-                <button
-                  onClick={() => setUserSearch('')}
-                  aria-label="Clear search"
-                  className="absolute right-2 top-1/2 -translate-y-1/2 w-5 h-5 flex items-center
-                    justify-center rounded text-[#6b7594] hover:text-[#f0ece4] hover:bg-white/5"
-                >
-                  ×
-                </button>
-              )}
-            </div>
-            <div className="flex flex-wrap gap-1.5">
-              {USER_FILTERS.map((f) => {
-                const active = userFilter === f.value
-                return (
-                  <button
-                    key={f.value}
-                    onClick={() => setUserFilter(f.value)}
-                    className={`font-mono text-[10px] font-bold uppercase tracking-wider
-                      px-2.5 py-1 rounded border transition-colors
-                      ${active
-                        ? 'bg-[#2dd4bf]/15 border-[#2dd4bf]/40 text-[#2dd4bf]'
-                        : 'border-white/10 text-[#6b7594] hover:text-[#f0ece4] hover:border-white/20'
-                      }`}
-                  >
-                    {f.label}
-                  </button>
-                )
-              })}
-            </div>
-          </div>
-
-          <div className={`space-y-2 ${filteredUsers.length > 10 ? 'max-h-[720px] overflow-y-auto pr-1' : ''}`}>
-            {filteredUsers.length === 0 ? (
-              <div className="bg-[#111827] rounded-xl border border-white/8 px-4 py-6 text-center">
-                <p className="font-mono text-sm text-[#6b7594]">No users match your search</p>
-              </div>
-            ) : filteredUsers.map((u) => {
-              const isExpanded = expandedUser === u.id
-              const displayName = u.full_name?.trim() || u.email
-              const now = Date.now()
-              const trialTs = u.trial_ends_at ? new Date(u.trial_ends_at).getTime() : null
-
-              // Sprint D6.92 — status label resolves to the actual paid
-              // tier (Cadet/Mate/Captain) rather than always labeling as
-              // "Pro" or falling through to "Expired" for non-pro paying
-              // users. Legacy 'pro' / 'solo' tiers map to "Captain" for
-              // visual consistency (account page already does this).
-              const PAID_TIER_LABEL: Record<string, string> = {
-                cadet:   'Cadet',
-                mate:    'Mate',
-                captain: 'Captain',
-                pro:     'Captain',  // legacy → Captain label
-                solo:    'Captain',  // legacy → Captain label
-              }
-              let statusLabel: string
-              let statusClass: string
-              if (
-                u.subscription_status === 'active' &&
-                PAID_TIER_LABEL[u.subscription_tier] !== undefined
-              ) {
-                statusLabel = PAID_TIER_LABEL[u.subscription_tier]
-                statusClass = 'bg-[#2dd4bf]/15 text-[#2dd4bf] border-[#2dd4bf]/30'
-              } else if (u.subscription_status === 'paused') {
-                statusLabel = 'Paused'
-                statusClass = 'bg-amber-500/15 text-amber-400 border-amber-500/30'
-              } else if (u.subscription_status === 'canceled' || u.subscription_status === 'canceling') {
-                statusLabel = 'Canceled'
-                statusClass = 'bg-[#6b7594]/15 text-[#6b7594] border-[#6b7594]/30'
-              } else if (trialTs !== null && trialTs > now) {
-                statusLabel = 'Trial'
-                statusClass = 'bg-[#2dd4bf]/10 text-[#2dd4bf]/80 border-[#2dd4bf]/20'
-              } else {
-                statusLabel = 'Expired'
-                statusClass = 'bg-red-500/10 text-red-400/80 border-red-500/30'
-              }
-
-              // Billing interval badge — shown for any active paid tier.
-              const intervalLabel =
-                u.subscription_status === 'active' &&
-                PAID_TIER_LABEL[u.subscription_tier] !== undefined
-                  ? u.billing_interval === 'year'
-                    ? 'Annual'
-                    : u.billing_interval === 'month'
-                    ? 'Monthly'
-                    : null
-                  : null
-
-              return (
-                <div key={u.id} className="bg-[#111827] rounded-xl border border-white/8 overflow-hidden">
-                  <button
-                    onClick={() => setExpandedUser(isExpanded ? null : u.id)}
-                    className="w-full px-4 py-3 text-left hover:bg-white/[0.02] transition-colors"
-                  >
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-1 flex-wrap">
-                          <span className={`font-mono text-[9px] font-bold uppercase tracking-wider
-                            px-1.5 py-0.5 rounded border ${statusClass}`}>
-                            {statusLabel}
-                          </span>
-                          {intervalLabel && (
-                            <span className="font-mono text-[9px] font-bold uppercase tracking-wider
-                              px-1.5 py-0.5 rounded border border-[#2dd4bf]/30 text-[#2dd4bf]/80 bg-[#2dd4bf]/5">
-                              {intervalLabel}
-                            </span>
-                          )}
-                          {u.is_admin && (
-                            <span className="font-mono text-[9px] font-bold uppercase tracking-wider
-                              px-1.5 py-0.5 rounded border border-[#2dd4bf]/40 text-[#2dd4bf]">
-                              Admin
-                            </span>
-                          )}
-                          {u.cancel_at_period_end && (
-                            <span className="font-mono text-[9px] font-bold uppercase tracking-wider
-                              px-1.5 py-0.5 rounded border border-amber-500/30 text-amber-400/80">
-                              Cancels
-                            </span>
-                          )}
-                        </div>
-                        <p className="font-mono text-sm text-[#f0ece4]/90 truncate">{displayName}</p>
-                      </div>
-                      <div className="flex items-center gap-4 flex-shrink-0">
-                        <div className="text-right">
-                          <p className="font-mono text-[9px] text-[#6b7594] uppercase tracking-wider">Last Active</p>
-                          <p className="font-mono text-xs text-[#f0ece4]/70 whitespace-nowrap">
-                            {fmtDate(u.last_active_at)}
-                          </p>
-                        </div>
-                        <div className="text-right min-w-[44px]">
-                          <p className="font-mono text-[9px] text-[#6b7594] uppercase tracking-wider">Msgs</p>
-                          <p className="font-mono text-xs text-[#f0ece4]/80">{u.message_count}</p>
-                        </div>
-                      </div>
-                    </div>
-                  </button>
-
-                  {isExpanded && (
-                    <div className="border-t border-white/8 px-4 py-4 space-y-4">
-                      {/* Detail grid */}
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2">
-                        <div>
-                          <p className="font-mono text-[9px] text-[#6b7594] uppercase tracking-wider">Email</p>
-                          <p className="font-mono text-xs text-[#f0ece4]/85 break-all">{u.email}</p>
-                        </div>
-                        <div>
-                          <p className="font-mono text-[9px] text-[#6b7594] uppercase tracking-wider">Role</p>
-                          <p className="font-mono text-xs text-[#f0ece4]/85">{u.role}</p>
-                        </div>
-                        <div>
-                          <p className="font-mono text-[9px] text-[#6b7594] uppercase tracking-wider">Registered</p>
-                          <p className="font-mono text-xs text-[#f0ece4]/85">{fmtDate(u.created_at)}</p>
-                        </div>
-                        <div>
-                          <p className="font-mono text-[9px] text-[#6b7594] uppercase tracking-wider">Trial Ends</p>
-                          <p className="font-mono text-xs text-[#f0ece4]/85">{fmtDate(u.trial_ends_at)}</p>
-                        </div>
-                        <div>
-                          <p className="font-mono text-[9px] text-[#6b7594] uppercase tracking-wider">Subscription</p>
-                          <p className="font-mono text-xs text-[#f0ece4]/85">
-                            {u.subscription_tier} / {u.subscription_status}
-                            {intervalLabel ? ` · ${intervalLabel}` : ''}
-                          </p>
-                          {u.current_period_end && (
-                            <p className="font-mono text-[10px] text-[#6b7594] mt-0.5">
-                              Period ends {fmtDate(u.current_period_end)}
-                            </p>
-                          )}
-                        </div>
-                        <div>
-                          <p className="font-mono text-[9px] text-[#6b7594] uppercase tracking-wider">Last Active</p>
-                          <p className="font-mono text-xs text-[#f0ece4]/85">{fmtDate(u.last_active_at)}</p>
-                        </div>
-                        <div>
-                          <p className="font-mono text-[9px] text-[#6b7594] uppercase tracking-wider">Messages</p>
-                          <p className="font-mono text-xs text-[#f0ece4]/85">{u.message_count}</p>
-                        </div>
-                        <div>
-                          <p className="font-mono text-[9px] text-[#6b7594] uppercase tracking-wider">Vessels</p>
-                          <p className="font-mono text-xs text-[#f0ece4]/85">{u.vessel_count}</p>
-                        </div>
-                        <div>
-                          <p className="font-mono text-[9px] text-[#6b7594] uppercase tracking-wider">Signup source</p>
-                          <p className="font-mono text-xs text-[#f0ece4]/85 break-all">{u.signup_source ?? 'not recorded'}</p>
-                        </div>
-                      </div>
-
-                      {/* Actions */}
-                      <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-white/5">
-                        <button
-                          onClick={() => exportChats(u.id, u.email)}
-                          disabled={exporting === u.id}
-                          className="font-mono text-[10px] font-bold uppercase tracking-wider
-                            px-2.5 py-1.5 rounded border border-[#2dd4bf]/30
-                            text-[#2dd4bf]/80 hover:text-[#2dd4bf] hover:bg-[#2dd4bf]/10
-                            disabled:opacity-50 transition-colors"
-                        >
-                          {exporting === u.id ? 'Exporting…' : 'Export Chats'}
-                        </button>
-                        {!isReadOnly && !u.is_admin && (
-                          <>
-                            {isOwner && (
-                            <>
-                            <button
-                              onClick={() => adminAction(u.id, 'extend-trial', 'Extend trial 14 days')}
-                              disabled={actionLoading === `${u.id}-extend-trial`}
-                              className="font-mono text-[10px] font-bold uppercase tracking-wider
-                                px-2.5 py-1.5 rounded border border-[#2dd4bf]/30
-                                text-[#2dd4bf]/80 hover:text-[#2dd4bf] hover:bg-[#2dd4bf]/10
-                                disabled:opacity-50 transition-colors"
-                            >
-                              Extend Trial
-                            </button>
-                            {u.subscription_tier !== 'pro' ? (
-                              <button
-                                onClick={() => adminAction(u.id, 'grant-pro', 'Grant Pro')}
-                                disabled={actionLoading === `${u.id}-grant-pro`}
-                                className="font-mono text-[10px] font-bold uppercase tracking-wider
-                                  px-2.5 py-1.5 rounded border border-[#2dd4bf]/30
-                                  text-[#2dd4bf]/80 hover:text-[#2dd4bf] hover:bg-[#2dd4bf]/10
-                                  disabled:opacity-50 transition-colors"
-                              >
-                                Grant Pro
-                              </button>
-                            ) : (
-                              <button
-                                onClick={() => adminAction(u.id, 'revoke-pro', 'Revoke Pro')}
-                                disabled={actionLoading === `${u.id}-revoke-pro`}
-                                className="font-mono text-[10px] font-bold uppercase tracking-wider
-                                  px-2.5 py-1.5 rounded border border-amber-500/30
-                                  text-amber-400/80 hover:text-amber-400 hover:bg-amber-500/10
-                                  disabled:opacity-50 transition-colors"
-                              >
-                                Revoke Pro
-                              </button>
-                            )}
-                            <button
-                              onClick={() => simulateExpiry(u.id, u.email)}
-                              disabled={actionLoading === `${u.id}-simulate-expiry`}
-                              className="font-mono text-[10px] font-bold uppercase tracking-wider
-                                px-2.5 py-1.5 rounded border border-amber-500/30
-                                text-amber-400/80 hover:text-amber-400 hover:bg-amber-500/10
-                                disabled:opacity-50 transition-colors"
-                            >
-                              Simulate Expiry
-                            </button>
-                            <button
-                              onClick={() => setReferralSource(u.id, u.email)}
-                              disabled={actionLoading === `${u.id}-referral-source`}
-                              className="font-mono text-[10px] font-bold uppercase tracking-wider
-                                px-2.5 py-1.5 rounded border border-[#2dd4bf]/30
-                                text-[#2dd4bf]/80 hover:text-[#2dd4bf] hover:bg-[#2dd4bf]/10
-                                disabled:opacity-50 transition-colors"
-                              title="Set or clear charity-partner referral_source"
-                            >
-                              Referral
-                            </button>
-                            <button
-                              onClick={() => resetUser(u.id, u.email)}
-                              disabled={resetting === u.id}
-                              className="font-mono text-[10px] font-bold uppercase tracking-wider
-                                px-2.5 py-1.5 rounded border border-amber-500/30
-                                text-amber-400/80 hover:text-amber-400 hover:bg-amber-500/10
-                                disabled:opacity-50 transition-colors"
-                            >
-                              {resetting === u.id ? 'Resetting…' : 'Reset'}
-                            </button>
-                            <button
-                              onClick={() => deleteUser(u.id, u.email)}
-                              disabled={deletingUser === u.id}
-                              className="font-mono text-[10px] font-bold uppercase tracking-wider
-                                px-2.5 py-1.5 rounded border border-red-500/40
-                                text-red-400/80 hover:text-red-400 hover:bg-red-500/10
-                                disabled:opacity-50 transition-colors ml-auto"
-                            >
-                              {deletingUser === u.id ? 'Deleting…' : 'Delete'}
-                            </button>
-                            </>
-                            )}
-                            {!isOwner && (
-                              <span className="font-mono text-[10px] text-[#6b7594]">View only</span>
-                            )}
-                          </>
-                        )}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )
-            })}
-          </div>
-
-          {hasMore && users.length > 0 && (
-            <div className="flex justify-center mt-4 mb-8">
-              <button onClick={loadMore}
-                className="font-mono text-xs text-[#2dd4bf] hover:underline">
-                Load more
-              </button>
-            </div>
-          )}
-          </>
-          )}
-
-          {activeTab === 'data' && <DataTab />}
-          {activeTab === 'jobs' && <JobsTab />}
-          {activeTab === 'system' && <SystemTab />}
-          {activeTab === 'partners' && <PartnersPanel />}
-          {activeTab === 'chats' && <ChatsTab initialChatId={initialChatId} />}
-          {activeTab === 'features' && <FeaturesTab />}
-
-        </div>
-      </main>
-
-      {/* Survey preview modal (admin-only, no save) */}
-      {surveyPreview && (
-        <PilotSurveyModal forceOpen preview onClose={() => setSurveyPreview(false)} />
-      )}
-    </div>
-  )
-}
-
-// ── Audit log section ────────────────────────────────────────────────────────
-
-interface AuditEntry {
-  id: string
-  admin_email: string
-  action: string
-  target_id: string | null
-  details: Record<string, unknown> | null
-  created_at: string
-}
-
-function AuditLogSection() {
-  const [entries, setEntries] = useState<AuditEntry[]>([])
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    apiRequest<AuditEntry[]>('/admin/audit-log?limit=100')
-      .then(setEntries)
-      .catch(() => setEntries([]))
-      .finally(() => setLoading(false))
-  }, [])
-
-  return (
-    <div className="mb-8">
-      <h2 className="font-display text-lg font-bold text-[#f0ece4] tracking-wide mb-3">Audit Log</h2>
-      {loading ? (
-        <div className="bg-[#111827] rounded-xl border border-white/8 h-[72px] animate-pulse" />
-      ) : entries.length === 0 ? (
-        <div className="bg-[#111827] rounded-xl border border-white/8 px-4 py-4 text-center">
-          <p className="font-mono text-sm text-[#6b7594]">No admin actions recorded yet</p>
-        </div>
-      ) : (
-        <div className="rounded-xl border border-white/8 overflow-auto max-h-[320px]">
-          <table className="w-full text-left font-mono text-xs" style={{ minWidth: '600px' }}>
-            <thead className="sticky top-0 z-10">
-              <tr className="bg-[#111827] text-[#6b7594]">
-                <th className="px-3 py-2.5 font-medium bg-[#111827]">Time</th>
-                <th className="px-3 py-2.5 font-medium bg-[#111827]">Admin</th>
-                <th className="px-3 py-2.5 font-medium bg-[#111827]">Action</th>
-                <th className="px-3 py-2.5 font-medium bg-[#111827]">Target</th>
-                <th className="px-3 py-2.5 font-medium bg-[#111827]">Details</th>
-              </tr>
-            </thead>
-            <tbody>
-              {entries.map((e, i) => (
-                <tr key={e.id} className={`border-t border-white/5 ${i % 2 === 0 ? 'bg-[#111827]' : 'bg-[#0f1629]'}`}>
-                  <td className="px-3 py-2 text-[#6b7594] whitespace-nowrap">{fmtRelative(e.created_at)}</td>
-                  <td className="px-3 py-2 text-[#f0ece4]/80">{e.admin_email.split('@')[0]}</td>
-                  <td className="px-3 py-2">
-                    <span className="text-[#2dd4bf] font-bold">{e.action}</span>
-                  </td>
-                  <td className="px-3 py-2 text-[#f0ece4]/60 truncate max-w-[120px]">{e.target_id ?? '—'}</td>
-                  <td className="px-3 py-2 text-[#6b7594] truncate max-w-[200px]">
-                    {e.details ? JSON.stringify(e.details) : '—'}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
-  )
-}
-
-// ── Email catalog section (inside Email tab) ────────────────────────────────
-
-interface EmailCatalogEntry { type: string; label: string }
-type EmailCatalog = Record<string, EmailCatalogEntry[]>
-
-interface EmailCatalogProps {
-  emailSending: string | null
-  emailToast: { msg: string; ok: boolean } | null
-  sendTestEmail: (type: string) => Promise<void>
-}
-
-function EmailCatalogSection({ emailSending, emailToast, sendTestEmail }: EmailCatalogProps) {
-  const [catalog, setCatalog] = useState<EmailCatalog>({})
-
-  useEffect(() => {
-    apiRequest<EmailCatalog>('/admin/test-email/catalog')
-      .then(setCatalog)
-      .catch(() => setCatalog({}))
-  }, [])
-
-  return (
-    <div className="mb-8">
-      <h2 className="font-display text-lg font-bold text-[#f0ece4] tracking-wide mb-3">Email Testing</h2>
-      <p className="font-mono text-xs text-[#6b7594] mb-4">
-        Send test emails to your admin address. Covers all {Object.values(catalog).reduce((n, arr) => n + arr.length, 0)} wired email templates.
-      </p>
-
-      <div className="flex flex-col gap-4">
-        {Object.entries(catalog).map(([category, entries]) => (
-          <div key={category} className="bg-[#111827] rounded-xl border border-white/8 p-4">
-            <p className="font-mono text-[10px] text-[#6b7594] uppercase tracking-wider mb-3">{category}</p>
-            <div className="flex flex-wrap gap-2">
-              {entries.map(({ type, label }) => (
-                <button
-                  key={type}
-                  onClick={() => sendTestEmail(type)}
-                  disabled={emailSending === type}
-                  className="font-mono text-xs font-bold px-3 py-1.5 rounded-md border border-[#2dd4bf]/30
-                    text-[#2dd4bf] hover:bg-[#2dd4bf]/10 disabled:opacity-50
-                    disabled:cursor-not-allowed transition-colors"
-                >
-                  {emailSending === type ? 'Sending…' : label}
-                </button>
-              ))}
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {emailToast && (
-        <div className={`mt-3 font-mono text-xs px-3 py-2 rounded-lg border ${
-          emailToast.ok
-            ? 'bg-[#2dd4bf]/10 border-[#2dd4bf]/30 text-[#2dd4bf]'
-            : 'bg-red-500/10 border-red-500/30 text-red-400'
-        }`}>
-          {emailToast.msg}
-        </div>
-      )}
-    </div>
-  )
-}
-
-// ── Data tab: universal table browser ────────────────────────────────────────
-
-interface TableInfo { name: string; columns: string[] }
-interface TableRowsResponse {
-  name: string
-  columns: string[]
-  rows: Record<string, unknown>[]
-  total: number
-  limit: number
-  offset: number
-}
-
-function DataTab() {
-  const [tables, setTables] = useState<TableInfo[]>([])
-  const [selectedTable, setSelectedTable] = useState<string>('users')
-  const [data, setData] = useState<TableRowsResponse | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [userIdFilter, setUserIdFilter] = useState('')
-  const [vesselIdFilter, setVesselIdFilter] = useState('')
-  const [search, setSearch] = useState('')
-  const [offset, setOffset] = useState(0)
-  const [expandedRow, setExpandedRow] = useState<number | null>(null)
-  // Sprint D6.92 — toggle to hide ID columns. UUID columns eat ~36
-  // chars of width each and rarely carry signal in a quick scan;
-  // hide-by-default-but-toggleable lets the admin see content
-  // without scrolling sideways.
-  const [hideIds, setHideIds] = useState(true)
-  const limit = 50
-
-  useEffect(() => {
-    apiRequest<TableInfo[]>('/admin/data/tables')
-      .then(setTables)
-      .catch(() => setError('Failed to load tables'))
-  }, [])
-
-  const fetchData = useCallback(async () => {
-    if (!selectedTable) return
-    setLoading(true)
-    setError(null)
-    try {
-      const params = new URLSearchParams({
-        limit: String(limit),
-        offset: String(offset),
-      })
-      if (userIdFilter.trim()) params.set('user_id', userIdFilter.trim())
-      if (vesselIdFilter.trim()) params.set('vessel_id', vesselIdFilter.trim())
-      if (search.trim()) params.set('search', search.trim())
-      const result = await apiRequest<TableRowsResponse>(
-        `/admin/data/table/${selectedTable}?${params}`,
-      )
-      setData(result)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load data')
-      setData(null)
-    } finally {
-      setLoading(false)
-    }
-  }, [selectedTable, offset, userIdFilter, vesselIdFilter, search])
-
-  useEffect(() => {
-    fetchData()
-  }, [fetchData])
-
-  function handleTableChange(name: string) {
-    setSelectedTable(name)
-    setOffset(0)
-    setExpandedRow(null)
-  }
-
-  function downloadJson() {
-    if (!data) return
-    const blob = new Blob([JSON.stringify(data.rows, null, 2)], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `${data.name}_${new Date().toISOString().slice(0, 10)}.json`
-    a.click()
-    URL.revokeObjectURL(url)
-  }
-
-  return (
-    <div className="mb-8 flex flex-col gap-4">
-      <h2 className="font-display text-lg font-bold text-[#f0ece4] tracking-wide">Data Browser</h2>
-      <p className="font-mono text-xs text-[#6b7594]">
-        Read-only access to whitelisted tables. Sensitive columns (hashed passwords, tokens) are excluded.
-      </p>
-
-      {/* Controls */}
-      <div className="bg-[#111827] rounded-xl border border-white/8 p-4 flex flex-col gap-3">
-        <div className="flex items-center gap-2 flex-wrap">
-          <label className="font-mono text-[10px] text-[#6b7594] uppercase tracking-wider">Table</label>
-          <select
-            value={selectedTable}
-            onChange={(e) => handleTableChange(e.target.value)}
-            className="font-mono text-xs border border-white/10 rounded-lg px-3 py-1.5
-              outline-none focus:border-[#2dd4bf] transition-colors"
-            style={{ backgroundColor: '#0d1225', color: '#f0ece4' }}
-          >
-            {tables.map((t) => (
-              <option key={t.name} value={t.name} style={{ backgroundColor: '#111827' }}>
-                {t.name}
-              </option>
-            ))}
-          </select>
-          {data && (
-            <span className="font-mono text-[10px] text-[#6b7594] ml-2">
-              {data.total} total
-            </span>
-          )}
-          <button
-            onClick={fetchData}
-            className="font-mono text-[10px] text-[#2dd4bf] hover:underline ml-auto"
-          >
-            Refresh
-          </button>
-          <button
-            onClick={downloadJson}
-            disabled={!data}
-            className="font-mono text-[10px] text-[#2dd4bf] hover:underline disabled:opacity-40"
-          >
-            Export JSON
-          </button>
-          {/* Sprint D6.92 — Hide IDs toggle. Filters columns named
-              `id` or ending in `_id` from the rendered table. The
-              expanded-row JSON view always shows everything. */}
-          <label className="flex items-center gap-1.5 font-mono text-[10px] text-[#6b7594] cursor-pointer select-none">
-            <input
-              type="checkbox"
-              checked={hideIds}
-              onChange={(e) => setHideIds(e.target.checked)}
-              className="accent-[#2dd4bf]"
-            />
-            Hide IDs
-          </label>
-        </div>
-
-        <div className="flex items-center gap-2 flex-wrap">
-          <input
-            value={userIdFilter}
-            onChange={(e) => { setUserIdFilter(e.target.value); setOffset(0) }}
-            placeholder="Filter: user_id (UUID)"
-            className="font-mono text-xs bg-[#0d1225] border border-white/10 rounded-lg px-3 py-1.5
-              text-[#f0ece4] outline-none focus:border-[#2dd4bf] transition-colors flex-1 min-w-[200px]"
-          />
-          <input
-            value={vesselIdFilter}
-            onChange={(e) => { setVesselIdFilter(e.target.value); setOffset(0) }}
-            placeholder="Filter: vessel_id (UUID)"
-            className="font-mono text-xs bg-[#0d1225] border border-white/10 rounded-lg px-3 py-1.5
-              text-[#f0ece4] outline-none focus:border-[#2dd4bf] transition-colors flex-1 min-w-[200px]"
-          />
-          <input
-            value={search}
-            onChange={(e) => { setSearch(e.target.value); setOffset(0) }}
-            placeholder="Search text columns"
-            className="font-mono text-xs bg-[#0d1225] border border-white/10 rounded-lg px-3 py-1.5
-              text-[#f0ece4] outline-none focus:border-[#2dd4bf] transition-colors flex-1 min-w-[200px]"
-          />
-        </div>
-      </div>
-
-      {error && (
-        <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-3">
-          <p className="font-mono text-xs text-red-400">{error}</p>
-        </div>
-      )}
-
-      {loading && !data && (
-        <div className="bg-[#111827] rounded-xl border border-white/8 h-32 animate-pulse" />
-      )}
-
-      {/* Rows — Sprint D6.92: columns filtered when Hide IDs is on.
-          The expanded-row JSON view always shows ALL columns regardless
-          of the toggle, so no data is hidden — just collapsed from the
-          condensed scan view. */}
-      {data && (() => {
-        const visibleColumns = hideIds
-          ? data.columns.filter(c => c !== 'id' && !c.endsWith('_id'))
-          : data.columns
-        return (
-        <div className="bg-[#111827] rounded-xl border border-white/8 overflow-x-auto">
-          <table className="w-full font-mono text-xs">
-            <thead>
-              <tr className="border-b border-white/8">
-                {visibleColumns.map((c) => (
-                  <th key={c} className="text-left px-3 py-2 text-[10px] uppercase tracking-wider text-[#6b7594] whitespace-nowrap">
-                    {c}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {data.rows.length === 0 && (
-                <tr>
-                  <td colSpan={visibleColumns.length} className="px-3 py-6 text-center text-[#6b7594]">
-                    No rows
-                  </td>
-                </tr>
-              )}
-              {data.rows.map((row, idx) => {
-                const isExpanded = expandedRow === idx
-                return (
-                  <>
-                    <tr
-                      key={idx}
-                      onClick={() => setExpandedRow(isExpanded ? null : idx)}
-                      className="border-b border-white/5 hover:bg-white/2 cursor-pointer transition-colors"
-                    >
-                      {visibleColumns.map((c) => {
-                        const v = row[c]
-                        const display =
-                          v === null || v === undefined
-                            ? <span className="text-[#6b7594]/50">—</span>
-                            : typeof v === 'object'
-                              ? <span className="text-[#2dd4bf]/70">{'{…}'}</span>
-                              : String(v).length > 40
-                                ? String(v).slice(0, 38) + '…'
-                                : String(v)
-                        return (
-                          <td key={c} className="px-3 py-2 text-[#f0ece4]/80 whitespace-nowrap">
-                            {display}
-                          </td>
-                        )
-                      })}
-                    </tr>
-                    {isExpanded && (
-                      <tr key={`${idx}-detail`} className="bg-[#0d1225]">
-                        <td colSpan={visibleColumns.length} className="px-3 py-3">
-                          <pre className="font-mono text-[10px] text-[#f0ece4]/80 whitespace-pre-wrap break-all">
-                            {JSON.stringify(row, null, 2)}
-                          </pre>
-                        </td>
-                      </tr>
-                    )}
-                  </>
-                )
-              })}
-            </tbody>
-          </table>
-        </div>
-      )})()}
-
-      {/* Pagination */}
-      {data && data.total > limit && (
-        <div className="flex items-center justify-between">
-          <button
-            onClick={() => setOffset(Math.max(0, offset - limit))}
-            disabled={offset === 0}
-            className="font-mono text-xs text-[#2dd4bf] hover:underline disabled:opacity-40"
-          >
-            ← Previous
-          </button>
-          <p className="font-mono text-[10px] text-[#6b7594]">
-            Rows {offset + 1}–{Math.min(offset + limit, data.total)} of {data.total}
-          </p>
-          <button
-            onClick={() => setOffset(offset + limit)}
-            disabled={offset + limit >= data.total}
-            className="font-mono text-xs text-[#2dd4bf] hover:underline disabled:opacity-40"
-          >
-            Next →
-          </button>
-        </div>
-      )}
-    </div>
-  )
-}
-
-// ── Jobs tab: one-click Celery triggers ─────────────────────────────────────
-
-function JobsTab() {
-  const [result, setResult] = useState<{ msg: string; ok: boolean } | null>(null)
-  const [loadingKey, setLoadingKey] = useState<string | null>(null)
-  const [ingestSource, setIngestSource] = useState('cfr_46')
-  const [noNotify, setNoNotify] = useState(true)
-  const [beatSchedule, setBeatSchedule] = useState<Record<string, { task: string; schedule: string }>>({})
-
-  useEffect(() => {
-    apiRequest<{ beat_schedule: typeof beatSchedule }>('/admin/jobs/beat-schedule')
-      .then((r) => setBeatSchedule(r.beat_schedule || {}))
-      .catch(() => {})
-  }, [])
-
-  async function run(key: string, path: string, method: string = 'POST') {
-    setLoadingKey(key)
-    setResult(null)
-    try {
-      const r = await apiRequest<{ ok: boolean; details?: string; sent?: number }>(path, { method })
-      setResult({ msg: r.details || `Sent: ${r.sent ?? ''}`, ok: r.ok !== false })
-    } catch (e) {
-      setResult({ msg: e instanceof Error ? e.message : 'Failed', ok: false })
-    } finally {
-      setLoadingKey(null)
-    }
-  }
-
-  return (
-    <div className="mb-8 flex flex-col gap-4">
-      <h2 className="font-display text-lg font-bold text-[#f0ece4] tracking-wide">Jobs</h2>
-
-      {result && (
-        <div className={`rounded-xl border p-3 ${result.ok ? 'bg-[#2dd4bf]/5 border-[#2dd4bf]/30' : 'bg-red-500/10 border-red-500/30'}`}>
-          <p className={`font-mono text-xs ${result.ok ? 'text-[#2dd4bf]' : 'text-red-400'}`}>{result.msg}</p>
-        </div>
-      )}
-
-      {/* Ingest controls */}
-      <div className="bg-[#111827] rounded-xl border border-white/8 p-4 flex flex-col gap-3">
-        <p className="font-mono text-[10px] text-[#6b7594] uppercase tracking-wider">Manual Ingest</p>
-        <div className="flex items-center gap-2 flex-wrap">
-          <select
-            value={ingestSource}
-            onChange={(e) => setIngestSource(e.target.value)}
-            className="font-mono text-xs border border-white/10 rounded-lg px-3 py-1.5
-              outline-none focus:border-[#2dd4bf] transition-colors"
-            style={{ backgroundColor: '#0d1225', color: '#f0ece4' }}
-          >
-            {['cfr_33', 'cfr_46', 'cfr_49', 'nvic', 'colregs', 'solas', 'stcw', 'ism', 'erg'].map((s) => (
-              <option key={s} value={s} style={{ backgroundColor: '#111827' }}>{s}</option>
-            ))}
-          </select>
-          <label className="flex items-center gap-2 font-mono text-xs text-[#f0ece4]/80">
-            <input
-              type="checkbox"
-              checked={noNotify}
-              onChange={(e) => setNoNotify(e.target.checked)}
-              className="accent-[#2dd4bf]"
-            />
-            --no-notify (safe)
-          </label>
-          <button
-            onClick={() => run(
-              `ingest-${ingestSource}`,
-              `/admin/jobs/ingest?source=${ingestSource}&no_notify=${noNotify}`,
-            )}
-            disabled={loadingKey === `ingest-${ingestSource}`}
-            className="font-mono text-xs font-bold text-[#0a0e1a] bg-[#2dd4bf]
-              hover:brightness-110 disabled:opacity-50 rounded-lg px-4 py-1.5
-              transition-[filter] duration-150"
-          >
-            {loadingKey === `ingest-${ingestSource}` ? 'Starting…' : 'Run Ingest'}
-          </button>
-        </div>
-        <p className="font-mono text-[10px] text-[#6b7594]">
-          Spawns a background subprocess. Watch <code>journalctl -u regknots-api</code> for progress.
-        </p>
-      </div>
-
-      {/* Celery job triggers */}
-      <div className="bg-[#111827] rounded-xl border border-white/8 p-4 flex flex-col gap-2">
-        <p className="font-mono text-[10px] text-[#6b7594] uppercase tracking-wider">Scheduled Jobs (manual trigger)</p>
-        <JobRow
-          label="Credential expiry reminders"
-          description="Runs for admin's own credentials only"
-          previewPath="/admin/test-job/preview-credential-reminders"
-          sendPath="/admin/test-job/credential-reminders"
-          loadingKey={loadingKey}
-          run={run}
-          previewRender={(data: { pending_reminders?: unknown[]; total?: number }) => (
-            <p className="font-mono text-[10px] text-[#6b7594]">
-              {data.total ?? 0} pending reminders across all users
-            </p>
-          )}
-        />
-        <JobRow
-          label="Regulation digest"
-          description="Sends a digest to admin only"
-          previewPath="/admin/test-job/preview-digest"
-          sendPath="/admin/test-job/regulation-digest"
-          loadingKey={loadingKey}
-          run={run}
-          previewRender={(data: { notification_count?: number; recipient_count?: number }) => (
-            <p className="font-mono text-[10px] text-[#6b7594]">
-              {data.notification_count ?? 0} notifications, {data.recipient_count ?? 0} eligible users
-            </p>
-          )}
-        />
-        <JobRow
-          label="IMO amendment check"
-          description="Scrapes IMO sources for new MSC refs"
-          previewPath={null}
-          sendPath="/admin/jobs/imo-amendment-check"
-          loadingKey={loadingKey}
-          run={run}
-        />
-        <JobRow
-          label="NMC document check"
-          description="Scrapes NMC for new policy letters, memos, credentialing guidance"
-          previewPath={null}
-          sendPath="/admin/jobs/nmc-check"
-          loadingKey={loadingKey}
-          run={run}
-        />
-      </div>
-
-      {/* Beat schedule */}
-      <div className="bg-[#111827] rounded-xl border border-white/8 p-4 flex flex-col gap-2">
-        <p className="font-mono text-[10px] text-[#6b7594] uppercase tracking-wider">Celery Beat Schedule</p>
-        {Object.keys(beatSchedule).length === 0 ? (
-          <p className="font-mono text-[10px] text-[#6b7594]">No schedule info available.</p>
+        )}
+      </section>
+
+      {/* ── KPIs ────────────────────────────────────────────────────── */}
+      <div className="grid grid-cols-2 xl:grid-cols-4 gap-3 md:gap-4 mb-6">
+        {!stats || !dash ? (
+          Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-[168px]" />)
         ) : (
-          <table className="w-full font-mono text-[10px]">
-            <thead>
-              <tr className="border-b border-white/8">
-                <th className="text-left py-1 text-[#6b7594]">Name</th>
-                <th className="text-left py-1 text-[#6b7594]">Task</th>
-                <th className="text-left py-1 text-[#6b7594]">Schedule</th>
-              </tr>
-            </thead>
-            <tbody>
-              {Object.entries(beatSchedule).map(([name, entry]) => (
-                <tr key={name} className="border-b border-white/5">
-                  <td className="py-1 text-[#f0ece4]/80">{name}</td>
-                  <td className="py-1 text-[#2dd4bf]/70">{entry.task}</td>
-                  <td className="py-1 text-[#6b7594]">{entry.schedule}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <>
+            <Kpi
+              label="Paying customers"
+              value={paying}
+              href="/admin/users?filter=pro"
+              sub={
+                <>
+                  <span className="text-[#2dd4bf] font-bold">{fmtMoney(dash.revenue.mrr_cents)}</span> MRR
+                  {' · '}
+                  {[['Cadet', stats.subs_active.cadet ?? 0], ['Mate', stats.subs_active.mate], ['Captain', stats.subs_active.captain + stats.subs_active.pro_legacy]]
+                    .filter(([, n]) => Number(n) > 0).map(([l, n]) => `${l} ${n}`).join(' · ') || 'none yet'}
+                </>
+              }
+              series={weeks.map((w) => w.new_paying)}
+              seriesLabel="New paying customers per week, 26 weeks"
+            />
+            <Kpi
+              label="Active users · 7 days"
+              value={stats.active_users_7d}
+              href="/admin/users"
+              sub={<>30 days: {dash.funnel.active_30d} · {pct(stats.active_users_7d, stats.total_users)}% of {stats.total_users.toLocaleString()} signed up</>}
+              series={weeks.map((w) => w.active_users)}
+              seriesLabel="Users who asked a question, per week"
+            />
+            <Kpi
+              label="Questions · 7 days"
+              value={stats.questions_7d}
+              href="/admin/chats"
+              sub={<>{stats.total_questions.toLocaleString()} all time · {stats.total_conversations.toLocaleString()} conversations</>}
+              series={weeks.map((w) => w.questions)}
+              seriesLabel="Questions per week"
+            />
+            <Kpi
+              label="Signups · last 4 weeks"
+              value={signups30}
+              href="/admin/traffic"
+              sub={<>This week: {weeks.at(-1)?.signups ?? 0} · {stats.total_users.toLocaleString()} all time</>}
+              series={weeks.map((w) => w.signups)}
+              seriesLabel="Signups per week"
+            />
+          </>
         )}
       </div>
-    </div>
-  )
-}
 
-interface JobRowProps {
-  label: string
-  description: string
-  previewPath: string | null
-  sendPath: string
-  loadingKey: string | null
-  run: (key: string, path: string, method?: string) => Promise<void>
-  previewRender?: (data: Record<string, unknown>) => React.ReactNode
-}
-
-function JobRow({ label, description, previewPath, sendPath, loadingKey, run, previewRender }: JobRowProps) {
-  const [preview, setPreview] = useState<Record<string, unknown> | null>(null)
-  const [previewLoading, setPreviewLoading] = useState(false)
-
-  async function fetchPreview() {
-    if (!previewPath) return
-    setPreviewLoading(true)
-    try {
-      const r = await apiRequest<Record<string, unknown>>(previewPath)
-      setPreview(r)
-    } catch {
-      // ignore
-    } finally {
-      setPreviewLoading(false)
-    }
-  }
-
-  return (
-    <div className="flex flex-col gap-1 py-2 border-b border-white/5 last:border-0">
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex flex-col min-w-0 flex-1">
-          <p className="font-mono text-sm text-[#f0ece4]">{label}</p>
-          <p className="font-mono text-[10px] text-[#6b7594]">{description}</p>
-          {preview && previewRender && (
-            <div className="mt-1">{previewRender(preview)}</div>
-          )}
+      {dashError && (
+        <div className="mb-6 rounded-xl border border-red-500/30 bg-red-500/5 px-4 py-3 flex items-center justify-between gap-3">
+          <p className="font-mono text-xs text-red-300">Couldn&apos;t load the trends and funnel.</p>
+          <button className={btn.secondary} onClick={load}>Retry</button>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
-          {previewPath && (
-            <button
-              onClick={fetchPreview}
-              disabled={previewLoading}
-              className="font-mono text-[10px] text-[#6b7594] hover:text-[#2dd4bf] disabled:opacity-40"
-            >
-              {previewLoading ? '…' : 'Preview'}
-            </button>
+      )}
+
+      {/* ── Growth + funnel ─────────────────────────────────────────── */}
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-3 md:gap-4 mb-6">
+        <Card title="Signups and active users" subtitle="Per week, last 26 weeks" className="xl:col-span-2">
+          {!dash ? <Skeleton className="h-[260px] border-0" /> : weeks.length === 0 ? (
+            <p className={`font-mono text-xs ${TEXT_MUTED} py-24 text-center`}>No weekly data yet</p>
+          ) : (
+            <ResponsiveContainer width="100%" height={260}>
+              <ComposedChart data={weeks} margin={{ top: 8, right: -10, bottom: 0, left: -18 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
+                <XAxis dataKey="week_start" tickFormatter={fmtWeek} tick={{ fontSize: 10, fill: '#8b93ad' }} interval="preserveStartEnd" minTickGap={24} />
+                {/* Questions run 10x the other two, so they get their own axis on the right. */}
+                <YAxis yAxisId="people" allowDecimals={false} tick={{ fontSize: 10, fill: '#8b93ad' }} />
+                <YAxis yAxisId="questions" orientation="right" allowDecimals={false} tick={{ fontSize: 10, fill: '#e69f00' }} />
+                <Tooltip
+                  contentStyle={{ backgroundColor: '#1a2332', border: '1px solid #2dd4bf33', borderRadius: 8, fontSize: 11, fontFamily: 'monospace' }}
+                  labelStyle={{ color: '#8b93ad' }}
+                  labelFormatter={(v) => `Week of ${fmtWeek(String(v))}`}
+                  cursor={{ fill: 'rgba(45,212,191,0.06)' }}
+                />
+                <Legend wrapperStyle={{ fontSize: 11, fontFamily: 'monospace' }} formatter={(v) => <span style={{ color: '#8b93ad' }}>{String(v)}</span>} />
+                <Bar yAxisId="people" dataKey="signups" name="Signups" fill="#56b4e9" fillOpacity={0.7} radius={[3, 3, 0, 0]} maxBarSize={18} />
+                <Line yAxisId="people" dataKey="active_users" name="Active users" stroke="#2dd4bf" strokeWidth={2} dot={false} type="monotone" />
+                <Line yAxisId="questions" dataKey="questions" name="Questions (right axis)" stroke="#e69f00" strokeWidth={1.5} strokeDasharray="4 3" dot={false} type="monotone" />
+              </ComposedChart>
+            </ResponsiveContainer>
           )}
-          <button
-            onClick={() => run(sendPath, sendPath)}
-            disabled={loadingKey === sendPath}
-            className="font-mono text-[10px] font-bold text-[#2dd4bf]
-              border border-[#2dd4bf]/40 hover:bg-[#2dd4bf]/10
-              disabled:opacity-50 rounded px-3 py-1 transition-colors duration-150"
-          >
-            {loadingKey === sendPath ? 'Running…' : 'Run'}
-          </button>
-        </div>
-      </div>
-    </div>
-  )
-}
+        </Card>
 
-// ── System tab: health panel ────────────────────────────────────────────────
-
-interface SystemHealth {
-  timestamp: string
-  environment: string
-  database?: { ok: boolean; size?: string; active_connections?: number; pool_size?: number; pool_free?: number; latest_migration?: string; error?: string }
-  redis?: { ok: boolean; used_memory_human?: string; error?: string }
-  uploads?: { ok: boolean; path?: string; total_bytes?: number; file_count?: number; disk_free?: number; disk_total?: number; error?: string }
-  sentry?: { ok: boolean; org?: string | null }
-  api_keys?: { anthropic: boolean; openai: boolean; resend: boolean; stripe: boolean }
-}
-
-// ── Chats tab (Sprint D6.21) ────────────────────────────────────────────────
-
-interface ChatListItem {
-  conversation_id: string
-  user_id: string
-  user_email: string
-  user_name: string | null
-  is_internal: boolean
-  vessel_id: string | null
-  vessel_name: string | null
-  vessel_type: string | null
-  flag_state: string | null
-  title: string | null
-  message_count: number
-  has_unverified: boolean
-  has_hedge: boolean
-  last_model: string | null
-  created_at: string
-  last_message_at: string | null
-}
-
-interface ChatListResponse {
-  items: ChatListItem[]
-  total: number
-  limit: number
-  offset: number
-}
-
-interface ChatMessageDetail {
-  id: string
-  role: 'user' | 'assistant'
-  content: string
-  model_used: string | null
-  tokens_used: number | null
-  cited_regulations: { source: string; section_number: string; section_title: string | null }[]
-  unverified_citations: string[]
-  hedge_phrase: string | null
-  created_at: string
-  // D6.59 — populated for assistant turns that fired the web fallback
-  // so admin chat preview can render the same yellow card the user saw.
-  web_fallback?: {
-    fallback_id: string
-    source_url: string
-    source_domain: string
-    quote: string
-    summary: string
-    confidence: number
-    surface_tier?: 'verified' | 'consensus' | 'reference' | null
-  } | null
-}
-
-interface VesselSnapshot {
-  id: string | null
-  name: string | null
-  vessel_type: string | null
-  flag_state: string | null
-  route_types: string[]
-  cargo_types: string[]
-  gross_tonnage: number | null
-  subchapter: string | null
-  route_limitations: string | null
-}
-
-interface ChatDetail {
-  conversation_id: string
-  user_id: string
-  user_email: string
-  user_name: string | null
-  is_internal: boolean
-  title: string | null
-  created_at: string
-  vessel: VesselSnapshot | null
-  messages: ChatMessageDetail[]
-}
-
-interface ChatsTabProps {
-  /** Conversation id to auto-open on mount (deep-link from hedge-audit
-   *  / web-fallback admin pages via ?conversation_id=...). */
-  initialChatId?: string | null
-}
-
-function ChatsTab({ initialChatId }: ChatsTabProps = {}) {
-  const [items, setItems] = useState<ChatListItem[]>([])
-  const [total, setTotal] = useState(0)
-  const [offset, setOffset] = useState(0)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [excludeInternal, setExcludeInternal] = useState(true)
-  const [filterFlag, setFilterFlag] = useState('')
-  const [filterUnverified, setFilterUnverified] = useState<'all' | 'with' | 'without'>('all')
-  const [filterHedged, setFilterHedged] = useState<'all' | 'with' | 'without'>('all')
-  const [filterEmail, setFilterEmail] = useState('')
-  const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [detail, setDetail] = useState<ChatDetail | null>(null)
-  const [detailLoading, setDetailLoading] = useState(false)
-
-  const PAGE_SIZE = 25
-
-  const fetchList = useCallback(async () => {
-    setLoading(true)
-    setError(null)
-    try {
-      const params = new URLSearchParams({
-        limit: String(PAGE_SIZE),
-        offset: String(offset),
-        exclude_internal: String(excludeInternal),
-      })
-      if (filterFlag) params.set('flag_state', filterFlag)
-      if (filterEmail) params.set('user_email', filterEmail)
-      if (filterUnverified !== 'all') params.set('has_unverified', String(filterUnverified === 'with'))
-      if (filterHedged !== 'all') params.set('has_hedge', String(filterHedged === 'with'))
-      const r = await apiRequest<ChatListResponse>(`/admin/chats?${params.toString()}`)
-      setItems(r.items)
-      setTotal(r.total)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load chats')
-    } finally {
-      setLoading(false)
-    }
-  }, [offset, excludeInternal, filterFlag, filterEmail, filterUnverified, filterHedged])
-
-  useEffect(() => { fetchList() }, [fetchList])
-
-  const openDetail = useCallback(async (id: string) => {
-    setSelectedId(id)
-    setDetail(null)
-    setDetailLoading(true)
-    try {
-      const r = await apiRequest<ChatDetail>(`/admin/chats/${id}`)
-      setDetail(r)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load chat detail')
-    } finally {
-      setDetailLoading(false)
-    }
-  }, [])
-
-  // Deep-link: when navigated to with ?conversation_id=<id>, auto-open
-  // that chat in the detail panel. The chat detail comes from
-  // /admin/chats/<id> directly; it does not need to be in the filtered
-  // list. Runs once per distinct id.
-  useEffect(() => {
-    if (initialChatId && initialChatId !== selectedId) {
-      void openDetail(initialChatId)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialChatId])
-
-  return (
-    <div>
-      {/* Filter bar */}
-      <div className="flex flex-wrap gap-2 mb-4 items-center text-xs font-mono">
-        <label className="flex items-center gap-1">
-          <input type="checkbox" checked={excludeInternal} onChange={(e) => { setExcludeInternal(e.target.checked); setOffset(0) }} />
-          Exclude internal
-        </label>
-        <input
-          placeholder="email contains"
-          value={filterEmail}
-          onChange={(e) => { setFilterEmail(e.target.value); setOffset(0) }}
-          className="bg-[#0d1224] border border-white/10 rounded px-2 py-1 text-[#f0ece4] w-48"
-        />
-        <input
-          placeholder="flag (e.g. United States)"
-          value={filterFlag}
-          onChange={(e) => { setFilterFlag(e.target.value); setOffset(0) }}
-          className="bg-[#0d1224] border border-white/10 rounded px-2 py-1 text-[#f0ece4] w-56"
-        />
-        <select
-          value={filterUnverified}
-          onChange={(e) => { setFilterUnverified(e.target.value as 'all' | 'with' | 'without'); setOffset(0) }}
-          className="bg-[#0d1224] border border-white/10 rounded px-2 py-1 text-[#f0ece4]"
-        >
-          <option value="all">unverified: any</option>
-          <option value="with">unverified: yes</option>
-          <option value="without">unverified: no</option>
-        </select>
-        <select
-          value={filterHedged}
-          onChange={(e) => { setFilterHedged(e.target.value as 'all' | 'with' | 'without'); setOffset(0) }}
-          className="bg-[#0d1224] border border-white/10 rounded px-2 py-1 text-[#f0ece4]"
-        >
-          <option value="all">hedged: any</option>
-          <option value="with">hedged: yes</option>
-          <option value="without">hedged: no</option>
-        </select>
-        <span className="text-[#6b7594] ml-auto">
-          {total} total · showing {items.length} from offset {offset}
-        </span>
-      </div>
-
-      {error && <div className="text-red-400 text-sm font-mono mb-2">{error}</div>}
-
-      <div className="grid grid-cols-1 lg:grid-cols-[1fr_1.5fr] gap-4">
-        {/* List */}
-        <div className="overflow-y-auto max-h-[80vh] border border-white/8 rounded-md">
-          {loading && <div className="p-4 text-[#6b7594] text-xs">Loading…</div>}
-          {!loading && items.length === 0 && (
-            <div className="p-4 text-[#6b7594] text-xs">No chats match these filters.</div>
-          )}
-          {items.map((it) => (
-            <button
-              key={it.conversation_id}
-              onClick={() => openDetail(it.conversation_id)}
-              className={`w-full text-left px-3 py-2 border-b border-white/5 hover:bg-white/5 ${
-                selectedId === it.conversation_id ? 'bg-[#2dd4bf]/10' : ''
-              }`}
-            >
-              <div className="flex items-start gap-2">
-                <div className="flex-1 min-w-0">
-                  <div className="text-xs font-mono text-[#f0ece4] truncate">
-                    {it.title || '(untitled)'}
-                  </div>
-                  <div className="text-[10px] font-mono text-[#6b7594] mt-0.5 truncate">
-                    {it.user_email}
-                    {it.is_internal && <span className="ml-1 text-[#fbbf24]">[internal]</span>}
-                    {it.vessel_name && <span className="ml-1">· {it.vessel_name}</span>}
-                    {it.flag_state && <span className="ml-1">· {it.flag_state}</span>}
-                  </div>
-                </div>
-                <div className="flex flex-col items-end text-[10px] font-mono text-[#6b7594] gap-0.5">
-                  <span>{fmtRelative(it.last_message_at || it.created_at)}</span>
-                  <div className="flex gap-1">
-                    {it.has_unverified && <span className="text-red-400">unv</span>}
-                    {it.has_hedge && <span className="text-amber-400">hdg</span>}
-                    <span>{it.message_count}m</span>
-                  </div>
-                </div>
-              </div>
-            </button>
-          ))}
-          {/* Pagination */}
-          <div className="flex justify-between p-2 text-xs font-mono border-t border-white/8">
-            <button
-              disabled={offset === 0 || loading}
-              onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}
-              className="text-[#2dd4bf] disabled:text-[#6b7594]"
-            >
-              ← prev
-            </button>
-            <button
-              disabled={offset + items.length >= total || loading}
-              onClick={() => setOffset(offset + PAGE_SIZE)}
-              className="text-[#2dd4bf] disabled:text-[#6b7594]"
-            >
-              next →
-            </button>
-          </div>
-        </div>
-
-        {/* Detail */}
-        <div className="border border-white/8 rounded-md p-4 max-h-[80vh] overflow-y-auto">
-          {!selectedId && <div className="text-[#6b7594] text-xs font-mono">Select a chat from the list to inspect.</div>}
-          {selectedId && detailLoading && <div className="text-[#6b7594] text-xs font-mono">Loading…</div>}
-          {detail && (
-            <>
-              {/* Header */}
-              <div className="border-b border-white/10 pb-2 mb-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <div className="text-sm font-mono text-[#f0ece4]">{detail.title || '(untitled)'}</div>
-                    <div className="text-[10px] font-mono text-[#6b7594] mt-1">
-                      {detail.user_email} · {fmtDate(detail.created_at)}
-                    </div>
-                  </div>
-                  <a
-                    href={`/admin/chat-preview/${detail.conversation_id}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex-shrink-0 px-2.5 py-1 rounded border border-[#2dd4bf]/30 bg-[#2dd4bf]/5
-                               text-[10px] font-mono text-[#2dd4bf] hover:bg-[#2dd4bf]/10
-                               transition-colors"
-                    title="Render this chat in the production UI to verify what the user actually saw"
-                  >
-                    View as user ↗
-                  </a>
-                </div>
-              </div>
-
-              {/* Vessel snapshot */}
-              {detail.vessel && (
-                <div className="bg-[#0d1224] rounded p-2 mb-3 text-[11px] font-mono">
-                  <div className="text-[#2dd4bf] text-[10px] uppercase tracking-wide mb-1">Vessel context</div>
-                  <div className="grid grid-cols-2 gap-1 text-[#f0ece4]">
-                    <div>Name: {detail.vessel.name || '—'}</div>
-                    <div>Type: {detail.vessel.vessel_type || '—'}</div>
-                    <div>Flag: {detail.vessel.flag_state || '—'}</div>
-                    <div>Tonnage: {detail.vessel.gross_tonnage ?? '—'}</div>
-                    <div className="col-span-2">Routes: {detail.vessel.route_types.join(', ') || '—'}</div>
-                    <div className="col-span-2">Cargo: {detail.vessel.cargo_types.join(', ') || '—'}</div>
-                    {detail.vessel.route_limitations && (
-                      <div className="col-span-2">Route note: {detail.vessel.route_limitations}</div>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {/* Messages */}
-              {detail.messages.map((m) => (
-                <div key={m.id} className="mb-4">
-                  <div className="flex items-center justify-between text-[10px] font-mono text-[#6b7594] mb-1">
-                    <span className={m.role === 'user' ? 'text-[#fbbf24]' : 'text-[#2dd4bf]'}>
-                      {m.role.toUpperCase()}
+        <Card title="Signup funnel" subtitle="Everyone who has signed up, all time">
+          {!dash ? <Skeleton className="h-[260px] border-0" /> : (
+            <ol className="flex flex-col gap-3.5 mt-1">
+              {([
+                ['Signed up', dash.funnel.signed_up, null],
+                ['Asked a question', dash.funnel.asked, 'at least once'],
+                ['Came back', dash.funnel.returned, 'asked on 2+ different days'],
+                ['Active in the last 30 days', dash.funnel.active_30d, null],
+                ['Paying now', dash.funnel.paying, null],
+              ] as const).map(([label, n, note], i) => (
+                <li key={label}>
+                  <div className="flex items-baseline justify-between gap-3 mb-1">
+                    <span className="font-mono text-xs text-[#f0ece4]/85">
+                      {label}
+                      {note && <span className={`ml-1.5 text-[10px] ${TEXT_MUTED}`}>{note}</span>}
                     </span>
-                    <span>
-                      {m.model_used && <span className="mr-2">{m.model_used}</span>}
-                      {m.tokens_used !== null && <span className="mr-2">{m.tokens_used}t</span>}
-                      <span>{fmtRelative(m.created_at)}</span>
+                    <span className="font-mono text-xs tabular-nums text-[#f0ece4]">
+                      <span className="font-bold">{n.toLocaleString()}</span>
+                      {i > 0 && <span className={`ml-1.5 ${TEXT_MUTED}`}>{pct(n, dash.funnel.signed_up)}%</span>}
                     </span>
                   </div>
-                  <div className="text-xs text-[#f0ece4] whitespace-pre-wrap break-words bg-[#0a0e1c] rounded p-2 border border-white/5">
-                    {m.content}
-                  </div>
-                  {m.role === 'assistant' && (m.cited_regulations.length > 0 || m.unverified_citations.length > 0 || m.hedge_phrase) && (
-                    <div className="mt-1 text-[10px] font-mono space-y-0.5">
-                      {m.cited_regulations.length > 0 && (
-                        <div className="text-[#6b7594]">
-                          Cited:{' '}
-                          {m.cited_regulations.map((c, i) => (
-                            <span key={i} className="text-[#2dd4bf] mr-2">
-                              {c.section_number}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                      {m.unverified_citations.length > 0 && (
-                        <div className="text-red-400">
-                          Unverified: {m.unverified_citations.join(' · ')}
-                        </div>
-                      )}
-                      {m.hedge_phrase && (
-                        <div className="text-amber-400">Hedged: &quot;{m.hedge_phrase}&quot;</div>
-                      )}
-                    </div>
-                  )}
-                </div>
+                  <MeterBar value={n} max={dash.funnel.signed_up} color={i === 4 ? '#2dd4bf' : '#56b4e9'} />
+                </li>
               ))}
-            </>
+            </ol>
           )}
-        </div>
-      </div>
-    </div>
-  )
-}
-
-function SystemTab() {
-  const [health, setHealth] = useState<SystemHealth | null>(null)
-  const [loading, setLoading] = useState(false)
-
-  const fetchHealth = useCallback(async () => {
-    setLoading(true)
-    try {
-      const r = await apiRequest<SystemHealth>('/admin/system/health')
-      setHealth(r)
-    } catch {
-      setHealth(null)
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => { fetchHealth() }, [fetchHealth])
-
-  function formatBytes(b: number | undefined): string {
-    if (b === undefined || b === null) return '—'
-    const units = ['B', 'KB', 'MB', 'GB', 'TB']
-    let i = 0
-    let n = b
-    while (n >= 1024 && i < units.length - 1) { n /= 1024; i++ }
-    return `${n.toFixed(1)} ${units[i]}`
-  }
-
-  function Status({ ok }: { ok: boolean | undefined }) {
-    return (
-      <span className={`inline-block w-2 h-2 rounded-full ${ok ? 'bg-[#2dd4bf]' : 'bg-red-400'}`} />
-    )
-  }
-
-  return (
-    <div className="mb-8 flex flex-col gap-4">
-      <div className="flex items-center justify-between">
-        <h2 className="font-display text-lg font-bold text-[#f0ece4] tracking-wide">System Health</h2>
-        <button
-          onClick={fetchHealth}
-          disabled={loading}
-          className="font-mono text-xs text-[#2dd4bf] hover:underline disabled:opacity-50"
-        >
-          {loading ? 'Refreshing…' : 'Refresh'}
-        </button>
+        </Card>
       </div>
 
-      {!health && !loading && (
-        <p className="font-mono text-xs text-red-400">Failed to load health</p>
-      )}
-      {!health && loading && (
-        <div className="bg-[#111827] rounded-xl border border-white/8 h-32 animate-pulse" />
-      )}
-
-      {health && (
-        <>
-          <p className="font-mono text-[10px] text-[#6b7594]">
-            Snapshot taken {new Date(health.timestamp).toLocaleString()} · env: <strong className="text-[#f0ece4]">{health.environment}</strong>
-          </p>
-
-          {/* Database */}
-          <div className="bg-[#111827] rounded-xl border border-white/8 p-4 flex flex-col gap-2">
-            <div className="flex items-center gap-2">
-              <Status ok={health.database?.ok} />
-              <p className="font-mono text-xs text-[#f0ece4] uppercase tracking-wider">Database</p>
-            </div>
-            {health.database?.ok ? (
-              <div className="grid grid-cols-2 gap-2 font-mono text-[10px] text-[#f0ece4]/80">
-                <div><span className="text-[#6b7594]">Size:</span> {health.database.size}</div>
-                <div><span className="text-[#6b7594]">Active connections:</span> {health.database.active_connections}</div>
-                <div><span className="text-[#6b7594]">Pool size:</span> {health.database.pool_size}</div>
-                <div><span className="text-[#6b7594]">Pool free:</span> {health.database.pool_free}</div>
-                <div className="col-span-2"><span className="text-[#6b7594]">Latest migration:</span> {health.database.latest_migration}</div>
-              </div>
-            ) : (
-              <p className="font-mono text-[10px] text-red-400">{health.database?.error || 'unreachable'}</p>
-            )}
-          </div>
-
-          {/* Redis */}
-          <div className="bg-[#111827] rounded-xl border border-white/8 p-4 flex flex-col gap-2">
-            <div className="flex items-center gap-2">
-              <Status ok={health.redis?.ok} />
-              <p className="font-mono text-xs text-[#f0ece4] uppercase tracking-wider">Redis</p>
-            </div>
-            {health.redis?.ok ? (
-              <p className="font-mono text-[10px] text-[#f0ece4]/80">
-                <span className="text-[#6b7594]">Memory:</span> {health.redis.used_memory_human}
-              </p>
-            ) : (
-              <p className="font-mono text-[10px] text-red-400">{health.redis?.error || 'unreachable'}</p>
-            )}
-          </div>
-
-          {/* Uploads / disk */}
-          <div className="bg-[#111827] rounded-xl border border-white/8 p-4 flex flex-col gap-2">
-            <div className="flex items-center gap-2">
-              <Status ok={health.uploads?.ok} />
-              <p className="font-mono text-xs text-[#f0ece4] uppercase tracking-wider">Uploads / Disk</p>
-            </div>
-            {health.uploads?.ok ? (
-              <div className="grid grid-cols-2 gap-2 font-mono text-[10px] text-[#f0ece4]/80">
-                <div className="col-span-2"><span className="text-[#6b7594]">Path:</span> {health.uploads.path}</div>
-                <div><span className="text-[#6b7594]">Upload size:</span> {formatBytes(health.uploads.total_bytes)}</div>
-                <div><span className="text-[#6b7594]">Files:</span> {health.uploads.file_count}</div>
-                <div><span className="text-[#6b7594]">Disk free:</span> {formatBytes(health.uploads.disk_free)}</div>
-                <div><span className="text-[#6b7594]">Disk total:</span> {formatBytes(health.uploads.disk_total)}</div>
-              </div>
-            ) : (
-              <p className="font-mono text-[10px] text-red-400">{health.uploads?.error || 'unreachable'}</p>
-            )}
-          </div>
-
-          {/* External services */}
-          <div className="bg-[#111827] rounded-xl border border-white/8 p-4 flex flex-col gap-2">
-            <p className="font-mono text-xs text-[#f0ece4] uppercase tracking-wider">External Services</p>
-            <div className="grid grid-cols-2 gap-2 font-mono text-[10px] text-[#f0ece4]/80">
-              <div className="flex items-center gap-2"><Status ok={health.sentry?.ok} /> Sentry {health.sentry?.org ? `(${health.sentry.org})` : ''}</div>
-              <div className="flex items-center gap-2"><Status ok={health.api_keys?.anthropic} /> Anthropic API key</div>
-              <div className="flex items-center gap-2"><Status ok={health.api_keys?.openai} /> OpenAI API key</div>
-              <div className="flex items-center gap-2"><Status ok={health.api_keys?.resend} /> Resend API key</div>
-              <div className="flex items-center gap-2"><Status ok={health.api_keys?.stripe} /> Stripe API key</div>
-            </div>
-          </div>
-        </>
-      )}
-    </div>
-  )
-}
-
-// ── Features tab (Sprint D6.25) ───────────────────────────────────────────
-//
-// Shows adoption signal for the four under-discovered features (Credentials,
-// Compliance Log, PSC Checklist, Vessel Dossier) plus Vessels overall.
-// Sourced from /admin/feature-usage — no new instrumentation required, just
-// counts off the existing tables.
-
-interface FeatureTotal {
-  feature: string
-  total_records: number
-  distinct_users: number
-  last_created_at: string | null
-}
-
-interface FeatureUserRow {
-  user_id: string
-  email: string
-  full_name: string | null
-  credentials: number
-  compliance_logs: number
-  psc_checklists: number
-  vessels: number
-  vessel_documents: number
-  // Sprint D6.92 — new feature columns + tier inline
-  conversations?: number
-  studies?: number
-  subscription_tier?: string
-  last_activity_at: string | null
-}
-
-// Sprint D6.92 — sortable column keys for the Top Users table.
-type FeatureUserSortKey =
-  | 'email' | 'tier' | 'conversations' | 'studies'
-  | 'credentials' | 'compliance_logs' | 'psc_checklists'
-  | 'vessels' | 'vessel_documents' | 'last_activity_at'
-
-type SortDir = 'asc' | 'desc'
-
-function FeaturesTab() {
-  const [totals, setTotals] = useState<FeatureTotal[]>([])
-  const [users, setUsers] = useState<FeatureUserRow[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [excludeInternal, setExcludeInternal] = useState(true)
-
-  // Sprint D6.92 — sortable Top Users table.
-  // Default: server-side ORDER BY (total feature touches DESC). Once
-  // the admin clicks a header, switch to client-side sort by that
-  // column. Toggling the same header flips direction.
-  const [sortKey, setSortKey] = useState<FeatureUserSortKey | null>(null)
-  const [sortDir, setSortDir] = useState<SortDir>('desc')
-
-  const load = useCallback(async () => {
-    setLoading(true)
-    setError(null)
-    try {
-      const params = new URLSearchParams({
-        exclude_internal: String(excludeInternal),
-        limit: '50',
-      })
-      const r = await apiRequest<{ totals: FeatureTotal[]; top_users: FeatureUserRow[] }>(
-        `/admin/feature-usage?${params.toString()}`,
-      )
-      setTotals(r.totals)
-      setUsers(r.top_users)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load feature usage')
-    } finally {
-      setLoading(false)
-    }
-  }, [excludeInternal])
-
-  useEffect(() => { load() }, [load])
-
-  /** Click handler: same key flips direction, new key resets to desc. */
-  function onSort(key: FeatureUserSortKey) {
-    if (sortKey === key) {
-      setSortDir(d => d === 'asc' ? 'desc' : 'asc')
-    } else {
-      setSortKey(key)
-      setSortDir('desc')
-    }
-  }
-
-  /** Apply client-side sort when a column has been clicked; otherwise
-   *  preserve the server's default ordering. */
-  const sortedUsers = useMemo(() => {
-    if (!sortKey) return users
-    const dir = sortDir === 'asc' ? 1 : -1
-    const out = [...users]
-    out.sort((a, b) => {
-      let av: string | number
-      let bv: string | number
-      switch (sortKey) {
-        case 'email':           av = a.email.toLowerCase(); bv = b.email.toLowerCase(); break
-        case 'tier':            av = a.subscription_tier ?? ''; bv = b.subscription_tier ?? ''; break
-        case 'conversations':   av = a.conversations ?? 0; bv = b.conversations ?? 0; break
-        case 'studies':         av = a.studies ?? 0; bv = b.studies ?? 0; break
-        case 'credentials':     av = a.credentials; bv = b.credentials; break
-        case 'compliance_logs': av = a.compliance_logs; bv = b.compliance_logs; break
-        case 'psc_checklists':  av = a.psc_checklists; bv = b.psc_checklists; break
-        case 'vessels':         av = a.vessels; bv = b.vessels; break
-        case 'vessel_documents': av = a.vessel_documents; bv = b.vessel_documents; break
-        case 'last_activity_at':
-          av = a.last_activity_at ? new Date(a.last_activity_at).getTime() : 0
-          bv = b.last_activity_at ? new Date(b.last_activity_at).getTime() : 0
-          break
-      }
-      if (av < bv) return -1 * dir
-      if (av > bv) return  1 * dir
-      return 0
-    })
-    return out
-  }, [users, sortKey, sortDir])
-
-  /** Sort-header indicator arrow. */
-  function SortHeader({ label, k, right }: { label: string; k: FeatureUserSortKey; right?: boolean }) {
-    const active = sortKey === k
-    const arrow = active ? (sortDir === 'asc' ? '▲' : '▼') : ''
-    return (
-      <th
-        className={`${right ? 'text-right' : 'text-left'} px-3 py-2 cursor-pointer hover:text-[#f0ece4] transition-colors select-none`}
-        onClick={() => onSort(k)}
-        title={`Sort by ${label.toLowerCase()}`}
-      >
-        {label} {arrow && <span className="text-[#2dd4bf]">{arrow}</span>}
-      </th>
-    )
-  }
-
-  return (
-    <div>
-      <div className="flex items-center justify-between mb-4">
-        <p className="font-mono text-xs text-[#6b7594]">
-          Counts straight off each feature's table. Use this to gauge whether the
-          feature highlight cards on /welcome are nudging adoption over time.
-        </p>
-        <label className="flex items-center gap-1 text-xs font-mono whitespace-nowrap">
-          <input
-            type="checkbox"
-            checked={excludeInternal}
-            onChange={(e) => setExcludeInternal(e.target.checked)}
-          />
-          Exclude internal
-        </label>
-      </div>
-
-      {error && (
-        <div className="bg-[#111827] rounded-xl border border-red-500/30 px-4 py-3 mb-4">
-          <p className="font-mono text-xs text-red-400">{error}</p>
-        </div>
-      )}
-
-      {/* Per-feature totals */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-8">
-        {loading && totals.length === 0
-          ? Array.from({ length: 5 }).map((_, i) => (
-              <div key={i} className="bg-[#111827] rounded-xl border border-white/8 px-4 py-3 h-[88px] animate-pulse" />
-            ))
-          : totals.map((t) => (
-              <div key={t.feature} className="bg-[#111827] rounded-xl border border-white/8 px-4 py-3">
-                <p className="font-mono text-[10px] uppercase tracking-wider text-[#6b7594] truncate">
-                  {t.feature}
+      {/* ── Quality · citations · roles ────────────────────────────── */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 md:gap-4 mb-6">
+        <Card title="Answer quality · 7 days" action={<Link href="/admin/hedge-audit" className="font-mono text-[11px] text-[#2dd4bf] hover:underline">Hedge audit →</Link>}>
+          {!dash || !stats ? <Skeleton className="h-[220px] border-0" /> : (
+            <div className="flex flex-col gap-4">
+              <div>
+                <p className="font-display text-3xl font-bold text-[#f0ece4] leading-none">
+                  {dash.quality.hedged_7d}
+                  <span className="font-mono text-sm font-normal text-[#f0ece4]/60"> of {plural(dash.quality.answers_7d, 'answer')} hedged</span>
                 </p>
-                <p className="font-display text-2xl font-bold text-[#f0ece4] mt-1">
-                  {t.total_records}
-                </p>
-                <p className="font-mono text-[10px] text-[#6b7594] mt-1">
-                  {t.distinct_users} {t.distinct_users === 1 ? 'user' : 'users'}
-                  {t.last_created_at && (
-                    <> · last {fmtRelative(t.last_created_at)}</>
-                  )}
-                </p>
+                <div className="mt-2"><MeterBar value={dash.quality.hedged_7d} max={Math.max(1, dash.quality.answers_7d)} color="#e69f00" /></div>
+                {Object.keys(dash.quality.judge_7d).length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 mt-2.5">
+                    {Object.entries(dash.quality.judge_7d).map(([v, n]) => (
+                      <Pill key={v} tone={v === 'complete_miss' ? 'red' : v === 'false_hedge' ? 'gray' : 'amber'}>{n} {JUDGE_LABELS[v] ?? v}</Pill>
+                    ))}
+                  </div>
+                )}
               </div>
-            ))}
-      </div>
-
-      {/* Per-user breakdown — Sprint D6.92 sortable columns + new
-          feature columns (Conversations, Studies, Tier). Click any
-          header to sort by it; click again to flip direction. */}
-      <h3 className="font-mono text-xs uppercase tracking-wider text-[#6b7594] mb-2">
-        Top users (any feature)
-      </h3>
-      <div className="bg-[#111827] rounded-xl border border-white/8 overflow-x-auto">
-        <table className="w-full text-xs font-mono">
-          <thead>
-            <tr className="bg-[#0d1224] text-[#6b7594]">
-              <SortHeader label="User"     k="email" />
-              <SortHeader label="Tier"     k="tier" />
-              <SortHeader label="Convos"   k="conversations" right />
-              <SortHeader label="Studies"  k="studies" right />
-              <SortHeader label="Creds"    k="credentials" right />
-              <SortHeader label="Logs"     k="compliance_logs" right />
-              <SortHeader label="PSC"      k="psc_checklists" right />
-              <SortHeader label="Vessels"  k="vessels" right />
-              <SortHeader label="Docs"     k="vessel_documents" right />
-              <SortHeader label="Last activity" k="last_activity_at" />
-            </tr>
-          </thead>
-          <tbody>
-            {loading && users.length === 0 && (
-              <tr><td colSpan={10} className="px-3 py-6 text-center text-[#6b7594]">Loading…</td></tr>
-            )}
-            {!loading && users.length === 0 && (
-              <tr><td colSpan={10} className="px-3 py-6 text-center text-[#6b7594]">No users have engaged any feature yet.</td></tr>
-            )}
-            {sortedUsers.map((u) => (
-              <tr key={u.user_id} className="border-t border-white/5 hover:bg-white/[0.02]">
-                <td className="px-3 py-2">
-                  <div className="text-[#f0ece4] truncate max-w-[240px]">{u.email}</div>
-                  {u.full_name && <div className="text-[#6b7594] truncate max-w-[240px]">{u.full_name}</div>}
-                </td>
-                <td className="px-3 py-2">
-                  {u.subscription_tier && u.subscription_tier !== 'free' ? (
-                    <span className="inline-block text-[9px] font-bold uppercase tracking-wider
-                      px-1.5 py-0.5 rounded border border-[#2dd4bf]/30 text-[#2dd4bf] bg-[#2dd4bf]/5">
-                      {u.subscription_tier}
+              <dl className="grid grid-cols-2 gap-x-4 gap-y-3 font-mono text-xs">
+                <div>
+                  <dt className={TEXT_MUTED}>Unverified citations</dt>
+                  <dd className={`text-lg font-bold ${stats.citation_errors_7d ? 'text-red-400' : 'text-[#f0ece4]'}`}>{stats.citation_errors_7d}</dd>
+                </div>
+                <div>
+                  <dt className={TEXT_MUTED}>Web answers shown</dt>
+                  <dd className="text-lg font-bold text-[#f0ece4]">
+                    {stats.web_fallback_surfaced_7d ?? 0}
+                    <span className={`text-xs font-normal ${TEXT_MUTED}`}> of {stats.web_fallback_attempts_7d ?? 0} tried</span>
+                  </dd>
+                </div>
+                <div className="col-span-2">
+                  <dt className={TEXT_MUTED}>Open hedge audits</dt>
+                  <dd className="text-[#f0ece4]">
+                    <span className="text-lg font-bold">{dash.quality.hedge_audits_open}</span>
+                    <span className={`ml-2 ${TEXT_MUTED}`}>
+                      {Object.entries(dash.quality.open_audit_causes).slice(0, 3)
+                        .map(([c, n]) => `${n} ${CAUSE_LABELS[c] ?? c.toLowerCase()}`).join(' · ')}
                     </span>
-                  ) : (
-                    <span className="text-[#6b7594]">—</span>
-                  )}
-                </td>
-                <td className="text-right px-3 py-2 text-[#f0ece4]">{u.conversations || '—'}</td>
-                <td className="text-right px-3 py-2 text-[#f0ece4]">{u.studies || '—'}</td>
-                <td className="text-right px-3 py-2 text-[#f0ece4]">{u.credentials || '—'}</td>
-                <td className="text-right px-3 py-2 text-[#f0ece4]">{u.compliance_logs || '—'}</td>
-                <td className="text-right px-3 py-2 text-[#f0ece4]">{u.psc_checklists || '—'}</td>
-                <td className="text-right px-3 py-2 text-[#f0ece4]">{u.vessels || '—'}</td>
-                <td className="text-right px-3 py-2 text-[#f0ece4]">{u.vessel_documents || '—'}</td>
-                <td className="px-3 py-2 text-[#6b7594]">{fmtRelative(u.last_activity_at)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                  </dd>
+                </div>
+              </dl>
+            </div>
+          )}
+        </Card>
+
+        <Card title="Most cited regulations" subtitle="All time">
+          {topCitations.length === 0 ? (
+            <p className={`font-mono text-xs ${TEXT_MUTED} py-8 text-center`}>No citations yet</p>
+          ) : (
+            <ol className="flex flex-col gap-2.5">
+              {topCitations.slice(0, 8).map((c) => (
+                <li key={`${c.source}-${c.section_number}`} title={c.section_title ?? undefined}>
+                  <div className="flex items-baseline justify-between gap-3 mb-1">
+                    <span className="font-mono text-xs text-[#f0ece4]/85 truncate">{c.section_number}</span>
+                    <span className="font-mono text-xs tabular-nums text-[#f0ece4]/70">{c.cite_count}</span>
+                  </div>
+                  <MeterBar value={c.cite_count} max={topCitations[0].cite_count} />
+                </li>
+              ))}
+            </ol>
+          )}
+        </Card>
+
+        <Card title="Questions by role" subtitle="All time">
+          {roles.length === 0 ? (
+            <p className={`font-mono text-xs ${TEXT_MUTED} py-8 text-center`}>No data yet</p>
+          ) : (
+            <ol className="flex flex-col gap-2.5">
+              {[...roles].sort((a, b) => b.message_count - a.message_count).slice(0, 8).map((r) => (
+                <li key={r.role}>
+                  <div className="flex items-baseline justify-between gap-3 mb-1">
+                    <span className="font-mono text-xs text-[#f0ece4]/85 truncate">{r.role.replace(/_/g, ' ')}</span>
+                    <span className="font-mono text-xs tabular-nums text-[#f0ece4]/70">
+                      {r.message_count}<span className={`ml-1.5 ${TEXT_MUTED}`}>{plural(r.user_count, 'user')}</span>
+                    </span>
+                  </div>
+                  <MeterBar value={r.message_count} max={Math.max(...roles.map((x) => x.message_count))} color="#cc79a7" />
+                </li>
+              ))}
+            </ol>
+          )}
+        </Card>
       </div>
-    </div>
-  )
-}
 
-// ── Page ─────────────────────────────────────────────────────────────────────────
+      {/* ── Recent activity + money ────────────────────────────────── */}
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-3 md:gap-4 mb-6">
+        <Card title="Latest questions" className="xl:col-span-2" action={<Link href="/admin/chats" className="font-mono text-[11px] text-[#2dd4bf] hover:underline">All conversations →</Link>}>
+          {!dash ? <Skeleton className="h-[240px] border-0" /> : dash.recent_questions.length === 0 ? (
+            <p className={`font-mono text-xs ${TEXT_MUTED} py-8 text-center`}>No questions yet</p>
+          ) : (
+            <ul className="divide-y divide-white/5 -my-2">
+              {dash.recent_questions.map((q, i) => (
+                <li key={`${q.conversation_id}-${i}`}>
+                  <Link href={`/admin/chats?conversation_id=${q.conversation_id}`} className="block py-2.5 group">
+                    <p className="font-mono text-[13px] text-[#f0ece4]/90 line-clamp-2 group-hover:text-[#2dd4bf] transition-colors">{q.preview}</p>
+                    <p className={`font-mono text-[11px] ${TEXT_MUTED} mt-0.5 truncate`}>
+                      {q.user_name?.trim() || q.user_email} · {fmtRelative(q.created_at)}
+                    </p>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
 
-export default function AdminPage() {
-  // Suspense boundary required by useSearchParams() in AdminContent —
-  // without it Next.js bails the whole route out of static prerendering.
-  return (
-    <AuthGuard>
-      <Suspense fallback={null}>
-        <AdminContent />
-      </Suspense>
-    </AuthGuard>
+        <div className="flex flex-col gap-3 md:gap-4">
+          <Card title="Revenue" action={<Link href="/admin/users?filter=pro" className="font-mono text-[11px] text-[#2dd4bf] hover:underline">Paying users →</Link>}>
+            {!dash ? <Skeleton className="h-[120px] border-0" /> : (
+              <>
+                <dl className="grid grid-cols-3 gap-3 font-mono">
+                  <div>
+                    <dt className={`text-[10px] uppercase tracking-wider ${TEXT_MUTED}`}>MRR</dt>
+                    <dd className="text-lg font-bold text-[#2dd4bf]">{fmtMoney(dash.revenue.mrr_cents)}</dd>
+                  </div>
+                  <div>
+                    <dt className={`text-[10px] uppercase tracking-wider ${TEXT_MUTED}`}>30 days</dt>
+                    <dd className="text-lg font-bold text-[#f0ece4]">{fmtMoney(dash.revenue.paid_30d_cents)}</dd>
+                  </div>
+                  <div>
+                    <dt className={`text-[10px] uppercase tracking-wider ${TEXT_MUTED}`}>All time</dt>
+                    <dd className="text-lg font-bold text-[#f0ece4]">{fmtMoney(dash.revenue.paid_alltime_cents)}</dd>
+                  </div>
+                </dl>
+                {dash.recent_payments.length > 0 && (
+                  <ul className="mt-3 pt-3 border-t border-white/5 flex flex-col gap-1.5">
+                    {dash.recent_payments.slice(0, 4).map((p, i) => (
+                      <li key={i} className="flex items-baseline justify-between gap-2 font-mono text-[11px]">
+                        <span className="text-[#f0ece4]/80 truncate">{p.user_email}</span>
+                        <span className="whitespace-nowrap text-[#f0ece4]/70">
+                          {fmtMoney(p.amount_cents)} {TIER_LABELS[p.subscription_tier ?? ''] ?? p.subscription_tier ?? ''}
+                          <span className={`ml-1.5 ${TEXT_MUTED}`}>{fmtRelative(p.paid_at)}</span>
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </>
+            )}
+          </Card>
+
+          <Card title="Newest signups" action={<Link href="/admin/users" className="font-mono text-[11px] text-[#2dd4bf] hover:underline">Users →</Link>}>
+            {!dash ? <Skeleton className="h-[160px] border-0" /> : dash.recent_signups.length === 0 ? (
+              <p className={`font-mono text-xs ${TEXT_MUTED} py-6 text-center`}>No signups yet</p>
+            ) : (
+              <ul className="flex flex-col gap-2">
+                {dash.recent_signups.slice(0, 5).map((s) => (
+                  <li key={s.id} className="flex items-baseline justify-between gap-2 font-mono text-[11px]">
+                    <span className="min-w-0">
+                      <span className="block text-[#f0ece4]/85 truncate">{s.full_name?.trim() || s.email}</span>
+                      <span className={`block ${TEXT_MUTED} truncate`}>
+                        {s.role?.replace(/_/g, ' ') ?? 'no role'} · {s.signup_source ?? 'source not recorded'}
+                      </span>
+                    </span>
+                    <span className="text-right whitespace-nowrap">
+                      <span className="block text-[#f0ece4]/70">{fmtRelative(s.created_at)}</span>
+                      <span className={`block ${s.questions ? 'text-[#2dd4bf]' : TEXT_MUTED}`}>{plural(s.questions, 'question')}</span>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Card>
+        </div>
+      </div>
+
+      {/* ── Corpus ──────────────────────────────────────────────────── */}
+      {stats && (
+        <Link href="/admin/corpus" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/8 bg-[#111827] px-4 md:px-5 py-3.5 hover:border-[#2dd4bf]/30 transition-colors">
+          <p className="font-mono text-xs text-[#f0ece4]/80">
+            <span className={`uppercase tracking-wider text-[11px] ${TEXT_MUTED} mr-3`}>Corpus</span>
+            <span className="font-bold text-[#f0ece4]">{stats.total_chunks.toLocaleString()}</span> passages from{' '}
+            <span className="font-bold text-[#f0ece4]">{Object.keys(stats.chunks_by_source).length}</span> sources
+          </p>
+          <span className="font-mono text-[11px] text-[#2dd4bf]">By source →</span>
+        </Link>
+      )}
+    </Page>
   )
 }

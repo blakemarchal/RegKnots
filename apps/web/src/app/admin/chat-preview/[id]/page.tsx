@@ -15,7 +15,6 @@
 import { useEffect, useState, useCallback } from 'react'
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
-import AuthGuard from '@/components/AuthGuard'
 import { ChatThread } from '@/components/ChatThread'
 import { apiRequest } from '@/lib/api'
 import type { Message, CitedRegulation, WebFallbackCard } from '@/types/chat'
@@ -155,7 +154,7 @@ function Content() {
   if (!id) return null
 
   return (
-    <div className="flex flex-col h-dvh overflow-hidden bg-[#0a0e1a]">
+    <div className="flex flex-col h-[calc(100dvh-3.5rem)] lg:h-dvh overflow-hidden bg-[#0a0e1a]">
       {/* ── Admin metadata strip — distinguishes preview from real chat ── */}
       <div className="flex-shrink-0 bg-[#0a1628] border-b border-[#2dd4bf]/30 px-4 py-2">
         <div className="max-w-3xl mx-auto flex items-center justify-between gap-3 flex-wrap">
@@ -184,16 +183,16 @@ function Content() {
           </div>
           <div className="flex items-center gap-3">
             <Link
-              href={`/admin?tab=chats&conversation_id=${id}`}
+              href={`/admin/chats?conversation_id=${id}`}
               className="text-xs font-mono text-[#2dd4bf] hover:underline"
             >
               Forensic view →
             </Link>
             <Link
-              href="/admin"
-              className="text-xs font-mono text-[#6b7594] hover:text-[#f0ece4]"
+              href="/admin/chats"
+              className="text-xs font-mono text-[#8b93ad] hover:text-[#f0ece4]"
             >
-              ← Admin
+              ← Conversations
             </Link>
           </div>
         </div>
@@ -213,7 +212,7 @@ function Content() {
       )}
 
       {/* ── Chat thread (production rendering, read-only) ── */}
-      <main className="flex-1 overflow-y-auto">
+      <div className="flex-1 overflow-y-auto">
         <div className="max-w-3xl mx-auto">
           {loading && (
             <div className="px-4 py-12 text-center text-sm font-mono text-[#6b7594]">
@@ -236,15 +235,12 @@ function Content() {
             />
           )}
         </div>
-      </main>
+      </div>
     </div>
   )
 }
 
 export default function AdminChatPreviewPage() {
-  return (
-    <AuthGuard>
-      <Content />
-    </AuthGuard>
-  )
+  // 2026-09-29 — the admin layout supplies the auth gate and sidebar.
+  return <Content />
 }

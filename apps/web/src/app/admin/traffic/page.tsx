@@ -5,10 +5,7 @@
 // no third-party services. Cost: $0.
 
 import { useEffect, useState } from 'react'
-import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import AuthGuard from '@/components/AuthGuard'
-import { AppHeader } from '@/components/AppHeader'
 import { apiRequest } from '@/lib/api'
 import { useAuthStore } from '@/lib/auth'
 
@@ -44,14 +41,8 @@ interface TrafficSummary {
 const DAY_OPTIONS: number[] = [1, 7, 14, 30]
 
 export default function AdminTrafficPage() {
-  return (
-    <AuthGuard>
-      <div className="min-h-screen bg-[#0a0e1a] text-[#f0ece4]">
-        <AppHeader />
-        <TrafficContent />
-      </div>
-    </AuthGuard>
-  )
+  // 2026-09-29 — the admin layout supplies the auth gate, sidebar and background.
+  return <TrafficContent />
 }
 
 function TrafficContent() {
@@ -91,18 +82,15 @@ function TrafficContent() {
   if (!hydrated || !isAdmin) return null
 
   return (
-    <main className="max-w-7xl mx-auto px-5 py-6">
+    <div className="px-4 md:px-8 py-6 md:py-8 max-w-[1500px] mx-auto">
       <div className="flex items-baseline justify-between mb-5 gap-4 flex-wrap">
         <div>
-          <h1 className="font-display text-2xl font-bold tracking-wide">Traffic</h1>
+          <h1 className="font-display text-2xl md:text-3xl font-bold tracking-wide text-[#f0ece4] mb-1">Traffic &amp; signups</h1>
           <p className="font-mono text-xs text-[#6b7594] mt-1">
             Caddy access-log rollup. Refreshes every 5 minutes server-side.
           </p>
         </div>
         <div className="flex items-center gap-3">
-          <Link href="/admin" className="font-mono text-xs text-[#2dd4bf] hover:underline">
-            ← Admin
-          </Link>
           <div className="flex gap-1">
             {DAY_OPTIONS.map((d) => (
               <button
@@ -185,7 +173,7 @@ function TrafficContent() {
           </div>
         </div>
       )}
-    </main>
+    </div>
   )
 }
 
