@@ -68,7 +68,7 @@ If a doc says "alembic head is 0045" but `alembic current` says `0092`, the doc 
 - D6.83 Account toggle: `users.study_tools_enabled`, hidden from nav when off.
 - 2026-05-07: `scripts/deploy.sh` + `scripts/smoke.sh` shipped — closes the "no auto-deploy" gap; smoke probes are content-asserting (HTTP 200 + JS-chunk canary string), not status-only.
 - 2026-05-08: full-system audit at `docs/sprint-audits/full-system-audit-2026-05-08.md`. Two critical-but-fixable findings (JWT secret env-var mismatch, no DB backups) flagged for pre-marketing-push fix.
-- 2026-05-09 D6.84 Sprint A: confidence tier router shipped in **shadow mode** on prod. Adds 4-tier provenance (✓ Verified / ⚓ Industry Standard / 🌐 Relaxed Web / ⚠ Best-effort) on top of today's pipeline. Closes the partial_miss-low-web dead zone where Jordan Dusek's gasket-class questions hedged. Flag: `CONFIDENCE_TIERS_MODE=off|shadow|live`. Migration 0093 adds `tier_router_shadow_log` table + `messages.tier_metadata` JSONB. Admin compare view at `/admin/tier-router`. 12/12 unit tests pass. Gold set at `data/eval/tier_router_gold.json`. **Phase E flip to `live` is operator-driven.**
+- 2026-05-09 D6.84 Sprint A: confidence tier router shipped in **shadow mode** on prod. Adds 4-tier provenance (✓ Verified / ⚓ Industry Standard / 🌐 Relaxed Web / ⚠ Best-effort) on top of today's pipeline. Closes the partial_miss-low-web dead zone where Jordan Dusek's gasket-class questions hedged. Flag: `CONFIDENCE_TIERS_MODE=off|shadow|live`. Migration 0093 adds `tier_router_shadow_log` table + `messages.tier_metadata` JSONB. The router was killed on 2026-05-19 (`docs/sprint-audits/tier-router-shadow-kill-2026-05-19.md`; admin view and endpoints removed in `af71074`). 12/12 unit tests pass. Gold set at `data/eval/tier_router_gold.json`. **Phase E flip to `live` is operator-driven.**
 - 2026-05-22 D6.97 Sprint B: SOLAS re-parse with per-Regulation granularity. 81 Part-level → 379 per-Regulation Sections so "SOLAS Ch.III Reg.6" structured-matches against a real `section_number` instead of falling through to keyword search. Karynn's Maersk-onboard SART/comms question motivated.
 - 2026-05-23 D6.97 Sprint C: **Precision Mode** + **Authority Hierarchy** prompt block shipped. Precision Mode is a per-user toggle on `/account` (col `users.precision_mode_enabled`, default OFF) that swaps in a stricter synthesis posture refusing unverified claims. Authority Hierarchy is always-on — 3 decision rules + BAD/GOOD example so US-flag fire-equipment queries lead with 46 CFR, not SOLAS.
 - 2026-05-25 D6.97 Sprint #47 + #50: Per-Reg splitting for **all 10 IMO codes** (IBC 1→7 chapters, CSS 1→7, BWM 9→50, IGF 2→7, Polar 4→6; FSS/LSA/HSC/IGC/Load Lines chapter-level held). Tier 2 chunk-level enrichment (Sonnet 8-12 maritime aliases per chunk, prepended as `[Search terms:]` block) now applied to all IMO sources. Tier 1 maritime jargon synonyms added in `synonyms.py` (FF, IMO sticker, SCBA, EEBD, FCP, fireman's outfit) + extractor short-token carve-out (unlocked ~13 dead-code 2-3 char glossary entries — mob, gps, ais, psc, etc.).
@@ -247,6 +247,37 @@ If a doc says "alembic head is 0045" but `alembic current` says `0092`, the doc 
   - First web unit tests: `pnpm test` in apps/web (node:test with type stripping, Node 22.6+, nothing to install). CI runs them in a new `web` job.
   - **Deployed 2026-09-29 in `fc13d63`** (smoke OK; the production chunk carries the new paragraph pattern).
   - The video footage was captured before this fix and still shows the stray "(b))". Re-capturing the affected shots waits until Karynn's voice-over is in (Blake: hold off). It needs no new questions, only the existing M/V Bay Pioneer conversations reopened.
+- **2026-09-29 admin redesign + customer UX pass** (Blake: "full greenlight to go with recommended"; `ccdf2e5` api, `5057cdd` admin, `58c8f1a` web). **Committed, not yet pushed or deployed.**
+  - **Admin layout** (`apps/web/src/app/admin/layout.tsx`, `_components/AdminShell.tsx`): a sidebar in five groups (Overview / Customers / Answers / Support / Platform) with live counts, a phone drawer, the "real users only" switch in one place, and `admin/error.tsx`, so a page crash keeps the sidebar. Shared bits are in `_lib/` (AdminContext, types, format) and `_components/ui.tsx`.
+  - **Dashboard** (`/admin`): a "needs attention" strip, KPI tiles with 26-week sparklines, a weekly signups/active/questions chart, the funnel, answer quality, top citations, questions by role, latest questions, revenue and newest signups. The data comes from the new **`GET /admin/dashboard`** (`apps/api/app/routers/admin_dashboard.py`, read-only, external users by default).
+  - The old six-tab page is one page per tool now. Old `?tab=` links redirect.
+  - **Admin bugs fixed:**
+    - The hedge rate on the Overview was always 0%: it read `hedge_audits.classification` instead of `retrieval_misses.judge_verdict`.
+    - Saving a hedge audit older than the newest 200 returned 404.
+    - Web-fallback thumbs from non-admins raised AttributeError, and the web client sent them without the token.
+    - The custom-email "wheelhouse" audience skipped trialing fleets.
+    - Several write actions left no audit-log entry.
+  - **Retired (HTTP 410):**
+    - `POST /admin/reset-all-pilots`: it would wipe every customer's chats and overwrite their subscription status.
+    - `POST /admin/jobs/trigger-ingest`: it spawned in a directory that does not exist and bypassed `run_ingest.sh`.
+    - Web-fallback replay is owner-only.
+  - **Customer side:**
+    - 246 `bg-[--color-x]` classes were empty rules under Tailwind 4, so register, sign-in, onboarding, invite and password-reset buttons had no fill. A guard test is in `src/lib/tailwindClasses.test.mjs`.
+    - Chat has one send path, so starter prompts and Resend get the paywall/verify/429 handling and Stop.
+    - The account-page switches save on flip.
+    - The trial survey no longer shows forever after a trial ends.
+    - Phone form fields are 16px, so iOS stops zooming.
+    - Also: local-day log dates, delete confirmations, vessel add/edit navigation, and FAQ pricing that matches `/pricing`.
+  - Checked in a local browser against a mock API with synthetic data (desktop and phone, full and empty data). `next build` is clean; api 70 and web 7 tests pass.
+  - **Production numbers the dashboard surfaced (read-only, 2026-09-29):** funnel 64 signed up → 40 asked → 15 came back → 1 active in 30 days → 2 paying. MRR $48.99. **165 hedge audits are open, and none has ever been triaged.**
+  - **Not done, flagged:**
+    - The IMO/NMC job checks call blocking `requests.get` on the event loop.
+    - `is_admin` for Karynn comes from a code list; her DB row is not verified.
+    - The model-usage panel labels its token columns loosely.
+    - "Exclude internal" means slightly different things per endpoint.
+    - Naming drifts between Wheelhouse, Workspaces and Fleet, and between menu labels and page titles.
+    - Sheets have no Escape/close.
+    - Landing and pricing promise "Your data, your delete button", but users cannot delete their account, and conversations only archive.
 See `docs/PROJECT_STATE.md` for a fuller operational snapshot and `docs/roadmap.md` for the prioritized backlog.
 
 
@@ -282,4 +313,4 @@ Full audit report (models, retrieval, UX, product packaging): see the 2026-07-18
 
 ---
 
-*Last updated 2026-09-29 (CFR paragraph chips fixed, first web unit tests; video ads first cut; earlier: NVIC 06-72 misread figures fixed; company documents shipped, outreach live; signup attribution, model-led grounding on). When this drifts from reality, fix it — that's the rule.*
+*Last updated 2026-09-29 (admin redesign + /admin/dashboard, customer UX pass incl. the Tailwind button-fill bug; CFR paragraph chips fixed, first web unit tests; video ads first cut; earlier: NVIC 06-72 misread figures fixed; company documents shipped, outreach live; signup attribution, model-led grounding on). When this drifts from reality, fix it — that's the rule.*
