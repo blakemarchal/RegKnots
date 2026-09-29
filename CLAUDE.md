@@ -247,7 +247,7 @@ If a doc says "alembic head is 0045" but `alembic current` says `0092`, the doc 
   - First web unit tests: `pnpm test` in apps/web (node:test with type stripping, Node 22.6+, nothing to install). CI runs them in a new `web` job.
   - **Deployed 2026-09-29 in `fc13d63`** (smoke OK; the production chunk carries the new paragraph pattern).
   - The video footage was captured before this fix and still shows the stray "(b))". Re-capturing the affected shots waits until Karynn's voice-over is in (Blake: hold off). It needs no new questions, only the existing M/V Bay Pioneer conversations reopened.
-- **2026-09-29 admin redesign + customer UX pass** (Blake: "full greenlight to go with recommended"; `ccdf2e5` api, `5057cdd` admin, `58c8f1a` web). **Committed, not yet pushed or deployed.**
+- **2026-09-29 admin redesign + customer UX pass** (Blake: "full greenlight to go with recommended"; `ccdf2e5` api, `5057cdd` admin, `58c8f1a` web). **Deployed 2026-09-29 in `7e91744`** with the follow-up below.
   - **Admin layout** (`apps/web/src/app/admin/layout.tsx`, `_components/AdminShell.tsx`): a sidebar in five groups (Overview / Customers / Answers / Support / Platform) with live counts, a phone drawer, the "real users only" switch in one place, and `admin/error.tsx`, so a page crash keeps the sidebar. Shared bits are in `_lib/` (AdminContext, types, format) and `_components/ui.tsx`.
   - **Dashboard** (`/admin`): a "needs attention" strip, KPI tiles with 26-week sparklines, a weekly signups/active/questions chart, the funnel, answer quality, top citations, questions by role, latest questions, revenue and newest signups. The data comes from the new **`GET /admin/dashboard`** (`apps/api/app/routers/admin_dashboard.py`, read-only, external users by default).
   - The old six-tab page is one page per tool now. Old `?tab=` links redirect.
@@ -270,14 +270,22 @@ If a doc says "alembic head is 0045" but `alembic current` says `0092`, the doc 
     - Also: local-day log dates, delete confirmations, vessel add/edit navigation, and FAQ pricing that matches `/pricing`.
   - Checked in a local browser against a mock API with synthetic data (desktop and phone, full and empty data). `next build` is clean; api 70 and web 7 tests pass.
   - **Production numbers the dashboard surfaced (read-only, 2026-09-29):** funnel 64 signed up → 40 asked → 15 came back → 1 active in 30 days → 2 paying. MRR $48.99. **165 hedge audits are open, and none has ever been triaged.**
-  - **Not done, flagged:**
-    - The IMO/NMC job checks call blocking `requests.get` on the event loop.
-    - `is_admin` for Karynn comes from a code list; her DB row is not verified.
-    - The model-usage panel labels its token columns loosely.
-    - "Exclude internal" means slightly different things per endpoint.
-    - Naming drifts between Wheelhouse, Workspaces and Fleet, and between menu labels and page titles.
-    - Sheets have no Escape/close.
-    - Landing and pricing promise "Your data, your delete button", but users cannot delete their account, and conversations only archive.
+  - **Follow-up, same day** (Blake: "Fix those found items, then push and deploy"; `92833c4` api, `7e91744` web):
+    - **Self-serve account deletion.** Landing and pricing promise "Your data, your delete button"; only the owner could delete an account.
+      - `POST /auth/delete-account` needs the password and the typed word DELETE. It refuses admins, and owners of a Wheelhouse other people use (transfer ownership or remove the crew first). Wrong input returns 400, not 401.
+      - The account page has a "Delete account" section. The login page confirms the deletion. The privacy page says deletion is self-serve and that payment records are kept.
+      - `app/account_deletion.py` is shared with the admin delete. Steps: cancel the user's and owned workspaces' Stripe subscriptions (nothing is deleted if Stripe refuses); delete owned workspaces and the user in one transaction; remove uploads inside `upload_dir`. **The admin delete used to leave Stripe billing.**
+      - **Migration 0118:** `billing_events.user_id` is nullable, ON DELETE SET NULL (was CASCADE). A deleted customer's invoices stay in revenue and partner accruals. Dry-run on the prod schema before deploy. **Alembic head is 0118.**
+      - **Left as is on purpose:**
+        - Single conversations still only archive (the D6.80 decision; data keeps feeding retrieval work).
+        - A deleted crew member's workspace conversations go with their account.
+        - A deleted workspace's `workspace_billing_events` cascade with it.
+    - The admin IMO/NMC checks run on a private event loop in a worker thread (`_run_task_off_loop`). Their blocking `requests.get` (30 s timeouts) used to stall the API.
+    - The dashboard counts answers by model. `fallback_gpt4o` (Claude unavailable) shows in Needs attention; the retired model-usage panel was the only place it appeared.
+    - `/admin/users` and `/admin/chats` "exclude internal" leave out admins too, like every other endpoint. `/admin/model-usage` reports `total_tokens`: there is one number per answer, which had been labelled output tokens.
+    - `useEscapeKey` (`src/lib`): Escape closes the topmost sheet, drawer or modal, across 11 overlays.
+    - Menu labels match their pages: Credentials, Help & Support, and a "Study" section with "Study Tools". `/workspaces` is titled Wheelhouse.
+    - Karynn's DB row has `is_admin = true` (read-only SQL).
 See `docs/PROJECT_STATE.md` for a fuller operational snapshot and `docs/roadmap.md` for the prioritized backlog.
 
 
@@ -313,4 +321,4 @@ Full audit report (models, retrieval, UX, product packaging): see the 2026-07-18
 
 ---
 
-*Last updated 2026-09-29 (admin redesign + /admin/dashboard, customer UX pass incl. the Tailwind button-fill bug; CFR paragraph chips fixed, first web unit tests; video ads first cut; earlier: NVIC 06-72 misread figures fixed; company documents shipped, outreach live; signup attribution, model-led grounding on). When this drifts from reality, fix it — that's the rule.*
+*Last updated 2026-09-29 (self-serve account deletion + migration 0118; admin redesign + /admin/dashboard, customer UX pass incl. the Tailwind button-fill bug; CFR paragraph chips fixed, first web unit tests; video ads first cut; earlier: NVIC 06-72 misread figures fixed; company documents shipped, outreach live; signup attribution, model-led grounding on). When this drifts from reality, fix it — that's the rule.*
