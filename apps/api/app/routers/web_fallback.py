@@ -58,10 +58,12 @@ async def submit_feedback(
             detail="Cannot submit feedback on a non-surfaced response",
         )
     is_admin = bool(getattr(current_user, "is_admin", False))
+    # 2026-09-29 — CurrentUser carries user_id (a str), not id; the old
+    # comparison raised AttributeError for every non-admin vote.
     if (
         not is_admin
         and row["user_id"] is not None
-        and row["user_id"] != current_user.id
+        and str(row["user_id"]) != current_user.user_id
     ):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

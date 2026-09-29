@@ -19,7 +19,7 @@ if settings.sentry_dsn:
         environment=settings.environment,
     )
 from app.db import init_pool, close_pool, close_redis
-from app.routers import admin, auth, billing, checklists, coming_up, company_documents, contact, credentials, documents, dossier, export, health, chat, logs, me, onboarding, preferences, sea_service, sea_time, study, transcribe, vessels, regulations, conversations, notifications, support, survey, waitlist, web_fallback, whale_zones, workspaces
+from app.routers import admin, admin_dashboard, auth, billing, checklists, coming_up, company_documents, contact, credentials, documents, dossier, export, health, chat, logs, me, onboarding, preferences, sea_service, sea_time, study, transcribe, vessels, regulations, conversations, notifications, support, survey, waitlist, web_fallback, whale_zones, workspaces
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +92,7 @@ app.include_router(sea_time.router)
 app.include_router(me.router)
 app.include_router(onboarding.router)
 app.include_router(admin.router)
+app.include_router(admin_dashboard.router)   # 2026-09-29 — trends, funnel, revenue for /admin
 app.include_router(web_fallback.router)
 app.include_router(workspaces.router)
 app.include_router(workspaces.me_router)

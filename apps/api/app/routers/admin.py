@@ -391,15 +391,19 @@ async def get_stats(
         # every regex-triggered hedge regardless of tier router state,
         # and the `classification` column carries equivalent
         # complete_miss / partial_miss values.
+        # 2026-09-29 — this read hedge_audits.classification, which only ever
+        # holds the retrieval causes (VOCAB … CORPUS_GAP, migration 0081), so
+        # it was always 0 and the Overview showed a 0% hedge rate while real
+        # answers hedged. The judge's verdicts live on retrieval_misses (0085).
         hedges_presented_7d = await conn.fetchval(
-            "SELECT COUNT(*) FROM hedge_audits h "
-            "LEFT JOIN users u ON u.id = h.user_id "
-            "WHERE h.created_at > NOW() - INTERVAL '7 days' "
-            f"  AND h.classification IN ('complete_miss', 'partial_miss'){uf}"
+            "SELECT COUNT(*) FROM retrieval_misses rm "
+            "LEFT JOIN users u ON u.id = rm.user_id "
+            "WHERE rm.created_at > NOW() - INTERVAL '7 days' "
+            f"  AND rm.judge_verdict IN ('complete_miss', 'partial_miss'){uf}"
             if exclude_internal else
-            "SELECT COUNT(*) FROM hedge_audits "
+            "SELECT COUNT(*) FROM retrieval_misses "
             "WHERE created_at > NOW() - INTERVAL '7 days' "
-            "  AND classification IN ('complete_miss', 'partial_miss')"
+            "  AND judge_verdict IN ('complete_miss', 'partial_miss')"
         ) or 0
 
         # ── Quality signals ─────────────────────────────────────────
@@ -794,42 +798,17 @@ async def reset_user(
 async def reset_all_pilots(
     admin: Annotated[CurrentUser, Depends(require_owner)],
 ) -> ResetResult:
-    """Reset ALL non-admin users: zero message_count, restart trial, delete conversations."""
-    pool = await get_pool()
-    await audit_log(pool, admin, "reset_all_pilots")
-    async with pool.acquire() as conn:
-        async with conn.transaction():
-            rows = await conn.fetch("SELECT id FROM users WHERE is_admin = false")
-            user_ids = [r["id"] for r in rows]
+    """Reset ALL non-admin users: zero message_count, restart trial, delete conversations.
 
-            if not user_ids:
-                return ResetResult(reset_count=0)
-
-            await conn.execute(
-                """
-                UPDATE users
-                SET message_count = 0,
-                    trial_ends_at = NOW() + INTERVAL '14 days',
-                    subscription_status = 'active'
-                WHERE is_admin = false
-                """
-            )
-
-            await conn.execute(
-                """
-                DELETE FROM messages WHERE conversation_id IN (
-                    SELECT id FROM conversations WHERE user_id = ANY($1::uuid[])
-                )
-                """,
-                user_ids,
-            )
-            await conn.execute(
-                "DELETE FROM conversations WHERE user_id = ANY($1::uuid[])",
-                user_ids,
-            )
-
-    logger.info("Admin %s reset %d pilot accounts", admin.email, len(user_ids))
-    return ResetResult(reset_count=len(user_ids))
+    2026-09-29 — RETIRED. Built for the spring pilot; with paying customers it
+    would delete every customer's chat history and overwrite their subscription
+    status in one click. The per-user reset (/admin/reset-user/{id}) covers test
+    accounts; the original bulk UPDATE/DELETE is in git history.
+    """
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail="Retired: this reset would wipe paying customers. Reset accounts one at a time.",
+    )
 
 
 # ── Admin write actions ────────────────────────────────────────────────────────
@@ -1144,6 +1123,7 @@ async def toggle_notification(
     )
     if result == "UPDATE 0":
         raise HTTPException(status_code=404, detail="Notification not found")
+    await audit_log(pool, admin, "toggle_notification", notification_id)
     logger.info("Admin %s toggled notification %s", admin.email, notification_id)
     return {"status": "toggled"}
 
@@ -1218,6 +1198,7 @@ async def simulate_expiry(
     )
     if result == "UPDATE 0":
         raise HTTPException(status_code=404, detail="User not found")
+    await audit_log(pool, admin, "simulate_expiry", user_id)
     logger.info("Admin %s simulated expiry for %s", admin.email, user_id)
     return AdminActionResult(ok=True)
 
@@ -1314,7 +1295,8 @@ class WebFallbackReplayResult(BaseModel):
 @router.post("/web-fallback/replay", response_model=WebFallbackReplayResult)
 async def web_fallback_replay(
     request: Request,
-    _admin: Annotated[CurrentUser, Depends(require_admin)],
+    # 2026-09-29 — owner-only: each replay spends web-search credits.
+    _admin: Annotated[CurrentUser, Depends(require_owner)],
     n: int = Query(default=25, ge=1, le=100),
     cosine_threshold: float = Query(default=0.5, ge=0.0, le=1.0),
 ) -> WebFallbackReplayResult:
@@ -1837,7 +1819,8 @@ def _custom_email_recipient_query(filter_key: str) -> str | None:
     user_filters = {
         # Existing pre-D6.91 (preserved for back-compat)
         "all":   "subscription_status = 'active'",
-        "pro":   "subscription_tier = 'solo' AND subscription_status = 'active'",
+        # Legacy tiers only (the admin UI no longer offers this audience).
+        "pro":   "subscription_tier IN ('pro', 'solo') AND subscription_status = 'active'",
         "trial": "trial_ends_at IS NOT NULL AND trial_ends_at > NOW() AND subscription_tier = 'free'",
         # Sprint D6.91 new filters
         "expired": (
@@ -1858,14 +1841,17 @@ def _custom_email_recipient_query(filter_key: str) -> str | None:
             f"WHERE {user_filters[filter_key]} AND is_internal = FALSE"
         )
 
-    # Wheelhouse — owners of active workspaces. The owner pays and is
+    # Wheelhouse — owners of live workspaces. The owner pays and is
     # the billing decision-maker; crew members aren't the audience
     # for pricing or product-tier announcements.
+    # 2026-09-29 — includes fleets still on their trial ('trialing',
+    # 'card_pending'); only 'active' used to count, which left out every
+    # fleet the outreach trial creates.
     if filter_key == "wheelhouse":
         return (
             "SELECT DISTINCT u.email FROM users u "
             "JOIN workspaces w ON w.owner_user_id = u.id "
-            "WHERE w.status = 'active' AND u.is_internal = FALSE"
+            "WHERE w.status IN ('active', 'trialing', 'card_pending') AND u.is_internal = FALSE"
         )
 
     return None
@@ -1927,6 +1913,8 @@ async def send_custom_email_blast(
 
     if not emails:
         return CustomEmailResult(sent=0, failed=0, failed_emails=[])
+    await audit_log(pool, admin, "send_custom_email", None,
+                    {"filter": body.recipient_filter, "recipients": len(emails), "subject": body.subject[:120]})
 
     sent = 0
     failed_emails: list[str] = []
@@ -2046,6 +2034,7 @@ async def founding_email_send(
     )
 
     pool = await get_pool()
+    await audit_log(pool, admin, "founding_email_send", None, {"force": force})
 
     already_sent = await pool.fetchval(
         "SELECT COUNT(*) FROM users WHERE founding_email_sent = true"
@@ -2201,10 +2190,11 @@ async def sentry_issues(
 @router.get("/export-chats/{user_id}")
 async def export_chats(
     user_id: str,
-    _admin: Annotated[CurrentUser, Depends(require_admin)],
+    admin: Annotated[CurrentUser, Depends(require_admin)],
 ) -> JSONResponse:
     """Export all conversations and messages for a user as JSON."""
     pool = await get_pool()
+    await audit_log(pool, admin, "export_chats", user_id)
     async with pool.acquire() as conn:
         user_row = await conn.fetchrow(
             "SELECT email, full_name, role FROM users WHERE id = $1", user_id,
@@ -2782,6 +2772,7 @@ async def reply_to_ticket(
     )
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket not found")
+    await audit_log(pool, admin, "reply_support_ticket", ticket_id)
 
     from app.email import send_support_reply_email
 
@@ -2829,6 +2820,7 @@ async def close_ticket(
     )
     if result == "UPDATE 0":
         raise HTTPException(status_code=404, detail="Ticket not found")
+    await audit_log(pool, admin, "close_support_ticket", ticket_id)
     logger.info("Admin %s closed ticket %s", admin.email, ticket_id)
     return AdminActionResult(ok=True)
 
@@ -3138,6 +3130,7 @@ async def purge_citation_errors(
 
     # asyncpg returns e.g. "DELETE 42" — parse the count
     deleted = int(result.split(" ")[-1]) if result.startswith("DELETE") else 0
+    await audit_log(pool, admin, "purge_citation_errors", None, {"deleted": deleted, "before": before})
     logger.info("Admin %s purged %d citation errors (before=%s)", admin.email, deleted, before)
     return PurgeResult(ok=True, deleted=deleted)
 
@@ -3390,33 +3383,18 @@ async def trigger_ingest(
     source: str = Query(..., description="Regulation source to update"),
     no_notify: bool = Query(default=False, description="Suppress notifications (dev/maintenance)"),
 ) -> JobRunResult:
-    """Trigger a scheduled ingest subprocess for a single source from the admin UI.
+    """Trigger an ingest for one source from the admin UI.
 
-    Fires in the background (non-blocking). Observe progress via systemd/app logs.
-    Returns immediately after spawning the subprocess.
+    2026-09-29 — RETIRED. It spawned `ingest.cli` in parents[3]/packages/ingest,
+    which resolves to apps/packages/ingest (doesn't exist), so the subprocess
+    never started while the endpoint reported ok=True. It also bypassed
+    scripts/run_ingest.sh, the memory-capped systemd wrapper every ad-hoc ingest
+    must use (plain interactive ingests caused 12 of 13 OOM events in May).
     """
-    import asyncio as _asyncio
-    import subprocess
-    from pathlib import Path
-
-    allowed = {"cfr_33", "cfr_46", "cfr_49", "nvic", "colregs", "solas", "stcw", "ism", "erg"}
-    if source not in allowed:
-        raise HTTPException(status_code=400, detail=f"Unknown source. Allowed: {', '.join(sorted(allowed))}")
-
-    ingest_dir = Path(__file__).resolve().parents[3] / "packages" / "ingest"
-    cmd = ["uv", "run", "python", "-m", "ingest.cli", "--source", source, "--update"]
-    if no_notify:
-        cmd.append("--no-notify")
-
-    async def _run():
-        def _spawn():
-            subprocess.Popen(cmd, cwd=str(ingest_dir))
-        await _asyncio.to_thread(_spawn)
-
-    _asyncio.create_task(_run())
-
-    logger.info("Admin %s triggered ingest source=%s no_notify=%s", admin.email, source, no_notify)
-    return JobRunResult(ok=True, details=f"Ingest for '{source}' started in background. Watch logs for progress.")
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail="Retired: run scripts/run_ingest.sh on the server (memory-capped). Celery Beat refreshes cfr_* and NVICs weekly.",
+    )
 
 
 @router.post("/jobs/imo-amendment-check", response_model=JobRunResult)
@@ -4772,6 +4750,45 @@ async def hedge_audit_stats(
     )
 
 
+_HEDGE_AUDIT_SELECT = """
+        SELECT ha.id, ha.created_at, ha.classification, ha.status,
+               ha.query, ha.classifier_reasoning, ha.recommendation,
+               ha.classifier_model, ha.web_surface_tier,
+               ha.conversation_id, ha.top_retrieved_sections,
+               ha.admin_notes, ha.fixed_at,
+               u.email AS user_email, u.full_name AS user_full_name,
+               fb.email AS fixed_by_email
+        FROM hedge_audits ha
+        LEFT JOIN users u ON u.id = ha.user_id
+        LEFT JOIN users fb ON fb.id = ha.fixed_by_user_id"""
+
+
+def _hedge_audit_dto(r) -> "HedgeAuditDTO":
+    import json as _json
+    return HedgeAuditDTO(
+        id=str(r["id"]),
+        created_at=r["created_at"].isoformat(),
+        classification=r["classification"],
+        status=r["status"],
+        query=r["query"],
+        classifier_reasoning=r["classifier_reasoning"],
+        recommendation=r["recommendation"],
+        classifier_model=r["classifier_model"],
+        web_surface_tier=r["web_surface_tier"],
+        user_email=r["user_email"],
+        user_full_name=r["user_full_name"],
+        conversation_id=str(r["conversation_id"]) if r["conversation_id"] else None,
+        top_retrieved_sections=(
+            _json.loads(r["top_retrieved_sections"])
+            if isinstance(r["top_retrieved_sections"], str)
+            else (r["top_retrieved_sections"] or [])
+        ),
+        admin_notes=r["admin_notes"],
+        fixed_at=r["fixed_at"].isoformat() if r["fixed_at"] else None,
+        fixed_by_email=r["fixed_by_email"],
+    )
+
+
 @router.get("/hedge-audits", response_model=list[HedgeAuditDTO])
 async def list_hedge_audits(
     _admin: Annotated[CurrentUser, Depends(require_admin)],
@@ -4803,48 +4820,14 @@ async def list_hedge_audits(
 
     rows = await pool.fetch(
         f"""
-        SELECT ha.id, ha.created_at, ha.classification, ha.status,
-               ha.query, ha.classifier_reasoning, ha.recommendation,
-               ha.classifier_model, ha.web_surface_tier,
-               ha.conversation_id, ha.top_retrieved_sections,
-               ha.admin_notes, ha.fixed_at,
-               u.email AS user_email, u.full_name AS user_full_name,
-               fb.email AS fixed_by_email
-        FROM hedge_audits ha
-        LEFT JOIN users u ON u.id = ha.user_id
-        LEFT JOIN users fb ON fb.id = ha.fixed_by_user_id
+        {_HEDGE_AUDIT_SELECT}
         {where_sql}
         ORDER BY ha.created_at DESC
         LIMIT ${idx}
         """,
         *params,
     )
-    import json as _json
-    return [
-        HedgeAuditDTO(
-            id=str(r["id"]),
-            created_at=r["created_at"].isoformat(),
-            classification=r["classification"],
-            status=r["status"],
-            query=r["query"],
-            classifier_reasoning=r["classifier_reasoning"],
-            recommendation=r["recommendation"],
-            classifier_model=r["classifier_model"],
-            web_surface_tier=r["web_surface_tier"],
-            user_email=r["user_email"],
-            user_full_name=r["user_full_name"],
-            conversation_id=str(r["conversation_id"]) if r["conversation_id"] else None,
-            top_retrieved_sections=(
-                _json.loads(r["top_retrieved_sections"])
-                if isinstance(r["top_retrieved_sections"], str)
-                else (r["top_retrieved_sections"] or [])
-            ),
-            admin_notes=r["admin_notes"],
-            fixed_at=r["fixed_at"].isoformat() if r["fixed_at"] else None,
-            fixed_by_email=r["fixed_by_email"],
-        )
-        for r in rows
-    ]
+    return [_hedge_audit_dto(r) for r in rows]
 
 
 @router.patch("/hedge-audits/{audit_id}", response_model=HedgeAuditDTO)
@@ -4887,14 +4870,13 @@ async def update_hedge_audit(
     if res is None:
         raise HTTPException(404, "Hedge audit not found")
 
-    # Return the updated row through list_hedge_audits' shape for UI consistency
-    rows = await list_hedge_audits(
-        _admin=admin, pool=pool, status="all", classification=None, limit=200,
-    )
-    for r in rows:
-        if r.id == str(audit_id):
-            return r
-    raise HTTPException(404, "Hedge audit not found after update")
+    await audit_log(pool, admin, "update_hedge_audit", str(audit_id), {"status": body.status})
+    # 2026-09-29 — re-read this row by id. It used to scan the newest 200
+    # audits, so with more than 200 an older one saved and then 404'd.
+    row = await pool.fetchrow(f"{_HEDGE_AUDIT_SELECT} WHERE ha.id = $1", audit_id)
+    if row is None:
+        raise HTTPException(404, "Hedge audit not found after update")
+    return _hedge_audit_dto(row)
 
 
 
