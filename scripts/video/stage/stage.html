@@ -14,6 +14,13 @@
   <filter id="vblur" x="-5%" y="-25%" width="110%" height="150%"><feGaussianBlur id="vblurDev" stdDeviation="0 0"/></filter>
 </svg>
 <div id="stage"></div>
+<script>
+  // ?vo=<url of data/video/vo/<cut>_<voice>.js>: caption timings that follow a voice-over track.
+  (function () {
+    var vo = new URLSearchParams(location.search).get('vo');
+    if (vo) document.write('<script src="' + vo + '"><\/script>');
+  })();
+</script>
 <script src="data.js"></script>
 <script src="stage.js"></script>
 </body>

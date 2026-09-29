@@ -1,8 +1,9 @@
-"""Mux music into the silent renders, make the 16:9 versions and cover stills.
+"""Mux the audio into the silent renders, make the 16:9 versions, covers and share copies.
 
-    python finish.py main [cutA cutB]
+    python finish.py main [cutA cutB]              # music only
+    python finish.py main cutA cutB --vo marin     # temp AI voice-over (mix_vo.py output)
 
-Outputs in out/final/: RegKnot_<cut>_9x16.mp4, RegKnot_<cut>_16x9.mp4, cover jpgs.
+Outputs in out/final/ (masters) and out/share/ (small copies to send around).
 Loudness: two-pass EBU R128 loudnorm to -14 LUFS integrated, -1.5 dBTP.
 """
 import json
@@ -16,8 +17,11 @@ FF = os.environ["FFMPEG"]
 DATA = Path(os.environ.get("REGKNOT_VIDEO_DATA", Path(__file__).resolve().parents[2] / "data" / "video"))
 OUT = DATA / "out"
 FIN = OUT / "final"
+SHARE = OUT / "share"
 FIN.mkdir(exist_ok=True)
+SHARE.mkdir(exist_ok=True)
 NAMES = {"main": "RegKnot_main_45s", "cutA": "RegKnot_first-trip_15s", "cutB": "RegKnot_audit_15s"}
+VOICE_TAG = {"marin": "AI-voice-female", "cedar": "AI-voice-male"}
 COVER_T = {"main": 3.9, "cutA": 2.6, "cutB": 2.4}
 
 
@@ -37,11 +41,13 @@ def loudnorm_filter(wav: Path) -> str:
             f"measured_LRA={m['input_lra']}:measured_thresh={m['input_thresh']}:offset={m['target_offset']}:linear=true")
 
 
-for cut in sys.argv[1:] or ["main"]:
-    name = NAMES[cut]
-    silent, wav = OUT / f"{cut}_9x16_silent.mp4", OUT / f"{cut}_music.wav"
+def finish(cut, voice=None):
+    key = f"{cut}_{voice}" if voice else cut
+    name = NAMES[cut] + (f"_{VOICE_TAG[voice]}" if voice else "")
+    silent = OUT / f"{key}_9x16_silent.mp4"
+    wav = OUT / (f"{key}_mix.wav" if voice else f"{key}_music.wav")
     v = FIN / f"{name}_9x16.mp4"
-    print(cut)
+    print(key)
     af = loudnorm_filter(wav)
     run(["-i", str(silent), "-i", str(wav), "-map", "0:v", "-map", "1:a", "-c:v", "copy",
          "-af", af + ",aresample=48000", "-c:a", "aac", "-b:a", "192k", "-shortest", "-movflags", "+faststart", str(v)])
@@ -56,5 +62,21 @@ for cut in sys.argv[1:] or ["main"]:
     # Covers.
     run(["-ss", str(COVER_T[cut]), "-i", str(v), "-frames:v", "1", "-q:v", "2", str(FIN / f"{name}_cover_9x16.jpg")])
     run(["-ss", str(COVER_T[cut]), "-i", str(w), "-frames:v", "1", "-q:v", "2", str(FIN / f"{name}_cover_16x9.jpg")])
-    for f in (v, w):
+    # Share copies: small enough for email and messaging.
+    share_base = name.replace("_9x16", "")
+    run(["-i", str(v), "-c:v", "libx264", "-preset", "slow", "-crf", "24", "-maxrate", "4M", "-bufsize", "8M",
+         "-c:a", "copy", "-movflags", "+faststart", str(SHARE / f"{share_base}_vertical.mp4")])
+    run(["-i", str(w), "-c", "copy", "-movflags", "+faststart", str(SHARE / f"{share_base}_widescreen.mp4")])
+    for f in (v, w, SHARE / f"{share_base}_vertical.mp4"):
         print(f"  {f.name}  {f.stat().st_size / 1e6:.1f} MB")
+
+
+if __name__ == "__main__":
+    argv = sys.argv[1:]
+    voice = None
+    if "--vo" in argv:
+        i = argv.index("--vo")
+        voice = argv[i + 1]
+        del argv[i:i + 2]
+    for c in argv or ["main"]:
+        finish(c, voice)

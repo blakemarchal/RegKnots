@@ -423,7 +423,7 @@ function radarScene({ t0, t1, top = 470, heroAt = null, heroLines = null, dimAt 
   }, 20);
   if (heroAt != null) { flashAt(heroAt, 0.28, 0.16); ev(heroAt, 'impact'); }
   ev(t0 + 0.2, 'ping'); ev(t0 + 0.2 + PERIOD, 'ping', { gain: 0.6 });
-  for (const s of stackEls) ev(s.at, 'hit');
+  if (!window.VO) for (const s of stackEls) ev(s.at, 'hit');   // voiced versions: the voice carries these words
 }
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -1140,6 +1140,9 @@ function endCard({ t0, t1, variant = 'main' }) {
   url.append(ul);
   root.append(cta, url, fine1);
   if (fine2) root.append(fine2);
+  // Voiced versions use a stock AI narrator (never Karynn's voice); say so.
+  const aiNote = window.VO ? h('div', { class: 'fine', style: 'top:1560px; font-size:24px; opacity:0.75' }, 'Narration: AI voice') : null;
+  if (aiNote) root.append(aiNote);
   flashAt(t0, 0.35, 0.22);
   ev(t0, 'impact', { big: true });
   ev(t0 + 0.9, 'shimmer');
@@ -1185,6 +1188,7 @@ function endCard({ t0, t1, variant = 'main' }) {
     ul.style.top = '96px';
     fine1.style.opacity = E.outC(prog(lt, 1.7, 2.05)).toFixed(3);
     if (fine2) fine2.style.opacity = E.outC(prog(lt, 1.95, 2.3)).toFixed(3);
+    if (aiNote) aiNote.style.opacity = (0.75 * E.outC(prog(lt, 2.1, 2.5))).toFixed(3);
   }, 27);
 }
 
@@ -1230,52 +1234,57 @@ function auditOpener({ t0, t1 }) {
 // CUTS
 // ══════════════════════════════════════════════════════════════════════════
 let DURATION = 45;
+// Voice-over variants (vo.py) bring their own caption timings, retimed to the speech.
+const VOX = window.VO || null;
+const cap = (a, b, text) => { if (!VOX) caption(a, b, text); };
+const st = (i, d) => (VOX && VOX.stack && VOX.stack[i] != null ? VOX.stack[i] : d);
 if (CUT === 'main') {
   DURATION = 45;
   radarScene({ t0: 0, t1: 5.1, top: 470, heroAt: 3.3, heroLines: ['Is that actually', '<span class="hl">required?</span>'], dimAt: 3.2 });
-  caption(0.45, 2.2, 'Every captain gets the question');
-  caption(2.2, 3.25, 'at the worst moment:');
+  cap(0.45, 2.2, 'Every captain gets the question');
+  cap(2.2, 3.25, 'at the worst moment:');
   wallScene({ t0: 4.8, t1: 9.3, countFrom: 5.35, countTo: 7.6 });
-  caption(5.0, 6.85, "The answer's in there somewhere.");
-  caption(6.85, 8.8, '*Thousands* of pages of it.');
+  cap(5.0, 6.85, "The answer's in there somewhere.");
+  cap(6.85, 8.8, '*Thousands* of pages of it.');
   composerScene({ t0: 9.0, t1: 12.6, text: Q1, typeFrom: 9.45, typeTo: 11.95, sendAt: 12.15 });
-  caption(9.1, 10.55, 'So I ask *RegKnot*,');
-  caption(10.55, 12.45, "the way I'd ask another captain.");
+  cap(9.1, 10.55, 'So I ask *RegKnot*,');
+  cap(10.55, 12.45, "the way I'd ask another captain.");
   phoneQ1Main({ t0: 12.2, t1: 30.4 });
-  caption(13.9, 15.6, 'It answers for *my vessel*,');
-  caption(15.6, 16.85, 'in plain English,');
-  caption(16.85, 19.2, "and it shows exactly *where it's written.*");
-  caption(24.1, 25.3, 'Tap the citation,');
-  caption(25.3, 27.7, "and there's *the regulation itself.*");
+  cap(13.9, 15.6, 'It answers for *my vessel*,');
+  cap(15.6, 16.85, 'in plain English,');
+  cap(16.85, 19.2, "and it shows exactly *where it's written.*");
+  cap(24.1, 25.3, 'Tap the citation,');
+  cap(25.3, 27.7, "and there's *the regulation itself.*");
   nameplateScene({ t0: 30.0, t1: 33.9 });
   montageScene({ t0: 33.6, t1: 36.25 });
-  caption(33.7, 36.0, 'We built RegKnot for *working mariners*,');
+  cap(33.7, 36.0, 'We built RegKnot for *working mariners*,');
   docsScene({ t0: 36.1, t1: 40.35 });
-  caption(36.1, 37.65, 'and for fleets, it answers');
-  caption(37.65, 40.0, 'from your own *safety management system*, too.');
+  cap(36.1, 37.65, 'and for fleets, it answers');
+  cap(37.65, 40.0, 'from your own *safety management system*, too.');
   endCard({ t0: 40.2, t1: 45.0, variant: 'main' });
 } else if (CUT === 'cutA') {
   DURATION = 15;
   radarScene({
     t0: 0, t1: 3.2, top: 470, readouts: true, dimAt: 0.0,
-    stack: [['New deckhand.', 0.15, 700, 130], ['First trip.', 0.8, 850, 130], ['<span class="hl">Orientation</span> first?', 1.5, 1000, 130]],
+    stack: [['New deckhand.', st(0, 0.15), 700, 130], ['First trip.', st(1, 0.8), 850, 130], ['<span class="hl">Orientation</span> first?', st(2, 1.5), 1000, 130]],
   });
   composerScene({ t0: 3.0, t1: 5.2, text: Q1, typeFrom: 3.3, typeTo: 4.55, sendAt: 4.75 });
-  caption(3.1, 4.8, 'Ask *RegKnot*.');
+  cap(3.1, 4.8, 'Ask *RegKnot*.');
   phoneQ1Cut({ t0: 4.85, t1: 11.2 });
-  caption(6.0, 7.9, '*Yes,* before the boat gets underway.');
-  caption(7.9, 9.55, '*10* topics.');
-  caption(9.55, 10.95, '*Logged.*');
+  cap(6.0, 7.9, '*Yes,* before the boat gets underway.');
+  cap(7.9, 9.55, '*10* topics.');
+  cap(9.55, 10.95, '*Logged.*');
   endCard({ t0: 11.0, t1: 15.0, variant: 'cut' });
 } else if (CUT === 'cutB') {
   DURATION = 15;
   auditOpener({ t0: 0, t1: 3.2 });
   composerScene({ t0: 3.0, t1: 5.2, text: Q2, typeFrom: 3.3, typeTo: 4.55, sendAt: 4.75, seed: 8 });
-  caption(3.1, 4.8, 'Ask *RegKnot*.');
+  cap(3.1, 4.8, 'Ask *RegKnot*.');
   phoneQ2Cut({ t0: 4.85, t1: 11.2 });
-  caption(6.0, 10.85, "Here's what your *TVR* has to show.");
+  cap(6.0, 10.85, "Here's what your *TVR* has to show.");
   endCard({ t0: 11.0, t1: 15.0, variant: 'cut' });
 }
+if (VOX) VOX.caps.forEach(([a, b, text]) => caption(a, b, text));
 
 // ── seek ───────────────────────────────────────────────────────────────────
 function seek(t) {

@@ -1,6 +1,6 @@
 """Original score + sound design for the RegKnot ads, synthesized from scratch.
 
-    uv run --with numpy --with scipy python audio.py main|cutA|cutB
+    uv run --with numpy --with scipy python audio.py main|cutA|cutB [voice]
 
 Reads out/<cut>_events.json (written by render.js) for the SFX sync points and
 writes out/<cut>_music.wav (48 kHz stereo, peak-normalized; loudness is set
@@ -332,8 +332,9 @@ def chord_at(plan, t):
     return cur
 
 
-def build(cut: str):
-    ev = json.loads((OUT / f"{cut}_events.json").read_text())
+def build(cut: str, variant: str | None = None):
+    stem = f"{cut}_{variant}" if variant else cut      # a voice-over variant has its own event log
+    ev = json.loads((OUT / f"{stem}_events.json").read_text())
     plan = PLANS["main" if cut == "main" else "cut"]
     dur = plan["dur"]
     beat = 60 / plan["bpm"]
@@ -465,9 +466,12 @@ def build(cut: str):
         tr += beat / 4
 
     # SFX from the stage's event log.
+    # Voiced versions: soften the effects that land on consonants (chip ticks, data
+    # blips, typing, risers) so the narration stays clear over them.
+    soft = {"key": 0.55, "tick": 0.3, "stream": 0.3, "riser": 0.4, "pop": 0.7, "chime": 0.8} if variant else {}
     for e in ev["events"]:
-        g = e.get("gain", 1.0)
         et, ty = e["t"], e["type"]
+        g = e.get("gain", 1.0) * soft.get(ty, 1.0)
         if ty == "key":
             mx.add("sfx", et, key_click(0.22 * g), pan=rng.uniform(-0.2, 0.2))
         elif ty == "tap":
@@ -491,9 +495,9 @@ def build(cut: str):
         elif ty == "hit":
             mx.add("sfx", et, hit(0.42 * g), send=0.25)
         elif ty == "riser":
-            mx.add("sfx", et, riser(e.get("dur", 1.5), 0.14), send=0.2)
+            mx.add("sfx", et, riser(e.get("dur", 1.5), 0.14 * g), send=0.2)
         elif ty == "stream":
-            mx.add("sfx", et, stream_blips(0.1), send=0.2)
+            mx.add("sfx", et, stream_blips(0.1 * g), send=0.2)
         elif ty == "shimmer":
             mx.add("sfx", et, shimmer(0.12), send=0.5)
 
@@ -531,10 +535,10 @@ def build(cut: str):
     mix *= 10 ** (-17 / 20) / max(rms, 1e-9)
     mix = np.tanh(mix * 1.1) / np.tanh(1.1)
     mix *= 10 ** (-1 / 20) / np.abs(mix).max()
-    f = OUT / f"{cut}_music.wav"
+    f = OUT / f"{stem}_music.wav"
     wavfile.write(f, SR, (mix * 32767).astype(np.int16))
     print(f, f"{len(mix) / SR:.2f}s", "kicks", len(kicks))
 
 
 if __name__ == "__main__":
-    build(sys.argv[1] if len(sys.argv) > 1 else "main")
+    build(sys.argv[1] if len(sys.argv) > 1 else "main", sys.argv[2] if len(sys.argv) > 2 else None)
