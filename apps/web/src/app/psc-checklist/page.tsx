@@ -307,6 +307,9 @@ function PSCContent() {
 
   async function deleteItem(idx: number) {
     if (!selectedVessel) return
+    // 2026-09-29 — deleting an item can't be undone; ask first.
+    const label = checklist?.checklist?.[idx]?.item
+    if (!confirm(label ? `Remove "${label}" from this checklist?` : 'Remove this item from the checklist?')) return
     setSavingItem(true)
     try {
       const updated = await apiRequest<PSCChecklist>(`/checklists/psc/${selectedVessel}/items/${idx}`, {
@@ -686,7 +689,8 @@ function PSCContent() {
                                 )}
                               </div>
                             </label>
-                            <div className="flex flex-col gap-1 shrink-0 opacity-0 group-hover:opacity-100
+                            <div className="flex flex-col gap-1 shrink-0 opacity-100 [@media(hover:hover)]:opacity-0
+                              [@media(hover:hover)]:group-hover:opacity-100 focus-within:opacity-100
                               transition-opacity duration-100 print:hidden">
                               <button
                                 onClick={() => startEdit(idx, item)}

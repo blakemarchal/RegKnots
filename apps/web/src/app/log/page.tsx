@@ -55,7 +55,7 @@ function LogContent() {
 
   // Form fields
   const [formVessel, setFormVessel] = useState(activeVesselId ?? '')
-  const [formDate, setFormDate] = useState(new Date().toISOString().slice(0, 10))
+  const [formDate, setFormDate] = useState(localToday())
   const [formCategory, setFormCategory] = useState('general')
   const [formEntry, setFormEntry] = useState('')
 
@@ -87,7 +87,7 @@ function LogContent() {
 
   function resetForm() {
     setFormVessel(activeVesselId ?? '')
-    setFormDate(new Date().toISOString().slice(0, 10))
+    setFormDate(localToday())
     setFormCategory('general')
     setFormEntry('')
     setShowForm(false)
@@ -121,6 +121,8 @@ function LogContent() {
   }
 
   async function handleDelete(id: string) {
+    // 2026-09-29 — log entries are a compliance record and can't be restored.
+    if (!confirm("Delete this log entry? It can't be restored.")) return
     try {
       await apiRequest(`/logs/${id}`, { method: 'DELETE' })
       setLogs((prev) => prev.filter((l) => l.id !== id))
@@ -347,6 +349,13 @@ function LogContent() {
       </main>
     </div>
   )
+}
+
+// 2026-09-29 — today's date in the user's own time zone. toISOString() is
+// UTC, so an evening entry in U.S. time zones defaulted to tomorrow's date.
+function localToday(): string {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
 export default function LogPage() {

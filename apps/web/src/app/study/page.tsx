@@ -273,7 +273,7 @@ function StudyToolsContent() {
           {tierBlocked && (
             <section className="bg-[#111827] border border-amber-400/30 rounded-xl p-5">
               <p className="font-display text-lg font-bold text-[#f0ece4] mb-2">
-                Study Tools require Mate or Captain
+                Study Tools come with every paid plan
               </p>
               <p className="font-mono text-sm text-[#6b7594] leading-relaxed mb-4">
                 The quiz and study-guide generators are part of the paid tiers.

@@ -40,7 +40,7 @@ export function NetworkErrorCard({ diagnosis, onRetry }: Props) {
         <span className="text-red-400 text-base leading-none mt-0.5" aria-hidden="true">⚠</span>
         <div className="min-w-0">
           <p className="font-display text-sm font-bold text-red-400 leading-tight">{title}</p>
-          <p className="font-mono text-xs text-[--color-off-white]/70 mt-1.5 leading-relaxed">
+          <p className="font-mono text-xs text-off-white/70 mt-1.5 leading-relaxed">
             {message}
           </p>
         </div>
@@ -51,7 +51,7 @@ export function NetworkErrorCard({ diagnosis, onRetry }: Props) {
         <div className="ml-6 flex flex-col gap-2">
           <Link
             href="/whitelisting"
-            className="font-mono text-[11px] text-[--color-teal] hover:underline"
+            className="font-mono text-[11px] text-teal hover:underline"
           >
             View full whitelisting request →
           </Link>
@@ -59,7 +59,7 @@ export function NetworkErrorCard({ diagnosis, onRetry }: Props) {
           <button
             type="button"
             onClick={() => setExpanded(!expanded)}
-            className="font-mono text-[11px] text-[--color-teal] hover:underline flex items-center gap-1 self-start"
+            className="font-mono text-[11px] text-teal hover:underline flex items-center gap-1 self-start"
           >
             <span className={`inline-block transition-transform duration-200 ${expanded ? 'rotate-90' : ''}`}>
               ▸
@@ -68,8 +68,8 @@ export function NetworkErrorCard({ diagnosis, onRetry }: Props) {
           </button>
 
           {expanded && (
-            <div className="mt-1 bg-[--color-surface-dim] border border-white/8 rounded-lg p-3 flex flex-col gap-2.5">
-              <pre className="font-mono text-[10px] text-[--color-off-white]/60 whitespace-pre-wrap leading-relaxed">
+            <div className="mt-1 bg-surface-dim border border-white/8 rounded-lg p-3 flex flex-col gap-2.5">
+              <pre className="font-mono text-[10px] text-off-white/60 whitespace-pre-wrap leading-relaxed">
                 {WHITELIST_TEXT}
               </pre>
 
@@ -77,15 +77,15 @@ export function NetworkErrorCard({ diagnosis, onRetry }: Props) {
                 <button
                   type="button"
                   onClick={copyWhitelist}
-                  className="font-mono text-[10px] text-[--color-teal] border border-[--color-teal]/30
-                    hover:bg-[--color-teal]/10 rounded px-2.5 py-1 transition-colors"
+                  className="font-mono text-[10px] text-teal border border-teal/30
+                    hover:bg-teal/10 rounded px-2.5 py-1 transition-colors"
                 >
                   {copied ? 'Copied ✓' : 'Copy to clipboard'}
                 </button>
                 <button
                   type="button"
                   onClick={emailSupport}
-                  className="font-mono text-[10px] text-[--color-muted] border border-white/10
+                  className="font-mono text-[10px] text-muted border border-white/10
                     hover:border-white/20 rounded px-2.5 py-1 transition-colors"
                 >
                   Email to IT
@@ -101,7 +101,7 @@ export function NetworkErrorCard({ diagnosis, onRetry }: Props) {
         <button
           type="button"
           onClick={onRetry}
-          className="ml-6 self-start font-mono text-xs text-[--color-teal] hover:underline"
+          className="ml-6 self-start font-mono text-xs text-teal hover:underline"
         >
           Try again →
         </button>

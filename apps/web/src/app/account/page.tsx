@@ -165,6 +165,39 @@ function AccountContent() {
       .catch(() => {})
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // 2026-09-29 — the three switches save the moment they flip. They used to
+  // wait for the Save button at the bottom of the section, so leaving the page
+  // quietly dropped the change. The endpoint COALESCEs every field, so sending
+  // one field leaves the rest of the profile alone.
+  type SwitchField = 'study_tools_enabled' | 'precision_mode_enabled' | 'location_tracking_enabled'
+  const [switchStatus, setSwitchStatus] = useState<Partial<Record<SwitchField, 'saved' | 'error'>>>({})
+  async function saveSwitch(field: SwitchField, value: boolean, revert: () => void) {
+    try {
+      await apiRequest('/onboarding/persona', { method: 'POST', body: JSON.stringify({ [field]: value }) })
+      if (field === 'study_tools_enabled') {
+        window.dispatchEvent(new CustomEvent('regknot:study-tools-changed', { detail: value }))
+      }
+      // Turning tracking off deletes the stored position on the server.
+      if (field === 'location_tracking_enabled' && !value) {
+        setLastKnownLocation({ lat: null, lon: null, at: null, source: null })
+      }
+      setSwitchStatus((prev) => ({ ...prev, [field]: 'saved' }))
+      setTimeout(() => setSwitchStatus((prev) => ({ ...prev, [field]: undefined })), 2000)
+    } catch {
+      revert()
+      setSwitchStatus((prev) => ({ ...prev, [field]: 'error' }))
+    }
+  }
+  function switchNote(field: SwitchField) {
+    const st = switchStatus[field]
+    if (!st) return null
+    return (
+      <span role="status" className={`font-mono text-[10px] ${st === 'saved' ? 'text-[#2dd4bf]' : 'text-red-400'}`}>
+        {st === 'saved' ? 'Saved' : "Couldn't save. Try again."}
+      </span>
+    )
+  }
+
   async function savePersona() {
     setPersonaSaving(true)
     setPersonaMsg(null)
@@ -527,10 +560,14 @@ function AccountContent() {
                 off for everyone else; user can flip either way and the
                 explicit choice wins over the persona default. */}
             <div className="flex flex-col gap-1">
-              <label className="font-mono text-xs text-[#6b7594]">Study Tools</label>
+              <div className="flex items-center justify-between"><label className="font-mono text-xs text-[#6b7594]">Study Tools</label>{switchNote('study_tools_enabled')}</div>
               <button
                 type="button"
-                onClick={() => setStudyToolsEnabled((v) => !v)}
+                onClick={() => {
+                  const next = !studyToolsEnabled
+                  setStudyToolsEnabled(next)
+                  void saveSwitch('study_tools_enabled', next, () => setStudyToolsEnabled(!next))
+                }}
                 role="switch"
                 aria-checked={studyToolsEnabled}
                 className={`flex items-center justify-between px-3 py-2 rounded-lg border transition-colors duration-150
@@ -566,10 +603,14 @@ function AccountContent() {
                 use where citation discipline matters more than
                 breadth of answer. */}
             <div className="flex flex-col gap-1">
-              <label className="font-mono text-xs text-[#6b7594]">Precision Mode</label>
+              <div className="flex items-center justify-between"><label className="font-mono text-xs text-[#6b7594]">Precision Mode</label>{switchNote('precision_mode_enabled')}</div>
               <button
                 type="button"
-                onClick={() => setPrecisionModeEnabled((v) => !v)}
+                onClick={() => {
+                  const next = !precisionModeEnabled
+                  setPrecisionModeEnabled(next)
+                  void saveSwitch('precision_mode_enabled', next, () => setPrecisionModeEnabled(!next))
+                }}
                 role="switch"
                 aria-checked={precisionModeEnabled}
                 className={`flex items-center justify-between px-3 py-2 rounded-lg border transition-colors duration-150
@@ -607,10 +648,14 @@ function AccountContent() {
                 alerts. No history is kept — only the most recent
                 position. Toggling off nulls the stored coordinates. */}
             <div className="flex flex-col gap-1">
-              <label className="font-mono text-xs text-[#6b7594]">Location tracking</label>
+              <div className="flex items-center justify-between"><label className="font-mono text-xs text-[#6b7594]">Location tracking</label>{switchNote('location_tracking_enabled')}</div>
               <button
                 type="button"
-                onClick={() => setLocationTrackingEnabled((v) => !v)}
+                onClick={() => {
+                  const next = !locationTrackingEnabled
+                  setLocationTrackingEnabled(next)
+                  void saveSwitch('location_tracking_enabled', next, () => setLocationTrackingEnabled(!next))
+                }}
                 role="switch"
                 aria-checked={locationTrackingEnabled}
                 className={`flex items-center justify-between px-3 py-2 rounded-lg border transition-colors duration-150
@@ -881,7 +926,7 @@ function AccountContent() {
                       bg-[#2dd4bf] hover:brightness-110 rounded-lg py-2.5
                       transition-[filter] duration-150 block"
                   >
-                    Pick a plan &mdash; Mate or Captain
+                    Pick a plan &mdash; Cadet, Mate or Captain
                   </a>
                 </>
               )}

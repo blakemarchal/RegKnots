@@ -67,8 +67,8 @@ const FAQ_ITEMS: FaqItem[] = [
   },
   {
     category: 'Account & Billing',
-    q: 'How much does RegKnot Pro cost?',
-    a: 'RegKnot Pro is $39/month, or $29/month on the annual plan (billed $348/year \u2014 a 26% savings). Both plans include unlimited questions and cancel anytime.',
+    q: 'How much does RegKnot cost?',
+    a: 'There are three plans: Cadet at $9.99/month (25 messages a month), Mate at $19.99/month (100 messages) and Captain at $39.99/month (unlimited). Annual billing saves 25%: $89.88, $179.88 or $359.88 a year. Fleets use the Wheelhouse plan, with the first boat free for 30 days. Every plan can be canceled anytime; [Pricing](/pricing) lists what each includes.',
   },
   {
     category: 'Account & Billing',
@@ -77,8 +77,8 @@ const FAQ_ITEMS: FaqItem[] = [
   },
   {
     category: 'Account & Billing',
-    q: 'What is the Certificates tab?',
-    a: 'The Certificates tab provides printable reference templates of SOLAS certificate forms, including the Cargo Ship Safety Equipment Certificate as amended through January 2026. These are convention-prescribed form layouts that you can print or save as PDF for reference.',
+    q: 'Where are the certificate templates?',
+    a: 'The [Certificates](/certificates) page provides printable reference templates of SOLAS certificate forms, including the Cargo Ship Safety Equipment Certificate as amended through January 2026. These are convention-prescribed form layouts that you can print or save as PDF for reference.',
   },
   // Technical
   {

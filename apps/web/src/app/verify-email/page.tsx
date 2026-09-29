@@ -57,10 +57,10 @@ function VerifyEmailInner() {
   }, [token, refreshAuth])
 
   return (
-    <div className="bg-[--color-surface-mid] border border-white/8 rounded-xl p-6 flex flex-col gap-4 text-center">
+    <div className="bg-surface-mid border border-white/8 rounded-xl p-6 flex flex-col gap-4 text-center">
       {status === 'loading' && (
         <>
-          <p className="font-mono text-sm text-[--color-off-white]">
+          <p className="font-mono text-sm text-off-white">
             Verifying your email…
           </p>
           <div className="h-2 bg-white/8 rounded animate-pulse mx-auto w-2/3" />
@@ -69,15 +69,15 @@ function VerifyEmailInner() {
 
       {status === 'success' && (
         <>
-          <h2 className="font-display text-2xl font-bold text-[--color-teal]">
+          <h2 className="font-display text-2xl font-bold text-teal">
             Email verified
           </h2>
-          <p className="font-mono text-xs text-[--color-muted]">
+          <p className="font-mono text-xs text-muted">
             Your RegKnot account is unlocked. Full access restored.
           </p>
           <Link
             href="/"
-            className="mt-2 bg-[--color-teal] hover:brightness-110 text-[--color-navy]
+            className="mt-2 bg-teal hover:brightness-110 text-navy
               font-bold text-sm uppercase tracking-wider rounded-lg py-2.5
               transition-[filter] font-mono"
           >
@@ -88,15 +88,15 @@ function VerifyEmailInner() {
 
       {status === 'already' && (
         <>
-          <h2 className="font-display text-2xl font-bold text-[--color-off-white]">
+          <h2 className="font-display text-2xl font-bold text-off-white">
             Already verified
           </h2>
-          <p className="font-mono text-xs text-[--color-muted]">
+          <p className="font-mono text-xs text-muted">
             This email was already confirmed. You're all set.
           </p>
           <Link
             href="/"
-            className="mt-2 bg-[--color-teal] hover:brightness-110 text-[--color-navy]
+            className="mt-2 bg-teal hover:brightness-110 text-navy
               font-bold text-sm uppercase tracking-wider rounded-lg py-2.5
               transition-[filter] font-mono"
           >
@@ -110,13 +110,13 @@ function VerifyEmailInner() {
           <h2 className="font-display text-2xl font-bold text-red-400">
             Invalid link
           </h2>
-          <p className="font-mono text-xs text-[--color-muted]">
+          <p className="font-mono text-xs text-muted">
             This verification link is invalid or has already been used.
             Sign in and use the banner at the top of the chat to request a new one.
           </p>
           <Link
             href="/login"
-            className="font-mono text-xs text-[--color-teal] hover:underline"
+            className="font-mono text-xs text-teal hover:underline"
           >
             Sign in →
           </Link>
@@ -128,7 +128,7 @@ function VerifyEmailInner() {
           <h2 className="font-display text-2xl font-bold text-red-400">
             Something went wrong
           </h2>
-          <p className="font-mono text-xs text-[--color-muted]">
+          <p className="font-mono text-xs text-muted">
             We couldn't verify your email right now. Please try the link again
             in a moment.
           </p>
@@ -140,15 +140,15 @@ function VerifyEmailInner() {
 
 export default function VerifyEmailPage() {
   return (
-    <main className="min-h-screen flex items-center justify-center bg-[--color-navy] px-4">
+    <main className="min-h-screen flex items-center justify-center bg-navy px-4">
       <div className="w-full max-w-sm">
         <div className="mb-8 text-center flex flex-col items-center gap-3">
-          <CompassRose className="w-12 h-12 text-[--color-teal]" />
+          <CompassRose className="w-12 h-12 text-teal" />
           <div>
-            <h1 className="font-display text-3xl font-black tracking-widest uppercase text-[--color-off-white]">
-              Reg<span className="text-[--color-teal]">Knot</span>
+            <h1 className="font-display text-3xl font-black tracking-widest uppercase text-off-white">
+              Reg<span className="text-teal">Knot</span>
             </h1>
-            <p className="mt-1 text-xs text-[--color-muted] tracking-wider uppercase font-mono">
+            <p className="mt-1 text-xs text-muted tracking-wider uppercase font-mono">
               Maritime Compliance Co-pilot
             </p>
           </div>
@@ -156,7 +156,7 @@ export default function VerifyEmailPage() {
 
         <Suspense
           fallback={
-            <div className="bg-[--color-surface-mid] border border-white/8 rounded-xl p-6 h-40 animate-pulse" />
+            <div className="bg-surface-mid border border-white/8 rounded-xl p-6 h-40 animate-pulse" />
           }
         >
           <VerifyEmailInner />

@@ -82,7 +82,7 @@ function InviteContent() {
         <p className="text-sm text-[#6b7594] mb-6">{loadError}</p>
         <Link
           href="/login"
-          className="inline-block bg-[--color-teal] text-[--color-navy] font-bold
+          className="inline-block bg-teal text-navy font-bold
                      text-sm uppercase tracking-wider rounded-lg py-2.5 px-5"
         >
           Sign in
@@ -108,14 +108,14 @@ function InviteContent() {
           <strong className="text-[#f0ece4]">{inviter}</strong> invited you to
           join as <strong className="text-[#f0ece4]">{roleLabel}</strong>.
           You don&apos;t have a RegKnot account yet &mdash; create one with the
-          email <code className="text-[--color-teal]">{invite.email}</code> and
+          email <code className="text-teal">{invite.email}</code> and
           you&apos;ll be added to the Wheelhouse automatically.
         </p>
         <Link
           href={`/register?invite=${token}&email=${encodeURIComponent(invite.email)}`}
-          className="block text-center bg-[--color-teal] text-[--color-navy]
+          className="block text-center bg-teal text-navy
                      font-bold text-sm uppercase tracking-wider rounded-lg
-                     py-2.5 px-5 hover:bg-[--color-teal-dark] transition-colors"
+                     py-2.5 px-5 hover:bg-teal-dark transition-colors"
         >
           Create account &amp; join
         </Link>
@@ -133,14 +133,14 @@ function InviteContent() {
           <strong className="text-[#f0ece4]">{inviter}</strong> invited you to
           join as <strong className="text-[#f0ece4]">{roleLabel}</strong>.
           You already have a RegKnot account at{' '}
-          <code className="text-[--color-teal]">{invite.email}</code> &mdash;
+          <code className="text-teal">{invite.email}</code> &mdash;
           sign in to accept.
         </p>
         <Link
           href={`/login?invite=${token}`}
-          className="block text-center bg-[--color-teal] text-[--color-navy]
+          className="block text-center bg-teal text-navy
                      font-bold text-sm uppercase tracking-wider rounded-lg
-                     py-2.5 px-5 hover:bg-[--color-teal-dark] transition-colors"
+                     py-2.5 px-5 hover:bg-teal-dark transition-colors"
         >
           Sign in to accept
         </Link>
@@ -156,7 +156,7 @@ function InviteContent() {
         <Header workspaceName={invite.workspace_name} />
         <p className="text-sm text-amber-300/90 mb-2">
           You&apos;re signed in as <code>{user.email}</code> but this invite
-          is addressed to <code className="text-[--color-teal]">{invite.email}</code>.
+          is addressed to <code className="text-teal">{invite.email}</code>.
         </p>
         <p className="text-sm text-[#6b7594] mb-6">
           Sign out and sign in with the invited email to accept, or ask
@@ -245,9 +245,9 @@ function InviteContent() {
         <button
           onClick={accept}
           disabled={submitting}
-          className="flex-1 bg-[--color-teal] text-[--color-navy] font-bold
+          className="flex-1 bg-teal text-navy font-bold
                      text-sm uppercase tracking-wider rounded-lg py-2.5
-                     hover:bg-[--color-teal-dark] disabled:opacity-50
+                     hover:bg-teal-dark disabled:opacity-50
                      disabled:cursor-not-allowed transition-colors"
         >
           {submitting ? 'Joining…' : 'Accept'}
@@ -270,15 +270,15 @@ function InviteContent() {
 
 function Shell({ children }: { children: React.ReactNode }) {
   return (
-    <main className="min-h-screen flex items-center justify-center bg-[--color-navy] px-4">
+    <main className="min-h-screen flex items-center justify-center bg-navy px-4">
       <div className="w-full max-w-md">
         <div className="mb-8 text-center flex flex-col items-center gap-3">
-          <CompassRose className="w-10 h-10 text-[--color-teal]" />
-          <h1 className="font-display text-2xl font-black tracking-widest uppercase text-[--color-off-white]">
-            Reg<span className="text-[--color-teal]">Knot</span>
+          <CompassRose className="w-10 h-10 text-teal" />
+          <h1 className="font-display text-2xl font-black tracking-widest uppercase text-off-white">
+            Reg<span className="text-teal">Knot</span>
           </h1>
         </div>
-        <div className="bg-[--color-surface-mid] border border-white/8 rounded-xl p-6">
+        <div className="bg-surface-mid border border-white/8 rounded-xl p-6">
           {children}
         </div>
       </div>
@@ -289,10 +289,10 @@ function Shell({ children }: { children: React.ReactNode }) {
 function Header({ workspaceName }: { workspaceName: string }) {
   return (
     <>
-      <p className="text-xs font-mono uppercase tracking-wider text-[--color-muted] mb-1">
+      <p className="text-xs font-mono uppercase tracking-wider text-muted mb-1">
         You&apos;re invited to
       </p>
-      <h2 className="text-xl font-bold mb-3 text-[--color-teal]">
+      <h2 className="text-xl font-bold mb-3 text-teal">
         {workspaceName}
       </h2>
     </>
@@ -301,7 +301,7 @@ function Header({ workspaceName }: { workspaceName: string }) {
 
 function Footer({ expires }: { expires: string }) {
   return (
-    <p className="mt-4 text-center text-[10px] text-[--color-muted] font-mono">
+    <p className="mt-4 text-center text-[10px] text-muted font-mono">
       Invite expires {expires}
     </p>
   )

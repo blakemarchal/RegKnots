@@ -1,5 +1,6 @@
 'use client'
 
+import { apiRequest } from '@/lib/api'
 import { useState, type ReactNode } from 'react'
 import type { Components } from 'react-markdown'
 import ReactMarkdown from 'react-markdown'
@@ -619,16 +620,13 @@ function WebFallbackCardView({ card }: { card: import('@/types/chat').WebFallbac
     if (submitting || feedback) return
     setSubmitting(true)
     try {
-      // Best-effort fire — errors don't surface to user.
-      await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL || ''}/web-fallback/${card.fallback_id}/feedback`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify({ feedback: value }),
-        }
-      )
+      // 2026-09-29 — through apiRequest, which sends the Bearer token. The
+      // plain fetch here had none, so every vote got a 401 while the card
+      // still said thanks; the admin thumbs-up/down counts never filled.
+      await apiRequest(`/web-fallback/${card.fallback_id}/feedback`, {
+        method: 'POST',
+        body: JSON.stringify({ feedback: value }),
+      })
       setFeedback(value)
     } catch {
       // swallow

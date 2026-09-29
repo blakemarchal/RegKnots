@@ -15,31 +15,31 @@ import { apiRequest } from '@/lib/api'
 // body; monospace to match the regulatory text aesthetic).
 const citationMdComponents: Components = {
   p: ({ children }) => (
-    <p className="font-mono text-xs text-[--color-off-white]/80 leading-relaxed mb-2 last:mb-0 whitespace-pre-wrap">
+    <p className="font-mono text-xs text-off-white/80 leading-relaxed mb-2 last:mb-0 whitespace-pre-wrap">
       {children}
     </p>
   ),
   h1: ({ children }) => (
-    <h1 className="font-display text-sm font-bold text-[--color-off-white] mt-3 mb-1.5 first:mt-0">
+    <h1 className="font-display text-sm font-bold text-off-white mt-3 mb-1.5 first:mt-0">
       {children}
     </h1>
   ),
   h2: ({ children }) => (
-    <h2 className="font-display text-xs font-bold text-[--color-off-white] mt-2.5 mb-1 first:mt-0 uppercase tracking-wider">
+    <h2 className="font-display text-xs font-bold text-off-white mt-2.5 mb-1 first:mt-0 uppercase tracking-wider">
       {children}
     </h2>
   ),
   h3: ({ children }) => (
-    <h3 className="font-display text-xs font-semibold text-[--color-off-white]/90 mt-2 mb-1 first:mt-0">
+    <h3 className="font-display text-xs font-semibold text-off-white/90 mt-2 mb-1 first:mt-0">
       {children}
     </h3>
   ),
-  strong: ({ children }) => <strong className="text-[--color-off-white] font-semibold">{children}</strong>,
-  em: ({ children }) => <em className="italic text-[--color-off-white]/85">{children}</em>,
+  strong: ({ children }) => <strong className="text-off-white font-semibold">{children}</strong>,
+  em: ({ children }) => <em className="italic text-off-white/85">{children}</em>,
   ul: ({ children }) => <ul className="list-disc list-outside pl-4 mb-2 space-y-0.5">{children}</ul>,
   ol: ({ children }) => <ol className="list-decimal list-outside pl-4 mb-2 space-y-0.5">{children}</ol>,
   li: ({ children }) => (
-    <li className="font-mono text-xs text-[--color-off-white]/80 leading-relaxed">{children}</li>
+    <li className="font-mono text-xs text-off-white/80 leading-relaxed">{children}</li>
   ),
   // Tables — the canonical reason this Markdown pipeline exists.
   // IMDG segregation tables, SOLAS applicability tables, etc.
@@ -54,25 +54,25 @@ const citationMdComponents: Components = {
   tbody: ({ children }) => <tbody>{children}</tbody>,
   tr: ({ children }) => <tr className="border-b border-white/5 last:border-b-0">{children}</tr>,
   th: ({ children }) => (
-    <th className="px-2 py-1 text-left font-semibold text-[--color-off-white]/90 border-r border-white/5 last:border-r-0 align-top">
+    <th className="px-2 py-1 text-left font-semibold text-off-white/90 border-r border-white/5 last:border-r-0 align-top">
       {children}
     </th>
   ),
   td: ({ children }) => (
-    <td className="px-2 py-1 text-[--color-off-white]/80 border-r border-white/5 last:border-r-0 align-top whitespace-pre-wrap">
+    <td className="px-2 py-1 text-off-white/80 border-r border-white/5 last:border-r-0 align-top whitespace-pre-wrap">
       {children}
     </td>
   ),
   hr: () => <hr className="border-white/10 my-2" />,
   blockquote: ({ children }) => (
-    <blockquote className="border-l-2 border-[--color-teal]/40 pl-2 italic text-[--color-off-white]/70 my-2">
+    <blockquote className="border-l-2 border-teal/40 pl-2 italic text-off-white/70 my-2">
       {children}
     </blockquote>
   ),
   code: ({ children, className }) => {
     if (className?.startsWith('language-')) {
       return (
-        <pre className="block bg-black/30 border border-white/10 rounded px-2 py-1.5 text-[10px] font-mono text-[--color-off-white]/80 overflow-x-auto my-2 whitespace-pre">
+        <pre className="block bg-black/30 border border-white/10 rounded px-2 py-1.5 text-[10px] font-mono text-off-white/80 overflow-x-auto my-2 whitespace-pre">
           {children}
         </pre>
       )
@@ -80,7 +80,7 @@ const citationMdComponents: Components = {
     return <code className="bg-black/30 border border-white/10 rounded px-1 py-0.5 text-[10px] font-mono">{children}</code>
   },
   a: ({ href, children }) => (
-    <a href={href} target="_blank" rel="noopener noreferrer" className="text-[--color-teal] underline">
+    <a href={href} target="_blank" rel="noopener noreferrer" className="text-teal underline">
       {children}
     </a>
   ),
@@ -310,7 +310,7 @@ export function CitationSheet({ source, sectionNumber, sectionTitle, onClose, wo
             <button
               type="button"
               onClick={navigateBack}
-              className="font-mono text-[11px] text-[--color-teal]/80 hover:text-[--color-teal]
+              className="font-mono text-[11px] text-teal/80 hover:text-teal
                          transition-colors mb-2 flex items-center gap-1.5"
               aria-label="Back to previous citation"
             >
@@ -320,10 +320,10 @@ export function CitationSheet({ source, sectionNumber, sectionTitle, onClose, wo
               Back
             </button>
           )}
-          <p className="font-display text-xl font-bold text-[--color-teal] tracking-wide leading-tight">
+          <p className="font-display text-xl font-bold text-teal tracking-wide leading-tight">
             {viewing.sectionNumber}
           </p>
-          <p className="font-mono text-sm text-[--color-off-white] mt-1 leading-snug">
+          <p className="font-mono text-sm text-off-white mt-1 leading-snug">
             {detail?.section_title ?? viewing.sectionTitle}
           </p>
         </div>
@@ -344,7 +344,7 @@ export function CitationSheet({ source, sectionNumber, sectionTitle, onClose, wo
           )}
 
           {error && !loading && (
-            <p className="font-mono text-sm text-[--color-muted] italic">
+            <p className="font-mono text-sm text-muted italic">
               {viewing.source === 'company'
                 ? "This section isn't in your fleet's documents any more."
                 : 'Regulation text unavailable.'}
@@ -362,7 +362,7 @@ export function CitationSheet({ source, sectionNumber, sectionTitle, onClose, wo
                   Full text of <span className="font-bold">{viewing.sectionNumber}</span> isn&apos;t
                   in our corpus directly.
                 </p>
-                <p className="font-mono text-[11px] text-[--color-off-white]/60 leading-snug mt-1.5">
+                <p className="font-mono text-[11px] text-off-white/60 leading-snug mt-1.5">
                   Found {detail.references!.length} document{detail.references!.length === 1 ? '' : 's'} in our index
                   that cite it — open one to read the surrounding context.
                 </p>
@@ -375,19 +375,19 @@ export function CitationSheet({ source, sectionNumber, sectionTitle, onClose, wo
                       onClick={() => openReference(ref)}
                       className="w-full text-left px-3 py-2.5 rounded-lg
                                  bg-white/5 border border-white/8
-                                 hover:bg-white/10 hover:border-[--color-teal]/30
+                                 hover:bg-white/10 hover:border-teal/30
                                  transition-colors"
                     >
                       <div className="flex items-baseline justify-between gap-3">
-                        <span className="font-display text-sm font-semibold text-[--color-teal]">
+                        <span className="font-display text-sm font-semibold text-teal">
                           {ref.section_number}
                         </span>
-                        <span className="font-mono text-[10px] text-[--color-off-white]/40 uppercase tracking-wider">
+                        <span className="font-mono text-[10px] text-off-white/40 uppercase tracking-wider">
                           {ref.source}
                         </span>
                       </div>
                       {ref.section_title && (
-                        <p className="font-mono text-xs text-[--color-off-white]/70 leading-snug mt-1 line-clamp-2">
+                        <p className="font-mono text-xs text-off-white/70 leading-snug mt-1 line-clamp-2">
                           {ref.section_title}
                         </p>
                       )}
@@ -399,8 +399,8 @@ export function CitationSheet({ source, sectionNumber, sectionTitle, onClose, wo
           )}
 
           {detail && !loading && !isReferencesMode && detail.copyrighted && (
-            <div className="rounded-lg border border-[--color-teal]/20 bg-[--color-teal]/5 px-4 py-4 mt-1">
-              <p className="font-display text-sm font-semibold text-[--color-teal] mb-2">
+            <div className="rounded-lg border border-teal/20 bg-teal/5 px-4 py-4 mt-1">
+              <p className="font-display text-sm font-semibold text-teal mb-2">
                 IMO Copyrighted Content
               </p>
               {/* D6.88 Phase 1.5 — Markdown renders regulation tables,
@@ -408,12 +408,12 @@ export function CitationSheet({ source, sectionNumber, sectionTitle, onClose, wo
                   these in Markdown (pipe-tables, *bullets, **bold**);
                   rendering as plain text turned IMDG segregation
                   tables into a wall of pipes. */}
-              <div className="text-[--color-off-white]/80">
+              <div className="text-off-white/80">
                 <ReactMarkdown remarkPlugins={[remarkGfm]} components={citationMdComponents}>
                   {detail.full_text}
                 </ReactMarkdown>
               </div>
-              <p className="font-mono text-[10px] text-[--color-off-white]/50 mt-3 italic">
+              <p className="font-mono text-[10px] text-off-white/50 mt-3 italic">
                 Excerpt shown to support compliance verification. Official text and the
                 latest amendments are available from your flag state, classification
                 society, or IMO Publishing.
@@ -422,7 +422,7 @@ export function CitationSheet({ source, sectionNumber, sectionTitle, onClose, wo
           )}
 
           {detail && !loading && !isReferencesMode && !detail.copyrighted && (
-            <div className="text-[--color-off-white]/80">
+            <div className="text-off-white/80">
               <ReactMarkdown remarkPlugins={[remarkGfm]} components={citationMdComponents}>
                 {detail.full_text}
               </ReactMarkdown>
@@ -434,11 +434,11 @@ export function CitationSheet({ source, sectionNumber, sectionTitle, onClose, wo
         <div className="flex-shrink-0 border-t border-white/8 px-5 py-4 flex items-center justify-between gap-4">
           <div>
             {detail?.up_to_date_as_of && (
-              <p className="font-mono text-[10px] text-[--color-muted]">
+              <p className="font-mono text-[10px] text-muted">
                 As of: {detail.up_to_date_as_of}
               </p>
             )}
-            <p className="font-mono text-[10px] text-[--color-muted] mt-0.5">
+            <p className="font-mono text-[10px] text-muted mt-0.5">
               Navigation aid only — not legal advice
             </p>
           </div>
@@ -446,7 +446,7 @@ export function CitationSheet({ source, sectionNumber, sectionTitle, onClose, wo
           {sourceLink && !isReferencesMode && (
             <button
               onClick={() => window.open(sourceLink.url, '_blank', 'noopener')}
-              className="font-mono text-xs text-[--color-teal] hover:underline whitespace-nowrap"
+              className="font-mono text-xs text-teal hover:underline whitespace-nowrap"
             >
               {sourceLink.label} ↗
             </button>

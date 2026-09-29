@@ -353,7 +353,7 @@ export function VesselSheet({ onClose, workspaceId, workspaceRole }: Props) {
           {/* Add another vessel — only when allowed (D6.55) */}
           {!loading && detail.length > 0 && canAddVessel && (
             <button
-              onClick={goToOnboarding}
+              onClick={goToOnboardingAdd}
               className="w-full flex items-center gap-2 px-5 py-3.5 text-left
                 text-[#2dd4bf] hover:bg-white/5 transition-colors duration-150"
             >

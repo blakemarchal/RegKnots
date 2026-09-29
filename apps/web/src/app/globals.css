@@ -420,4 +420,22 @@ body {
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
+  /* 2026-09-29 — but keep loading spinners turning (slowly): the rule above
+     froze them, so "working…" looked like a hang. */
+  .animate-spin {
+    animation-duration: 1.6s !important;
+    animation-iteration-count: infinite !important;
+  }
+}
+
+/* 2026-09-29 — iOS Safari zooms the whole page when a focused field's text is
+   under 16px, and nearly every field here is text-sm (14px) — including the
+   chat composer. Phones only; wider screens keep the smaller type. Unlayered
+   on purpose so it outranks the Tailwind utility on the element. */
+@media (max-width: 767px) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]),
+  select,
+  textarea {
+    font-size: 16px;
+  }
 }

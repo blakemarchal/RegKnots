@@ -7,6 +7,17 @@ import { apiRequest } from '@/lib/api'
 import type { BillingStatus } from '@/lib/auth'
 
 const SESSION_KEY = 'pilot_survey_shown'
+// 2026-09-29 — remembered across sessions once answered or dismissed twice.
+const DONE_KEY = 'pilot_survey_done'
+const DISMISS_COUNT_KEY = 'pilot_survey_dismissals'
+
+function readLocal(key: string): string | null {
+  try { return localStorage.getItem(key) } catch { return null }
+}
+
+function writeLocal(key: string, value: string) {
+  try { localStorage.setItem(key, value) } catch { /* private mode */ }
+}
 
 // ── Shared radio helper ────────────────────────────────────────────────────────
 
@@ -111,13 +122,17 @@ export function PilotSurveyModal({ billing, forceOpen, onClose, preview }: Props
     if (!billing) return
     if (billing.tier !== 'free') return
     if (sessionStorage.getItem(SESSION_KEY)) return
+    if (readLocal(DONE_KEY)) return
     if (!billing.trial_ends_at) return
 
     const trialEnd = new Date(billing.trial_ends_at)
     const now = new Date()
     const hoursLeft = (trialEnd.getTime() - now.getTime()) / (1000 * 60 * 60)
 
-    if (hoursLeft <= 48) {
+    // 2026-09-29 — the last 48 hours of the trial only. `hoursLeft <= 48`
+    // also matched every negative value, so it reopened in every session for
+    // good once a trial had ended, even after the user had answered.
+    if (hoursLeft > 0 && hoursLeft <= 48) {
       setVisible(true)
     }
   }, [billing, forceOpen])
@@ -126,6 +141,11 @@ export function PilotSurveyModal({ billing, forceOpen, onClose, preview }: Props
 
   function dismiss() {
     sessionStorage.setItem(SESSION_KEY, '1')
+    if (!preview) {
+      const n = Number(readLocal(DISMISS_COUNT_KEY) ?? '0') + 1
+      writeLocal(DISMISS_COUNT_KEY, String(n))
+      if (n >= 2) writeLocal(DONE_KEY, '1')
+    }
     setVisible(false)
     onClose?.()
   }
@@ -155,10 +175,12 @@ export function PilotSurveyModal({ billing, forceOpen, onClose, preview }: Props
         }),
       })
       setSubmitted(true)
+      writeLocal(DONE_KEY, '1')
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Failed to submit'
       if (msg.includes('409') || msg.includes('already')) {
         setSubmitted(true) // Already submitted — just show thanks
+        writeLocal(DONE_KEY, '1')
       } else {
         setError(msg)
       }

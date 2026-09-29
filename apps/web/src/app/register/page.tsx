@@ -164,24 +164,24 @@ function RegisterForm() {
   }
 
   return (
-    <main className="min-h-screen flex items-center justify-center bg-[--color-navy] px-4">
+    <main className="min-h-screen flex items-center justify-center bg-navy px-4">
       <div className="w-full max-w-sm">
         {/* Logo / wordmark */}
         <div className="mb-8 text-center flex flex-col items-center gap-3">
-          <CompassRose className="w-12 h-12 text-[--color-teal]" />
+          <CompassRose className="w-12 h-12 text-teal" />
           <div>
-            <h1 className="font-display text-3xl font-black tracking-widest uppercase text-[--color-off-white]">
-              Reg<span className="text-[--color-teal]">Knot</span>
+            <h1 className="font-display text-3xl font-black tracking-widest uppercase text-off-white">
+              Reg<span className="text-teal">Knot</span>
             </h1>
-            <p className="mt-1 text-xs text-[--color-muted] tracking-wider uppercase font-mono">
+            <p className="mt-1 text-xs text-muted tracking-wider uppercase font-mono">
               Maritime Compliance Co-pilot
             </p>
           </div>
         </div>
 
         {inviteToken && (
-          <div className="mb-4 rounded-lg border border-[--color-teal]/30
-                          bg-[--color-teal]/5 px-4 py-3 text-xs text-[--color-teal]
+          <div className="mb-4 rounded-lg border border-teal/30
+                          bg-teal/5 px-4 py-3 text-xs text-teal
                           font-mono">
             You&apos;re joining a Wheelhouse. Create your account with the
             invited email and you&apos;ll be added automatically.
@@ -190,10 +190,10 @@ function RegisterForm() {
 
         <form
           onSubmit={handleSubmit}
-          className="bg-[--color-surface-mid] border border-white/8 rounded-xl p-6 flex flex-col gap-4"
+          className="bg-surface-mid border border-white/8 rounded-xl p-6 flex flex-col gap-4"
         >
           <div className="flex flex-col gap-1">
-            <label htmlFor="full_name" className="text-xs text-[--color-muted] uppercase tracking-wider font-mono">
+            <label htmlFor="full_name" className="text-xs text-muted uppercase tracking-wider font-mono">
               Full Name
             </label>
             <input
@@ -203,12 +203,12 @@ function RegisterForm() {
               required
               value={fullName}
               onChange={(e) => setFullName(e.target.value)}
-              className="font-mono bg-[--color-surface-dim] border border-white/10 rounded-lg px-3 py-2 text-sm text-[--color-off-white] outline-none focus:border-[--color-teal] transition-colors"
+              className="font-mono bg-surface-dim border border-white/10 rounded-lg px-3 py-2 text-sm text-off-white outline-none focus:border-teal transition-colors"
             />
           </div>
 
           <div className="flex flex-col gap-1">
-            <label htmlFor="email" className="text-xs text-[--color-muted] uppercase tracking-wider font-mono">
+            <label htmlFor="email" className="text-xs text-muted uppercase tracking-wider font-mono">
               Email
             </label>
             <input
@@ -219,17 +219,17 @@ function RegisterForm() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               readOnly={!!inviteToken}
-              className={`font-mono bg-[--color-surface-dim] border border-white/10 rounded-lg px-3 py-2 text-sm text-[--color-off-white] outline-none focus:border-[--color-teal] transition-colors ${inviteToken ? 'opacity-70 cursor-not-allowed' : ''}`}
+              className={`font-mono bg-surface-dim border border-white/10 rounded-lg px-3 py-2 text-sm text-off-white outline-none focus:border-teal transition-colors ${inviteToken ? 'opacity-70 cursor-not-allowed' : ''}`}
             />
             {inviteToken && (
-              <p className="text-[10px] text-[--color-muted] font-mono mt-1">
+              <p className="text-[10px] text-muted font-mono mt-1">
                 Locked &mdash; matches the invite address.
               </p>
             )}
           </div>
 
           <div className="flex flex-col gap-1">
-            <label htmlFor="password" className="text-xs text-[--color-muted] uppercase tracking-wider font-mono">
+            <label htmlFor="password" className="text-xs text-muted uppercase tracking-wider font-mono">
               Password
             </label>
             <input
@@ -240,12 +240,12 @@ function RegisterForm() {
               minLength={8}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="font-mono bg-[--color-surface-dim] border border-white/10 rounded-lg px-3 py-2 text-sm text-[--color-off-white] outline-none focus:border-[--color-teal] transition-colors"
+              className="font-mono bg-surface-dim border border-white/10 rounded-lg px-3 py-2 text-sm text-off-white outline-none focus:border-teal transition-colors"
             />
           </div>
 
           <div className="flex flex-col gap-1">
-            <label htmlFor="password_confirm" className="text-xs text-[--color-muted] uppercase tracking-wider font-mono">
+            <label htmlFor="password_confirm" className="text-xs text-muted uppercase tracking-wider font-mono">
               Confirm Password
             </label>
             <input
@@ -256,10 +256,10 @@ function RegisterForm() {
               minLength={8}
               value={passwordConfirm}
               onChange={(e) => setPasswordConfirm(e.target.value)}
-              className={`font-mono bg-[--color-surface-dim] border rounded-lg px-3 py-2 text-sm text-[--color-off-white] outline-none transition-colors ${
+              className={`font-mono bg-surface-dim border rounded-lg px-3 py-2 text-sm text-off-white outline-none transition-colors ${
                 passwordMismatch
                   ? 'border-red-400/60 focus:border-red-400'
-                  : 'border-white/10 focus:border-[--color-teal]'
+                  : 'border-white/10 focus:border-teal'
               }`}
             />
             {passwordMismatch && (
@@ -270,14 +270,14 @@ function RegisterForm() {
           </div>
 
           <div className="flex flex-col gap-1">
-            <label htmlFor="role" className="text-xs text-[--color-muted] uppercase tracking-wider font-mono">
+            <label htmlFor="role" className="text-xs text-muted uppercase tracking-wider font-mono">
               Who you are
             </label>
             <select
               id="role"
               value={role}
               onChange={(e) => setRole(e.target.value)}
-              className="font-mono border border-white/10 rounded-lg px-3 py-2 text-sm outline-none focus:border-[--color-teal] transition-colors"
+              className="font-mono border border-white/10 rounded-lg px-3 py-2 text-sm outline-none focus:border-teal transition-colors"
               style={{ backgroundColor: '#111827', color: '#f0ece4' }}
             >
               {PERSONA_OPTIONS.map((r) => (
@@ -314,15 +314,15 @@ function RegisterForm() {
           <button
             type="submit"
             disabled={loading || passwordMismatch}
-            className="mt-1 bg-[--color-teal] hover:bg-[--color-teal-dark] disabled:opacity-50 disabled:cursor-not-allowed text-[--color-navy] font-bold text-sm uppercase tracking-wider rounded-lg py-2.5 transition-colors font-mono"
+            className="mt-1 bg-teal hover:bg-teal-dark disabled:opacity-50 disabled:cursor-not-allowed text-navy font-bold text-sm uppercase tracking-wider rounded-lg py-2.5 transition-colors font-mono"
           >
             {loading ? 'Creating account…' : 'Create Account'}
           </button>
         </form>
 
-        <p className="mt-4 text-center text-xs text-[--color-muted] font-mono">
+        <p className="mt-4 text-center text-xs text-muted font-mono">
           Already have an account?{' '}
-          <Link href={withNext('/login', next)} className="text-[--color-teal] hover:underline">
+          <Link href={withNext('/login', next)} className="text-teal hover:underline">
             Sign in
           </Link>
         </p>

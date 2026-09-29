@@ -47,7 +47,7 @@ export function VerificationBanner() {
       <div className="flex flex-col min-w-0">
         <p className="font-mono text-xs text-[#2dd4bf] leading-snug">
           Verify your email to unlock full access
-          <span className="text-[#6b7594]"> ({usedDisplay}/5 messages used)</span>
+          <span className="text-[#8a94ad]"> ({usedDisplay} of 5 messages before you verify)</span>
         </p>
         {status && (
           <p className="font-mono text-[10px] text-[#f0ece4]/80 mt-0.5">{status}</p>

@@ -631,15 +631,25 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
     setImageError(null)
   }, [])
 
-  const handleSend = useCallback(async () => {
-    const query = input.trim()
+  // 2026-09-29 — one send path. Starter prompts, ?q= deep links and Resend
+  // used a second copy (handlePrompt) with no Stop wiring and no answer-length
+  // choice, which reported every failure as "Connection lost": a 402, 403 or
+  // 429 never showed the pricing, verify-email or slow-down prompt. Resend
+  // called a stale handleSend that read an empty input and sent nothing.
+  // `fresh` starts a new conversation (starter prompts, deep links).
+  const sendText = useCallback(async (
+    text: string,
+    { fresh = false, withImages = true }: { fresh?: boolean; withImages?: boolean } = {},
+  ) => {
+    const query = text.trim()
+    const images = withImages ? pendingImages : []
     // D6.97 Phase 2 — image-only queries are allowed. The send button
     // gates this client-side via canSend; this guard is defense-in-depth.
-    if ((!query && pendingImages.length === 0) || loading) return
+    if ((!query && images.length === 0) || loading) return
 
     // Snapshot images BEFORE clearing so the user-message captures them
     // even though we reset state immediately for UI responsiveness.
-    const imagesForTurn = pendingImages
+    const imagesForTurn = images
     const imagesPayload = imagesForTurn.map(img => ({
       data_url: img.data_url,
       width: img.width,
@@ -664,10 +674,12 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
       image_attachments: imageAttachmentsForMsg,
       created_at: new Date().toISOString(),
     }
-    setMessages(prev => [...prev, userMsg])
+    setMessages(prev => (fresh ? [userMsg] : [...prev, userMsg]))
     setInput('')
-    setPendingImages([])
-    setImageError(null)
+    if (withImages) {
+      setPendingImages([])
+      setImageError(null)
+    }
     setLoading(true)
     setProgressMsg(null)
 
@@ -675,14 +687,15 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
     // identify whether a server-side assistant message arrived after this
     // exact send (vs. a leftover from a prior turn).
     const sentAt = Date.now()
-    let resolvedConvId: string | null = conversationId
+    const baseConvId = fresh ? null : conversationId
+    let resolvedConvId: string | null = baseConvId
 
     // Sprint D6.85 Fix C — fresh AbortController for this send. Reset
     // the accumulator so partial-text on Stop reflects only this turn.
     const abortController = new AbortController()
     streamingAbortRef.current = abortController
     streamingAccumRef.current = ''
-    streamingConvIdRef.current = conversationId
+    streamingConvIdRef.current = baseConvId
 
     try {
       const currentVesselId = useAuthStore.getState().activeVesselId
@@ -693,7 +706,7 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
       setVerbosity(savedVerbosity)
       await sendMessageStream(
         query,
-        conversationId,
+        baseConvId,
         currentVesselId,
         (status) => {
           setProgressMsg(status)
@@ -824,7 +837,7 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
           ))
           streamingMsgIdRef.current = null
         }
-        clearPending(resolvedConvId ?? conversationId ?? '')
+        clearPending(resolvedConvId ?? baseConvId ?? '')
         return
       }
 
@@ -894,7 +907,9 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
       streamingAccumRef.current = ''
       streamingConvIdRef.current = null
     }
-  }, [input, loading, conversationId, router, setBilling, writePending, clearPending, recoveryLoop, verbosity, savedVerbosity, activeWorkspaceId, pendingImages])
+  }, [loading, conversationId, router, setBilling, writePending, clearPending, recoveryLoop, verbosity, savedVerbosity, activeWorkspaceId, pendingImages])
+
+  const handleSend = useCallback(() => { void sendText(input) }, [sendText, input])
 
   // Sprint D6.85 Fix C — Stop button handler.
   //
@@ -915,140 +930,7 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
   }, [])
 
   function handlePrompt(text: string) {
-    setInput(text)
-    setTimeout(() => {
-      setInput('')
-      const userMsg: Message = {
-        id: crypto.randomUUID(),
-        role: 'user',
-        content: text,
-        citations: [],
-      }
-      setMessages([userMsg])
-      setLoading(true)
-      setProgressMsg(null)
-      const sentAt = Date.now()
-      let resolvedConvId: string | null = null
-      sendMessageStream(
-        text,
-        null,
-        useAuthStore.getState().activeVesselId,
-        (status) => {
-          setProgressMsg(status)
-          // Sprint D6.88 Phase 3 — detect web-fallback dispatch from
-          // the status text. These specific strings are emitted by
-          // engine.chat_with_progress() during citation_oracle and
-          // _dispatch_web_fallback. When we see either, render the
-          // inline placeholder below the streamed answer so the user
-          // can tell more content is coming.
-          if (
-            status.includes('Searching authoritative sources') ||
-            status.includes('Locating the relevant regulation')
-          ) {
-            setWebFallbackInFlight(true)
-          }
-        },
-        (data) => {
-          resolvedConvId = data.conversation_id
-          setConversationId(data.conversation_id)
-          // D6.68 — same streaming-replace pattern as the main submit
-          // path. If deltas arrived, swap the placeholder's content;
-          // otherwise append a fresh message.
-          const sid = streamingMsgIdRef.current
-          if (sid) {
-            setMessages(prev => prev.map(m =>
-              m.id === sid
-                ? {
-                    ...m,
-                    content: data.answer,
-                    citations: data.cited_regulations,
-                    web_fallback: data.web_fallback ?? null,
-                    tier_metadata: data.tier_metadata ?? null,
-                  }
-                : m
-            ))
-            streamingMsgIdRef.current = null
-          } else {
-            const assistantMsg: Message = {
-              id: crypto.randomUUID(),
-              role: 'assistant',
-              content: data.answer,
-              citations: data.cited_regulations,
-              web_fallback: data.web_fallback ?? null,
-              tier_metadata: data.tier_metadata ?? null,
-              created_at: new Date().toISOString(),
-            }
-            setMessages(prev => [...prev, assistantMsg])
-          }
-          clearPending(data.conversation_id)
-          // Refresh billing status in background
-          apiRequest<BillingStatus>('/billing/status').then(setBilling).catch(() => {})
-        },
-        (startedConvId) => {
-          // Server confirmed receipt — persist the pending marker so a
-          // phone-lock or network blip can recover the answer.
-          resolvedConvId = startedConvId
-          setConversationId(startedConvId)
-          writePending(startedConvId, text)
-        },
-        undefined,
-        activeWorkspaceId,
-        // D6.68 onDelta — append streamed chunk into the placeholder.
-        (chunk) => {
-          if (!streamingMsgIdRef.current) {
-            const newId = crypto.randomUUID()
-            streamingMsgIdRef.current = newId
-            setMessages(prev => [
-              ...prev,
-              { id: newId, role: 'assistant', content: chunk, citations: [] },
-            ])
-            setProgressMsg(null)
-          } else {
-            const sid = streamingMsgIdRef.current
-            setMessages(prev => prev.map(m =>
-              m.id === sid ? { ...m, content: m.content + chunk } : m
-            ))
-          }
-        },
-        // D6.68 onDeltaReset — Claude failure → OpenAI fallback handoff.
-        () => {
-          const sid = streamingMsgIdRef.current
-          if (sid) {
-            setMessages(prev => prev.map(m =>
-              m.id === sid ? { ...m, content: '' } : m
-            ))
-          }
-        },
-      )
-        .catch(() => {
-          // D6.68 — drop the streaming placeholder before recovery / error UI.
-          const streamingId = streamingMsgIdRef.current
-          if (streamingId) {
-            setMessages(prev => prev.filter(m => m.id !== streamingId))
-            streamingMsgIdRef.current = null
-          }
-          if (resolvedConvId) {
-            setProgressMsg(null)
-            setLoading(false)
-            void recoveryLoop(resolvedConvId, sentAt, text)
-            return
-          }
-          setMessages(prev => [
-            ...prev,
-            {
-              id: crypto.randomUUID(),
-              role: 'assistant',
-              content: 'Connection lost before your question reached the server. Please try again.',
-              citations: [],
-            },
-          ])
-        })
-        .finally(() => {
-          setProgressMsg(null)
-          setLoading(false)
-          setWebFallbackInFlight(false)
-        })
-    }, 50)
+    void sendText(text, { fresh: true, withImages: false })
   }
 
   async function handleResendVerification() {
@@ -1406,12 +1288,9 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
                 <button
                   onClick={() => {
                     const q = failedQuery
-                    setInput(q)
                     setRecoveryFailed(false)
                     setFailedQuery(null)
-                    // Microtask deferral so the new input value is in
-                    // place before handleSend reads it.
-                    setTimeout(() => handleSend(), 0)
+                    void sendText(q)
                   }}
                   className="px-2 py-0.5 rounded-md text-[11px] font-medium
                     bg-amber-500/15 text-amber-300 border border-amber-500/40

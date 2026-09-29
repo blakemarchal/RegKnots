@@ -395,6 +395,13 @@ function DocumentItem({
 
 function VesselEditContent() {
   const router = useRouter()
+  // 2026-09-29 — Save and Back return to wherever the editor was opened from
+  // (the chat's vessel sheet, the Dossier, the PSC checklist). Both used to
+  // go to /account, which no longer lists vessels.
+  const leave = useCallback(() => {
+    if (window.history.length > 1) router.back()
+    else router.push('/')
+  }, [router])
   const params = useParams()
   const vesselId = params.id as string
 
@@ -517,7 +524,7 @@ function VesselEditContent() {
         }),
       })
       setSuccess(true)
-      setTimeout(() => router.push('/account'), 600)
+      setTimeout(leave, 600)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to save')
     } finally {
@@ -624,10 +631,10 @@ function VesselEditContent() {
       <header className="flex-shrink-0 flex items-center gap-3 px-4 py-3
         bg-[#111827]/95 backdrop-blur-md border-b border-white/8">
         <button
-          onClick={() => router.push('/account')}
+          onClick={leave}
           className="w-9 h-9 flex items-center justify-center rounded-lg
             text-[#6b7594] hover:text-[#f0ece4] transition-colors duration-150"
-          aria-label="Back to Account"
+          aria-label="Back"
         >
           <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <path d="M19 12H5M12 5l-7 7 7 7" strokeLinecap="round" strokeLinejoin="round" />

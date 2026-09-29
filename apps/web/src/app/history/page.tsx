@@ -627,13 +627,26 @@ function HistoryContent() {
           {!loading && !error && conversations.length === 0 && (
             <div className="flex flex-col items-center gap-4 mt-16">
               <CompassRose className="w-16 h-16 text-[#f0ece4]/20" />
-              <p className="font-mono text-sm text-[#6b7594]">No conversations yet</p>
+              <p className="font-mono text-sm text-[#8a94ad]">
+                {showArchived ? 'No conversations yet' : 'No active conversations'}
+              </p>
               <button
                 onClick={() => router.push('/')}
                 className="font-mono text-xs text-[#2dd4bf] hover:underline"
               >
-                Ask your first question
+                Ask a question
               </button>
+              {/* 2026-09-29 — the archive toggle lives in the filter bar, which
+                  only renders when there are active chats; archiving them all
+                  used to hide the way back. */}
+              {!showArchived && (
+                <button
+                  onClick={() => setShowArchived(true)}
+                  className="font-mono text-xs text-[#8a94ad] hover:text-[#f0ece4] underline underline-offset-4"
+                >
+                  Show archived conversations
+                </button>
+              )}
             </div>
           )}
 
