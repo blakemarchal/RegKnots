@@ -233,6 +233,13 @@ If a doc says "alembic head is 0045" but `alembic current` says `0092`, the doc 
     - Dense harness: 0.8608 / 0.7105 before, **0.8608 / 0.7168** after, no pair gained or lost. Weak recall 0.9114 both runs; the 09-26 run had 0.9241, so that dip predates the fix.
     - **Found, spawned as a task:** NVIC section numbers collide, because numbered lists inside enclosures restart at "1.". The Sunday run parsed 6,805 chunks for 4,202 rows. It re-embeds about 3,500 chunks a week and flips the colliding rows; the bulk gate suppresses the notification.
     - Same misread signatures, not reviewed: NVIC 03-06, 11-84, 03-94, 02-88, 05-87 and 08-87 (degree as 0); 11-63 and 11-82 (letter in a figure). 10 rows in all.
+- **2026-09-29 video ads, first cut** (Blake: "greenlight the video … a mix of real content and your 'flare'"). Script: `docs/marketing/video-script-2026-09-27.md`; the shared copy for Karynn is the Claude Doc "RegKnot video script".
+  - Main 45 s plus two 15 s towing cuts ("First trip", "Audit coming"), each 9:16 and 16:9, with covers. The masters are in `data/video/out/final/` (gitignored).
+  - Built from real captures of the live app on the M/V Bay Pioneer demo profile, marked "Real answer · sped up", plus motion graphics. There is no stock footage, and the score and sound effects are synthesized.
+  - Pipeline in `scripts/video/` (README). Every frame is `seek(t)` in a Chrome page, rendered through puppeteer-core into ffmpeg. `audio.py` syncs to the stage's event log.
+  - Claims on screen were checked against the eCFR text of 46 CFR 140.410, 140.515(c) and 140.915(a).
+  - Karynn's lines are on screen as captions. Her voice memo is still to come; the README covers how it drops in.
+  - Found in the footage and spawned as a task: CFR chips drop the opening "(" and leave "(b))" (`apps/web/src/lib/parseMessage.ts` `CFR_RE`).
 See `docs/PROJECT_STATE.md` for a fuller operational snapshot and `docs/roadmap.md` for the prioritized backlog.
 
 

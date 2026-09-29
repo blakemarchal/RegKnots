@@ -1,0 +1,8 @@
+{
+  "name": "regknot-video",
+  "private": true,
+  "description": "Renders the RegKnot video ads; see README.md",
+  "dependencies": {
+    "puppeteer-core": "^23.11.1"
+  }
+}

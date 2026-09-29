@@ -1,0 +1,67 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800;900&family=IBM+Plex+Mono:wght@400;500;600&display=block" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 1920px; height: 1080px; overflow: hidden; background: #0a0e1a; }
+  body { position: relative; font-family: 'IBM Plex Mono', monospace; color: #f0ece4; }
+  .bg { position: absolute; inset: 0;
+    background: radial-gradient(900px 700px at 50% 45%, rgba(45,212,191,0.10), transparent 70%),
+                radial-gradient(700px 500px at 90% 100%, rgba(30,58,110,0.35), transparent 70%),
+                linear-gradient(180deg, #0b1020 0%, #0a0e1a 60%, #080b15 100%); }
+  .grid { position: absolute; inset: 0; background-image:
+    repeating-linear-gradient(0deg, transparent 0 47px, rgba(45,212,191,0.035) 47px 48px),
+    repeating-linear-gradient(90deg, transparent 0 47px, rgba(45,212,191,0.035) 47px 48px); }
+  .slot { position: absolute; left: 679px; top: 40px; width: 562px; height: 1000px; border-radius: 34px;
+    box-shadow: 0 30px 90px rgba(0,0,0,0.7), 0 0 0 2px rgba(45,212,191,0.35), 0 0 60px rgba(45,212,191,0.18); background: #0a0e1a; }
+  .left { position: absolute; left: 90px; top: 0; bottom: 0; width: 500px; display: flex; flex-direction: column; justify-content: center; }
+  .right { position: absolute; right: 56px; top: 0; bottom: 0; width: 560px; display: flex; flex-direction: column; justify-content: center; text-align: left; }
+  .mark { width: 150px; height: 150px; margin-bottom: 34px; }
+  .word { font-family: 'Barlow Condensed'; font-weight: 700; font-size: 104px; letter-spacing: 5px; line-height: 1; color: #fff; }
+  .word span { color: #2dd4bf; }
+  .tag { margin-top: 18px; font-size: 20px; letter-spacing: 5px; color: #6b7594; white-space: nowrap; }
+  .lead { margin-top: 56px; font-family: 'Barlow Condensed'; font-weight: 700; font-size: 50px; line-height: 1.08; color: #f0ece4; }
+  .lead b { color: #2dd4bf; font-weight: 700; }
+  .h { font-family: 'Barlow Condensed'; font-weight: 800; font-size: 84px; line-height: 1; color: #f0ece4; }
+  .url { margin-top: 18px; font-weight: 600; font-size: 52px; color: #2dd4bf; }
+  .rule { margin: 34px 0; width: 120px; height: 3px; background: #2dd4bf; box-shadow: 0 0 12px rgba(45,212,191,0.8); }
+  .fine { font-size: 23px; line-height: 1.6; color: #9aa3bf; white-space: nowrap; }
+  .fine b { color: #f0ece4; font-weight: 500; }
+</style></head>
+<body>
+<div class="bg"></div><div class="grid"></div>
+<div class="left">
+  <div class="mark"><svg style="width:100%;height:100%" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" fill="none">
+<g transform="translate(0.0 0.0) scale(1.0)" fill="none" stroke="#2dd4bf">
+  <circle cx="60" cy="60" r="56" stroke-width="0.5" stroke-dasharray="3 7"/>
+  <circle cx="60" cy="60" r="34" stroke-width="0.5"/>
+  <line x1="60" y1="4" x2="60" y2="116" stroke-width="0.5"/>
+  <line x1="4" y1="60" x2="116" y2="60" stroke-width="0.5"/>
+  <line x1="20" y1="20" x2="100" y2="100" stroke-width="0.3"/>
+  <line x1="100" y1="20" x2="20" y2="100" stroke-width="0.3"/>
+  <path d="M60 6 L65 52 L60 57 L55 52 Z" fill="#2dd4bf" stroke="none"/>
+  <path d="M60 114 L65 68 L60 63 L55 68 Z" fill="#2dd4bf" fill-opacity="0.45" stroke="none"/>
+  <path d="M114 60 L68 65 L63 60 L68 55 Z" fill="#2dd4bf" fill-opacity="0.45" stroke="none"/>
+  <path d="M6 60 L52 65 L57 60 L52 55 Z" fill="#2dd4bf" fill-opacity="0.45" stroke="none"/>
+  <path d="M98 22 L68 56 L64 52 L71 45 Z" fill="#2dd4bf" fill-opacity="0.25" stroke="none"/>
+  <path d="M22 22 L52 56 L56 52 L49 45 Z" fill="#2dd4bf" fill-opacity="0.25" stroke="none"/>
+  <path d="M98 98 L68 64 L64 68 L71 75 Z" fill="#2dd4bf" fill-opacity="0.25" stroke="none"/>
+  <path d="M22 98 L52 64 L56 68 L49 75 Z" fill="#2dd4bf" fill-opacity="0.25" stroke="none"/>
+  <circle cx="60" cy="60" r="4" fill="#2dd4bf" stroke="none"/>
+  <circle cx="60" cy="60" r="9" stroke-width="0.8"/>
+  <text x="60" y="3.5" text-anchor="middle" font-size="7" fill="#2dd4bf" font-weight="700" stroke="none" font-family="'Barlow Condensed', 'Barlow Semi Condensed', 'Oswald', 'Liberation Sans Narrow', 'Arial Narrow', Impact, sans-serif">N</text>
+</g>
+</svg>
+</div>
+  <div class="word">REG<span>KNOT</span></div>
+  <div class="tag">MARITIME COMPLIANCE CO-PILOT</div>
+  <div class="lead">Plain-English answers,<br><b>cited to the regulation,</b><br>for your vessel.</div>
+</div>
+<div class="slot"></div>
+<div class="right">
+  <div class="h">Try it free</div>
+  <div class="url">regknots.com</div>
+  <div class="rule"></div>
+  <div class="fine">7-day free trial · No credit card<br><b>Fleets: first boat free for 30 days</b><br><br>Built with Captain Karynn Marchal,<br>USCG Master Unlimited</div>
+</div>
+</body></html>

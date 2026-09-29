@@ -1,4 +1,10 @@
-# RegKnots video script, v1 (2026-09-27)
+# RegKnot video script, v1 (2026-09-27)
+
+**2026-09-29: first cut built.** The main ad and both 15 s cuts are rendered from the real app
+(M/V Bay Pioneer demo profile) with motion graphics in place of the Grok B-roll and an original
+synthesized score. Karynn's lines are on screen as captions; her voice memo drops in on the same
+timeline. Pipeline and VO steps: `scripts/video/README.md`. The shared copy for Karynn is the
+Claude Doc "RegKnot video script".
 
 One shoot gives three pieces:
 - **Main, 45 s.** For LinkedIn, Facebook and the website.
@@ -8,7 +14,7 @@ Shoot vertical (9:16) and crop a 16:9 version for LinkedIn and YouTube. Burn the
 because most people watch muted.
 
 **Rules**
-- The answer on screen is a real, unedited RegKnots answer, from a screen recording.
+- The answer on screen is a real, unedited RegKnot answer, from a screen recording.
 - Karynn's voice is real, from a phone voice memo. If she won't record, use a neutral AI narrator.
   Never clone her voice or build an avatar of her.
 - Every regulatory statement below is checked against the corpus text: 46 CFR 140.410 and
@@ -20,10 +26,10 @@ because most people watch muted.
 |---|---|---|---|
 | 0:00–0:04 | Pre-dawn wheelhouse, towboat pushing barges (Grok B-roll 1) | Your crew has a compliance question. | "Every captain gets the question at the worst moment: is that actually required?" |
 | 0:04–0:09 | Hands flipping a thick regulation binder (B-roll 2) | 46 CFR · 33 CFR · SOLAS · MARPOL · STCW | "The answer's in there somewhere. Thousands of pages of it." |
-| 0:09–0:14 | Screen recording: typing the question | Does a new deckhand need a safety orientation before we get underway? | "So I ask RegKnots, the way I'd ask another captain." |
+| 0:09–0:14 | Screen recording: typing the question | Does a new deckhand need a safety orientation before we get underway? | "So I ask RegKnot, the way I'd ask another captain." |
 | 0:14–0:24 | The answer streams in; zoom on "46 CFR 140.410" | Answered for your vessel | "It answers for my vessel, in plain English, and it shows exactly where it's written." |
 | 0:24–0:30 | Tap the citation chip; the regulation text opens | Tap the citation. Read the regulation. | "Tap the citation, and there's the regulation itself." |
-| 0:30–0:39 | Quick cuts: vessel profile, fleet workspace, company documents | Built by a USCG Master Unlimited · Your fleet's own SMS, too | "I'm Captain Karynn Marchal, USCG Master Unlimited. We built RegKnots for working mariners, and for fleets it answers from your own safety management system, too." |
+| 0:30–0:39 | Quick cuts: vessel profile, fleet workspace, company documents | Built by a USCG Master Unlimited · Your fleet's own SMS, too | "I'm Captain Karynn Marchal, USCG Master Unlimited. We built RegKnot for working mariners, and for fleets it answers from your own safety management system, too." |
 | 0:39–0:45 | Logo and URL | Try it free: regknots.com · Fleets: first boat free for 30 days | "Try it free at regknots.com." |
 
 The voiceover is about 85 words, roughly 35 seconds at an unhurried pace, which leaves room for music.
@@ -34,10 +40,10 @@ The voiceover is about 85 words, roughly 35 seconds at an unhurried pace, which 
 |---|---|---|
 | 0:00–0:03 | Deckhand walking a barge tow (B-roll 4) | New deckhand. First trip. Orientation first? |
 | 0:03–0:11 | Screen: the question, then the answer streaming; zoom on 46 CFR 140.410 | Yes, before the boat gets underway. 10 topics. Logged. |
-| 0:11–0:15 | Logo | Ask RegKnots · regknots.com |
+| 0:11–0:15 | Logo | Ask RegKnot · regknots.com |
 
 Optional voiceover: "New deckhand, first trip? Orientation comes first: ten topics, logged
-before you get underway. Ask RegKnots."
+before you get underway. Ask RegKnot."
 
 ## Cut B: "Audit coming" (15 s, towing)
 
@@ -45,7 +51,7 @@ before you get underway. Ask RegKnots."
 |---|---|---|
 | 0:00–0:03 | Towboat at the dock, clipboard (B-roll 3) | TPO audit coming? |
 | 0:03–0:11 | Screen: "What records does a Subchapter M towboat have to keep?"; answer list (46 CFR 140.915) | Here's what your TVR has to show. |
-| 0:11–0:15 | Logo | Ask RegKnots · regknots.com |
+| 0:11–0:15 | Logo | Ask RegKnot · regknots.com |
 
 ## What we need from Karynn (5 minutes)
 
@@ -81,6 +87,6 @@ Label AI footage where a platform asks: Meta's "AI info", YouTube's "altered or 
 
 ## Where it goes
 
-- LinkedIn, on Blake's profile and a RegKnots company page. Fleet managers and DPAs are there.
+- LinkedIn, on Blake's profile and a RegKnot company page. Fleet managers and DPAs are there.
 - Maritime Facebook groups (check each group's rules).
 - Instagram and TikTok for crew and cadets.
