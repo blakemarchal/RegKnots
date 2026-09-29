@@ -238,13 +238,15 @@ If a doc says "alembic head is 0045" but `alembic current` says `0092`, the doc 
   - Built from real captures of the live app on the M/V Bay Pioneer demo profile, marked "Real answer · sped up", plus motion graphics. There is no stock footage, and the score and sound effects are synthesized.
   - Pipeline in `scripts/video/` (README). Every frame is `seek(t)` in a Chrome page, rendered through puppeteer-core into ffmpeg. `audio.py` syncs to the stage's event log.
   - Claims on screen were checked against the eCFR text of 46 CFR 140.410, 140.515(c) and 140.915(a).
-  - Karynn's lines are on screen as captions. Her voice memo is still to come; the README covers how it drops in.
+  - Karynn's lines are on screen as captions. Her voice memo is still to come (she was recording on 2026-09-29); the README covers how it drops in.
+  - Temp AI narration versions (`fc13d63`): stock OpenAI voices, female `marin` and male `cedar`, never her voice. Her line 6 is read in the third person ("Built by Captain Karynn Marchal…"), and the end card says "Narration: AI voice". They are in `data/video/out/share/`. TTS runs where the prod OpenAI key is (the local key is stale). Whisper transcribed every finished mix word for word over the music.
   - Found in the footage and spawned as a task: CFR chips drop the opening "(" and leave "(b))" (`apps/web/src/lib/parseMessage.ts` `CFR_RE`).
 - **2026-09-29 CFR paragraph chips fixed** (the footage bug above). "(46 CFR 140.410(b))" rendered as "[46 CFR 140.410](b))": the chip pattern's optional "(" took the opening parenthesis, and its optional ")" met the "(" of "(b)".
   - The chip label keeps the paragraph (`46 CFR 140.410(b)(1)`, `46 CFR 140.910(c)–(d)`) and still opens 46 CFR 140.410. Parentheses go into a chip only as a pair around the whole citation. The footer still lists sections.
   - The live scanner (patterns, `scanCitations`, `extractFooterCitations`) moved from `ChatMessage.tsx` to `apps/web/src/lib/parseMessage.ts`. The `parseContent()` that lived there was dead code.
   - First web unit tests: `pnpm test` in apps/web (node:test with type stripping, Node 22.6+, nothing to install). CI runs them in a new `web` job.
-  - The video's first cut was captured before this fix and still shows the stray "(b))".
+  - **Deployed 2026-09-29 in `fc13d63`** (smoke OK; the production chunk carries the new paragraph pattern).
+  - The video footage was captured before this fix and still shows the stray "(b))". Re-capturing the affected shots waits until Karynn's voice-over is in (Blake: hold off). It needs no new questions, only the existing M/V Bay Pioneer conversations reopened.
 See `docs/PROJECT_STATE.md` for a fuller operational snapshot and `docs/roadmap.md` for the prioritized backlog.
 
 
