@@ -20,6 +20,7 @@
 //   - "address" — just an email address for direct contact (landing footer)
 
 import { useState, useEffect } from 'react'
+import { useEscapeKey } from '@/lib/useEscapeKey'
 
 type Mode = 'compose' | 'address'
 
@@ -78,6 +79,7 @@ function mailtoUrl(to: string, subject: string, body: string): string {
 
 export function EmailComposeButton(props: Props) {
   const [open, setOpen] = useState(false)
+  useEscapeKey(open, () => setOpen(false))
   const [copied, setCopied] = useState<'recipient' | 'subject' | 'body' | 'all' | null>(null)
 
   const mode: Mode = props.mode

@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { useEscapeKey } from '@/lib/useEscapeKey'
 import { useRouter } from 'next/navigation'
 import { CompassRose } from './CompassRose'
 import { apiRequest } from '@/lib/api'
@@ -136,6 +137,8 @@ export function PilotSurveyModal({ billing, forceOpen, onClose, preview }: Props
       setVisible(true)
     }
   }, [billing, forceOpen])
+
+  useEscapeKey(visible, () => dismiss())
 
   if (!visible) return null
 

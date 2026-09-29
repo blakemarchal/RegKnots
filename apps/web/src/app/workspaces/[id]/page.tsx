@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { useEscapeKey } from '@/lib/useEscapeKey'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import AuthGuard from '@/components/AuthGuard'
@@ -155,7 +156,7 @@ function DetailContent() {
       <>
         <div className="mb-4">
           <Link href="/workspaces" className="text-sm text-[#2dd4bf] hover:underline">
-            ← Back to workspaces
+            ← Back to Wheelhouse
           </Link>
         </div>
         <div className="rounded-md border border-amber-400/30 bg-amber-400/5 px-4 py-3 text-sm text-amber-200/90">
@@ -220,7 +221,7 @@ function DetailContent() {
     <>
       <div className="mb-4">
         <Link href="/workspaces" className="text-sm text-[#2dd4bf] hover:underline">
-          ← Back to workspaces
+          ← Back to Wheelhouse
         </Link>
       </div>
 
@@ -545,6 +546,7 @@ function InviteModal({
   const [success, setSuccess] = useState<{
     kind: 'member' | 'invite'; email: string;
   } | null>(null)
+  useEscapeKey(!submitting, () => (success ? onSuccess() : onCancel()))
 
   async function submit(e: React.FormEvent) {
     e.preventDefault()
@@ -677,6 +679,7 @@ function TransferModal({
 }) {
   const [selectedId, setSelectedId] = useState(admins[0]?.user_id ?? '')
   const [submitting, setSubmitting] = useState(false)
+  useEscapeKey(!submitting, onCancel)
   const [error, setError] = useState<string | null>(null)
   const [confirmed, setConfirmed] = useState(false)
 
@@ -780,6 +783,7 @@ function CheckoutModal({
 }) {
   const [plan, setPlan] = useState<'monthly' | 'annual'>('annual')
   const [submitting, setSubmitting] = useState(false)
+  useEscapeKey(!submitting, onCancel)
   const [error, setError] = useState<string | null>(null)
 
   async function submit(e: React.FormEvent) {

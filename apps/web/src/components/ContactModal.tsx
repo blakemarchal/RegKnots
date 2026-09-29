@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { useEscapeKey } from '@/lib/useEscapeKey'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'
 
@@ -35,6 +36,8 @@ export function ContactModal({ open, onClose }: ContactModalProps) {
     setError(null)
     setSent(false)
   }, [open])
+
+  useEscapeKey(open, onClose)
 
   // Auto-close 3s after a successful send.
   useEffect(() => {

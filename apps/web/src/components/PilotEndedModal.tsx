@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { useEscapeKey } from '@/lib/useEscapeKey'
 import { CompassRose } from './CompassRose'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'
@@ -14,6 +15,7 @@ export function PilotEndedModal({ message, onClose }: Props) {
   const [email, setEmail] = useState('')
   const [submitted, setSubmitted] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  useEscapeKey(true, onClose)
 
   async function handleSubmit() {
     if (!email.trim()) return

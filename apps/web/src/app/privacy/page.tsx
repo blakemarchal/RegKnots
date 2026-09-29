@@ -22,7 +22,7 @@ export default function PrivacyPage() {
         <h1 className="font-display text-3xl font-bold text-[#f0ece4] tracking-wide mb-2">
           Privacy Policy
         </h1>
-        <p className="font-mono text-xs text-[#6b7594] mb-8">Effective: April 3, 2026</p>
+        <p className="font-mono text-xs text-[#6b7594] mb-8">Effective: April 3, 2026 · Updated: September 29, 2026</p>
 
         <div className="prose-custom space-y-6 font-mono text-sm leading-relaxed text-[#f0ece4]/75">
           <section>
@@ -66,7 +66,8 @@ export default function PrivacyPage() {
             <p>
               Your data is stored on secured servers. Chat history and account data are stored in a
               PostgreSQL database. Passwords are hashed using bcrypt. API communication is encrypted
-              via TLS. We retain your data for as long as your account is active.
+              via TLS. We retain your data for as long as your account is active. When you delete
+              your account, its data is deleted with it; records of payments are kept for accounting.
             </p>
           </section>
 
@@ -74,8 +75,8 @@ export default function PrivacyPage() {
             <h2 className="font-display text-lg font-bold text-[#2dd4bf] mb-2">5. Your Rights</h2>
             <p>You may:</p>
             <ul className="list-disc list-inside mt-2 space-y-1">
-              <li>Request a copy of your data</li>
-              <li>Request deletion of your account and associated data</li>
+              <li>Export your conversations from Account settings, or request a copy of your data</li>
+              <li>Delete your account and its data yourself from Account settings, or ask us to</li>
               <li>Update your profile information at any time</li>
             </ul>
             <p className="mt-2">

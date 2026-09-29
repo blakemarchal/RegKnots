@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { useEscapeKey } from '@/lib/useEscapeKey'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import AuthGuard from '@/components/AuthGuard'
@@ -175,10 +176,10 @@ function WorkspacesContent() {
   return (
     <>
       <header className="mb-6">
-        <h1 className="text-2xl font-bold mb-1">Workspaces</h1>
+        <h1 className="text-2xl font-bold mb-1">Wheelhouse</h1>
         <p className="text-sm text-[#6b7594]">
-          Vessel-anchored workspaces for crew rotations. One workspace per
-          vessel; multiple admins for parity across rotation watches.
+          Shared workspaces for rotation crews: one per vessel, with several
+          admins so every rotation has one aboard.
         </p>
       </header>
 
@@ -360,6 +361,7 @@ function CreateWorkspaceModal({
   submitting: boolean
   error: string | null
 }) {
+  useEscapeKey(!submitting, onCancel)
   return (
     <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center px-4">
       <div className="w-full max-w-md rounded-lg border border-white/10

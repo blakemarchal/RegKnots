@@ -8,6 +8,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useEffect, useState } from 'react'
+import { useEscapeKey } from '@/lib/useEscapeKey'
 import { useAdmin } from '../_lib/AdminContext'
 import { CountBadge, Pill } from './ui'
 
@@ -154,6 +155,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
   const [drawerOpen, setDrawerOpen] = useState(false)
   const pathname = usePathname()
   useEffect(() => setDrawerOpen(false), [pathname])
+  useEscapeKey(drawerOpen, () => setDrawerOpen(false))
 
   const badges = useBadges()
 

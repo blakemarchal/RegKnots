@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
+import { useEscapeKey } from '@/lib/useEscapeKey'
 import { useRouter } from 'next/navigation'
 import { apiRequest } from '@/lib/api'
 import { useAuthStore } from '@/lib/auth'
@@ -93,6 +94,8 @@ export function VesselSheet({ onClose, workspaceId, workspaceRole }: Props) {
     setDismissing(true)
     setTimeout(onClose, 260)
   }
+  // Escape backs out of an open delete confirmation before closing the sheet.
+  useEscapeKey(!dismissing, () => (confirmDeleteId ? setConfirmDeleteId(null) : dismiss()))
 
   function selectVessel(id: string | null) {
     setActiveVessel(id)

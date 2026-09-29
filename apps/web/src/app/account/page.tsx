@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import AuthGuard from '@/components/AuthGuard'
 import { AppHeader } from '@/components/AppHeader'
 import { useAuthStore } from '@/lib/auth'
+import { DeleteAccountSection } from '@/components/DeleteAccountSection'
 import type { BillingStatus } from '@/lib/auth'
 import { apiRequest } from '@/lib/api'
 import { useViewMode } from '@/lib/useViewMode'
@@ -577,7 +578,7 @@ function AccountContent() {
                   }`}
               >
                 <span className={`font-mono text-sm ${studyToolsEnabled ? 'text-[#2dd4bf]' : 'text-[#f0ece4]/80'}`}>
-                  Quizzes &amp; Guides {studyToolsEnabled ? 'enabled' : 'hidden'}
+                  Study Tools {studyToolsEnabled ? 'enabled' : 'hidden'}
                 </span>
                 <span
                   aria-hidden="true"
@@ -591,7 +592,7 @@ function AccountContent() {
                 </span>
               </button>
               <p className="font-mono text-[10px] text-[#6b7594] leading-relaxed mt-1">
-                Hides &ldquo;Quizzes &amp; Guides&rdquo; from the menu when off. The page is still
+                Hides &ldquo;Study Tools&rdquo; from the menu when off. The page is still
                 reachable by direct link if you want it later. Defaulted on for students and teachers.
               </p>
             </div>
@@ -1204,6 +1205,9 @@ function AccountContent() {
           >
             Sign Out
           </button>
+
+          {/* ── Delete account (2026-09-29) ──────────────────────── */}
+          <DeleteAccountSection billing={billing} isAdmin={!!user?.is_admin} />
 
         </div>
       </main>

@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState, useTransition } from 'react'
+import { useEscapeKey } from '@/lib/useEscapeKey'
 import { useRouter, usePathname } from 'next/navigation'
 import { useAuthStore } from '@/lib/auth'
 import { useViewMode } from '@/lib/useViewMode'
@@ -56,7 +57,8 @@ const MENU_SECTIONS: MenuSection[] = [
   {
     label: 'My Credentials',
     items: [
-      { icon: '\u2299', label: 'Credentials Tracker', action: 'credentials', path: '/credentials' },
+      // 2026-09-29 — each label matches the title of the page it opens.
+      { icon: '\u2299', label: 'Credentials', action: 'credentials', path: '/credentials' },
       { icon: '\u2693', label: 'Sea-Time Log',         action: 'sea-time',           path: '/sea-time' },
       { icon: '\u270D', label: 'Sea Service Letter',   action: 'sea-service-letter', path: '/sea-service-letter' },
     ],
@@ -74,12 +76,12 @@ const MENU_SECTIONS: MenuSection[] = [
     ],
   },
   {
-    label: 'Study Tools',
+    label: 'Study',
     items: [
       // Sprint D6.83 \u2014 Study Tools (quiz + study guide generators).
       // Available to all logged-in users; tier gate happens server-side
       // (free tier sees an upsell on the page itself).
-      { icon: '\u2261', label: 'Quizzes & Guides', action: 'study', path: '/study' },
+      { icon: '\u2261', label: 'Study Tools', action: 'study', path: '/study' },
     ],
   },
   {
@@ -88,7 +90,7 @@ const MENU_SECTIONS: MenuSection[] = [
       // D6.63 \u2014 Reference removed: it was an offline-content stub
       // and we don't actually work offline. Re-introduce when (if)
       // we ship a real offline pack.
-      { icon: '?', label: 'Help', action: 'help', path: '/support' },
+      { icon: '?', label: 'Help & Support', action: 'help', path: '/support' },
       { icon: '\u2709', label: 'Give Feedback', action: 'feedback' },
       { icon: '\u2665', label: 'Giving Back', action: 'giving', path: '/giving' },
       { icon: '\u25CE', label: 'Account', action: 'account', path: '/account' },
@@ -117,8 +119,8 @@ const ADMIN_ITEM: MenuItem = { icon: '\u2318', label: 'Admin', action: 'admin', 
 const SHORE_PERSONAS = new Set(['shore_side_compliance', 'legal_consultant'])
 const STUDY_PERSONAS = new Set(['cadet_student', 'teacher_instructor'])
 const SHORE_HIDDEN_ACTIONS = new Set(['sea-time', 'sea-service-letter'])
-const SHORE_SECTION_ORDER = ['Chat', 'Compliance Tools', 'My Fleet', 'My Credentials', 'Study Tools', 'Help & Account']
-const STUDY_SECTION_ORDER = ['Chat', 'Study Tools', 'My Credentials', 'My Fleet', 'Compliance Tools', 'Help & Account']
+const SHORE_SECTION_ORDER = ['Chat', 'Compliance Tools', 'My Fleet', 'My Credentials', 'Study', 'Help & Account']
+const STUDY_SECTION_ORDER = ['Chat', 'Study', 'My Credentials', 'My Fleet', 'Compliance Tools', 'Help & Account']
 const SHORE_SECTION_RELABEL: Record<string, string> = {
   'My Fleet': 'Fleet',
   'My Credentials': 'Credentials',
@@ -281,6 +283,8 @@ export function HamburgerMenu({ open, onClose, onNewChat, onOpenVessels, onOpenS
     wasPendingRef.current = isPending
   }, [isPending, onClose])
 
+  useEscapeKey(open && !isPending, onClose)
+
   if (!open) return null
 
   function navigateTo(action: string, path: string) {
@@ -344,7 +348,7 @@ export function HamburgerMenu({ open, onClose, onNewChat, onOpenVessels, onOpenS
   // headers.
   // Sprint D6.83 follow-up — also drop the Study Tools entry when the
   // user has it toggled off. We hide the row, not the whole section,
-  // and the empty-section filter at the end drops the "Study Tools"
+  // and the empty-section filter at the end drops the "Study"
   // header automatically once the only entry is gone.
   const filteredSections: MenuSection[] = applyPersona(
     MENU_SECTIONS

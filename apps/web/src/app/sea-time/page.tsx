@@ -12,6 +12,7 @@
 // that qualifies you for Mate Near-Coastal under 46 CFR 11.464."
 
 import { useEffect, useState, useCallback } from 'react'
+import { useEscapeKey } from '@/lib/useEscapeKey'
 import Link from 'next/link'
 import AuthGuard from '@/components/AuthGuard'
 import { AppHeader } from '@/components/AppHeader'
@@ -138,6 +139,7 @@ function Content() {
   const [error, setError] = useState<string | null>(null)
 
   const [editing, setEditing] = useState<Partial<SeaTimeEntry> | null>(null)
+  useEscapeKey(editing !== null, () => { setEditing(null); setError(null) })
   const [saving, setSaving] = useState(false)
 
   const load = useCallback(async () => {

@@ -21,6 +21,8 @@ function LoginForm() {
   const [loading, setLoading] = useState(false)
 
   const resetSuccess = searchParams.get('reset') === '1'
+  // 2026-09-29 — set by the account page after a self-serve account deletion.
+  const accountDeleted = searchParams.get('deleted') === '1'
   // D6.53 — invite redirect. /invite/<token> sends users here with
   // ?invite=<token>. After successful login we forward back so the
   // landing page can show the Accept button with the user signed in.
@@ -59,6 +61,11 @@ function LoginForm() {
         {resetSuccess && (
           <p className="font-mono text-xs text-teal bg-teal/10 border border-teal/20 rounded-lg px-3 py-2 mb-4 text-center">
             Password updated — sign in with your new password.
+          </p>
+        )}
+        {accountDeleted && (
+          <p className="font-mono text-xs text-teal bg-teal/10 border border-teal/20 rounded-lg px-3 py-2 mb-4 text-center">
+            Your account and its data have been deleted.
           </p>
         )}
 

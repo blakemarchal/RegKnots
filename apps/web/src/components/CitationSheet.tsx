@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
+import { useEscapeKey } from '@/lib/useEscapeKey'
 import ReactMarkdown from 'react-markdown'
 import type { Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -239,6 +240,7 @@ export function CitationSheet({ source, sectionNumber, sectionTitle, onClose, wo
     setDismissing(true)
     setTimeout(onClose, 260)
   }
+  useEscapeKey(!dismissing, dismiss)
 
   // Touch drag
   function onTouchStart(e: React.TouchEvent) {

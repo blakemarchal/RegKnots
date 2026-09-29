@@ -50,6 +50,14 @@ const CAUSE_LABELS: Record<string, string> = {
   COSINE: 'similarity',
 }
 
+const MODEL_LABELS: Record<string, string> = {
+  opus: 'Opus',
+  sonnet: 'Sonnet',
+  haiku: 'Haiku',
+  fallback_gpt4o: 'GPT-4o fallback',
+  unknown: 'unrecorded',
+}
+
 const TIER_LABELS: Record<string, string> = { cadet: 'Cadet', mate: 'Mate', captain: 'Captain', pro: 'Captain (legacy)' }
 
 function useLegacyTabRedirect() {
@@ -112,6 +120,12 @@ export default function AdminDashboard() {
         href: '/admin/hedge-audit',
         tone: 'amber',
       })
+    }
+    // 2026-09-29 — Claude unavailable (credits ran out on 08-09 and 09-26): the
+    // engine answers with GPT-4o instead, which only shows up in model_used.
+    const fallback = dash?.quality.models_7d?.fallback_gpt4o ?? 0
+    if (fallback) {
+      items.push({ key: 'fallback', text: `${plural(fallback, 'answer')} came from the GPT-4o fallback this week (Claude unavailable)`, href: '/admin/system', tone: 'red' })
     }
     const pastDue = stats.subs_past_due + stats.subs_paused
     if (pastDue) items.push({ key: 'pastdue', text: `${plural(pastDue, 'subscription')} past due or paused`, href: '/admin/users?filter=paused', tone: 'red' })
@@ -307,6 +321,20 @@ export default function AdminDashboard() {
                   </dd>
                 </div>
                 <div className="col-span-2">
+                  <dt className={TEXT_MUTED}>Answered by</dt>
+                  <dd className="text-[#f0ece4]/85">
+                    {Object.keys(dash.quality.models_7d ?? {}).length === 0 ? (
+                      <span className={TEXT_MUTED}>no answers yet</span>
+                    ) : (
+                      Object.entries(dash.quality.models_7d ?? {}).map(([m, n], i) => (
+                        <span key={m} className={m === 'fallback_gpt4o' ? 'text-red-400' : undefined}>
+                          {i > 0 && ' · '}{MODEL_LABELS[m] ?? m} {n}
+                        </span>
+                      ))
+                    )}
+                  </dd>
+                </div>
+                <div className="col-span-2">
                   <dt className={TEXT_MUTED}>Open hedge audits</dt>
                   <dd className="text-[#f0ece4]">
                     <span className="text-lg font-bold">{dash.quality.hedge_audits_open}</span>
@@ -403,7 +431,7 @@ export default function AdminDashboard() {
                   <ul className="mt-3 pt-3 border-t border-white/5 flex flex-col gap-1.5">
                     {dash.recent_payments.slice(0, 4).map((p, i) => (
                       <li key={i} className="flex items-baseline justify-between gap-2 font-mono text-[11px]">
-                        <span className="text-[#f0ece4]/80 truncate">{p.user_email}</span>
+                        <span className="text-[#f0ece4]/80 truncate">{p.user_email ?? 'Deleted account'}</span>
                         <span className="whitespace-nowrap text-[#f0ece4]/70">
                           {fmtMoney(p.amount_cents)} {TIER_LABELS[p.subscription_tier ?? ''] ?? p.subscription_tier ?? ''}
                           <span className={`ml-1.5 ${TEXT_MUTED}`}>{fmtRelative(p.paid_at)}</span>
