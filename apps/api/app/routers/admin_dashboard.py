@@ -50,6 +50,9 @@ class Revenue(BaseModel):
 
 class Quality(BaseModel):
     answers_7d: int
+    # Answers by messages.model_used ("opus", "sonnet", "haiku", "fallback_gpt4o", ...).
+    # A fallback_gpt4o count means Claude was unavailable (e.g. credits ran out).
+    models_7d: dict[str, int] = {}
     hedged_7d: int                       # answers the hedge detector flagged (retrieval_misses)
     judge_7d: dict[str, int]             # the hedge judge's verdicts on those, "unjudged" when empty
     hedge_audits_new_7d: int
@@ -80,7 +83,7 @@ class RecentQuestion(BaseModel):
 
 
 class RecentPayment(BaseModel):
-    user_email: str
+    user_email: str | None  # None once the account has been deleted (the payment stays, migration 0118)
     amount_cents: int
     subscription_tier: str | None
     billing_interval: str | None
@@ -181,17 +184,19 @@ async def dashboard(
             SELECT COALESCE(sum(be.amount_paid_cents) FILTER (WHERE be.paid_at > now() - interval '30 days'), 0) AS d30,
                    COALESCE(sum(be.amount_paid_cents), 0) AS alltime,
                    count(*) AS invoices, max(be.paid_at) AS last_paid
-            FROM billing_events be JOIN users u ON u.id = be.user_id
+            FROM billing_events be LEFT JOIN users u ON u.id = be.user_id
             WHERE TRUE{uf}
             """
         )
-        answers_7d = await conn.fetchval(
+        model_rows = await conn.fetch(
             f"""
-            SELECT count(*) FROM messages m
+            SELECT m.model_used AS model, count(*) AS n FROM messages m
             JOIN conversations c ON c.id = m.conversation_id JOIN users u ON u.id = c.user_id
             WHERE m.role = 'assistant' AND m.created_at > now() - interval '7 days'{uf}
+            GROUP BY 1 ORDER BY 2 DESC
             """
         )
+        answers_7d = sum(r["n"] for r in model_rows)
         judge_rows = await conn.fetch(
             f"""
             SELECT rm.judge_verdict AS verdict, count(*) AS n FROM retrieval_misses rm
@@ -245,7 +250,7 @@ async def dashboard(
         payments = await conn.fetch(
             f"""
             SELECT u.email, be.amount_paid_cents, be.subscription_tier, be.billing_interval, be.paid_at
-            FROM billing_events be JOIN users u ON u.id = be.user_id
+            FROM billing_events be LEFT JOIN users u ON u.id = be.user_id
             WHERE be.paid_at IS NOT NULL{uf}
             ORDER BY be.paid_at DESC LIMIT 6
             """
@@ -264,6 +269,7 @@ async def dashboard(
         ),
         quality=Quality(
             answers_7d=answers_7d or 0,
+            models_7d=_counts(model_rows, "model", empty="unknown"),
             hedged_7d=sum(r["n"] for r in judge_rows),
             judge_7d=_counts(judge_rows, "verdict"),
             hedge_audits_new_7d=audits["new_7d"] or 0,

@@ -629,7 +629,9 @@ async def list_users(
     exclude_internal: bool = Query(default=False),
 ) -> list[AdminUser]:
     pool = await get_pool()
-    where = "WHERE u.is_internal IS NOT TRUE" if exclude_internal else ""
+    # 2026-09-29 — same "real users" filter as /admin/stats and /admin/dashboard
+    # (internal OR admin accounts left out); this one used to keep admins.
+    where = "WHERE u.is_internal IS NOT TRUE AND u.is_admin IS NOT TRUE" if exclude_internal else ""
     rows = await pool.fetch(
         f"""
         SELECT u.id, u.email, u.full_name, u.role, u.subscription_tier,
@@ -716,8 +718,9 @@ async def signup_sources(
 class ModelUsage(BaseModel):
     model: str
     message_count: int
-    total_input_tokens: int
-    total_output_tokens: int
+    # messages.tokens_used is one number per answer, with no input/output split.
+    # 2026-09-29 — it was reported as total_output_tokens (with input always 0).
+    total_tokens: int
 
 
 @router.get("/model-usage", response_model=list[ModelUsage])
@@ -742,8 +745,7 @@ async def model_usage(
         ModelUsage(
             model=r["model"],
             message_count=r["msg_count"],
-            total_input_tokens=0,  # TODO: wire up when input/output token split is tracked
-            total_output_tokens=r["total_tokens"],
+            total_tokens=r["total_tokens"],
         )
         for r in rows
     ]
@@ -932,19 +934,9 @@ async def delete_user(
     D6.58 audit fix — workspaces.owner_user_id has ON DELETE RESTRICT
     (not CASCADE) by design: deleting a workspace owner without
     explicit handling would orphan a billing-active workspace, which
-    we never want to do silently. Before the user delete, we
-    explicitly cancel + archive any workspaces this user owns. The
-    workspace cascade then deletes their members rows; orphaned
-    seats on those workspaces (if any) cascade to NULL via the
-    user_id FK.
-
-    The two-pass delete:
-      1. Archive (soft-delete) any owned workspaces. status='archived'
-         + null out stripe_subscription_id so future webhooks can't
-         interact with a dead workspace.
-      2. DELETE the workspace rows (cascades to members + invites +
-         vessels + handoff history).
-      3. DELETE the user row (now FK-clean).
+    we never want to do silently. The owned workspaces are deleted
+    with the user (cascading to members, invites, vessels, documents).
+    See app/account_deletion.py for the order of steps.
 
     Admin users still can't be deleted. Admins must promote/demote
     via /admin/users/{id}/role first.
@@ -964,38 +956,16 @@ async def delete_user(
     if row["is_admin"]:
         raise HTTPException(status_code=403, detail="Cannot delete admin users")
 
-    # D6.58 — pre-clear workspaces owned by this user. Records the
-    # archival in workspace_billing_events so the audit trail is
-    # preserved even though the workspace row is gone.
-    owned_workspaces = await pool.fetch(
-        "SELECT id, name, status FROM workspaces WHERE owner_user_id = $1",
-        uid,
-    )
-    workspaces_archived: list[dict] = []
-    if owned_workspaces:
-        for w in owned_workspaces:
-            try:
-                await pool.execute(
-                    "INSERT INTO workspace_billing_events "
-                    "  (workspace_id, event_type, actor_user_id, details) "
-                    "VALUES ($1, 'owner_account_deleted', $2, $3::jsonb)",
-                    w["id"], uid,
-                    f'{{"prior_status": "{w["status"]}", "name": "{w["name"]}"}}',
-                )
-            except Exception:
-                pass  # audit-log failures don't block delete
-            await pool.execute(
-                "DELETE FROM workspaces WHERE id = $1",
-                w["id"],
-            )
-            workspaces_archived.append({
-                "id": str(w["id"]),
-                "name": w["name"],
-                "prior_status": w["status"],
-            })
-
+    # 2026-09-29 — shared with the self-serve delete (app/account_deletion.py).
+    # It also cancels the user's and their workspaces' Stripe subscriptions
+    # (this route used to leave them billing) and removes uploaded files. The
+    # owned workspaces are deleted in the same transaction as the user; the old
+    # 'owner_account_deleted' workspace_billing_events row went with them in the
+    # cascade, so the admin audit log below is the record.
+    import stripe as _stripe
+    from app.account_deletion import delete_account
     try:
-        await pool.execute("DELETE FROM users WHERE id = $1", uid)
+        summary = await delete_account(pool, uid)
     except asyncpg.exceptions.ForeignKeyViolationError as exc:
         logger.exception("FK violation deleting user %s", user_id)
         raise HTTPException(
@@ -1003,22 +973,29 @@ async def delete_user(
             detail=(
                 f"Cannot delete user: foreign key constraint "
                 f"{exc.constraint_name or 'unknown'} blocks the cascade. "
-                "A referencing table is missing ON DELETE CASCADE or "
-                "needs explicit pre-cleanup. Owned workspaces were "
-                "removed but a different reference is still blocking."
+                "A referencing table needs ON DELETE CASCADE / SET NULL or "
+                "explicit pre-cleanup. Nothing was deleted."
             ),
+        ) from exc
+    except _stripe.StripeError as exc:
+        logger.exception("Stripe cancel failed deleting user %s", user_id)
+        raise HTTPException(
+            status_code=502,
+            detail=f"Stripe refused to cancel a subscription, so nothing was deleted: {str(exc)[:200]}",
         ) from exc
     await audit_log(
         pool, admin, "delete_user",
         target_id=user_id,
         details={
             "email": row["email"],
-            "workspaces_deleted": workspaces_archived,
+            "workspaces_deleted": summary.workspaces_deleted,
+            "subscriptions_canceled": summary.subscriptions_canceled,
+            "files_removed": summary.files_removed,
         },
     )
     logger.warning(
-        "Admin %s deleted user %s (%s); also removed %d owned workspaces",
-        admin.email, row["email"], user_id, len(workspaces_archived),
+        "Admin %s deleted user %s (%s); %d owned workspace(s), %d subscription(s) canceled",
+        admin.email, row["email"], user_id, len(summary.workspaces_deleted), summary.subscriptions_canceled,
     )
     return DeleteUserResult(deleted=True, email=row["email"])
 
@@ -3397,6 +3374,19 @@ async def trigger_ingest(
     )
 
 
+async def _run_task_off_loop(task_coro_fn) -> None:
+    """Run a Celery task body from an admin request without freezing the API.
+
+    2026-09-29 — the IMO and NMC checks fetch pages with blocking
+    requests.get (30 s timeout each) and send mail synchronously. Awaited on
+    the API's event loop, that stalled every other request for as long as the
+    scrape took. They open their own asyncpg connection (not the shared
+    pool), so they can run on a private event loop in a worker thread, the
+    same way the Celery worker runs them.
+    """
+    await asyncio.to_thread(lambda: asyncio.run(task_coro_fn()))
+
+
 @router.post("/jobs/imo-amendment-check", response_model=JobRunResult)
 async def trigger_imo_check(
     admin: Annotated[CurrentUser, Depends(require_write_admin)],
@@ -3405,7 +3395,7 @@ async def trigger_imo_check(
     from app.tasks import _check_imo_amendments_async
     logger.info("Admin %s triggered IMO amendment check", admin.email)
     try:
-        await _check_imo_amendments_async()
+        await _run_task_off_loop(_check_imo_amendments_async)
         return JobRunResult(ok=True, details="IMO check complete. If new refs found, an alert email was sent to hello@regknots.com.")
     except Exception as exc:
         logger.exception("IMO amendment check failed")
@@ -3421,7 +3411,7 @@ async def trigger_nmc_check(
     logger.info("Admin %s triggered NMC document check", admin.email)
     await audit_log(await get_pool(), admin, "trigger_nmc_check")
     try:
-        await _check_nmc_updates_async()
+        await _run_task_off_loop(_check_nmc_updates_async)
         return JobRunResult(ok=True, details="NMC check complete. If new documents found, an alert email was sent to hello@regknots.com.")
     except Exception as exc:
         logger.exception("NMC document check failed")
@@ -4171,7 +4161,8 @@ async def list_chats(
         idx += 1
 
     if exclude_internal:
-        where.append("u.is_internal IS NOT TRUE")
+        # 2026-09-29 — admins are left out too, as everywhere else.
+        where.append("u.is_internal IS NOT TRUE AND u.is_admin IS NOT TRUE")
     if flag_state:
         _add("v.flag_state = %P", flag_state)
     if user_email:

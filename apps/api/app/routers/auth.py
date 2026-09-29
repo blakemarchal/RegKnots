@@ -1,5 +1,6 @@
 import hashlib
 import json
+import logging
 import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -30,6 +31,7 @@ from app.email import (
 from app.routers.workspaces import auto_claim_invites_for_user
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+logger = logging.getLogger(__name__)
 
 _COOKIE_NAME = "refresh_token"
 _COOKIE_PATH = "/"
@@ -429,6 +431,66 @@ async def change_password(
         await send_password_changed_email(user.email, user.full_name or user.email)
     except Exception:
         pass
+
+
+# ── Account deletion ──────────────────────────────────────────────────────────
+
+
+class DeleteAccountRequest(BaseModel):
+    password: str
+    confirm: str  # the user types DELETE
+
+
+@router.post("/delete-account")
+async def delete_own_account(
+    body: DeleteAccountRequest,
+    user: Annotated[CurrentUser, Depends(get_current_user)],
+) -> JSONResponse:
+    """2026-09-29 — delete your own account from the account page.
+
+    The landing and pricing pages promise "your data, your delete button"; until
+    now only the owner could delete an account, from the admin. Needs the
+    password and the typed word DELETE. Wrong input is a 400, not a 401, so the
+    web client doesn't take it for an expired session.
+    """
+    from app.account_deletion import delete_account, shared_workspaces_owned
+
+    if body.confirm.strip().upper() != "DELETE":
+        raise HTTPException(status_code=400, detail="Type DELETE to confirm.")
+    uid = uuid.UUID(user.user_id)
+    pool = await get_pool()
+    row = await pool.fetchrow("SELECT hashed_password, is_admin FROM users WHERE id = $1", uid)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Account not found.")
+    if not verify_password(body.password, row["hashed_password"]):
+        raise HTTPException(status_code=400, detail="That password isn't right.")
+    if row["is_admin"]:
+        raise HTTPException(status_code=403, detail="Admin accounts can't be deleted from the app.")
+    shared = await shared_workspaces_owned(pool, uid)
+    if shared:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"You own {', '.join(shared)}, which other people use. Transfer ownership "
+                "or remove its members first, then delete your account."
+            ),
+        )
+    try:
+        summary = await delete_account(pool, uid)
+    except Exception:
+        logger.exception("self-serve account deletion failed for %s", uid)
+        raise HTTPException(
+            status_code=502,
+            detail="We couldn't finish deleting your account, and your data is still there. Please try again or email support@regknots.com.",
+        )
+    # Log the id only: the point is that the email is gone.
+    logger.warning(
+        "Account %s deleted by its owner: %d subscription(s) canceled, %d workspace(s), %d file(s)",
+        uid, summary.subscriptions_canceled, len(summary.workspaces_deleted), summary.files_removed,
+    )
+    resp = JSONResponse({"deleted": True, "subscriptions_canceled": summary.subscriptions_canceled})
+    resp.delete_cookie(key=_COOKIE_NAME, path=_COOKIE_PATH)
+    return resp
 
 
 # ── Password reset (unauthenticated) ──────────────────────────────────────────

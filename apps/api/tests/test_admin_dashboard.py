@@ -25,6 +25,8 @@ class _Conn:
         if "generate_series" in sql:
             return [{"week_start": date(2026, 9, 21), "signups": 0, "active_users": 1, "questions": 2, "new_paying": 0},
                     {"week_start": date(2026, 9, 28), "signups": 1, "active_users": 0, "questions": 0, "new_paying": 0}]
+        if "m.model_used AS model" in sql:
+            return [{"model": "opus", "n": 2}, {"model": "fallback_gpt4o", "n": 1}]
         if "rm.judge_verdict" in sql:
             return [{"verdict": "partial_miss", "n": 1}, {"verdict": None, "n": 1}]
         if "h.classification" in sql:
@@ -36,7 +38,10 @@ class _Conn:
             return [{"conversation_id": uuid.uuid4(), "email": "b@example.com", "full_name": "B",
                      "created_at": NOW, "preview": "Does a new deckhand need an orientation?"}]
         if "be.amount_paid_cents, be.subscription_tier" in sql:
+            # The second payment's account was deleted: LEFT JOIN, email NULL (migration 0118).
             return [{"email": "c@example.com", "amount_paid_cents": 3900, "subscription_tier": "captain",
+                     "billing_interval": "month", "paid_at": NOW},
+                    {"email": None, "amount_paid_cents": 999, "subscription_tier": "mate",
                      "billing_interval": "month", "paid_at": NOW}]
         raise AssertionError(f"unexpected fetch: {sql[:80]}")
 
@@ -54,8 +59,6 @@ class _Conn:
         self.sql.append(sql)
         if "LATERAL" in sql:
             return 4899
-        if "m.role = 'assistant'" in sql:
-            return 2
         if "trial_ends_at BETWEEN" in sql:
             return 0
         raise AssertionError(f"unexpected fetchval: {sql[:80]}")
@@ -100,6 +103,10 @@ def test_dashboard_shapes_trends_funnel_money_and_quality(conn):
     assert d.quality.open_audit_causes == {"CORPUS_GAP": 3, "unclassified": 1}
     assert d.recent_questions[0].preview.startswith("Does a new deckhand")
     assert d.recent_payments[0].amount_cents == 3900
+    assert d.recent_payments[1].user_email is None
+    # Answers by model; the GPT-4o fallback shows up as its own bucket.
+    assert d.quality.answers_7d == 3
+    assert d.quality.models_7d == {"opus": 2, "fallback_gpt4o": 1}
 
 
 def test_dashboard_filters_internal_accounts_only_when_asked(conn):
