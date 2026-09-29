@@ -13,7 +13,7 @@ S = importlib.import_module("app.routers.study")
 
 
 def test_quiz_runs_on_sonnet_with_pinned_effort_and_thinking_headroom():
-    assert S._QUIZ_MODEL == "claude-sonnet-5"
+    assert S._QUIZ_MODEL == "claude-sonnet-5-5"
     assert S._QUIZ_EFFORT == "high"
     # Sonnet 5 thinks adaptively and thinking counts toward max_tokens; a
     # 10-question quiz measured up to 5,055 output tokens at `high`.

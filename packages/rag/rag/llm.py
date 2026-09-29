@@ -9,9 +9,10 @@ remembered them:
     `response.content[0].text` raises AttributeError — the bug that silently
     disabled regeneration until 2026-09-22.
   * A safety-classifier refusal (HTTP 200, `stop_reason="refusal"`, no usable
-    text; Sonnet 5 and Opus 5.5 run cyber/bio/reasoning_extraction
-    classifiers) is logged and surfaced as "no result", not as an empty
-    answer or a JSON parse error.
+    text; Sonnet 5.5 and Opus 5.5 run cyber/bio/reasoning_extraction and
+    other classifiers) is logged and surfaced as "no result", not as an empty
+    answer or a JSON parse error. Sonnet 5.5 calls also carry the server-side
+    fallback, which re-runs a declined request on a substitute model.
   * JSON comes from structured outputs (`output_config.format`): the API
     guarantees the shape, replacing the six copy-pasted "strip the code
     fence, regex for {...}" parsers. Truncation (`stop_reason="max_tokens"`)
@@ -27,10 +28,71 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from dataclasses import dataclass
 from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
+
+
+# ── Model choice for the small helper calls ──────────────────────────────────
+
+# 2026-09-28 — one place for the small model behind the router, distill,
+# rewrite, rerank, hedge judge, citation check, hedge audit, conversation
+# titles, the support bot and the fast study guide. Haiku 5.5 is due the week
+# of 2026-10-05: switching is this default (or SIDECAR_MODEL in the env) plus a
+# measurement (retrieval harness dense-prod arm, the hedge judge's gold set,
+# latency). apps/api/app/routers/chat.py maps any claude-haiku-* ID to "haiku".
+SIDECAR_MODEL: str = os.environ.get("SIDECAR_MODEL") or "claude-haiku-4-5-20251001"
+
+# Room for thinking on a short call to a model that thinks by default.
+_THINKING_HEADROOM = 2048
+
+
+def small_call_kwargs(model: str, max_tokens: int) -> dict:
+    """`max_tokens` (and effort) for a short call on `model`.
+
+    Haiku 4.5 doesn't think unless asked and rejects `effort`, so it keeps the
+    caller's cap. The 5.x models think by default (Opus 5.5 always), and
+    thinking counts toward max_tokens: on the router's 10-token cap, any
+    thinking on Sonnet left the off-topic confirmation with no text. Those get
+    thinking headroom and effort `low`. A newer small model that rejects
+    `effort` fails loudly on the first call instead of returning empty answers.
+    """
+    if model.startswith("claude-haiku-4-5"):
+        return {"max_tokens": max_tokens}
+    return {"max_tokens": max(max_tokens, _THINKING_HEADROOM), "output_config": {"effort": "low"}}
+
+
+# ── Refusal fallback (Sonnet 5.5) ────────────────────────────────────────────
+
+# 2026-09-28 — Sonnet 5.5 can decline in five safety categories (cyber, bio,
+# frontier_llm, reasoning_extraction, general_harms), and hazmat, IMDG and
+# 33 CFR 101 cyber questions sit near some of them. With the server-side
+# fallback, a declined request is re-run on a substitute model inside the
+# same call instead of coming back empty. Claude API only: the Batches API
+# rejects the parameter, so the enricher's batch path sends none.
+FALLBACK_BETA = "server-side-fallback-2026-07-01"
+
+
+def takes_server_fallback(model: Optional[str]) -> bool:
+    return bool(model) and model.startswith("claude-sonnet-5-5")
+
+
+async def messages_create(client: Any, **kwargs: Any) -> Any:
+    """`client.messages.create(**kwargs)`, with the server-side refusal
+    fallback on models that take it."""
+    if not takes_server_fallback(kwargs.get("model")):
+        return await client.messages.create(**kwargs)
+    betas = [*kwargs.pop("betas", []), FALLBACK_BETA]
+    response = await client.beta.messages.create(betas=betas, fallbacks="default", **kwargs)
+    iterations = getattr(getattr(response, "usage", None), "iterations", None) or []
+    if any(getattr(i, "type", None) == "fallback_message" for i in iterations):
+        logger.info(
+            "%s declined; served by %s (stop_reason=%s)",
+            kwargs.get("model"), getattr(response, "model", None), stop_reason(response),
+        )
+    return response
 
 
 # ── Response reading ─────────────────────────────────────────────────────────
@@ -189,11 +251,12 @@ async def create_json(
 
     API errors propagate unchanged — every caller already has its own
     failure path around the call. A refusal or unparseable body returns
-    `JsonResult(data=None, ...)` and is logged under `label`.
+    `JsonResult(data=None, ...)` and is logged under `label`. Sonnet 5.5
+    calls go through the server-side refusal fallback (`messages_create`).
     """
     cfg = dict(output_config or {})
     cfg["format"] = {"type": "json_schema", "schema": schema}
-    response = await client.messages.create(output_config=cfg, **create_kwargs)
+    response = await messages_create(client, output_config=cfg, **create_kwargs)
     text = text_of(response)
     sr = stop_reason(response)
     if sr == "refusal":

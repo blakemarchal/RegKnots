@@ -32,12 +32,12 @@ from __future__ import annotations
 
 import logging
 
-from rag.llm import INT, arr, create_json, obj
+from rag.llm import INT, SIDECAR_MODEL, arr, create_json, obj, small_call_kwargs
 
 logger = logging.getLogger(__name__)
 
 
-_RERANK_MODEL = "claude-haiku-4-5-20251001"
+_RERANK_MODEL = SIDECAR_MODEL
 _RERANK_MAX_TOKENS = 800
 
 # 2026-09-22 (U5) — structured output replaces the fence-strip/regex parse.
@@ -110,7 +110,7 @@ async def rerank_chunks(
             schema=_RERANK_SCHEMA,
             label="reranker",
             model=_RERANK_MODEL,
-            max_tokens=_RERANK_MAX_TOKENS,
+            **small_call_kwargs(_RERANK_MODEL, _RERANK_MAX_TOKENS),
             system=_RERANK_SYSTEM_PROMPT,
             messages=[{"role": "user", "content": user_payload}],
         )

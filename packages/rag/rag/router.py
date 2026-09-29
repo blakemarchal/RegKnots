@@ -11,11 +11,10 @@ verdicts. Falls back to score 2 (Sonnet) on any classifier error.
 """
 
 import logging
-import re
 
 from anthropic import AsyncAnthropic
 
-from rag.llm import text_of
+from rag.llm import SIDECAR_MODEL, create_json, obj, small_call_kwargs
 from rag.models import RouteDecision
 from rag.prompts import CLASSIFIER_PROMPT
 
@@ -27,7 +26,8 @@ MODEL_MAP: dict[int, str] = {
     # ensemble; return the polite off-topic refusal directly. This is
     # the abuse-cost gate.
     0: "",
-    1: "claude-haiku-4-5-20251001",
+    # 2026-09-28 — the shared small model (rag.llm.SIDECAR_MODEL).
+    1: SIDECAR_MODEL,
     # 2026-07-18 model refresh — Sonnet 4.6 → Sonnet 5, Opus 4.7 → 4.8.
     # 2026-09-22 — Opus 4.8 → Opus 5.5 (claude-opus-5-5, $4/$20 vs $5/$25).
     # ID validated against the prod API key (Models API + two live calls)
@@ -36,7 +36,9 @@ MODEL_MAP: dict[int, str] = {
     # effort and max_tokens explicitly via _opus_kwargs(). REMINDER:
     # any change here must ALSO add the new ID to chat.py _MODEL_ALIAS,
     # or model_used persists as NULL (bit us in D6.73).
-    2: "claude-sonnet-5",
+    # 2026-09-28 — Sonnet 5 → Sonnet 5.5 (same $2/$10). It is the off-topic
+    # confirmation pass and the answer model only when the floor is empty.
+    2: "claude-sonnet-5-5",
     3: "claude-opus-5-5",
 }
 
@@ -49,18 +51,31 @@ REGENERATION_MODEL: str = "claude-opus-5-5"
 
 _DEFAULT_SCORE = 2
 
+# The classifier's answer: one integer 0-3.
+_SCORE_SCHEMA = obj({"score": {"type": "integer", "enum": [0, 1, 2, 3]}})
+
 
 async def _classify_once(
     query: str, client: AsyncAnthropic, model: str,
 ) -> int | None:
     """Run a single classification pass with the given model.
 
-    Returns the integer score 0-3, or None if the response was unparseable
+    Returns the integer score 0-3, or None on a refusal or unusable output
     (caller decides whether to retry, escalate, or default).
     """
-    response = await client.messages.create(
+    # 2026-09-28 — structured output instead of "first digit in the text".
+    # Sonnet 5.5 at effort `low` answered the prompt's "Return ONE digit" with
+    # prose on a maritime question (live, 2026-09-28), and the old regex took
+    # the first 0-3 anywhere in the reply, so a section number could become
+    # the score. The cap comes from small_call_kwargs: tight on Haiku 4.5,
+    # thinking headroom and effort `low` on a model that thinks by default
+    # (with a flat 10 tokens, any thinking on Sonnet left no text at all).
+    result = await create_json(
+        client,
+        schema=_SCORE_SCHEMA,
+        label=f"router ({model})",
         model=model,
-        max_tokens=10,
+        **small_call_kwargs(model, 20),
         messages=[
             {
                 "role": "user",
@@ -68,17 +83,8 @@ async def _classify_once(
             }
         ],
     )
-    # 2026-09-22 (U2) — read by block type: a thinking-enabled model opens
-    # with a `thinking` block, and a refusal returns no text at all (→ None
-    # → caller's default-score path).
-    text = text_of(response).strip()
-    match = re.search(r"[0123]", text)
-    if not match:
-        return None
-    score = int(match.group())
-    if score not in (0, 1, 2, 3):
-        return None
-    return score
+    score = (result.data or {}).get("score")
+    return score if score in (0, 1, 2, 3) else None
 
 
 async def route_query(query: str, client: AsyncAnthropic) -> RouteDecision:

@@ -43,7 +43,7 @@ from typing import Annotated, Any, Optional
 from anthropic import AsyncAnthropic
 from fastapi import APIRouter, Depends, HTTPException, Path, Request, status
 from pydantic import BaseModel, Field
-from rag.llm import STR, arr, create_json, enum, obj
+from rag.llm import SIDECAR_MODEL, STR, arr, create_json, enum, obj, small_call_kwargs
 
 from app.auth.deps import get_current_user
 from app.auth.schemas import CurrentUser
@@ -65,10 +65,12 @@ router = APIRouter(prefix="/study", tags=["study"])
 # match failed for every model (fixed below). Effort is pinned at `high`
 # (the Sonnet 5 API default) rather than left implicit; `medium` / `low`
 # resolved 80% / 73%. Median generation 36 s vs 23 s for Haiku.
-_QUIZ_MODEL = "claude-sonnet-5"
+# 2026-09-28 — Sonnet 5 → Sonnet 5.5 at the same price. `high` is still its
+# API default (the levels were recalibrated), so the pin stays.
+_QUIZ_MODEL = "claude-sonnet-5-5"
 _QUIZ_EFFORT = "high"
-_GUIDE_MODEL_FAST = "claude-haiku-4-5-20251001"
-_GUIDE_MODEL_DEEP = "claude-sonnet-5"
+_GUIDE_MODEL_FAST = SIDECAR_MODEL
+_GUIDE_MODEL_DEEP = "claude-sonnet-5-5"
 
 # 2026-09-22 (U5) — structured-output schemas mirroring the quiz / guide
 # "Output JSON only" specs below. The whole parsed dict is persisted as
@@ -635,7 +637,12 @@ async def generate_guide(
 
     anthropic_client: AsyncAnthropic = request.app.state.anthropic
     model = _GUIDE_MODEL_DEEP if body.deep_dive else _GUIDE_MODEL_FAST
-    max_tokens = _GUIDE_MAX_TOKENS_DEEP if body.deep_dive else _GUIDE_MAX_TOKENS_FAST
+    # The fast guide runs on the small model; small_call_kwargs keeps its cap
+    # (and adds thinking headroom if that model thinks by default).
+    token_kwargs = (
+        {"max_tokens": _GUIDE_MAX_TOKENS_DEEP} if body.deep_dive
+        else small_call_kwargs(model, _GUIDE_MAX_TOKENS_FAST)
+    )
 
     try:
         result = await create_json(
@@ -643,7 +650,7 @@ async def generate_guide(
             schema=_GUIDE_SCHEMA,
             label="study guide",
             model=model,
-            max_tokens=max_tokens,
+            **token_kwargs,
             system=_GUIDE_SYSTEM_PROMPT,
             messages=[{"role": "user", "content": user_payload}],
         )

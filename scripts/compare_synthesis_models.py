@@ -7,11 +7,12 @@ assembly) and captures the exact synthesis request at the moment it would be sen
 replays that same request under six configurations, so the only variable is the model /
 thinking setting:
 
-  haiku         claude-haiku-4-5, the router's pick for score 1
-  sonnet_today  claude-sonnet-5, no thinking param (adaptive at default effort `high`),
-                as sent for score 2 before 2026-09-23
-  sonnet_low    claude-sonnet-5, effort low
-  sonnet_off    claude-sonnet-5, thinking disabled
+  haiku         the small model (rag.llm.SIDECAR_MODEL), the router's pick for score 1
+  sonnet_today  claude-sonnet-5-5, no thinking param (adaptive at default effort `high`),
+                as sent for score 2 (Sonnet 5 until 2026-09-28)
+  sonnet_low    claude-sonnet-5-5, effort low
+  sonnet_off    claude-sonnet-5-5, thinking off (`between_tools`; Sonnet 5.5 rejects
+                `disabled`)
   opus_low      claude-opus-5-5, effort low (the production default since 2026-09-23)
   opus_medium   claude-opus-5-5, effort medium
 
@@ -58,7 +59,7 @@ from openai import AsyncOpenAI  # noqa: E402
 from app.config import settings  # noqa: E402
 import rag.engine as E  # noqa: E402
 from rag.hedge import detect_hedge  # noqa: E402
-from rag.llm import INT, STR, arr, create_json, enum, obj, text_of  # noqa: E402
+from rag.llm import INT, SIDECAR_MODEL, STR, arr, create_json, enum, obj, text_of  # noqa: E402
 from rag.prompts import MODEL_LED_GROUNDING  # noqa: E402
 import eval_rag_baseline as G  # noqa: E402
 
@@ -67,12 +68,12 @@ OUT = REPO / "data" / "eval" / "model_compare" / (
     time.strftime("%Y%m%d-%H%M%S", time.gmtime()) + ("-prompt-ab" if PROMPT_AB else ""))
 OUT.mkdir(parents=True, exist_ok=True)
 
-HAIKU, SONNET, OPUS = "claude-haiku-4-5-20251001", "claude-sonnet-5", "claude-opus-5-5"
+HAIKU, SONNET, OPUS = SIDECAR_MODEL, "claude-sonnet-5-5", "claude-opus-5-5"
 VARIANTS: dict[str, dict] = {
     "haiku": {"model": HAIKU, "max_tokens": 8192},
     "sonnet_today": {"model": SONNET, "max_tokens": 8192},
     "sonnet_low": {"model": SONNET, "max_tokens": 8192, "output_config": {"effort": "low"}},
-    "sonnet_off": {"model": SONNET, "max_tokens": 8192, "thinking": {"type": "disabled"}},
+    "sonnet_off": {"model": SONNET, "max_tokens": 8192, "thinking": {"type": "between_tools"}},
     "opus_low": {"model": OPUS, "max_tokens": 16384, "output_config": {"effort": "low"}},
     "opus_medium": {"model": OPUS, "max_tokens": 16384, "output_config": {"effort": "medium"}},
 }
@@ -82,7 +83,8 @@ if PROMPT_AB:
         "opus_led": {**VARIANTS["opus_low"], "system_edits": MODEL_LED_GROUNDING},
     }
 ROUTER = {HAIKU: "haiku", SONNET: "sonnet_today", OPUS: "opus_low"}
-# $/MTok: input, output, 5-minute cache write, cache read (claude-api skill, 2026-09-23)
+# $/MTok: input, output, 5-minute cache write, cache read (claude-api skill, 2026-09-28;
+# Sonnet 5.5 is priced as Sonnet 5). Update the HAIKU row when SIDECAR_MODEL changes.
 PRICES = {HAIKU: (1.00, 5.00, 1.25, 0.10), SONNET: (2.00, 10.00, 2.50, 0.20), OPUS: (4.00, 20.00, 5.00, 0.20)}
 
 GOLD = [("F1", "V2"), ("F2", "V1"), ("F5", "V5"), ("C1", "V3"), ("C3", "V1"), ("E1", "V1"),

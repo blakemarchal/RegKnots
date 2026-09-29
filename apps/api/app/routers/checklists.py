@@ -519,7 +519,7 @@ async def generate_psc_checklist(
             anthropic_client,
             schema=_PSC_SCHEMA,
             label="psc checklist",
-            model="claude-sonnet-5",
+            model="claude-sonnet-5-5",
             max_tokens=8192,
             system=_PSC_SYSTEM_PROMPT,
             messages=[{

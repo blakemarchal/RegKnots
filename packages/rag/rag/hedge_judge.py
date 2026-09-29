@@ -35,12 +35,15 @@ import time
 from dataclasses import dataclass, field
 from typing import Optional
 
+from rag.llm import SIDECAR_MODEL, small_call_kwargs
+
 logger = logging.getLogger(__name__)
 
 
-# Haiku 4.5 — same model used by the offline hedge_audit classifier.
-# Pinned so a sudden upstream rename doesn't break real-time decisions.
-_JUDGE_MODEL = "claude-haiku-4-5-20251001"
+# The shared small model (rag.llm.SIDECAR_MODEL), also used by the offline
+# hedge_audit classifier. A pinned ID, never an alias, so an upstream rename
+# can't change real-time decisions.
+_JUDGE_MODEL = SIDECAR_MODEL
 
 
 # Caps on what we send to the judge. These dominate the cost/latency
@@ -361,7 +364,7 @@ async def judge_hedge(
             schema=_JUDGE_SCHEMA,
             label="hedge_judge",
             model=_JUDGE_MODEL,
-            max_tokens=400,
+            **small_call_kwargs(_JUDGE_MODEL, 400),
             system=_JUDGE_SYSTEM_PROMPT,
             messages=[{"role": "user", "content": user_payload}],
         )

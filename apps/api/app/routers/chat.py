@@ -45,6 +45,8 @@ _MODEL_ALIAS: dict[str, str] = {
     "claude-haiku-4-5-20251001": "haiku",
     # 2026-07-18 model refresh — Sonnet 5 / Opus 4.8 are the live IDs.
     "claude-sonnet-5": "sonnet",
+    # 2026-09-28 — Sonnet 5.5 (router.MODEL_MAP[2], the Sonnet features).
+    "claude-sonnet-5-5": "sonnet",
     # 2026-09-22 — Opus 5.5 is the live Opus (router.MODEL_MAP[3] and
     # REGENERATION_MODEL). 4.8 stays mapped below per the D6.73 rule.
     "claude-opus-5-5": "opus",
@@ -60,6 +62,23 @@ _MODEL_ALIAS: dict[str, str] = {
     "claude-opus-4-6": "opus",
     "fallback:gpt-4o": "fallback_gpt4o",
 }
+
+
+def _model_alias(model_used: str | None) -> str | None:
+    """The short alias stored in messages.model_used.
+
+    2026-09-28 — an ID missing from _MODEL_ALIAS falls back to its family, so
+    a new Haiku / Sonnet / Opus version is stored as "haiku" / "sonnet" /
+    "opus" instead of NULL (the D6.73 failure). Explicit keys still win."""
+    if not model_used:
+        return None
+    alias = _MODEL_ALIAS.get(model_used)
+    if alias:
+        return alias
+    for family in ("haiku", "sonnet", "opus"):
+        if model_used.startswith(f"claude-{family}-"):
+            return family
+    return None
 
 # Regulation sources we GENUINELY don't cover yet. Used by missing-source
 # detection: on a zero-citation answer whose query mentions one of these,
@@ -800,7 +819,7 @@ async def _persist_chat_outcome(
         )
         cited_ids = [r["id"] for r in id_rows]
 
-    model_alias = _MODEL_ALIAS.get(model_used)
+    model_alias = _model_alias(model_used)
     total_tokens = input_tokens + output_tokens
 
     await pool.execute(
@@ -1506,11 +1525,11 @@ async def _generate_title(
     anthropic_client: AsyncAnthropic,
     pool: asyncpg.Pool,
 ) -> None:
-    """Generate a 4-6 word title for a new conversation using Haiku. Non-blocking."""
+    """Generate a 4-6 word title for a new conversation on the small model. Non-blocking."""
     try:
         msg = await anthropic_client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=24,
+            model=SIDECAR_MODEL,
+            **small_call_kwargs(SIDECAR_MODEL, 24),
             messages=[
                 {
                     "role": "user",
@@ -1545,7 +1564,7 @@ from pydantic import BaseModel  # noqa: E402
 # rag.models is leaf-pure (only stdlib + pydantic) so it's safe to
 # import at module level here.
 from rag.models import ChatImageInput  # noqa: E402
-from rag.llm import text_of  # noqa: E402
+from rag.llm import SIDECAR_MODEL, small_call_kwargs, text_of  # noqa: E402
 
 
 class ChatRequestBody(BaseModel):

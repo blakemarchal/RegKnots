@@ -35,6 +35,8 @@ from urllib.parse import urlparse
 
 import httpx
 
+from rag.llm import messages_create
+
 logger = logging.getLogger(__name__)
 
 
@@ -574,7 +576,7 @@ async def attempt_web_fallback(
     *,
     query: str,
     anthropic_client,
-    model: str = "claude-sonnet-5",
+    model: str = "claude-sonnet-5-5",
     min_confidence_verified: int = 4,
     min_confidence_reference: int = 2,
 ) -> FallbackResult:
@@ -597,7 +599,8 @@ async def attempt_web_fallback(
     result = FallbackResult(query=query)
 
     try:
-        response = await anthropic_client.messages.create(
+        response = await messages_create(
+            anthropic_client,
             model=model,
             # 2026-09-23 — was 2048. Sonnet 5 runs adaptive thinking when
             # `thinking` is omitted (Sonnet 4.x did not) and thinking counts
@@ -757,7 +760,7 @@ async def attempt_news_fallback(
     query: str,
     markers_matched: list[str],
     anthropic_client,
-    model: str = "claude-sonnet-5",
+    model: str = "claude-sonnet-5-5",
     max_age_days: int = 180,
 ) -> NewsFallbackResult:
     """Run the maritime current-events news fallback. Returns a
@@ -773,7 +776,8 @@ async def attempt_news_fallback(
     result = NewsFallbackResult(query=query, markers_matched=markers_matched)
 
     try:
-        response = await anthropic_client.messages.create(
+        response = await messages_create(
+            anthropic_client,
             model=model,
             # 2026-09-23 — was 2048; thinking headroom, see attempt_web_fallback().
             max_tokens=8192,

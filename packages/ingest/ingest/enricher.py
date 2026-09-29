@@ -30,7 +30,11 @@ logger = logging.getLogger(__name__)
 
 _ENCODER = tiktoken.get_encoding("cl100k_base")
 _MAX_TOKENS = 512
-_MODEL = "claude-sonnet-5"
+# 2026-09-28 — Sonnet 5 → Sonnet 5.5 (same price). It thinks by default and the
+# thinking counts toward max_tokens, so the alias call sends effort `low` and
+# gets headroom; aliases are ~100 tokens and billed as generated.
+_MODEL = "claude-sonnet-5-5"
+_ALIAS_MAX_TOKENS = 1024
 _BATCH_SIZE = 20  # chunks per API batch — kept as the per-batch
                   # window so we can checkpoint the cache between
                   # batches and recover from interruptions.
@@ -214,7 +218,8 @@ class AliasEnricher:
         """Messages API params for one chunk — shared by the online and batch paths."""
         return {
             "model": _MODEL,
-            "max_tokens": 200,
+            "max_tokens": _ALIAS_MAX_TOKENS,
+            "output_config": {"effort": "low"},
             "system": _SYSTEM_PROMPT,
             "messages": [{
                 "role": "user",

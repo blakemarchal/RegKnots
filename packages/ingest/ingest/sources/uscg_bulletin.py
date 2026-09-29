@@ -30,6 +30,7 @@ from __future__ import annotations
 import asyncio
 import io
 import logging
+import os
 import re
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -335,7 +336,9 @@ def _pass1_match(
 
 # ── Pass 2: Claude Haiku LLM classifier ─────────────────────────────────
 
-_LLM_MODEL = "claude-haiku-4-5-20251001"
+# The same small model as the app (rag.llm.SIDECAR_MODEL); ingest does not
+# import rag, so it reads the same env var with the same default.
+_LLM_MODEL = os.environ.get("SIDECAR_MODEL") or "claude-haiku-4-5-20251001"
 _LLM_MAX_CONCURRENCY = 10
 _LLM_CONFIDENCE_THRESHOLD = 0.7
 _LLM_TIMEOUT = 30.0

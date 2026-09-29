@@ -18,7 +18,7 @@ from app.auth.deps import get_current_user
 from app.auth.schemas import CurrentUser
 from app.db import get_pool, get_redis
 from rag.fallback import fallback_chat
-from rag.llm import text_of
+from rag.llm import SIDECAR_MODEL, small_call_kwargs, text_of
 
 _CLAUDE_FAILURE_EXCEPTIONS = (
     APIError,
@@ -96,8 +96,8 @@ async def support_chat(
     try:
         try:
             resp = await client.messages.create(
-                model="claude-haiku-4-5-20251001",
-                max_tokens=1024,
+                model=SIDECAR_MODEL,
+                **small_call_kwargs(SIDECAR_MODEL, 1024),
                 system=_SUPPORT_SYSTEM_PROMPT,
                 messages=messages,
             )

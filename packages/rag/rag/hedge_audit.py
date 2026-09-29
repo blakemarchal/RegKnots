@@ -63,10 +63,13 @@ from dataclasses import dataclass
 from typing import Optional
 from uuid import UUID
 
+from rag.llm import SIDECAR_MODEL, small_call_kwargs
+
 logger = logging.getLogger(__name__)
 
 
-_CLASSIFIER_MODEL = "claude-haiku-4-5-20251001"
+# The shared small model (rag.llm.SIDECAR_MODEL).
+_CLASSIFIER_MODEL = SIDECAR_MODEL
 
 _VALID_CLASSIFICATIONS = frozenset({
     "VOCAB", "INTENT", "RANKING", "COSINE",
@@ -207,7 +210,7 @@ async def classify_hedge(
             schema=_CLASSIFIER_SCHEMA,
             label="hedge_audit",
             model=_CLASSIFIER_MODEL,
-            max_tokens=400,
+            **small_call_kwargs(_CLASSIFIER_MODEL, 400),
             system=_CLASSIFIER_SYSTEM_PROMPT,
             messages=[{"role": "user", "content": user_payload}],
         )

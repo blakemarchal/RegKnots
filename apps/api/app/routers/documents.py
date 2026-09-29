@@ -249,7 +249,7 @@ async def _extract_with_vision(
         client,
         schema=_EXTRACTION_SCHEMA,
         label="document extraction",
-        model="claude-sonnet-5",
+        model="claude-sonnet-5-5",
         max_tokens=4096,
         messages=[{"role": "user", "content": content_blocks}],
     )

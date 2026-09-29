@@ -42,7 +42,7 @@ from rag.prompts import (
     assemble_system_prompt,
 )
 from rag.retriever import retrieve, retrieve_enhanced
-from rag.llm import INT, STR, cached_system, create_json, obj, text_of
+from rag.llm import INT, SIDECAR_MODEL, STR, cached_system, create_json, obj, text_of
 from rag.router import REGENERATION_MODEL, route_query
 
 # Anthropic exceptions that indicate Claude itself is unavailable — these are
@@ -2037,7 +2037,7 @@ async def _try_citation_oracle_intervention(
             anthropic_client,
             schema=_ORACLE_SYNTHESIS_SCHEMA,
             label="citation_oracle synthesis",
-            model="claude-sonnet-5",
+            model="claude-sonnet-5-5",
             # 2026-09-26 — was 1500. Sonnet 5 thinks adaptively and the
             # thinking counts against max_tokens (vessel-analysis used 96%
             # of a 3,000 cap on 2026-09-23); a truncated reply parses to
@@ -2427,7 +2427,7 @@ async def _handle_off_topic(
             answer=_OFF_TOPIC_RATE_LIMITED,
             conversation_id=conversation_id,
             cited_regulations=[],
-            model_used="claude-haiku-4-5-20251001",
+            model_used=SIDECAR_MODEL,
             input_tokens=0,
             output_tokens=0,
         )
@@ -2446,7 +2446,7 @@ async def _handle_off_topic(
         answer=_OFF_TOPIC_REFUSAL,
         conversation_id=conversation_id,
         cited_regulations=[],
-        model_used="claude-haiku-4-5-20251001",
+        model_used=SIDECAR_MODEL,
         input_tokens=0,
         output_tokens=0,
     )
@@ -2482,7 +2482,7 @@ async def _handle_off_topic_stream(
             "answer": answer,
             "cited_regulations": [],
             "conversation_id": str(conversation_id),
-            "model_used": "claude-haiku-4-5-20251001",
+            "model_used": SIDECAR_MODEL,
             "input_tokens": 0,
             "output_tokens": 0,
             "unverified_citations": [],
@@ -2856,7 +2856,7 @@ async def chat_with_progress(
     # bearing query, negligible at current volume.
     if images and "haiku" in (route.model or "").lower():
         original_model = route.model
-        route.model = "claude-sonnet-5"
+        route.model = "claude-sonnet-5-5"
         logger.info(
             "image upload: model upgrade %s → %s (images=%d)",
             original_model, route.model, len(images),

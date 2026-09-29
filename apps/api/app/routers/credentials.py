@@ -693,8 +693,10 @@ async def extract_credential_from_photo(
             anthropic_client,
             schema=_CREDENTIAL_SCHEMA,
             label="credential extraction",
-            model="claude-sonnet-5",
-            max_tokens=1024,
+            model="claude-sonnet-5-5",
+            # 2026-09-28 — was 1024. Sonnet 5.5 thinks by default and the
+            # thinking counts toward max_tokens; billed as generated.
+            max_tokens=4096,
             messages=[{"role": "user", "content": content_blocks}],
         )
         if result.data is None:

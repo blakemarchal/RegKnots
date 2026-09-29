@@ -48,15 +48,15 @@ import re
 from dataclasses import dataclass, field
 from typing import Optional
 
-from rag.llm import STR, arr, create_json, enum, nullable, obj
+from rag.llm import SIDECAR_MODEL, STR, arr, create_json, enum, nullable, obj, small_call_kwargs
 
 logger = logging.getLogger(__name__)
 
 
-# Haiku 4.5 supports the web_search tool. Cheap routing model that's
-# good at citation lookup; we don't need Sonnet's reasoning depth
-# for "which CFR section answers this."
-_ORACLE_MODEL = "claude-haiku-4-5-20251001"
+# The shared small model (rag.llm.SIDECAR_MODEL); Haiku 4.5 supports the
+# web_search tool. Cheap and good at citation lookup; "which CFR section
+# answers this" doesn't need Sonnet's reasoning depth.
+_ORACLE_MODEL = SIDECAR_MODEL
 
 # Tight token budget — the oracle returns a small JSON object, not prose.
 _ORACLE_MAX_TOKENS = 600
@@ -168,7 +168,7 @@ async def find_citation_hint(
             schema=_ORACLE_SCHEMA,
             label="citation_oracle",
             model=_ORACLE_MODEL,
-            max_tokens=_ORACLE_MAX_TOKENS,
+            **small_call_kwargs(_ORACLE_MODEL, _ORACLE_MAX_TOKENS),
             system=_ORACLE_SYSTEM_PROMPT,
             messages=[{"role": "user", "content": query[:1500]}],
             # Same web_search tool the cascade ensemble uses for its

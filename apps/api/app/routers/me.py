@@ -59,7 +59,7 @@ router = APIRouter(prefix="/me", tags=["me"])
 # Model choices — Sonnet for narrative-quality reasoning, Haiku for
 # context-only fetches. Keeping these explicit (vs imported from a
 # central config) so per-endpoint tuning is clear in this file.
-_REASONING_MODEL = "claude-sonnet-5"
+_REASONING_MODEL = "claude-sonnet-5-5"
 # 2026-09-23 — output cap for the six co-pilots. Sonnet 5 runs adaptive
 # thinking when `thinking` is omitted (Sonnet 4.x did not), and thinking
 # counts toward max_tokens. Measured on prod: vessel-analysis at the API

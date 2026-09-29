@@ -33,15 +33,15 @@ import logging
 from dataclasses import dataclass
 from typing import Optional
 
-from rag.llm import STR, arr, create_json, obj
+from rag.llm import SIDECAR_MODEL, STR, arr, create_json, obj, small_call_kwargs
 
 logger = logging.getLogger(__name__)
 
 
-# Haiku 4.5 — same model used by hedge_judge and hedge_audit. One
-# capable, fast, cheap reasoning model for all classification /
-# rewrite tasks across the retrieval layer.
-_REWRITE_MODEL = "claude-haiku-4-5-20251001"
+# The shared small model (rag.llm.SIDECAR_MODEL), also used by hedge_judge
+# and hedge_audit: one fast, cheap model for the classification and rewrite
+# tasks across the retrieval layer.
+_REWRITE_MODEL = SIDECAR_MODEL
 
 # Cap output to keep cost bounded. 3 reformulations × ~80 tokens
 # each + JSON envelope sits well under 400.
@@ -253,7 +253,7 @@ async def rewrite_query(
             schema=_REWRITE_SCHEMA,
             label="query_rewrite",
             model=_REWRITE_MODEL,
-            max_tokens=_REWRITE_MAX_TOKENS,
+            **small_call_kwargs(_REWRITE_MODEL, _REWRITE_MAX_TOKENS),
             system=_REWRITE_SYSTEM_PROMPT,
             messages=[{"role": "user", "content": query[:1000]}],
         )

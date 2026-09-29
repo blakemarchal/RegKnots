@@ -40,11 +40,13 @@ from uuid import UUID
 
 import asyncpg
 
+from rag.llm import SIDECAR_MODEL, small_call_kwargs
+
 logger = logging.getLogger(__name__)
 
 
-# Use the same Haiku 4.5 we already pay for in the routing tier.
-DISTILL_MODEL = "claude-haiku-4-5-20251001"
+# The shared small model (rag.llm.SIDECAR_MODEL), the one the router uses.
+DISTILL_MODEL = SIDECAR_MODEL
 DISTILL_MAX_TOKENS = 200      # distilled query is short; cap output cost
 DISTILL_TIMEOUT_S = 10.0      # if distill is slow, fall back fast
 
@@ -100,7 +102,7 @@ async def distill_query(
         response = await asyncio.wait_for(
             anthropic_client.messages.create(
                 model=DISTILL_MODEL,
-                max_tokens=DISTILL_MAX_TOKENS,
+                **small_call_kwargs(DISTILL_MODEL, DISTILL_MAX_TOKENS),
                 system=_DISTILL_SYSTEM_PROMPT,
                 messages=[{"role": "user", "content": query}],
             ),
