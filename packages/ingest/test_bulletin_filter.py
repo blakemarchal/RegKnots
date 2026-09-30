@@ -111,7 +111,8 @@ def test_parse_feed_fetches_only_new_accepted_items(tmp_path, monkeypatch):
     assert fetched == ["42d27df"]
     assert [s.section_number for s in sections] == ["USCG REGULATORY 2026-09-29 [42d27df]"]
     assert "content.govdelivery.com/accounts/USDHSCG/bulletins/42d27df" in sections[0].full_text
-    assert ids_file.read_text().split() == ["41aaaaa", "42d27df"]
+    assert ids_file.read_text().split() == ["41aaaaa"]          # tracked in git: never written
+    assert (tmp_path / b.FEED_ACCEPTED).read_text().split() == ["42d27df"]
     assert (tmp_path / b.FEED_SEEN).read_text().split() == ["42d294d", "42d27df", "42d2000"]
     assert "42d2000" in (tmp_path / b.FEED_REVIEW).read_text()
     # a second run finds nothing new

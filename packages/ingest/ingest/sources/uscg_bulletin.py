@@ -1180,6 +1180,11 @@ def parse_source(ids_file: Path) -> list[Section]:
         raise FileNotFoundError(f"ids file not found: {ids_file}")
 
     ids = _read_ids_file(ids_file)
+    # 2026-09-30 — plus the bulletins the daily feed accepted (feed_accepted.txt)
+    accepted_path = ids_file.parent / FEED_ACCEPTED
+    if accepted_path.exists():
+        known = set(ids)
+        ids += [i for i in _read_ids_file(accepted_path) if i not in known]
     logger.info("uscg_bulletin: %d ids to process", len(ids))
 
     rejected_log_path = ids_file.parent / "rejected.log"
@@ -1228,6 +1233,10 @@ def parse_source(ids_file: Path) -> list[Section]:
 FEED_URL = "https://public.govdelivery.com/accounts/USDHSCG/feed.rss"
 FEED_SEEN = "feed_seen.txt"
 FEED_REVIEW = "feed_review.tsv"
+# Accepted ids for a later full run (parse_source reads them). Not the ids
+# file: wayback_ids.txt is tracked in git, and deploy.sh's reset --hard would
+# drop anything appended to it on the VPS.
+FEED_ACCEPTED = "feed_accepted.txt"
 
 
 @dataclass
@@ -1314,8 +1323,9 @@ async def _process_feed_items(
 def parse_feed(ids_file: Path) -> list[Section]:
     """Sections for bulletins in the feed that no earlier run decided.
 
-    Every new id goes to feed_seen.txt, accepted ones also to the ids file
-    (so a full --fresh run keeps them), ambiguous ones to feed_review.tsv.
+    Every new id goes to feed_seen.txt, accepted ones also to
+    feed_accepted.txt (so a full --fresh run keeps them), ambiguous ones to
+    feed_review.tsv.
     The feed covers about 30 hours, so a gap of more than a day misses
     bulletins; the log warns when every item in the feed was new.
     """
@@ -1349,7 +1359,7 @@ def parse_feed(ids_file: Path) -> list[Section]:
         with (out_dir / FEED_SEEN).open("a", encoding="utf-8") as fh:
             fh.writelines(f"{it.gd_id}\n" for it in new)
     if accepted:
-        with ids_file.open("a", encoding="utf-8") as fh:
+        with (out_dir / FEED_ACCEPTED).open("a", encoding="utf-8") as fh:
             fh.writelines(f"{a.gd_id}\n" for a in accepted)
     if review:
         review_path = out_dir / FEED_REVIEW
