@@ -532,7 +532,9 @@ _USCG_BULLETIN_TERMS: tuple[str, ...] = (
     "safety alert", "equipment recall", "defective",
     "enforcement priority", "psc campaign", "inspection focus",
     # 2026-09-30 — the waterway guidance and safety alerts in this group
-    "vessel traffic service", "vts", "high water", "low water", "waterways action plan",
+    # ("vts", "high water" and "low water" are in the regex below: as
+    # substrings, "below waterline" would lift this group on hull questions)
+    "vessel traffic service", "waterways action plan",
     "river closure", "horsepower per barge", "tow size",
     "concentrated inspection",
     "hurricane", "storm", "typhoon", "tsunami",
@@ -542,7 +544,7 @@ _USCG_BULLETIN_TERMS: tuple[str, ...] = (
     "current", "latest", "recent", "this week", "this month",
 )
 _USCG_BULLETIN_ABBR_RE = re.compile(
-    r"\b(?:msib|alcoast|marsec|notmar)\b",
+    r"\b(?:msib|alcoast|marsec|notmar|vts|high water|low water)\b",
     re.IGNORECASE,
 )
 

@@ -26,3 +26,10 @@ def test_retriever_looks_up_the_stored_form_too():
 def test_new_scoped_titles_resolve_as_corpus_sections():
     ids = [i for i in R._extract_identifiers("40 CFR 139.21 graywater") if i["type"] == "cfr_section"]
     assert ids[0]["section_number"] == "40 CFR 139.21" and ids[0]["source_filter"] == ("cfr_40",)
+
+
+def test_waterway_terms_lift_the_bulletin_group_as_whole_words_only():
+    # "below waterline" contains "low water"; the group gets +0.20
+    assert R._source_affinity("Which openings below waterline need watertight closures?").get("uscg_bulletin") is None
+    assert R._source_affinity("high water tow size limits on the Lower Mississippi").get("uscg_bulletin") == 0.20
+    assert R._source_affinity("Do I check in with VTS before Algiers Point?").get("uscg_bulletin") == 0.20
