@@ -104,3 +104,44 @@ test('the footer lists each section once, under the key the citation map uses', 
     { sectionNumber: '46 CFR 199.180', source: 'cfr_46', title: '' },
   ])
 })
+
+test('2026-09-30: chips for the inland / Coast Guard sources', () => {
+  const hits = text => scanCitations(text).map(h => [h.sectionNumber, h.sourceHint])
+  assert.deepEqual(hits('Per CG-CVC Policy Letter 23-05 CH-1 and CG-CVC PL 21-03, and CG-MMC PL 01-18.'), [
+    ['CG-CVC PL 23-05 CH-1', 'uscg_cvc'],
+    ['CG-CVC PL 21-03', 'uscg_cvc'],
+    ['CG-MMC PL 01-18', 'nmc_policy'],
+  ])
+  assert.deepEqual(hits('CVC-WI-013(8), CG-CVC-WI-038, CVC-FM-840K and CG-MOC PL 99-002'), [
+    ['CVC-WI-013', 'uscg_cvc'],
+    ['CVC-WI-038', 'uscg_cvc'],
+    ['CVC-FM-840K', 'uscg_cvc'],
+    ['CG-MOC PL 99-002', 'uscg_cvc'],
+  ])
+  assert.deepEqual(hits('USCG SA 15-26 and Marine Safety Alert 20-25 CH-1'), [
+    ['USCG SA 15-26', 'uscg_safety_alert'],
+    ['USCG SA 20-25 CH-1', 'uscg_safety_alert'],
+  ])
+  assert.deepEqual(hits('See MCP-FM-NMC5-28 and the TOAR Western Rivers; Subchapter M FAQ Parts 1, 2 and 15; Sub M FAQ Part 138.'), [
+    ['MCP-FM-NMC5-28', 'nmc_checklist'],
+    ['TOAR Western Rivers', 'nmc_checklist'],
+    ['Sub M FAQ Parts 1, 2 and 15', 'uscg_towing'],
+    ['Sub M FAQ Part 138', 'uscg_towing'],
+  ])
+  assert.deepEqual(hits('COMDTINST M16721.48, Chapter 12 and COMDTINST M16721.48'), [
+    ['COMDTINST M16721.48 Ch.12', 'uscg_msm'],
+    ['COMDTINST M16721.48', 'uscg_msm'],
+  ])
+  assert.deepEqual(hits('EPA 2013 VGP 2.2.3, VGP Part 5.1, 2013 VGP Appendix A; the EPA VGP 2013 ended'), [
+    ['EPA 2013 VGP 2.2.3', 'epa_vgp'],
+    ['EPA 2013 VGP 5.1', 'epa_vgp'],
+    ['EPA 2013 VGP App.A', 'epa_vgp'],
+  ])
+  assert.deepEqual(hits('40 CFR 139.21, 47 CFR 80.1085, 50 CFR 224.105, 29 CFR 1918.2 and 33 USC 1321'), [
+    ['40 CFR 139.21', 'cfr_40'],
+    ['47 CFR 80.1085', 'cfr_47'],
+    ['50 CFR 224.105', 'cfr_50'],
+    ['29 CFR 1918.2', 'cfr_29'],
+    ['33 USC 1321', 'usc_33'],
+  ])
+})

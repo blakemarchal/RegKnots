@@ -276,9 +276,66 @@ const CITATION_PATTERNS: CitationPattern[] = [
 
   // NMC Policy Letters — "CG-MMC PL 01-18", "CG-OES PL 01-16", "NMC PL 04-03"
   {
-    re: /\b(?:CG-(?:MMC|CVC|OES)|NMC)\s+PL\s+\d{2}-\d{2}/g,
+    re: /\b(?:CG-(?:MMC|OES)|NMC)\s+PL\s+\d{2}-\d{2}/g,
     sourceHint: 'nmc_policy',
     toSection: m => m[0].replace(/\s+/g, ' '),
+  },
+
+  // 2026-09-30 — the inland / Coast Guard sources.
+  // CG-CVC policy letters (and the older CG-543 / CG-MOC / CG-PCV series),
+  // with a change or enclosure: "CG-CVC PL 21-03", "CG-CVC Policy Letter
+  // 23-05 CH-1", "CG-MOC PL 99-002". PL 15-03 is stored with the NMC
+  // letters; the lookup tries nmc_policy when uscg_cvc has no such row.
+  {
+    re: /\b(CG-(?:CVC|543|MOC|PCV|3PCV))\s+(?:PL|Policy\s+Letter)\s+(\d{2}-\d{2,3})(?:\s+(CH-\d+|Encl\.\d+))?/g,
+    sourceHint: 'uscg_cvc',
+    toSection: m => `${m[1]} PL ${m[2]}${m[3] ? ` ${m[3]}` : ''}`,
+  },
+  // CG-CVC work instructions and forms — "CVC-WI-013", "CG-CVC-WI-038",
+  // "CVC-FM-840K", "5P-WI-002"
+  {
+    re: /\b(?:CG-)?(CVC-(?:WI|FM)-\d{3}[A-Z]?|5P-WI-\d{3})\b/g,
+    sourceHint: 'uscg_cvc',
+    toSection: m => m[1],
+  },
+  // USCG Marine Safety Alerts — "USCG SA 15-26", "Safety Alert 20-25 CH-1"
+  {
+    re: /\b(?:USCG\s+SA|(?:USCG\s+)?(?:Marine\s+)?Safety\s+Alert)\s+(?:No\.\s*)?(\d{1,2}-\d{2})(?:\s+CH-?(\d+))?\b/g,
+    sourceHint: 'uscg_safety_alert',
+    toSection: m => `USCG SA ${m[1]}${m[2] ? ` CH-${m[2]}` : ''}`,
+  },
+  // NMC credential checklists and towing officer assessment records —
+  // "MCP-FM-NMC5-28", "TOAR Western Rivers"
+  {
+    re: /\bMCP-FM-NMC5-(\d{2,3})\b/g,
+    sourceHint: 'nmc_checklist',
+    toSection: m => `MCP-FM-NMC5-${m[1]}`,
+  },
+  {
+    re: /\bTOAR\s+(Ocean and Near Coastal|Great Lakes and Inland|Western Rivers|Limited)\b/g,
+    sourceHint: 'nmc_checklist',
+    toSection: m => `TOAR ${m[1]}`,
+  },
+  // TVNCOE Subchapter M FAQs — "Sub M FAQ Part 138", "Subchapter M FAQ
+  // Parts 1, 2 and 15", "Sub M FAQ General"
+  {
+    re: /\bSub(?:chapter)?\s+M\s+FAQs?\s+(Parts?\s+\d+(?:(?:\s*,\s*|\s+and\s+)\d+)*|General|Preamble)\b/g,
+    sourceHint: 'uscg_towing',
+    toSection: m => `Sub M FAQ ${m[1].replace(/\s+/g, ' ')}`,
+  },
+  // Merchant Mariner Medical Manual — "COMDTINST M16721.48 Ch.12",
+  // "COMDTINST M16721.48, Chapter 7"
+  {
+    re: /\bCOMDTINST\s+M16721\.48(?:,?\s+Ch(?:apter\s*|\.\s*)(\d+))?/g,
+    sourceHint: 'uscg_msm',
+    toSection: m => `COMDTINST M16721.48${m[1] ? ` Ch.${m[1]}` : ''}`,
+  },
+  // EPA 2013 Vessel General Permit — "EPA 2013 VGP 2.2.3", "VGP Part 5.1",
+  // "2013 VGP Appendix A". A year after VGP is not a part number.
+  {
+    re: /\b(?:EPA\s+)?(?:2013\s+)?VGP\s+(?:Part\s+)?(?!20\d\d\b)(\d+(?:\.\d+){0,3}|App(?:endix\s*|\.\s*)[A-Z])\b/g,
+    sourceHint: 'epa_vgp',
+    toSection: m => `EPA 2013 VGP ${m[1].replace(/^App(?:endix\s*|\.\s*)/, 'App.')}`,
   },
 
   // IMO Specialty Codes — HSC, IGC, IBC, BWM, Polar, IGF, CSS, IAMSAR

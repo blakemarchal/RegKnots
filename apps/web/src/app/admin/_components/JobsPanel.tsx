@@ -47,7 +47,9 @@ export function JobsTab() {
       <div className="bg-[#111827] rounded-xl border border-white/8 p-4 flex flex-col gap-2">
         <p className="font-mono text-[10px] text-[#8b93ad] uppercase tracking-wider">Corpus ingest</p>
         <p className="font-mono text-xs text-[#f0ece4]/80 leading-relaxed">
-          Celery Beat refreshes cfr_33, cfr_46, cfr_49 and NVICs every week. For anything else, run
+          Celery Beat refreshes the CFR titles (33, 46, 49 and the scoped parts of 40, 47, 50, 29) and
+          NVICs every week, USCG bulletins from the GovDelivery feed daily, and safety alerts, CG-CVC,
+          TVNCOE, VTS / waterways and NMC checklists on the 5th of each month. For anything else, run
           {' '}<code className="text-[#2dd4bf]">scripts/run_ingest.sh</code> on the server; it runs the job in a
           memory-capped systemd unit so a runaway can&apos;t take the box down.
         </p>

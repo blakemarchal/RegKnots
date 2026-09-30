@@ -78,10 +78,15 @@ export default function CoveragePage() {
               </p>
               <h3 className="font-display text-lg font-bold mb-3">Full text</h3>
               <p className="font-mono text-sm text-[#6b7594] leading-relaxed">
-                CFR Titles 33, 46, and 49 in full (the regulations that bind U.S.-flag vessels
-                and any vessel calling at a U.S. port). 46 USC Subtitle II for the underlying
-                statute. NVIC, NMC policy letters, USCG Marine Safety Manual, and active
-                MSIB / ALCOAST bulletins for guidance and operational notices.
+                CFR Titles 33 and 46 in full (the regulations that bind U.S.-flag vessels
+                and any vessel calling at a U.S. port), and the maritime parts of Titles 49
+                (hazmat, TWIC), 40 (EPA discharge and engines), 47 (FCC radio), 50 (right
+                whales) and 29 (OSHA maritime). 46 USC Subtitle II and the maritime chapters
+                of 33 USC for the underlying statute. For guidance: NVICs, CG-CVC policy
+                letters and work instructions, the Coast Guard&apos;s Subchapter M FAQs, safety
+                alerts, NMC policy letters and credential checklists, the Marine Safety Manual
+                and Medical Manual, VTS user manuals and waterways action plans, the EPA
+                Vessel General Permit, and current USCG bulletins.
               </p>
             </div>
 
@@ -129,9 +134,10 @@ export default function CoveragePage() {
                 Veritas / ClassNK individually — those are paid publications.
               </li>
               <li>
-                <span className="text-[#f0ece4]">Currency.</span> Sources are refreshed manually
-                as amendments publish. We&apos;ll automate this for high-cadence sources
-                (USCG bulletins, MOU campaigns) when traffic warrants.
+                <span className="text-[#f0ece4]">Currency.</span> The CFR titles and NVICs
+                refresh weekly, USCG bulletins daily, and Coast Guard safety alerts, CG-CVC
+                letters, Subchapter M FAQs and NMC checklists monthly. Other sources are
+                refreshed by hand as amendments publish.
               </li>
             </ul>
           </div>
