@@ -123,6 +123,19 @@ def test_safety_alert_discovery():
     assert docs["USCG SA 15-26"].published == "2026-09-23"
 
 
+def test_findings_of_concern_discovery():
+    html = """<table>
+    <tr><td><a href="/Portals/9/DCO Documents/5p/CG-5PC/INV/foc/USCGFOC_008-26.pdf">USCGFOC_008-26.pdf</a></td>
+        <td>Risks Associated With Unmanned (Autonomous) Vessel Operations</td><td>9/29/2026</td></tr>
+    <tr><td><a href="/Portals/9/DCO Documents/5p/CG-5PC/INV/foc/USCGFOC_006-26.pdf">USCGFOC_006-26.pdf</a></td>
+        <td>Improper Electrical Heating Practices Create Lifeboat Fire Risk</td><td>9/15/2026</td></tr>
+    <tr><td><a href="/Portals/9/x/Some_Other.pdf">x</a></td><td>not a finding</td><td>1/1/2020</td></tr></table>"""
+    docs = uscg_safety_alert.discover_findings(html)
+    assert [d.doc_id for d in docs] == ["USCG FOC 008-26", "USCG FOC 006-26"]
+    assert docs[1].title == "Coast Guard Finding of Concern: Improper Electrical Heating Practices Create Lifeboat Fire Risk (2026-09-15)"
+    assert docs[0].url.endswith("/INV/foc/USCGFOC_008-26.pdf") and " " not in docs[0].url
+
+
 # ── uscg_towing ──────────────────────────────────────────────────────────────
 
 @pytest.mark.parametrize("text,doc_id", [

@@ -105,9 +105,9 @@ and K-boat inspection checklists). Cite as: (CG-CVC PL 21-03) or (CVC-WI-013).
 - Towing Vessel National Center of Expertise (uscg_towing) — the Coast Guard's answers to \
 Subchapter M questions by part, the Uninspected Towing Vessel Guidebook and the subchapter \
 applicability flowchart. Cite as: (Sub M FAQ Part 138) or (TVNCOE UTV Guidebook).
-- USCG Safety Alerts (uscg_safety_alert) — Office of Investigations & Casualty Analysis alerts on \
-equipment failures, recalls and operational hazards. Cite as: (USCG SA 15-26), and give the \
-alert's date.
+- USCG Safety Alerts and Findings of Concern (uscg_safety_alert) — Office of Investigations & \
+Casualty Analysis alerts on equipment failures, recalls and operational hazards, and findings from \
+casualty investigations. Cite as: (USCG SA 15-26) or (USCG FOC 006-26), and give the date.
 - Waterway guidance (uscg_waterways) — Vessel Traffic Service user manuals and the Eighth \
 District Waterways Action Plans (high-water and low-water action levels, horsepower and tow-size \
 limits). Cite as: (VTS Lower Mississippi River User Manual) or (D8 WAP Lower Mississippi River \
@@ -282,7 +282,7 @@ CG-CVC policy letters and work instructions, the TVNCOE Subchapter M FAQs, the M
 and the Merchant Mariner Medical Manual, VTS user manuals and Waterways Action Plans. \
 Authoritative interpretation of Tier 1 rules; cite alongside Tier 1 when relevant.
 - Tier 3 (operational notice, time-sensitive): MSIB, ALCOAST, NMC announcements, USCG Safety \
-Alerts. Always note the publication date when citing. Never let a Tier 3 notice override a Tier 1 regulation \
+Alerts and Findings of Concern. Always note the publication date when citing. Never let a Tier 3 notice override a Tier 1 regulation \
 without explaining why (e.g., a temporary port restriction modifies a permanent rule).
 - Tier 4 (domain reference standard): ERG (Emergency Response Guidebook for hazardous materials). \
 Tier 4 is NOT "low priority" — it is the authoritative source within its own subject matter. \

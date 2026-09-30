@@ -118,9 +118,10 @@ test('2026-09-30: chips for the inland / Coast Guard sources', () => {
     ['CVC-FM-840K', 'uscg_cvc'],
     ['CG-MOC PL 99-002', 'uscg_cvc'],
   ])
-  assert.deepEqual(hits('USCG SA 15-26 and Marine Safety Alert 20-25 CH-1'), [
+  assert.deepEqual(hits('USCG SA 15-26, Marine Safety Alert 20-25 CH-1 and Finding of Concern 006-26'), [
     ['USCG SA 15-26', 'uscg_safety_alert'],
     ['USCG SA 20-25 CH-1', 'uscg_safety_alert'],
+    ['USCG FOC 006-26', 'uscg_safety_alert'],
   ])
   assert.deepEqual(hits('See MCP-FM-NMC5-28 and the TOAR Western Rivers; Subchapter M FAQ Parts 1, 2 and 15; Sub M FAQ Part 138.'), [
     ['MCP-FM-NMC5-28', 'nmc_checklist'],

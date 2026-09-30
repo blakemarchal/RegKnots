@@ -380,7 +380,7 @@ const CORPUS: CorpusSource[] = [
   },
   {
     short: 'USCG Safety Alerts',
-    full: 'USCG Marine Safety Alerts: equipment failures, recalls and casualty lessons',
+    full: 'USCG Marine Safety Alerts (equipment failures, recalls, operational hazards) and Findings of Concern from casualty investigations',
     category: 'us_federal',
     url: 'https://www.dco.uscg.mil/Our-Organization/Assistant-Commandant-for-Prevention-Policy-CG-5P/Inspections-Compliance-CG-5PC-/Office-of-Investigations-Casualty-Analysis/Safety-Alerts/',
   },

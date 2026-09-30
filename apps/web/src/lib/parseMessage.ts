@@ -304,6 +304,13 @@ const CITATION_PATTERNS: CitationPattern[] = [
     sourceHint: 'uscg_safety_alert',
     toSection: m => `USCG SA ${m[1]}${m[2] ? ` CH-${m[2]}` : ''}`,
   },
+  // Findings of Concern from casualty investigations — "USCG FOC 006-26",
+  // "Finding of Concern 006-26"
+  {
+    re: /\b(?:USCG\s+FOC|Finding\s+of\s+Concern)\s+(?:No\.\s*)?(\d{3}-\d{2})\b/g,
+    sourceHint: 'uscg_safety_alert',
+    toSection: m => `USCG FOC ${m[1]}`,
+  },
   // NMC credential checklists and towing officer assessment records —
   // "MCP-FM-NMC5-28", "TOAR Western Rivers"
   {
