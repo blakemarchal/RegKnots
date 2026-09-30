@@ -57,6 +57,11 @@ fi
 # still propagated by --wait.
 if [ -t 1 ]; then TTY_FLAG="--pty"; else TTY_FLAG="--pipe"; fi
 
+# 2026-09-30 — `scripts/run_ingest.sh --ocr --source uscg_cvc` runs the
+# tesseract OCR of scanned PDFs (python -m ingest.ocr) in the same capped unit.
+MODULE=ingest.cli
+if [[ "${1:-}" == "--ocr" ]]; then MODULE=ingest.ocr; shift; fi
+
 exec systemd-run \
     --unit="${UNIT}" \
     --slice=regknots-ingest.slice \
@@ -67,4 +72,4 @@ exec systemd-run \
     --property=MemoryHigh=1G \
     --property=MemoryMax=1.5G \
     --property=CPUQuota=150% \
-    /root/.local/bin/uv run --project "${REPO}/packages/ingest" python -m ingest.cli "$@"
+    /root/.local/bin/uv run --project "${REPO}/packages/ingest" python -m "${MODULE}" "$@"

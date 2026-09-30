@@ -105,11 +105,34 @@ def update_uscg_guidance(self):
         len(_MONTHLY_SOURCES), ", ".join(_MONTHLY_SOURCES),
     )
     failures = _run_ingest_sources(_MONTHLY_SOURCES)
+    _run_ocr(_OCR_SOURCES)
     if failures:
         msg = ", ".join(f"{s}: {e}" for s, e in failures)
         logger.warning("USCG guidance update had %d failures: %s", len(failures), msg)
         raise self.retry(exc=RuntimeError(msg), countdown=6 * 3600)
     logger.info("Monthly USCG guidance update complete")
+
+
+# 2026-09-30 — sources whose adapters read OCR text for a scanned PDF
+# (data/ocr/<source>/). A scan the runs above downloaded is read by
+# tesseract here (python -m ingest.ocr) and ingested by the next scheduled
+# run: Sunday for NVICs, next month for the rest. Normally a no-op in seconds.
+_OCR_SOURCES: list[str] = ["nvic", "uscg_cvc", "uscg_safety_alert", "uscg_towing", "uscg_waterways"]
+
+
+def _run_ocr(sources: list[str]) -> None:
+    for source in sources:
+        try:
+            result = subprocess.run(
+                [str(_RUN_INGEST), "--ocr", "--source", source],
+                cwd=_INGEST_DIR, capture_output=True, text=True, timeout=3600,
+            )
+            if result.returncode != 0:
+                logger.error("OCR failed for %s (rc=%d): %s", source, result.returncode, result.stderr[-500:])
+            else:
+                logger.info("OCR for %s: %s", source, (result.stdout or result.stderr)[-300:])
+        except Exception as exc:  # OCR never fails the refresh
+            logger.exception("OCR for %s raised: %s", source, exc)
 
 
 @celery.task(name="app.tasks.update_uscg_bulletins")
