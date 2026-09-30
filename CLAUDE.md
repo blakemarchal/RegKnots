@@ -286,6 +286,14 @@ If a doc says "alembic head is 0045" but `alembic current` says `0092`, the doc 
     - `useEscapeKey` (`src/lib`): Escape closes the topmost sheet, drawer or modal, across 11 overlays.
     - Menu labels match their pages: Credentials, Help & Support, and a "Study" section with "Study Tools". `/workspaces` is titled Wheelhouse.
     - Karynn's DB row has `is_admin = true` (read-only SQL).
+- **2026-09-29 corpus gap audit, inland / USCG focus** (no spend): `docs/sprint-audits/corpus-gap-audit-inland-2026-09-29.md`. **Findings, not yet fixed; the plan awaits Blake's go.**
+  - The CFR is complete: 46 CFR has 8,319 of 8,321 eCFR sections, 33 CFR 4,596 of 4,598. 46 USC and the MSM volumes are complete too.
+  - **NVIC discovery drops 36 current NVICs.** `nvic.py` `_find_pdf_link_in_tag` requires links to end in `.pdf`, and USCG serves them as `.pdf?ver=…`. Missing: 03-16 (towing officer credentialing and the TOARs), the STCW endorsement series 05-14 to 24-14, 01-17 to 04-17, 01-20, 01-23, 01-24, 01-26 and others.
+  - **We serve cancelled medical guidance.** NVIC 04-08 comes in by hand through `_EXTRA_DOCS`; the Merchant Mariner Medical Manual (COMDTINST M16721.48) cancelled it in 2019 and isn't ingested.
+  - **`uscg_bulletin` is ~90% expired operational notices** (outlooks, broadcast notices), and its newest item is dated 2026-02-03. Retrieval never reads `published_date` or `expires_date`.
+  - Every non-CFR row's `regulations.title` reads "COLREGs — …" (`models.TITLE_NAMES[0]`). Nothing reads the column.
+  - Unverified citations are mostly the model's section numbers, not gaps: 46 CFR 10.215 is now 10.301–10.306, and 33 CFR 83.1 means 83.01.
+  - Ranked acquisitions: NMC checklists (we have 4 of 115) plus the TOARs; CG-CVC policy letters, work instructions and forms (~80); the TVNCOE Sub M package; 196 USCG Safety Alerts; VTS manuals and waterway action plans; EPA VGP / VIDA (40 CFR 139). Tier 1 embeddings cost under $1.
 See `docs/PROJECT_STATE.md` for a fuller operational snapshot and `docs/roadmap.md` for the prioritized backlog.
 
 
@@ -321,4 +329,4 @@ Full audit report (models, retrieval, UX, product packaging): see the 2026-07-18
 
 ---
 
-*Last updated 2026-09-29 (self-serve account deletion + migration 0118; admin redesign + /admin/dashboard, customer UX pass incl. the Tailwind button-fill bug; CFR paragraph chips fixed, first web unit tests; video ads first cut; earlier: NVIC 06-72 misread figures fixed; company documents shipped, outreach live; signup attribution, model-led grounding on). When this drifts from reality, fix it — that's the rule.*
+*Last updated 2026-09-29 (corpus gap audit, inland/USCG: NVIC discovery bug, cancelled medical NVIC; self-serve account deletion + migration 0118; admin redesign + /admin/dashboard, customer UX pass incl. the Tailwind button-fill bug; CFR paragraph chips fixed, first web unit tests; video ads first cut; earlier: NVIC 06-72 misread figures fixed; company documents shipped, outreach live; signup attribution, model-led grounding on). When this drifts from reality, fix it — that's the rule.*
