@@ -1386,6 +1386,22 @@ _STOPWORDS: frozenset[str] = frozenset(
 _MAX_KEYWORD_TERMS = 4
 _MIN_KEYWORD_LEN = 4
 _MAX_KEYWORD_FREQ = 200  # Skip keywords appearing in > this many chunks
+# 2026-09-30 — a keyword hit takes the synthetic score (the best vector
+# similarity + 0.02, i.e. first place) only when its own similarity is within
+# this gap of the best vector hit; otherwise it ranks on its similarity. Any
+# query word under _MAX_KEYWORD_FREQ used to put up to five rows on top,
+# however unrelated: "wanted" in "If I wanted to start a career…" surfaced
+# MSM "Placing Merchant Mariners on the Wanted List" and BWM "unwanted
+# organisms"; "Norfolk" surfaced a Chantix safety alert above the Elizabeth
+# River bridge rules. Which rows won ties followed physical row order.
+_KW_BOOST_MAX_GAP = 0.10
+
+
+def _merge_sim(chunk: dict, synthetic_sim: float, floor: float | None) -> float:
+    """The score a keyword / identifier hit merges with: synthetic_sim, or,
+    below `floor`, the hit's own similarity (2026-09-30, _KW_BOOST_MAX_GAP)."""
+    own = float(chunk.get("similarity") or 0.0)
+    return own if floor is not None and own < floor else synthetic_sim
 # Sprint D6.8 — synonyms (e.g. "logbook" 203, "lifesaving appliance" 155)
 # are by design slightly broader than the user's term. Allow a higher cap
 # for them specifically; bare-user keywords still cap at 200.
@@ -1556,8 +1572,12 @@ async def _broad_keyword_search(
     limit: int = 5,
     synonym_keywords: set[str] | None = None,
     allowed_jurisdictions: list[str] | None = None,
+    query_vec: str | None = None,
 ) -> tuple[list[dict], list[str]]:
     """Search regulations by text for broad keywords (lower confidence).
+
+    2026-09-30 — with query_vec, each row's `similarity` is its real vector
+    similarity (the merge compares it with _KW_BOOST_MAX_GAP); without, 0.0.
 
     Uses the GIN trigram index for fast ILIKE lookups. Returns up to
     `limit` source-diversified results per keyword (at most one per
@@ -1606,14 +1626,15 @@ async def _broad_keyword_search(
 
         # Sprint D6.19 — jurisdiction filter applied inside the inner
         # subquery so DISTINCT ON sees only allowed-jurisdiction chunks.
+        sim_sql = "0.0" if query_vec is None else "1 - (embedding <=> $4::vector)"
         if allowed_jurisdictions is not None:
             rows = await pool.fetch(
-                """
+                f"""
                 SELECT id, source, section_number, section_title, full_text,
-                       0.0 AS similarity
+                       {sim_sql} AS similarity
                 FROM (
                     SELECT DISTINCT ON (source)
-                        id, source, section_number, section_title, full_text
+                        id, source, section_number, section_title, full_text, embedding
                     FROM regulations
                     WHERE full_text ILIKE '%' || $1 || '%'
                       AND jurisdictions && $3::text[]
@@ -1630,15 +1651,16 @@ async def _broad_keyword_search(
                 kw,
                 limit,
                 allowed_jurisdictions,
+                *([query_vec] if query_vec is not None else []),
             )
         else:
             rows = await pool.fetch(
-                """
+                f"""
                 SELECT id, source, section_number, section_title, full_text,
-                       0.0 AS similarity
+                       {sim_sql.replace("$4", "$3")} AS similarity
                 FROM (
                     SELECT DISTINCT ON (source)
-                        id, source, section_number, section_title, full_text
+                        id, source, section_number, section_title, full_text, embedding
                     FROM regulations
                     WHERE full_text ILIKE '%' || $1 || '%'
                     ORDER BY source,
@@ -1653,6 +1675,7 @@ async def _broad_keyword_search(
                 """,
                 kw,
                 limit,
+                *([query_vec] if query_vec is not None else []),
             )
         for r in rows:
             if r["id"] not in seen_ids:
@@ -2042,7 +2065,7 @@ async def retrieve(
     if keywords:
         kw_results, specific_keywords = await _broad_keyword_search(
             keywords, pool, synonym_keywords=synonym_added,
-            allowed_jurisdictions=juris_list,
+            allowed_jurisdictions=juris_list, query_vec=vec_literal,
         )
     cited_sections = {i["section_number"] for i in identifiers if i.get("section_number")}
 
@@ -2061,6 +2084,8 @@ async def retrieve(
         kw_mem_boosted = 0
         for c in candidates:
             if float(c["similarity"]) >= kw_boost_sim:
+                continue
+            if float(c["similarity"]) < max_sim - _KW_BOOST_MAX_GAP:
                 continue
             text_lower = (c.get("full_text") or "").lower()
             if any(kw in text_lower for kw in specific_keywords):
@@ -2088,12 +2113,14 @@ async def retrieve(
 
         def _merge_chunks(
             chunks: list[dict], synthetic_sim: float, counter_name: str,
+            floor: float | None = None,
         ) -> tuple[int, int]:
             added = 0
             boosted = 0
             for chunk in chunks:
                 sec = chunk.get("section_number", "")
                 cited = sec in cited_sections
+                merge_sim = _merge_sim(chunk, synthetic_sim, floor)
                 if chunk["id"] in existing_ids:
                     if cited:
                         # A cited section's chunk that vector search already
@@ -2115,7 +2142,7 @@ async def retrieve(
                     existing = section_indices.get(sec, [])
                     cap = _MAX_CHUNKS_PER_CITED_SECTION if cited else _MAX_CHUNKS_PER_SECTION
                     if len(existing) < cap:
-                        chunk["similarity"] = synthetic_sim
+                        chunk["similarity"] = merge_sim
                         section_indices[sec].append(len(candidates))
                         candidates.append(chunk)
                         existing_ids.add(chunk["id"])
@@ -2123,11 +2150,11 @@ async def retrieve(
                     else:
                         # At cap — boost the weakest kept chunk for this section.
                         weakest_idx = min(existing, key=lambda i: candidates[i]["similarity"])
-                        if synthetic_sim > float(candidates[weakest_idx]["similarity"]):
-                            candidates[weakest_idx]["similarity"] = synthetic_sim
+                        if merge_sim > float(candidates[weakest_idx]["similarity"]):
+                            candidates[weakest_idx]["similarity"] = merge_sim
                             boosted += 1
                     continue
-                chunk["similarity"] = synthetic_sim
+                chunk["similarity"] = merge_sim
                 candidates.append(chunk)
                 if sec:
                     existing_sections.add(sec)
@@ -2139,7 +2166,9 @@ async def retrieve(
         if id_results:
             id_added, id_boosted = _merge_chunks(id_results, max_sim + 0.05, "identifier")
         if kw_results:
-            kw_added, kw_boosted = _merge_chunks(kw_results, max_sim + 0.02, "keyword")
+            kw_added, kw_boosted = _merge_chunks(
+                kw_results, max_sim + 0.02, "keyword", floor=max_sim - _KW_BOOST_MAX_GAP,
+            )
 
         logger.info(
             "Hybrid merge: %d identifier matches for %s, "
@@ -3198,7 +3227,7 @@ async def retrieve_hybrid(
     if keywords:
         kw_results, specific_keywords = await _broad_keyword_search(
             keywords, pool, synonym_keywords=synonym_added,
-            allowed_jurisdictions=juris_list,
+            allowed_jurisdictions=juris_list, query_vec=vec_literal,
         )
     cited_sections = {i["section_number"] for i in identifiers if i.get("section_number")}
 
@@ -3213,6 +3242,8 @@ async def retrieve_hybrid(
         for c in candidates:
             if float(c["similarity"]) >= kw_boost_sim:
                 continue
+            if float(c["similarity"]) < max_sim - _KW_BOOST_MAX_GAP:
+                continue
             text_lower = (c.get("full_text") or "").lower()
             if any(kw in text_lower for kw in specific_keywords):
                 c["similarity"] = kw_boost_sim
@@ -3225,9 +3256,10 @@ async def retrieve_hybrid(
         }
         existing_ids = {c["id"] for c in candidates}
 
-        def _merge(chunks: list[dict], synthetic_sim: float) -> None:
+        def _merge(chunks: list[dict], synthetic_sim: float, floor: float | None = None) -> None:
             for chunk in chunks:
                 sec = chunk.get("section_number", "")
+                merge_sim = _merge_sim(chunk, synthetic_sim, floor)
                 if chunk["id"] in existing_ids:
                     continue
                 if sec and sec in existing_sections:
@@ -3235,16 +3267,16 @@ async def retrieve_hybrid(
                     cap = (_MAX_CHUNKS_PER_CITED_SECTION if sec in cited_sections
                            else _MAX_CHUNKS_PER_SECTION)
                     if len(existing) < cap:
-                        chunk["similarity"] = synthetic_sim
+                        chunk["similarity"] = merge_sim
                         section_indices[sec].append(len(candidates))
                         candidates.append(chunk)
                         existing_ids.add(chunk["id"])
                     else:
                         weakest_idx = min(existing, key=lambda i: candidates[i]["similarity"])
-                        if synthetic_sim > float(candidates[weakest_idx]["similarity"]):
-                            candidates[weakest_idx]["similarity"] = synthetic_sim
+                        if merge_sim > float(candidates[weakest_idx]["similarity"]):
+                            candidates[weakest_idx]["similarity"] = merge_sim
                     continue
-                chunk["similarity"] = synthetic_sim
+                chunk["similarity"] = merge_sim
                 candidates.append(chunk)
                 if sec:
                     existing_sections.add(sec)
@@ -3254,7 +3286,7 @@ async def retrieve_hybrid(
         if id_results:
             _merge(id_results, max_sim + 0.05)
         if kw_results:
-            _merge(kw_results, max_sim + 0.02)
+            _merge(kw_results, max_sim + 0.02, floor=max_sim - _KW_BOOST_MAX_GAP)
 
     if candidates:
         candidates = _filter_by_vessel_applicability(candidates, vessel_profile)
