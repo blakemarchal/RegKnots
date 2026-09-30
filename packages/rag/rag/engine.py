@@ -30,6 +30,7 @@ from anthropic import (
     RateLimitError,
 )
 
+from rag.citation_norm import cfr_variants
 from rag.context import build_context
 from rag.fallback import FALLBACK_MODEL_ID, fallback_chat
 from rag.followup import compose_followup_query, compose_reason, detect_followup
@@ -476,6 +477,9 @@ def _extract_all_text_citations(answer: str) -> list[_TextCitation]:
                 cands.append((f"cfr_{title}", display))
                 cands.append((f"cfr_{title}", f"{display}.%"))
                 cands.append((f"cfr_{title}", f"{display}-%"))
+                # 2026-09-30 — "33 CFR 83.5" is stored as 83.05; 46 CFR 10.215
+                # moved to 10.302 (citation_norm.py).
+                cands.extend((f"cfr_{title}", v) for v in cfr_variants(title, section))
             found[display] = _TextCitation(
                 display=display,
                 candidates=cands,
@@ -527,8 +531,16 @@ def _extract_all_text_citations(answer: str) -> list[_TextCitation]:
         "imo_igc",
         "imo_hsc",
         "imo_ibc",
-        "fss",
-        "lsa",
+        # 2026-09-30 — the sources are imo_fss / imo_lsa; "fss" / "lsa" matched
+        # nothing, so MSC.98(73) (FSS Code) and MSC.48(66) (LSA Code) citations
+        # were flagged unverified. The MSC resolution harvest (imo_msc) and the
+        # IGF / Polar / Load Lines codes carry MSC numbers too.
+        "imo_fss",
+        "imo_lsa",
+        "imo_msc",
+        "imo_igf",
+        "imo_polar",
+        "imo_loadlines",
     )
     for m in _MSC_RE.finditer(answer):
         msc_key = f"MSC.{m.group(1)}({m.group(2)})"
@@ -2309,7 +2321,7 @@ _OFF_TOPIC_DAILY_CAP            = 25  # 26th query returns rate-limit message
 _OFF_TOPIC_ABUSE_DAY_THRESHOLD  = 3   # cap-days/30 that trigger admin email
 
 _OFF_TOPIC_REFUSAL = (
-    "I'm focused on maritime compliance — vessel operations, CFR Titles 33/46/49, "
+    "I'm focused on maritime compliance — vessel operations, the U.S. maritime CFR and Coast Guard guidance, "
     "SOLAS, STCW, IMDG, ISM, port-state regulations, your boat's certifications, "
     "and the workflows around them. Ask me about anything in that domain and "
     "I'll cite chapter and verse.\n\n"

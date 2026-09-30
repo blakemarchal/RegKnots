@@ -109,10 +109,11 @@ def test_cfr_part_searches_within_the_part():
 
 
 def test_cfr_title_not_in_corpus():
-    # a dotted section keeps the old text search; a bare part finds nothing
-    assert _cfr_ids("29 CFR 1910.134 respirators") == [
-        {"type": "cfr_section", "value": "29 CFR 1910.134", "pattern": "1910.134"}]
-    assert _cfr_ids("29 CFR 1910 respirators") == []
+    # a dotted section keeps the old text search; a bare part finds nothing.
+    # (2026-09-30 — 29 CFR is carried for its maritime parts now; 14 CFR is not.)
+    assert _cfr_ids("14 CFR 91.3 pilot in command") == [
+        {"type": "cfr_section", "value": "14 CFR 91.3", "pattern": "91.3"}]
+    assert _cfr_ids("14 CFR 91 pilot in command") == []
 
 
 class _CapturePool:

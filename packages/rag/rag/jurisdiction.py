@@ -54,6 +54,17 @@ SOURCE_TO_JURISDICTIONS: dict[str, list[str]] = {
     "nmc_exam_bank":    ["us"],
     "uscg_msm":         ["us"],
     "uscg_bulletin":    ["us"],
+    # 2026-09-30 — U.S. inland / Coast Guard sources (docs/sprint-audits/corpus-gap-audit-inland-2026-09-29.md §4).
+    "cfr_40":         ["us"],  # EPA: vessel discharges (VIDA), oil discharge, MSDs, marine engines
+    "cfr_47":         ["us"],  # FCC: stations in the maritime services
+    "cfr_50":         ["us"],  # NOAA: right whale speed and approach rules
+    "cfr_29":         ["us"],  # OSHA: shipyards, marine terminals, longshoring
+    "usc_33":         ["us"],  # 33 USC maritime chapters: OPA 90, CWA 311/312, APPS, VBBRA, Rivers and Harbors
+    "uscg_cvc":       ["us"],  # CG-CVC policy letters, work instructions, forms
+    "uscg_towing":    ["us"],  # TVNCOE Subchapter M FAQs and guides
+    "uscg_safety_alert": ["us"],  # USCG Safety Alerts (CG-INV)
+    "uscg_waterways": ["us"],  # VTS user manuals, D8 Waterways Action Plans
+    "epa_vgp":        ["us"],  # EPA 2013 Vessel General Permit
     # UK national
     "mca_mgn":          ["uk"],
     "mca_msn":          ["uk"],

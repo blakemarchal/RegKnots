@@ -32,6 +32,8 @@ import time
 import asyncpg
 from openai import AsyncOpenAI
 
+from rag.citation_norm import cfr_variants
+
 logger = logging.getLogger(__name__)
 
 _EMBED_MODEL = "text-embedding-3-small"
@@ -41,10 +43,17 @@ _EMBED_MODEL = "text-embedding-3-small"
 # Sources are grouped by regulatory body/type so related sub-sources stay
 # together. Each group fetches its own top-N independently in Phase 1.
 SOURCE_GROUPS: dict[str, tuple[str, ...]] = {
-    "cfr": ("cfr_33", "cfr_46", "cfr_49"),
+    # 2026-09-30 — plus the scoped maritime parts of Titles 40 (EPA vessel
+    # discharges, MSDs, engines), 47 (FCC maritime radio), 50 (right whale
+    # rules) and 29 (OSHA maritime), and the EPA 2013 VGP: a few hundred
+    # sections that answer U.S. discharge / radio / OSHA questions next to
+    # 33/46 CFR (docs/sprint-audits/corpus-gap-audit-inland-2026-09-29.md).
+    "cfr": ("cfr_33", "cfr_46", "cfr_49", "cfr_40", "cfr_47", "cfr_50", "cfr_29", "epa_vgp"),
     # 46 USC (statute) gets its own group so it isn't crowded out by the
     # much larger CFR corpus during per-group diversification. Sprint D5.1.
-    "usc": ("usc_46",),
+    # 2026-09-30 — 33 USC maritime chapters (OPA 90, CWA 311/312, APPS,
+    # bridge-to-bridge act, Rivers and Harbors Act) join 46 USC.
+    "usc": ("usc_46", "usc_33"),
     "colregs": ("colregs",),
     # Sprint D6.97 #53/#57 (2026-06-03) — imo_msc joins the solas group.
     # MSC + Assembly safety/operational resolutions (PSPC coatings,
@@ -52,7 +61,11 @@ SOURCE_GROUPS: dict[str, tuple[str, ...]] = {
     # safety instruments to SOLAS; grouping them here gives them the
     # SOLAS query-affinity boost and shared diversified-fetch slots.
     "solas": ("solas", "solas_supplement", "imo_msc"),
-    "nvic": ("nvic",),
+    # 2026-09-30 — CG-CVC policy letters / work instructions / forms and the
+    # TVNCOE Subchapter M FAQs are the same layer of Coast Guard guidance.
+    # Sharing the group gives them its boosts: Subchapter M / TSMS queries
+    # lift it by 0.20, "Coast Guard policy / guidance" and NVIC mentions too.
+    "nvic": ("nvic", "uscg_cvc", "uscg_towing"),
     "stcw": ("stcw", "stcw_supplement"),
     "ism": ("ism", "ism_supplement"),
     # ILO Maritime Labour Convention 2006 — Sprint D6.97 audit (2026-06).
@@ -92,7 +105,10 @@ SOURCE_GROUPS: dict[str, tuple[str, ...]] = {
     # notices, ALCOAST mentions. Distinct from 'nmc' because bulletins are
     # broader (port security, enforcement, environmental, weather) and
     # carry freshness metadata that retrieval can filter on later.
-    "uscg_bulletin": ("uscg_bulletin",),
+    # 2026-09-30 — USCG Safety Alerts and waterway guidance (VTS user
+    # manuals, Eighth District Waterways Action Plans) join the bulletins:
+    # the same notice-and-operations layer, lifted by the same terms.
+    "uscg_bulletin": ("uscg_bulletin", "uscg_safety_alert", "uscg_waterways"),
     # USCG Marine Safety Manual (CIM 16000.X). Own group so PSC /
     # inspection-procedure queries reliably surface MSM content alongside
     # the binding CFR rules they implement. Sprint D6.4.
@@ -515,6 +531,9 @@ _USCG_BULLETIN_TERMS: tuple[str, ...] = (
     "port security", "marsec", "security zone", "port closure",
     "safety alert", "equipment recall", "defective",
     "enforcement priority", "psc campaign", "inspection focus",
+    # 2026-09-30 — the waterway guidance and safety alerts in this group
+    "vessel traffic service", "vts", "high water", "low water", "waterways action plan",
+    "river closure", "horsepower per barge", "tow size",
     "concentrated inspection",
     "hurricane", "storm", "typhoon", "tsunami",
     "aid to navigation", "weather advisory", "navigation safety",
@@ -834,7 +853,8 @@ def _source_affinity(
         boosts["cfr"] = 0.15
         if any(
             t in q
-            for t in ("33 cfr", "title 33", "46 cfr", "title 46", "49 cfr", "title 49")
+            for t in ("33 cfr", "title 33", "46 cfr", "title 46", "49 cfr", "title 49",
+                      "40 cfr", "47 cfr", "50 cfr", "29 cfr")
         ):
             boosts["cfr"] = 0.25
 
@@ -906,7 +926,9 @@ _IDENTIFIER_PATTERNS: list[tuple[str, re.Pattern]] = [
 
 # CFR titles the corpus carries (sources cfr_33 / cfr_46 / cfr_49); a
 # citation of one resolves against section_number within that source.
-_CFR_CORPUS_TITLES = frozenset({"33", "46", "49"})
+# 2026-09-30 — 40, 47, 50 and 29 are carried for a few maritime parts each
+# (ingest/cfr_scope.py); a citation to any other part of them finds nothing.
+_CFR_CORPUS_TITLES = frozenset({"33", "46", "49", "40", "47", "50", "29"})
 
 
 # 2026-09-25 — SOLAS citations. The corpus names per-Regulation sections
@@ -1160,6 +1182,16 @@ def _extract_identifiers(query: str) -> list[dict]:
                         "source_filter": (source,),
                         "fallback_pattern": section,
                     })
+                    # 2026-09-30 — "33 CFR 83.5" is stored as 83.05; 46 CFR
+                    # 10.215 moved to 10.302 (citation_norm.py).
+                    for variant in cfr_variants(title, section):
+                        identifiers.append({
+                            "type": id_type,
+                            "value": variant,
+                            "pattern": variant.split(" CFR ", 1)[1],
+                            "section_number": variant,
+                            "source_filter": (source,),
+                        })
                 elif "." in section:
                     identifiers.append({
                         "type": id_type,

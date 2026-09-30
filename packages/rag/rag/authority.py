@@ -39,6 +39,15 @@ _SOURCE_TO_TIER: dict[str, int] = {
     "cfr_46": 1,
     "cfr_49": 1,
     "usc_46": 1,
+    # 2026-09-30 — the scoped maritime parts of Titles 40 / 47 / 50 / 29, the
+    # 33 USC maritime chapters, and the EPA 2013 VGP (an NPDES permit, binding
+    # on the vessels it covers until the Coast Guard's VIDA rules take effect).
+    "cfr_40": 1,
+    "cfr_47": 1,
+    "cfr_50": 1,
+    "cfr_29": 1,
+    "usc_33": 1,
+    "epa_vgp": 1,
     "solas": 1,
     "solas_supplement": 1,
     "colregs": 1,
@@ -122,8 +131,19 @@ _SOURCE_TO_TIER: dict[str, int] = {
     # itself binding regulation, but authoritative for how PSC and
     # inspection programs are conducted in practice.
     "uscg_msm": 2,
+    # 2026-09-30 — CG-CVC policy letters and work instructions, and the TVNCOE
+    # Subchapter M answers: how the Coast Guard applies the regulations, the
+    # same layer as NVICs. VTS user manuals and the Waterways Action Plans are
+    # the Coast Guard's operating guidance for those waterways (VTS measures
+    # themselves are issued under 33 CFR 161).
+    "uscg_cvc": 2,
+    "uscg_towing": 2,
+    "uscg_waterways": 2,
     # Tier 3 — operational notice
     "uscg_bulletin": 3,
+    # 2026-09-30 — USCG Safety Alerts: urgent equipment and operational
+    # hazards; not policy, and dated (the date is in each section title).
+    "uscg_safety_alert": 3,
     # Tier 4 — domain reference standard
     "erg": 4,
     # WHO IHR 2005 is an international treaty adopted by the World Health
