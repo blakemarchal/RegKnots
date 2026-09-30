@@ -49,6 +49,17 @@ class Target:
     out: Path
 
 
+def _first_pages_have_text(pdf: Path, min_chars: int) -> bool:
+    """Fast screen: pdftotext on pages 1–3. A scan has no text there; only
+    PDFs that fail it get the adapter's full (slow, pdfplumber) extraction."""
+    try:
+        res = subprocess.run(["pdftotext", "-f", "1", "-l", "3", str(pdf), "-"],
+                             capture_output=True, text=True, timeout=60)
+    except (subprocess.SubprocessError, OSError):
+        return False
+    return len(res.stdout.strip()) >= min_chars
+
+
 def nvic_targets(raw_dir: Path, ocr_dir: Path, only: list[str] | None = None,
                  force: bool = False) -> list[Target]:
     entries = json.loads((raw_dir / "index.json").read_text(encoding="utf-8"))
@@ -59,6 +70,8 @@ def nvic_targets(raw_dir: Path, ocr_dir: Path, only: list[str] | None = None,
             continue
         pdf, txt = raw_dir / f"{number}.pdf", ocr_dir / f"{number}.txt"
         if not pdf.exists() or (txt.exists() and not force):
+            continue
+        if _first_pages_have_text(pdf, NVIC_MIN_CHARS):
             continue
         if len(u.pdf_text(pdf).strip()) < NVIC_MIN_CHARS:
             out.append(Target(f"NVIC {number}", pdf, txt))
@@ -74,6 +87,8 @@ def listing_targets(raw_dir: Path, ocr_dir: Path, only: list[str] | None = None,
         pdf = raw_dir / doc.filename
         txt = ocr_dir / f"{pdf.stem}.txt"
         if pdf.suffix.lower() != ".pdf" or not pdf.exists() or (txt.exists() and not force):
+            continue
+        if _first_pages_have_text(pdf, LISTING_MIN_CHARS):
             continue
         if len(u.clean_text(u.pdf_text(pdf))) < LISTING_MIN_CHARS:
             out.append(Target(doc.doc_id, pdf, txt))

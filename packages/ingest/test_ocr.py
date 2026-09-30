@@ -20,6 +20,7 @@ def test_nvic_targets_are_scans_without_a_sidecar(tmp_path, monkeypatch):
     for n in ("02-23", "10-02", "01-26"):
         _pdf(raw / f"{n}.pdf")                              # 03-75: no PDF on disk
     (out / "10-02.txt").write_text("already OCR'd")
+    monkeypatch.setattr(ocr, "_first_pages_have_text", lambda pdf, n: False)
     monkeypatch.setattr(u, "pdf_text", lambda p: "" if p.stem != "01-26" else "text layer " * 50)
     assert [t.doc_id for t in ocr.nvic_targets(raw, out)] == ["NVIC 02-23"]
     assert [t.doc_id for t in ocr.nvic_targets(raw, out, force=True)] == ["NVIC 02-23", "NVIC 10-02"]
@@ -34,9 +35,14 @@ def test_listing_targets_use_the_file_stem(tmp_path, monkeypatch):
     u.write_index(raw, docs)
     for d in docs:
         _pdf(raw / d.filename)
+    monkeypatch.setattr(ocr, "_first_pages_have_text", lambda pdf, n: False)
     monkeypatch.setattr(u, "pdf_text", lambda p: "" if "15-06" in p.name else "Doublers on towing vessels. " * 10)
     [t] = ocr.listing_targets(raw, out)
     assert t.doc_id == "CG-CVC PL 15-06 CH-2" and t.out == out / "CG-CVC_PL_15-06_CH-2.txt"
+    # a PDF whose first pages have text is never fully extracted
+    monkeypatch.setattr(ocr, "_first_pages_have_text", lambda pdf, n: True)
+    monkeypatch.setattr(u, "pdf_text", lambda p: (_ for _ in ()).throw(AssertionError("slow path")))
+    assert ocr.listing_targets(raw, out) == []
 
 
 def test_ocr_pdf_reads_pages_in_order(tmp_path, monkeypatch):
