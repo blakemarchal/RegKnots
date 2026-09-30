@@ -325,8 +325,14 @@ def doc_sections(
     splitter: Splitter | None = None,
     default_date: date | None = None,
 ) -> list[Section]:
-    """One Section per document on disk (or per part, with a splitter)."""
+    """One Section per document on disk (or per part, with a splitter).
+
+    A scanned PDF (no text layer) is read from its OCR text,
+    data/ocr/<source>/<file stem>.txt, when that file exists (the NVIC adapter's
+    convention). Twelve CG-CVC letters were scans on 2026-09-30.
+    """
     sections: list[Section] = []
+    ocr_dir = ocr_dir_for(source, raw_dir)
     for doc in docs:
         path = raw_dir / doc.filename
         if not path.exists():
@@ -334,8 +340,13 @@ def doc_sections(
             continue
         text = clean_text(pdf_text(path)) if path.suffix.lower() == ".pdf" else path.read_text(encoding="utf-8")
         if len(text) < 80:
-            logger.warning("%s: %s gave no usable text — skipped", source, doc.doc_id)
-            continue
+            ocr_path = ocr_dir / f"{path.stem}.txt"
+            if ocr_path.exists():
+                text = clean_text(ocr_path.read_text(encoding="utf-8"))
+            if len(text) < 80:
+                logger.warning("%s: %s has no text layer and no OCR text at %s — skipped",
+                               source, doc.doc_id, ocr_path)
+                continue
         as_of = doc.published_date or default_date or date.today()
         title = f"{doc.doc_id} — {doc.title}" if doc.title else doc.doc_id
         if doc.note:
@@ -357,6 +368,11 @@ def doc_sections(
             ))
     logger.info("%s: %d sections from %d listed documents", source, len(sections), len(docs))
     return sections
+
+
+def ocr_dir_for(source: str, raw_dir: Path) -> Path:
+    """data/ocr/<source>/ next to data/raw/<source>/."""
+    return raw_dir.parent.parent / "ocr" / source
 
 
 def listing_source_date(raw_dir: Path) -> date:

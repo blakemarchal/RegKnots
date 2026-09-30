@@ -72,6 +72,23 @@ def test_listing_sources_always_parse_on_update(tmp_path):
         assert adapter.get_source_date(tmp_path) == date.today()
 
 
+def test_a_scanned_pdf_is_read_from_its_ocr_text(tmp_path, monkeypatch):
+    raw = tmp_path / "raw" / "uscg_cvc"
+    raw.mkdir(parents=True)
+    (raw / "CG-CVC_PL_15-06_CH-2.pdf").write_bytes(b"%PDF-1.4 scanned")
+    (raw / "CG-CVC_PL_21-03.pdf").write_bytes(b"%PDF-1.4 scanned")
+    monkeypatch.setattr(u, "pdf_text", lambda path: "")          # no text layer
+    ocr = tmp_path / "ocr" / "uscg_cvc"
+    ocr.mkdir(parents=True)
+    (ocr / "CG-CVC_PL_15-06_CH-2.txt").write_text(
+        "Installation of VHF-DSC radio equipment is required on inspected passenger vessels. " * 3)
+    docs = [u.Doc(doc_id="CG-CVC PL 15-06 CH-2", title="VHF-DSC", url="", filename="CG-CVC_PL_15-06_CH-2.pdf"),
+            u.Doc(doc_id="CG-CVC PL 21-03", title="Doublers", url="", filename="CG-CVC_PL_21-03.pdf")]
+    sections = u.doc_sections("uscg_cvc", docs, raw)
+    assert [s.section_number for s in sections] == ["CG-CVC PL 15-06 CH-2"]
+    assert "VHF-DSC radio equipment" in sections[0].full_text
+
+
 def test_a_brotli_reply_is_fetched_again_without_br():
     # httpx needs the brotli package to decode br; without it the bytes come back
     # compressed (the first VGP download, 2026-09-30)
