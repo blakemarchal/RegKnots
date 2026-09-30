@@ -229,3 +229,165 @@ which is free and already in use.
 | 5 | Safety alerts: a small adapter plus a monthly Celery refresh | half day |
 | 6 | Title 40 scope and the VGP; VTS manuals and waterway action plans | 1 day |
 | 7 | Tier 2, as demand shows | — |
+
+## 7. Shipped 2026-09-30
+
+Blake: "Greenlight all". Commits `7a4b2b4` (ingest), `11de59c` (rag), `6f39772` (api, migration
+**0119**), `5a1f239` (web), then `324fe65`, `fb4f048`, `9dd235e`, `a6db992`, `ff2998f`, `a3eeb73`,
+`ae2cda2`, `5251e67`, `a81a610`, `178797c`. All deployed (last `178797c`);
+the prod ingests ran through `scripts/run_ingest.sh` with `--no-notify`. No Anthropic spend: every
+new source is parsed locally and embedded with OpenAI (well under $1 in all).
+
+### Fixes to data we already had
+
+- **NVIC discovery (§3.1).** `_find_pdf_link_in_tag` accepts `.pdf?ver=…` and encodes spaces.
+  Discovery now lists 248 active NVICs. The update run embedded 3,663 new or changed chunks
+  (+3,623 rows), so 03-16 (towing officers, TOARs), the STCW endorsement series, 01-20, 01-23, 01-24,
+  01-26 and the rest of the §3.1 list are in.
+  - 07-68 is active; the old link check had hidden it. 09-94 is marked Cancelled/Superseded on the
+    1990s page and is retired (`nvic.RETIRED`).
+  - 09-00 CH-1 (CO2 system safety): USCG's page links it twice; the URL column's link 404s. The
+    adapter now takes the file under `/Portals/` from the number cell. It downloads now, but it
+    is a scan too.
+  - **Four NVICs are image-only and not ingested:** 02-23 (offshore renewable energy, 70 pages),
+    10-02 CH-1 (vessel security guidelines, 9 pages), 03-75 (bulk grain) and 09-00 CH-1. That is
+    why 03-75 and 10-02 were in the discovery cache but not the database. OCR options: the existing
+    `scripts/ocr_scanned_nvics.py` (Claude vision) or tesseract on the VPS (not installed; free).
+  - Pruned: 172 rows (04-08 Ch-2 120, 09-94 16, and 36 leftover 07-68 §4 chunks from an April
+    parse that the old link check had hidden). Backup `data/pruned/nvic-20260930-082907.csv.gz`.
+    NVIC now: 244 circulars, 3,115 sections, 9,554 chunks.
+- **Medical guidance (§3.2).** NVIC 04-08 Ch-2 is retired and pruned. The **Merchant Mariner
+  Medical Manual** (COMDTINST M16721.48, 297 pages) is in `uscg_msm`: 25 chapters, 284 chunks,
+  cited as "COMDTINST M16721.48 Ch.12".
+- **`uscg_bulletin` (§3.3).**
+  - Pruned by title, not by re-fetching (`--stale-report` / `--prune-stale` use
+    `uscg_bulletin.stale_report`): 3,332 of 3,392 rows (2,602 documents) removed, backup
+    `data/pruned/uscg_bulletin-20260930-082912.csv.gz`. Kinds removed: LNM notices and outlooks
+    (1,569 rows), broadcast notices and their updates and cancellations (1,377), GPS / NANU / ice
+    (160), closures, river stages, bridge deviations and VTS measures (100), CG-internal ALCOASTs and
+    ACNs (85), port conditions (18), COVID measures (8), marine events (6), and 9 second copies of a
+    bulletin stored under different LLM labels. Kept: 27 documents, e.g. the eVDSD and four-digit
+    VHF channel ALCOASTs, the Kidde extinguisher recall ACN, MSIB XVIII-069 (ITV flammable storage
+    cabinets), MSIB XXIII-012 (marine casualty notification), NMC credential announcements.
+  - The same filter runs at ingest, before Pass 1 (a Sector VTS "MSIB … High Water" matches Pass 1).
+    Regulatory keywords (STCW, merchant mariner, NVIC, policy letter, safety alert, final rule,
+    Subchapter M …) accept without the LLM.
+  - **Discovery resumed from GovDelivery's public feed**
+    (`public.govdelivery.com/accounts/USDHSCG/feed.rss`, the latest 100 bulletins, about 30 hours).
+    Daily Celery task `update_uscg_bulletins` (11:15 UTC) runs `--update`, which fetches only feed
+    items no run has decided. On the 2026-09-30 feed, 98 of 100 items were dropped by subject, 1
+    accepted (STCW basic training amendments) and 1 went to review. Ambiguous items go to
+    `feed_review.tsv`; the LLM classifies them only with `USCG_BULLETIN_LLM=1`. (The weekly refresh
+    that ran until 2026-08 re-fetched all 7,456 ids and sent about 6,000 subjects a week to Haiku.)
+    The first run (08:29 UTC) found all 100 items new, as expected on a first run, and accepted one:
+    the STCW basic training amendments. `uscg_bulletin` is now 28 documents / 62 chunks.
+  - Accepted ids go to `feed_accepted.txt`, not `wayback_ids.txt`: the latter is tracked in git and
+    `deploy.sh` resets the checkout.
+- **Citation normalization (§3.4)**, `rag/citation_norm.py`, used by retrieval and the verifier:
+  33 CFR Parts 83–88 two-digit sections ("83.5" also tries 83.05) and 46 CFR 10.215 → 10.302.
+  Subpart citations (46 CFR 92.07) are not handled yet.
+- **`regulations.title` (§3.5).** New and re-ingested rows get the source's own title
+  (`models.title_name`). Existing rows keep "COLREGs — …" until re-ingested: nothing reads the
+  column, and a one-off UPDATE would rewrite ~80k rows and their HNSW entries.
+- Found on the way: the citation verifier looked for MSC resolutions in sources named `fss` and
+  `lsa`, which do not exist, so every FSS / LSA Code citation was flagged unverified. It now checks
+  `imo_fss`, `imo_lsa`, `imo_msc`, `imo_igf`, `imo_polar` and `imo_loadlines`.
+
+### New sources
+
+All U.S. government works. Listing-page sources re-read their page on every run (a document is
+re-downloaded when its link's `?ver=` or revision changes) and embed only changed chunks.
+
+| Source | What | Sections | Chunks |
+|---|---|---|---|
+| `uscg_cvc` | CG-CVC policy letters not marked cancelled (and the older CG-543 / CG-MOC / CG-PCV series), MMS work instructions (e.g. CVC-WI-013, initial ITV COI under TSMS; WI-038, Sub M TPOs), inspection forms (K- and T-boat checklists) | 87 | 1,268 |
+| `uscg_towing` | TVNCOE: Sub M FAQs by part (1/2/15, 136–144, general, preamble), UTV Guidebook, applicability flowchart, ITV inspector job aid, small entity compliance guide | 16 | 283 |
+| `uscg_safety_alert` | 181 CG-INV Safety Alerts since 1996 and 111 Findings of Concern (the "advisories" share the alerts page) | 292 | 646 |
+| `uscg_waterways` | 12 NAVCEN VTS user manuals and 5 District 8 Waterways Action Plans (Lower / Upper Mississippi, Ohio, Illinois, Missouri) | 17 | 881 |
+| `epa_vgp` | EPA 2013 VGP, one section per part / appendix (Part 6 at state level) | 135 | 352 |
+| `usc_33` | 33 USC 401–467, 1201–1208, 1321–1322, 1901–1915, 2701–2762 (release point 2026-04-17) | 149 | 285 |
+| `cfr_40` | 40 CFR 110, 139, 140, 1042, 1043 | 140 | 288 |
+| `cfr_47` | 47 CFR 80 | 337 | 492 |
+| `cfr_50` | 50 CFR 224 | 5 | 31 |
+| `cfr_29` | 29 CFR 1915, 1917, 1918, 1919 | 312 | 710 |
+| | **new sources, total** | **1,490** | **5,236** |
+
+`nmc_checklist` went from 6 documents / 33 chunks to 122 / 476: the 112 checklists on NMC's checklist page
+plus the four TOARs (NVIC 03-16 enclosures 2–5).
+
+Two first runs failed and were re-run after a fix: eCFR returned a 502 on 29 CFR 1918
+(`fetch_full_xml` now retries 5xx twice), and epa.gov answered in brotli, which httpx cannot
+decode without the brotli package (`uscg_docs.get` asks again without `br`). CG-MOC PL 99-03's
+file on dco.uscg.mil is a 28-byte stub; it is skipped. The first safety-alert run kept 174 alerts
+and 45 findings: CG-INV lettered some alert numbers (10-10 (a) / (b)) and reused others (09-08 in
+1998, 2008 and 2009), and the Findings table is paged. Both fixed (`178797c`); 6 renamed rows
+pruned.
+
+**Twelve CG-CVC letters are scans with no text layer** and are not ingested yet: PL 18-02, 18-03
+(UPV safety program), 16-01, 16-02 (non-metallic sea strainers on small passenger vessels), 16-03
+(5-knot test after replacing on-load release gear), 15-06 CH-2 (VHF-DSC installation on inspected
+passenger and fishing vessels, which §4 named), 15-02, 15-01, 14-03 (sea service on liftboats),
+13-04 CH-1, 11-11 CH-1 and CG-PCV PL 06-08. `uscg_docs.doc_sections` reads
+`data/ocr/uscg_cvc/<file stem>.txt` for them once OCR text exists.
+
+### Retrieval, answers and chips
+
+- Groups take the new sources without growing the fan-out: `cfr` + cfr_40/47/50/29 and epa_vgp;
+  `usc` + usc_33; `nvic` + uscg_cvc and uscg_towing (so the Subchapter M boost reaches them);
+  `uscg_bulletin` + uscg_safety_alert and uscg_waterways.
+- Authority tiers: the scoped CFR titles, 33 USC and the VGP are Tier 1; CG-CVC, TVNCOE and the
+  waterway guidance Tier 2; safety alerts Tier 3. All ten sources are tagged `us`.
+- The prompt's knowledge-base list names every new source and its citation form. 29 CFR 1915–1919
+  may be cited (1910 still may not). Bulletins no longer promise closures or river stages, and
+  point to the VTS, the LNM and current MSIBs for today's status. The synthesis-model comparison
+  was not re-run for this prompt change (about $3–4).
+- Chips: CG-CVC / CG-543 / CG-MOC / CG-PCV policy letters and CVC work instructions and forms,
+  USCG SA / FOC numbers, MCP-FM-NMC5 checklists, the TOARs, Sub M FAQ parts, COMDTINST M16721.48
+  chapters, VGP parts. A chip whose guessed source lacks the section tries sibling sources before
+  the fallbacks (CG-CVC PL 15-03 is stored with the NMC letters).
+- "low water" matched "below waterline", which would have lifted the bulletin group on hull
+  questions; vts / high water / low water now match as whole words.
+
+### Schedules
+
+- Weekly `update_regulations` (Sundays 02:00 UTC) adds cfr_40, cfr_47, cfr_50, cfr_29.
+- Daily `update_uscg_bulletins`, 11:15 UTC, `--no-notify`.
+- Monthly `update_uscg_guidance`, the 5th at 18:30 UTC: safety alerts and findings, CG-CVC,
+  TVNCOE, VTS / waterways, NMC checklists. It stays outside Sunday's run: the worker runs two
+  tasks at once, and two ingests at once would not fit the box's free memory.
+- A listing that comes back under half its saved size keeps the saved index (a layout change, not
+  withdrawals). Documents withdrawn from a listing stay stored until a prune.
+
+### Dense harness (79 pairs)
+
+| run | strong recall@8 | weak recall@8 | MRR |
+|---|---|---|---|
+| before (new code, old data) | 0.8608 | 0.9114 | 0.7189 |
+| after the data, old gold set | 0.8101 | 0.8734 | 0.6314 |
+| after the data, updated gold set | 0.8608 | 0.9114 | 0.6820 |
+| + keyword floor (deployed, final data) | **0.9367** | **0.9494** | **0.7593** |
+
+- **The gold set rewarded what the plan removed.** C3 (type 2 diabetes) expected NVIC 04-08, cancelled
+  in 2019; the top results are now NMC's Top 10 Medical Conditions and COMDTINST M16721.48 Ch.14,
+  Endocrine Conditions. F7 (recent safety alert on fire extinguishers) expected two ALCOAST/ACN
+  bulletins; the top five are now the CG-INV extinguisher alerts. P1 expected expired LMR river-stage
+  bulletins; the top result is the D8 Waterways Action Plan. Their patterns were added (`a81a610`),
+  keeping the old ones; no earlier run could have matched the new patterns.
+- **The rest was the broad keyword search.** Any query word matching no more than 200 chunks put up to
+  five rows at first place (best similarity + 0.02), whatever they were, and ties followed physical
+  row order, which every large ingest or prune reshuffles. "wanted" in N-C1 ("If I wanted to start a
+  career…") surfaced MSM "Placing Merchant Mariners on the Wanted List" and BWM "unwanted
+  organisms"; "Norfolk" in P3 put a Chantix safety alert above the Elizabeth River drawbridge rules.
+  Keyword hits now take first place only within 0.10 of the best vector hit (`5251e67`,
+  `retriever._KW_BOOST_MAX_GAP`): +6 pairs, none lost, 16 ranked higher, N-E3/V1 from rank 1 to 2.
+- `dense-prod` (rewrite + reranker, ~$0.15) was not run.
+
+### Not done
+
+- OCR of the four image-only NVICs and the twelve scanned CG-CVC letters (about 140 pages;
+  Claude vision roughly $2–3, or tesseract on the VPS, free). The sidecar path is in place for
+  both sources.
+- Subpart citations (§3.4); the one-off `regulations.title` UPDATE (§3.5).
+- Tier 2 items not taken: USCG forms (CG-2692 and others), ABS river and intracoastal rules, NTSB
+  marine investigations, CG-ENG / CG-OES letters. Tier 3 (live gage / lock status, PSIX) remains.
+- The prompt change has not been through `compare_synthesis_models` (Claude spend).

@@ -20,7 +20,7 @@ RegKnots — maritime-compliance copilot for U.S. commercial vessel operators. L
 - **Propose spec, wait for greenlight** before coding non-trivial work. The user will say "go" or push back.
 - **`packages/ingest/ingest/cli.py`:** DO NOT regenerate from codegen. Patch in place. Preserve the line `dsn = settings.database_url.replace("postgresql+asyncpg://", "postgresql://")` near `create_pool` — it adapts the asyncpg URL for the sync ingest path. If you regenerate this file, dispatch breaks.
 - **Deploy procedure:** production runs from `origin/main` via `scripts/deploy.sh`. Never edit on the VPS. After every push to main, run `scripts/deploy.sh` from your laptop to roll the change.
-- **Two schedulers exist.** systemd timers (`deploy/systemd`; the four corpus-refresh timers were **disabled 2026-08-10**, backup + db-maintenance stay on) AND Celery Beat (`apps/api/celery_beat.py`: weekly `update_regulations` for cfr_33/46/49/nvic, monthly REINDEX, digests, reminders). Disabling one does not disable the other. Check both before assuming a job is off.
+- **Two schedulers exist.** systemd timers (`deploy/systemd`; the four corpus-refresh timers were **disabled 2026-08-10**, backup + db-maintenance stay on) AND Celery Beat (`apps/api/celery_beat.py`: weekly `update_regulations` for cfr_33/46/49/40/47/50/29 + nvic, daily `update_uscg_bulletins`, monthly `update_uscg_guidance` for safety alerts / CG-CVC / TVNCOE / waterways / NMC checklists, digests, reminders; the monthly REINDEX task was removed 2026-09-10). Disabling one does not disable the other. Check both before assuming a job is off.
 - **Ad-hoc ingest jobs MUST use `scripts/run_ingest.sh`**, not `uv run python -m ingest.cli` directly. The wrapper isolates the job inside a transient systemd unit with a 1.5 GB memory cap so a runaway can't take the box. Plain interactive ingests caused 12 of 13 OOM events / 14 days per the 2026-05-08 audit. There is no good reason to bypass the wrapper.
 - **Grep for "Cassandra" before every commit.** It's a recurring slip.
 
@@ -80,7 +80,7 @@ If a doc says "alembic head is 0045" but `alembic current` says `0092`, the doc 
 - 2026-06 (audit sprint): quality audit of live user questions shipped: follow-up retrieval composition (short mid-thread messages), CG-form identifier retrieval (Karynn's "835"), never-assert-non-existence prompt rule, **MLC 2006 ingested** (140 sections — the labour fourth pillar; Nirmal's provisions gap), IMO MEPC/MSC resolution harvest Phase 1 (12 resolutions, `imo_mepc`/`imo_msc`), SIRE 2.0 Q Library completed (Pt2, + `ocimf` affinity group it never had), whale-zones nav + 4-feature polish + opt-in GPS persistence (migration 0112).
 - **2026-07-18 model refresh (Fable audit session):** all Sonnet call sites → `claude-sonnet-5`, Opus → `claude-opus-4-8` (router MODEL_MAP, REGENERATION_MODEL, engine, web_fallback, checklists, study, documents, me, credentials, enricher, stcw/ism Vision). IDs live-validated against the prod key pre-ship. `chat.py _MODEL_ALIAS` got the new keys ADDED (old keys kept — D6.73 NULL-model_used lesson). Also fixed badly-rotted `chat.py _MISSING_SOURCES` that was telling users MARPOL/MLC/IMDG/IGC/IBC/CSS/BWM/Polar were "not in the database" (all long since ingested).
 - **2026-07-19 "Wk1-4" mega-wave (Blake greenlit the full 30-day plan):**
-  - **Hybrid verdict — DO NOT FLIP.** New `scripts/eval_retrieval.py` (retrieval-only recall@k/MRR, imports the eval_rag_baseline gold set). Dense 0.790 strong-recall@8 / 0.627 MRR vs hybrid RRF 0.548 / 0.416 — hybrid loses 16 pairs, gains 1 (lexical lane vetoes dense's correct hits via rank-blind RRF). ⛔ MEASURED comment on the config flag; evidence in `data/eval/retrieval/`; verdict doc `docs/hybrid-retrieval-verdict-2026-07-19.md`. ef_search 100 "measured zero effect" — invalid test (asyncpg RESET ALL wiped the pool-init SET; correction in the verdict doc, 2026-09-24). **Any retrieval change now runs this harness first.** Baselines to beat: **dense 0.8608/0.7168** (79-pair gold set, 2026-09-27 after the NVIC 06-72 fix; 0.7046 on 09-26 after the MARPOL split); **dense-prod 1.0000/0.7301** (71-pair set, 2026-09-26; not re-run on 79). The `dense` arm does not exercise query rewrite, reformulations or the reranker; a change to those must be measured with `--arm dense-prod`. A reformulation change shipped on dense-only probes on 2026-09-25 and was reverted the next day (−4 pairs on dense-prod). (The 2026-09-10 re-run gave 0.823/0.658, after prod was flipped back to dense; it had been serving hybrid since May against this verdict.)
+  - **Hybrid verdict — DO NOT FLIP.** New `scripts/eval_retrieval.py` (retrieval-only recall@k/MRR, imports the eval_rag_baseline gold set). Dense 0.790 strong-recall@8 / 0.627 MRR vs hybrid RRF 0.548 / 0.416 — hybrid loses 16 pairs, gains 1 (lexical lane vetoes dense's correct hits via rank-blind RRF). ⛔ MEASURED comment on the config flag; evidence in `data/eval/retrieval/`; verdict doc `docs/hybrid-retrieval-verdict-2026-07-19.md`. ef_search 100 "measured zero effect" — invalid test (asyncpg RESET ALL wiped the pool-init SET; correction in the verdict doc, 2026-09-24). **Any retrieval change now runs this harness first.** Baselines to beat: **dense 0.9367/0.7593** (79-pair gold set, 2026-09-30: keyword floor, and gold patterns for the Medical Manual / safety alerts / D8 WAP; 0.8608/0.7168 on 09-27 after the NVIC 06-72 fix); **dense-prod 1.0000/0.7301** (71-pair set, 2026-09-26; not re-run on 79). The `dense` arm does not exercise query rewrite, reformulations or the reranker; a change to those must be measured with `--arm dense-prod`. A reformulation change shipped on dense-only probes on 2026-09-25 and was reverted the next day (−4 pairs on dense-prod). (The 2026-09-10 re-run gave 0.823/0.658, after prod was flipped back to dense; it had been serving hybrid since May against this verdict.)
   - **Per-ingest REINDEX removed** (held ACCESS EXCLUSIVE during live traffic); weekly `REINDEX CONCURRENTLY` + VACUUM + backup-staleness gate via `regknots-db-maintenance.timer` (installed, first run green: 245s reindex, no locks). Opt-in per-run: `REGKNOTS_REINDEX_AFTER_INGEST=1`.
   - **Backups proven restorable** — first restore test in project history: 762MB dump → clean pgvector/pg16 container, 421s, 0 errors, embeddings + alembic head verified. Runbook `docs/runbooks/db-restore.md`. Offsite scaffolding installed (rclone script + disabled timer) — **awaiting Blake's 5-min DO Spaces bucket+keys step**. `smoke.sh` now probes backup age every deploy.
   - **Citation trust pack:** chips amber→teal (amber now = caution only), "Corpus-verified · N citations" badge, message timestamps, aria-live streaming, pinch-zoom unlock, prefers-reduced-motion.
@@ -286,7 +286,7 @@ If a doc says "alembic head is 0045" but `alembic current` says `0092`, the doc 
     - `useEscapeKey` (`src/lib`): Escape closes the topmost sheet, drawer or modal, across 11 overlays.
     - Menu labels match their pages: Credentials, Help & Support, and a "Study" section with "Study Tools". `/workspaces` is titled Wheelhouse.
     - Karynn's DB row has `is_admin = true` (read-only SQL).
-- **2026-09-29 corpus gap audit, inland / USCG focus** (no spend): `docs/sprint-audits/corpus-gap-audit-inland-2026-09-29.md`. **Findings, not yet fixed; the plan awaits Blake's go.**
+- **2026-09-29 corpus gap audit, inland / USCG focus** (no spend): `docs/sprint-audits/corpus-gap-audit-inland-2026-09-29.md`. **Fixed 2026-09-30 (next entry).**
   - The CFR is complete: 46 CFR has 8,319 of 8,321 eCFR sections, 33 CFR 4,596 of 4,598. 46 USC and the MSM volumes are complete too.
   - **NVIC discovery drops 36 current NVICs.** `nvic.py` `_find_pdf_link_in_tag` requires links to end in `.pdf`, and USCG serves them as `.pdf?ver=…`. Missing: 03-16 (towing officer credentialing and the TOARs), the STCW endorsement series 05-14 to 24-14, 01-17 to 04-17, 01-20, 01-23, 01-24, 01-26 and others.
   - **We serve cancelled medical guidance.** NVIC 04-08 comes in by hand through `_EXTRA_DOCS`; the Merchant Mariner Medical Manual (COMDTINST M16721.48) cancelled it in 2019 and isn't ingested.
@@ -294,6 +294,35 @@ If a doc says "alembic head is 0045" but `alembic current` says `0092`, the doc 
   - Every non-CFR row's `regulations.title` reads "COLREGs — …" (`models.TITLE_NAMES[0]`). Nothing reads the column.
   - Unverified citations are mostly the model's section numbers, not gaps: 46 CFR 10.215 is now 10.301–10.306, and 33 CFR 83.1 means 83.01.
   - Ranked acquisitions: NMC checklists (we have 4 of 115) plus the TOARs; CG-CVC policy letters, work instructions and forms (~80); the TVNCOE Sub M package; 196 USCG Safety Alerts; VTS manuals and waterway action plans; EPA VGP / VIDA (40 CFR 139). Tier 1 embeddings cost under $1.
+- **2026-09-30 inland / Coast Guard corpus SHIPPED** (Blake: "Greenlight all" on the 09-29 audit; no Anthropic spend). Commits `7a4b2b4` … `178797c`, migration **0119** (alembic head). Numbers and evidence: audit doc §7.
+  - **NVIC discovery fixed** (`.pdf?ver=` links): 244 circulars / 9,554 chunks, +36, incl. 03-16 (towing officers, the TOARs), the STCW endorsement series and 01-20/23/24/26. 04-08 Ch-2 and 09-94 (cancelled) retired and pruned, with 36 leftover 07-68 rows. **Image-only, not ingested:** 02-23, 10-02 CH-1, 03-75 and 09-00 CH-1.
+  - **Merchant Mariner Medical Manual** (COMDTINST M16721.48, 25 chapters) in `uscg_msm`.
+  - **Ten new sources** (migration 0119; shared helpers in `sources/uscg_docs.py`):
+    - `uscg_cvc`: CG-CVC letters, work instructions and forms. 12 letters are scans, incl. PL 15-06 CH-2 (VHF-DSC).
+    - `uscg_towing`: TVNCOE Sub M FAQs and the UTV Guidebook.
+    - `uscg_safety_alert`: 181 Safety Alerts + 111 Findings of Concern.
+    - `uscg_waterways`: 12 VTS manuals and 5 D8 WAPs.
+    - `epa_vgp`, `usc_33` (maritime chapters), and the scoped CFR parts `cfr_40/47/50/29` (fetched per part).
+    - `nmc_checklist` now holds the 112 checklists on NMC's checklist page + the 4 TOARs (122 documents with the application guides).
+  - **`uscg_bulletin` 3,392 → 62 chunks**, pruned by title (LNM, BNM, closures, river stages, GPS/NANU, port conditions, CG-internal ALCOASTs). The same filter runs at ingest.
+    - **Discovery resumed** from GovDelivery's public RSS feed (~30 h of items): daily `update_uscg_bulletins` at 11:15 UTC. Only undecided items are fetched, with **no LLM** unless `USCG_BULLETIN_LLM=1`.
+    - Accepted ids go to untracked `feed_accepted.txt`: `wayback_ids.txt` is tracked, and a deploy resets it.
+  - **Schedules:**
+    - Weekly `update_regulations` adds cfr_40/47/50/29.
+    - Monthly `update_uscg_guidance` runs the 5th at 18:30 UTC. It never overlaps Sunday's run: the worker's concurrency is 2, and two ingests would not fit in free memory.
+  - **Keyword floor** (`5251e67`, `retriever._KW_BOOST_MAX_GAP` = 0.10). Any query word matching ≤200 chunks used to put up to five rows at first place, with ties in physical row order ("wanted" → MSM "Wanted List"). Keyword hits now take first place only within 0.10 of the best vector hit. +6 pairs, none lost.
+  - **Dense harness:** 0.8608 / 0.7189 before → **0.9367 / 0.7593** (weak 0.9494).
+    - 3 gold patterns were added where the expected source was cancelled or pruned: C3 → Medical Manual Ch.14, F7 → extinguisher safety alerts, P1 → D8 WAP.
+    - `dense-prod` was not run.
+  - **Also:**
+    - `rag/citation_norm.py`: 33 CFR 83–88 two-digit sections; 46 CFR 10.215 → 10.302.
+    - The verifier's MSC family is fixed (`fss`/`lsa` were never sources).
+    - Chips: CVC, SA/FOC, MCP-FM-NMC5, TOARs, Sub M FAQs, the Medical Manual and the VGP. A chip lookup tries sibling sources.
+    - eCFR 5xx retries; brotli replies are re-requested without `br`.
+    - OCR sidecars: `data/ocr/<source>/<stem>.txt`.
+    - The prompt names every new source; `compare_synthesis_models` was **not** re-run (~$3–4).
+  - **Open:** OCR of the 4 NVICs + 12 CVC letters (~140 pages: ~$2–3 Claude vision, or tesseract on the VPS).
+  - Corpus **99,786 chunks / 76 sources**.
 See `docs/PROJECT_STATE.md` for a fuller operational snapshot and `docs/roadmap.md` for the prioritized backlog.
 
 
@@ -329,4 +358,4 @@ Full audit report (models, retrieval, UX, product packaging): see the 2026-07-18
 
 ---
 
-*Last updated 2026-09-29 (corpus gap audit, inland/USCG: NVIC discovery bug, cancelled medical NVIC; self-serve account deletion + migration 0118; admin redesign + /admin/dashboard, customer UX pass incl. the Tailwind button-fill bug; CFR paragraph chips fixed, first web unit tests; video ads first cut; earlier: NVIC 06-72 misread figures fixed; company documents shipped, outreach live; signup attribution, model-led grounding on). When this drifts from reality, fix it — that's the rule.*
+*Last updated 2026-09-30 (inland / Coast Guard corpus: ten new sources, NVIC discovery fix, Medical Manual, uscg_bulletin pruned + daily feed, keyword floor, migration 0119; earlier: corpus gap audit; self-serve account deletion + migration 0118; admin redesign + customer UX pass; CFR paragraph chips; video ads first cut). When this drifts from reality, fix it — that's the rule.*

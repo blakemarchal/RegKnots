@@ -2,13 +2,13 @@
 
 **One-page operational snapshot for humans and fresh Claude Code sessions.**
 
-Last updated: 2026-09-26 (question-audit follow-up deployed, SOLAS / cfr_49 cleanup applied, Anthropic credits exhausted; audit `docs/sprint-audits/question-audit-2026-09-25.md`; Opus 5.5 low is the default answer model; system audit 2026-09-10)
+Last updated: 2026-09-30 (inland / Coast Guard corpus: ten new sources, NVIC discovery fix, Medical Manual, `uscg_bulletin` pruned + daily feed, keyword floor; `docs/sprint-audits/corpus-gap-audit-inland-2026-09-29.md` §7. 2026-09-26: question-audit follow-up deployed, SOLAS / cfr_49 cleanup applied, Anthropic credits exhausted; audit `docs/sprint-audits/question-audit-2026-09-25.md`; Opus 5.5 low is the default answer model; system audit 2026-09-10)
 
 ---
 
 ## TL;DR
 
-RegKnot is a maritime-compliance RAG at **https://regknots.com**. Production stack live and healthy. **91,801 chunks across 66 sources** (2026-09-26, after the SOLAS re-parse, the cfr_49 scope, stale-row prunes and the MARPOL per-regulation re-parse) with 100% embedding coverage. Retrieval pipeline now includes multi-query rewrite, Haiku reranker, citation oracle, source-diversified fetch, jurisdiction filter, vessel-profile boosts, synonym + intent expansion; hybrid BM25+dense built, measured 2026-07-19 and rejected (dense wins) — prod `.env` carried it switched on until the 2026-09-10 fix, now dense. **96.1% A-or-A−** on the latest 152-question regression eval. First organic Captain-tier subscriber 2026-09-09. See the 2026-09-10 audit for the pre-push list.
+RegKnot is a maritime-compliance RAG at **https://regknots.com**. Production stack live and healthy. **99,786 chunks across 76 sources** (2026-09-30, after the inland / Coast Guard corpus work; 91,801 across 66 on 2026-09-26) with 100% embedding coverage. Retrieval pipeline now includes multi-query rewrite, Haiku reranker, citation oracle, source-diversified fetch, jurisdiction filter, vessel-profile boosts, synonym + intent expansion; hybrid BM25+dense built, measured 2026-07-19 and rejected (dense wins) — prod `.env` carried it switched on until the 2026-09-10 fix, now dense. **96.1% A-or-A−** on the latest 152-question regression eval. First organic Captain-tier subscriber 2026-09-09. See the 2026-09-10 audit for the pre-push list.
 
 ## Live production
 
@@ -16,7 +16,7 @@ RegKnot is a maritime-compliance RAG at **https://regknots.com**. Production sta
 - **API health:** https://regknots.com/api/health — `{"status":"healthy"}`
 - **VPS:** `root@68.183.130.3` (shared box, hostname `spiritflow-prod-01`)
 - **Repo paths:** local `C:\Users\Blake\Documents\RegKnots`, VPS `/opt/RegKnots` (NOT `/root/RegKnots`)
-- **Alembic head:** `0115`
+- **Alembic head:** `0119`
 - **Services:** `regknots-api`, `regknots-web`, `regknots-worker` — all systemd, all active
 - **DB:** `docker exec regknots-postgres psql -U regknots -d regknots` (PG 16.13 + pgvector, 1528 MB)
 - **Deploy:** `scripts/deploy.sh` + `scripts/smoke.sh` (shipped 2026-05-07; 3-stage smoke catches stale-build failure mode)
@@ -31,28 +31,30 @@ RegKnot is a maritime-compliance RAG at **https://regknots.com**. Production sta
 - **Propose spec, wait for greenlight** before coding non-trivial work.
 - **Grep for Cassandra** before every commit.
 
-## Corpus snapshot — 106,041 chunks across 66 sources (live 2026-09-10; 92,336 on 2026-09-26, see `docs/corpus-status.md`)
+## Corpus snapshot — 99,786 chunks across 76 sources (live 2026-09-30, see `docs/corpus-status.md`)
 
-100% embedding coverage. Vector dim 1536. ~108.9M chars / 27.2M tokens. Top sources by chunk count:
+100% embedding coverage. Vector dim 1536. Top sources by chunk count:
 
 | Source | Chunks | Notes |
 |---|---|---|
-| `cfr_49` | 15,838 | Title 49 — Transportation; per-row 172.101 hazmat chunking (D6.16b) |
-| `cfr_46` | 10,523 | Title 46 — Shipping |
-| `cfr_33` | 7,192 | Title 33 — Navigation |
+| `cfr_46` | 10,490 | Title 46 — Shipping |
+| `nvic` | 9,554 | 244 USCG NVICs; 36 added 2026-09-30 after the `.pdf?ver=` discovery fix |
+| `cfr_33` | 7,214 | Title 33 — Navigation |
+| `bv` | 7,213 | Bureau Veritas NR467 |
+| `abs_mvr` | 5,851 | ABS Marine Vessel Rules |
 | `nma_rsv` | 5,426 | Norway NMA RSR/RSV/SM circulars |
-| `nvic` | 3,453 | USCG NVICs |
-| `uscg_msm` | 3,048 | USCG Marine Safety Manual (last refresh 2021-09 — stale) |
+| `lr_rules` | 3,347 | Lloyd's Register Rules for Classification of Ships |
+| `uscg_msm` | 3,332 | Marine Safety Manual (Vols II–V, 2021) + Merchant Mariner Medical Manual (2019) |
+| `cfr_49` | 3,145 | Title 49, maritime parts only (hazmat, TWIC, CSC, NTSB) |
+| `fr_transport` | 3,086 | France — Code des transports |
 | `iacs_ur` | 2,981 | IACS Unified Requirements |
-| `nmc_exam_bank` | 2,938 | NMC exam-bank ingest (D6.83 Phase A1, 2026-05-07) |
-| `uscg_bulletin` | 2,232 | GovDelivery backfill 2023-04 → 2026-04; live feed pending |
-| `imdg` | 2,129 | IMDG Code Vol 1+2 (Amdt 42-24); per-row DGL chunking |
+| `nmc_exam_bank` | 2,938 | NMC exam bank (Study Tools) |
 
-Plus 40 additional sources: `cfr_*`, `solas`, `marpol`, `colregs`, `stcw`, `ism` (+ supplements), `usc_46`, `who_ihr`, `erg`, `nmc_policy` / `nmc_checklist`, foreign-flag (UK MCA, AMSA, MPA, MarDep, LISCR, IRI, BMA, NMA), IMO codes (HSC, IGC, IBC, CSS, Load Lines), and OCIMF public layer. See `docs/corpus-status.md` for the full table, tier classifications, and curated-vs-full coverage notes.
+Plus 64 more sources, among them the 2026-09-30 inland / Coast Guard set (`uscg_cvc`, `uscg_towing`, `uscg_safety_alert`, `uscg_waterways`, `epa_vgp`, `usc_33`, `cfr_40` / `cfr_47` / `cfr_50` / `cfr_29`), `solas`, `marpol`, `colregs`, `stcw`, `ism` (+ supplements), `usc_46`, `who_ihr`, `erg`, `nmc_policy` / `nmc_checklist`, `uscg_bulletin` (durable bulletins only since 2026-09-30, daily from the GovDelivery feed), foreign-flag regulators, IMO codes and the OCIMF public layer. See `docs/corpus-status.md` for the full table, tiers and refresh schedules.
 
 **Embedding model:** `text-embedding-3-small` (April + May audits both agree the upgrade to `-large` is not the bottleneck).
 
-**Stale outliers:** STCW (2017-07), ISM (2018-07), USCG MSM (2021-09), MARPOL (2022-11). `stcw_amend` / `marpol_amend` carry the deltas. Acquisition plan for missing IMO instruments (ISPS, LSA, FSS, IS Code, Load Lines, IAMSAR, BMP MS): `docs/roadmap.md` §IMO.
+**Stale outliers:** STCW (2017-07), ISM (2018-07), USCG MSM volumes (2021-09; the Medical Manual in the same source is the current 2019 edition), MARPOL (2022-11). `stcw_amend` / `marpol_amend` carry the deltas. Acquisition plan for missing IMO instruments (ISPS, LSA, FSS, IS Code, Load Lines, IAMSAR, BMP MS): `docs/roadmap.md` §IMO.
 
 ## RAG pipeline — current architecture
 

@@ -1,6 +1,6 @@
 # Corpus Status
 
-_Last updated: 2026-09-26 (SOLAS re-parse and cfr_49 scope with stale-row prune; counts live. 2026-09-10: IMO acquisition plan moved to `docs/roadmap.md` §IMO)_
+_Last updated: 2026-09-30 (inland / Coast Guard corpus: ten new sources, NVIC discovery fix, Medical Manual, `uscg_bulletin` pruned to durable items; `docs/sprint-audits/corpus-gap-audit-inland-2026-09-29.md` §7. 2026-09-26: SOLAS re-parse and cfr_49 scope. 2026-09-10: IMO acquisition plan moved to `docs/roadmap.md` §IMO)_
 
 This document is the engineering counterpart to the user-facing
 [/coverage](https://regknots.com/coverage) page. It tracks what's
@@ -19,12 +19,22 @@ vague about it"). This document is for engineering planning.
 | 33 CFR | `cfr_33` | 1 | Full | Continuous (eCFR API) |
 | 46 CFR | `cfr_46` | 1 | Full | Continuous |
 | 49 CFR | `cfr_49` | 1 | Maritime parts only since 2026-09-26 (`ingest/cfr_scope.py`: hazmat 105–109, 171–173, 176, 178, 180; Part 40; CSC 450–453; NTSB 831/850; TSA 1520/1570/1572); 3,145 chunks; per-row hazmat table chunking (D6.16b) | Continuous |
+| 40 CFR (maritime parts) | `cfr_40` | 1 | Parts 110 (oil discharge), 139 (VIDA vessel discharge standards), 140 (MSDs, no-discharge zones), 1042 / 1043 (marine engines); 140 sections / 288 chunks. Fetched one part at a time (`cfr_scope.PART_FETCH`) | Weekly (Celery) since 2026-09-30 |
+| 47 CFR 80 | `cfr_47` | 1 | FCC maritime radio; 337 sections / 492 chunks | Weekly |
+| 50 CFR 224 | `cfr_50` | 1 | NOAA endangered marine species incl. the right whale vessel speed rule; 5 sections / 31 chunks | Weekly |
+| 29 CFR 1915–1919 | `cfr_29` | 1 | OSHA shipyards, marine terminals, longshoring, gear certification; 312 sections / 710 chunks | Weekly |
 | 46 USC Subtitle II | `usc_46` | 1 | Full | Continuous |
-| NVIC | `nvic` | 2 | Full set — 1,638 sections / 4,202 chunks | Weekly via Celery `update_regulations` (last 2026-09-06) |
+| 33 USC (maritime chapters) | `usc_33` | 1 | Rivers and Harbors Act 401–467, Bridge-to-Bridge Act 1201–1208, CWA 1321–1322, APPS 1901–1915, OPA 90 2701–2762 (USLM release point); 149 sections / 285 chunks | Manual |
+| EPA 2013 VGP | `epa_vgp` | 1 | Vessel General Permit, one section per part / appendix; 135 sections / 352 chunks. Binds vessels ≥79 ft until the Coast Guard VIDA rules take effect | Static |
+| NVIC | `nvic` | 2 | 244 circulars / 3,115 sections / 9,554 chunks after the 2026-09-30 link fix (248 active in USCG's index; 02-23, 10-02 CH-1, 03-75 and 09-00 CH-1 are image-only, not ingested). 04-08 Ch-2 and 09-94 (cancelled) retired | Weekly via Celery `update_regulations` |
+| CG-CVC guidance | `uscg_cvc` | 2 | CG-CVC (and CG-543 / CG-MOC / CG-PCV) policy letters not marked cancelled, MMS work instructions, inspection forms: 87 documents / 1,268 chunks. 12 letters are scans with no text layer (read from `data/ocr/uscg_cvc/` once OCR'd) | Monthly (Celery `update_uscg_guidance`) |
+| TVNCOE Subchapter M | `uscg_towing` | 2 | Sub M FAQs by part, UTV Guidebook, applicability flowchart, ITV job aid, small entity guide: 16 documents / 283 chunks | Monthly |
+| VTS & waterways | `uscg_waterways` | 2 | 12 VTS user manuals (NAVCEN) + 5 District 8 Waterways Action Plans: 17 documents / 881 chunks | Monthly |
 | NMC Policy | `nmc_policy` | 2 | Full | Manual |
-| NMC Checklist | `nmc_checklist` | 2 | Full | Manual |
-| USCG MSM | `uscg_msm` | 2 | All current chapters | Manual |
-| USCG Bulletins | `uscg_bulletin` | 3 | 2023-04 to 2026-04 window | Discovery scheduled |
+| NMC Checklist | `nmc_checklist` | 2 | The 112 checklists on NMC's checklist page + the four TOARs (NVIC 03-16 encl. 2–5) + the application guides: 122 sections / 476 chunks | Monthly (checklist page) |
+| USCG MSM | `uscg_msm` | 2 | 72 MSM chapters (Vols II A–G, III, V) + the Merchant Mariner Medical Manual (COMDTINST M16721.48, 25 chapters): 97 sections / 3,332 chunks | Manual |
+| USCG Safety Alerts | `uscg_safety_alert` | 3 | 181 CG-INV Safety Alerts (since 1996) + 111 Findings of Concern: 292 documents / 646 chunks | Monthly |
+| USCG Bulletins | `uscg_bulletin` | 3 | Policy, safety and credential bulletins only: 28 documents / 62 chunks after the 2026-09-30 prune of 3,332 expired rows (LNM, BNM, closures, river stages, port conditions, GPS / NANU, CG-internal ALCOASTs) | Daily from the GovDelivery feed (Celery `update_uscg_bulletins`) |
 | SOLAS | `solas` | 1 | Full + Jan 2026 supplement; re-parsed 2026-09-26 (II-1 / II-2 / XI-1 / XI-2 named correctly, hyphenated regulations split, stale rows pruned): 848 chunks | Manual |
 | MARPOL | `marpol` | 1 | Full + supplements; split into 140 regulation sections 2026-09-26 (610 chunks). Missing from the scan: Annex VI Regs 11, 19, 20 and the opening pages of Annex I Regs 10, 26 and Annex VI Reg 13 | Manual |
 | COLREGs | `colregs` | 1 | Full | Static |
@@ -48,7 +58,7 @@ vague about it"). This document is for engineering planning.
 | Australia NSCV | `nscv` | 1 | National Standard for Commercial Vessels — DCV operational standard. 1,207 chunks. (D6.97 AU sprint) | Manual |
 | USCG NMC Exam Bank | `nmc_exam_bank` | 4 | National Maritime Center merchant-mariner exam questions. Powers Study Tools (D6.83). 2,938 chunks. | Manual |
 
-**~52,000 chunks pre-D6.93. Class-society corpus added 9,281 (D6.93). D6.97 corpus pivot added another ~19,400 chunks (BV 7,213 + IACS CSR 1,000 + COSWP ~700 + Cyprus 1,484 + Panama 1,376 + AU statutes 338 + NSCV 1,207 + NMC exam bank 2,938 + IMO Symbols 25 + per-Reg/Tier-2-enrichment net deltas across SOLAS + 10 IMO codes). Live total 2026-09-10: 106,041 chunks across 66 sources; 2026-09-26: 92,336 after the SOLAS re-parse (1,739 → 848) and the cfr_49 scope (15,967 → 3,145); then 91,892 after pruning stale rows in `marpol_amend` (−311 resolution-level duplicates), `stcw_amend` (−14), `cfr_46` (−52, 46 CFR 298 no longer in eCFR) and `cfr_33` (−68, mostly expired temporary rules); then 91,801 after the MARPOL per-regulation re-parse (702 → 610) and the IMDG duplicate-header fix (+1). `cfr_*` refreshed weekly by Celery `update_regulations` (Sundays 02:00 UTC), current to eCFR 2026-09-03.**
+**~52,000 chunks pre-D6.93. Class-society corpus added 9,281 (D6.93). D6.97 corpus pivot added another ~19,400 chunks (BV 7,213 + IACS CSR 1,000 + COSWP ~700 + Cyprus 1,484 + Panama 1,376 + AU statutes 338 + NSCV 1,207 + NMC exam bank 2,938 + IMO Symbols 25 + per-Reg/Tier-2-enrichment net deltas across SOLAS + 10 IMO codes). Live total 2026-09-10: 106,041 chunks across 66 sources; 2026-09-26: 92,336 after the SOLAS re-parse (1,739 → 848) and the cfr_49 scope (15,967 → 3,145); then 91,892 after pruning stale rows in `marpol_amend` (−311 resolution-level duplicates), `stcw_amend` (−14), `cfr_46` (−52, 46 CFR 298 no longer in eCFR) and `cfr_33` (−68, mostly expired temporary rules); then 91,801 after the MARPOL per-regulation re-parse (702 → 610) and the IMDG duplicate-header fix (+1); then **99,786 across 76 sources** on 2026-09-30 (ten new sources +5,236, NVIC +3,451 net, Medical Manual +284, NMC checklists +443; `uscg_bulletin` 3,392 → 62). `cfr_*` refreshed weekly by Celery `update_regulations` (Sundays 02:00 UTC), current to eCFR 2026-09-03.**
 
 ## Per-section granularity improvements (Sprint D6.97 #45, #47)
 
@@ -163,7 +173,17 @@ gives hard severance:
 
 ## Discovery & freshness
 
-Currently manual `--fresh` ingest for each source. NMC and NVIC have
-scheduled discovery (Celery beat), other sources do not. Automating
-discovery for new sources is parked — wave 1 corpora need 1-2 manual
-re-ingests first to learn failure modes.
+Celery Beat (`apps/api/celery_beat.py`), every run through `scripts/run_ingest.sh`:
+
+| Task | When (UTC) | Sources |
+|---|---|---|
+| `update_regulations` | Sundays 02:00 | cfr_33, cfr_46, cfr_49, cfr_40, cfr_47, cfr_50, cfr_29, nvic |
+| `update_uscg_bulletins` | daily 11:15 | uscg_bulletin: new items in GovDelivery's feed (~30 h deep), decided by subject, no LLM unless `USCG_BULLETIN_LLM=1`; `--no-notify` |
+| `update_uscg_guidance` | 5th of the month, 18:30 | uscg_safety_alert, uscg_cvc, uscg_towing, uscg_waterways, nmc_checklist |
+
+Listing-page sources re-read their page every run, download a file again
+when its link (`?ver=`) changes, and embed only changed chunks. A listing
+under half its saved size keeps the saved index. Documents withdrawn from
+a listing stay stored until a `--prune-stale`. Everything else is manual
+`--fresh` / `--update`; the four corpus-refresh systemd timers stay
+disabled (2026-08-10).
