@@ -228,6 +228,10 @@ QUESTIONS: list[TestQuestion] = [
             r"ACN 013/18",
             r"ACN 002/22",
             r"Fire Protection",
+            # 2026-09-30 — the CG-INV Safety Alerts are ingested (uscg_safety_alert):
+            # "Strike First Fire Extinguishers", "Counterfeit Portable Fire
+            # Extinguishers", "Fixed Gas Fire Extinguishing Systems", ...
+            r"Safety Alert: .*Extinguish",
         ],
         wrong_sub=[],  # this is a bulletin query; Subchapter isn't the axis
     ),
@@ -262,6 +266,10 @@ QUESTIONS: list[TestQuestion] = [
         expected=[
             r"NVIC 04-08",
             r"Medical and Physical",
+            # 2026-09-30 — NVIC 04-08 was cancelled in 2019 by the Merchant
+            # Mariner Medical Manual and is retired from the corpus; diabetes
+            # is in its Ch.14, Endocrine Conditions.
+            r"COMDTINST M16721\.48 Ch\.14\b",
         ],
         wrong_sub=[],
     ),
@@ -303,6 +311,11 @@ QUESTIONS: list[TestQuestion] = [
             r"Port Condition",
             r"High Water",
             r"Low Water",
+            # 2026-09-30 — expired bulletins (river stages, port conditions) are
+            # pruned; the standing procedures are the District 8 Waterways Action
+            # Plan and the VTS user manual for the river (uscg_waterways).
+            r"WAP Lower Mississippi",
+            r"VTS Lower Mississippi",
         ],
         wrong_sub=[],
     ),
