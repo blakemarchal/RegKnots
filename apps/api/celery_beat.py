@@ -14,6 +14,20 @@ celery.conf.beat_schedule = {
         # Every Sunday at 02:00 UTC
         "schedule": crontab(hour=2, minute=0, day_of_week="sunday"),
     },
+    "update-uscg-bulletins-daily": {
+        "task": "app.tasks.update_uscg_bulletins",
+        # 2026-09-30 — GovDelivery's USCG feed holds ~30 hours of bulletins.
+        # Daily at 11:15 UTC; takes seconds on a normal day.
+        "schedule": crontab(hour=11, minute=15),
+    },
+    "update-uscg-guidance-monthly": {
+        "task": "app.tasks.update_uscg_guidance",
+        # 2026-09-30 — safety alerts, CG-CVC, TVNCOE, VTS / WAPs, NMC
+        # checklists. 5th of the month, 18:30 UTC: never inside Sunday's
+        # 02:00 run (the worker runs two tasks at once; two ingests at once
+        # would not fit the box's free memory).
+        "schedule": crontab(hour=18, minute=30, day_of_month="5"),
+    },
     "send-trial-reminders-daily": {
         "task": "app.tasks.send_trial_expiring_reminders",
         # Daily at 14:00 UTC (morning in U.S.)

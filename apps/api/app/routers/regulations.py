@@ -264,6 +264,15 @@ async def _find_references(
     ]
 
 
+# 2026-09-30 — sources a chip's section may live in when the guessed source
+# has no such row (_load_regulation).
+_SIBLING_SOURCES: dict[str, tuple[str, ...]] = {
+    "uscg_cvc": ("nmc_policy", "uscg_bulletin"),
+    "nmc_policy": ("uscg_cvc", "nmc_checklist", "uscg_bulletin"),
+    "nmc_checklist": ("nmc_policy",),
+}
+
+
 async def _load_regulation(pool, source: str, section_number: str) -> RegulationDetail:
     """Shared loader used by both the path-based and query-based endpoints.
 
@@ -280,7 +289,7 @@ async def _load_regulation(pool, source: str, section_number: str) -> Regulation
     every paragraph-level chip click would 404 because the corpus
     is ingested at regulation level, not paragraph level.
     """
-    async def _fetch(sn: str):
+    async def _fetch(sn: str, src: str | None = None):
         async with pool.acquire() as conn:
             return await conn.fetch(
                 """
@@ -289,12 +298,28 @@ async def _load_regulation(pool, source: str, section_number: str) -> Regulation
                 WHERE source = $1 AND section_number = $2
                 ORDER BY chunk_index
                 """,
-                source,
+                src or source,
                 sn,
             )
 
     rows = await _fetch(section_number)
     resolved_sn = section_number
+
+    # 2026-09-30 — the chip's source is the frontend's guess from the
+    # citation's shape, and a few identifier families span sources
+    # (CG-CVC PL 15-03 is stored with the NMC letters, the other CVC
+    # letters in uscg_cvc). The exact section in a sibling source wins
+    # over the suffix, normalize and references fallbacks below.
+    if not rows:
+        for sibling in _SIBLING_SOURCES.get(source, ()):
+            rows = await _fetch(section_number, sibling)
+            if rows:
+                logger.info(
+                    "regulations lookup fallback (sibling): %s/%s -> %s",
+                    source, section_number, sibling,
+                )
+                source = sibling
+                break
 
     # Phase 2 fallback: strip granular suffix(es) and retry once.
     # Apply up to two strip passes (e.g., "Reg.2, para.5.1" → "Reg.2,

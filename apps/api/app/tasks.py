@@ -33,7 +33,25 @@ _AUTOMATABLE_SOURCES: list[str] = [
     "cfr_33",
     "cfr_46",
     "cfr_49",
+    # 2026-09-30 — scoped parts only (ingest/cfr_scope.py): EPA vessel
+    # rules, FCC maritime radio, the right whale rule, OSHA maritime.
+    "cfr_40",
+    "cfr_47",
+    "cfr_50",
+    "cfr_29",
     "nvic",
+]
+
+# 2026-09-30 — Coast Guard listing pages that change a few times a month at
+# most: safety alerts, CG-CVC letters and work instructions, TVNCOE Sub M
+# FAQs, VTS manuals / waterways action plans, NMC checklists. Monthly run
+# (update_uscg_guidance). Downloads only what is new or re-versioned.
+_MONTHLY_SOURCES: list[str] = [
+    "uscg_safety_alert",
+    "uscg_cvc",
+    "uscg_towing",
+    "uscg_waterways",
+    "nmc_checklist",
 ]
 
 
@@ -64,15 +82,66 @@ def update_regulations(self):
         len(_AUTOMATABLE_SOURCES), ", ".join(_AUTOMATABLE_SOURCES),
     )
 
+    failures = _run_ingest_sources(_AUTOMATABLE_SOURCES)
+    if failures:
+        # Retry the whole task if any source failed — the CLI is idempotent
+        # so sources that already succeeded will short-circuit on the retry.
+        msg = ", ".join(f"{s}: {e}" for s, e in failures)
+        logger.warning("Regulation update had %d failures: %s", len(failures), msg)
+        raise self.retry(exc=RuntimeError(msg), countdown=3600)
+
+    logger.info("Scheduled regulation update complete — all sources up to date")
+
+
+@celery.task(name="app.tasks.update_uscg_guidance", bind=True, max_retries=1)
+def update_uscg_guidance(self):
+    """Monthly refresh of the Coast Guard listing-page sources (2026-09-30).
+
+    Same per-source CLI invocation as update_regulations; see
+    _MONTHLY_SOURCES at module top.
+    """
+    logger.info(
+        "Starting monthly USCG guidance update for %d sources: %s",
+        len(_MONTHLY_SOURCES), ", ".join(_MONTHLY_SOURCES),
+    )
+    failures = _run_ingest_sources(_MONTHLY_SOURCES)
+    if failures:
+        msg = ", ".join(f"{s}: {e}" for s, e in failures)
+        logger.warning("USCG guidance update had %d failures: %s", len(failures), msg)
+        raise self.retry(exc=RuntimeError(msg), countdown=6 * 3600)
+    logger.info("Monthly USCG guidance update complete")
+
+
+@celery.task(name="app.tasks.update_uscg_bulletins")
+def update_uscg_bulletins():
+    """Daily: new bulletins from GovDelivery's USCG feed (2026-09-30).
+
+    The feed lists the latest ~30 hours, hence daily. `--update` reads only
+    feed items no earlier run decided and keeps policy / safety / credential
+    bulletins (sources/uscg_bulletin.py parse_feed; no LLM calls unless
+    USCG_BULLETIN_LLM=1). --no-notify: a banner a day would be noise. A
+    missed day is not retried; its bulletins have left the feed.
+    """
+    failures = _run_ingest_sources(["uscg_bulletin"], extra_args=("--no-notify",))
+    if failures:
+        logger.warning("USCG bulletin feed update failed: %s", failures)
+
+
+def _run_ingest_sources(sources: list[str], extra_args: tuple[str, ...] = ()) -> list[tuple[str, str]]:
+    """Run `--update` for each source in its own memory-capped unit.
+
+    Returns (source, reason) for each failure; one failure never stops the
+    rest.
+    """
     failures: list[tuple[str, str]] = []
-    for source in _AUTOMATABLE_SOURCES:
+    for source in sources:
         logger.info("Running ingest for source=%s", source)
         try:
             # run_ingest.sh picks --pipe (not --pty) when stdout is not a
             # TTY, so stdout/stderr are still captured below and the
             # transient unit's exit code is forwarded by systemd-run --wait.
             result = subprocess.run(
-                [str(_RUN_INGEST), "--source", source, "--update"],
+                [str(_RUN_INGEST), "--source", source, "--update", *extra_args],
                 cwd=_INGEST_DIR,
                 capture_output=True,
                 text=True,
@@ -95,15 +164,7 @@ def update_regulations(self):
         except Exception as exc:
             logger.exception("Ingest for %s raised: %s", source, exc)
             failures.append((source, str(exc)[:200]))
-
-    if failures:
-        # Retry the whole task if any source failed — the CLI is idempotent
-        # so sources that already succeeded will short-circuit on the retry.
-        msg = ", ".join(f"{s}: {e}" for s, e in failures)
-        logger.warning("Regulation update had %d failures: %s", len(failures), msg)
-        raise self.retry(exc=RuntimeError(msg), countdown=3600)
-
-    logger.info("Scheduled regulation update complete — all sources up to date")
+    return failures
 
 
 @celery.task(name="app.tasks.send_trial_expiring_reminders")
