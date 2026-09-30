@@ -40,8 +40,26 @@ _INV = ("https://www.dco.uscg.mil/Our-Organization/Assistant-Commandant-for-Prev
 LIST_URL = _INV + "Safety-Alerts/"
 FOC_URL = _INV + "Findings-of-Concern/"
 
-_NUMBER = re.compile(r"^(\d{1,2}-\d{2})\s*(?:CH\s*-?\s*0?(\d+))?", re.I)
-_FOC_FILE = re.compile(r"USCGFOC_(\d{3})-(\d{2})\.pdf", re.I)
+# "10-10 (b)", "01-12(A)", "20-25 CH1"
+_NUMBER = re.compile(r"^(\d{1,2}-\d{2})\s*(?:\(\s*([A-Za-z])\s*\))?\s*(?:CH\s*-?\s*0?(\d+))?", re.I)
+# "USCGFOC_008-26.pdf", "USCGFOC_004_24.pdf", "USCGFOC_017_23_Corr01.pdf"
+_FOC_FILE = re.compile(r"USCGFOC_(\d{3})[-_](\d{2})(?:_Corr0*(\d+))?\.pdf", re.I)
+# the Findings table is paged: "?udt_40515_param_page=2"
+_PAGER = re.compile(r"[?&]udt_\d+_param_page=\d+")
+
+
+def _add(docs: dict[str, u.Doc], doc_id: str, title: str, url: str, published: str | None) -> None:
+    """Keep every listed document. CG-INV reused numbers (01-17 is an advisory
+    and a lessons-learned alert; 09-08 was issued in 1998, 2008 and 2009): a
+    later one with the same number gets its date added to the id."""
+    if doc_id in docs:
+        if docs[doc_id].url == url:
+            return
+        doc_id = f"{doc_id} ({published or len(docs)})"
+        if doc_id in docs:
+            return
+    docs[doc_id] = u.Doc(doc_id=doc_id, title=title, url=url, filename=u.safe_filename(doc_id),
+                         published=published)
 
 
 def discover(html: str) -> list[u.Doc]:
@@ -53,29 +71,38 @@ def discover(html: str) -> list[u.Doc]:
         m = _NUMBER.match(cells[0])
         if not m:
             continue
-        doc_id = f"USCG SA {m.group(1)}" + (f" CH-{m.group(2)}" if m.group(2) else "")
+        doc_id = (f"USCG SA {m.group(1)}" + (f"({m.group(2).lower()})" if m.group(2) else "")
+                  + (f" CH-{m.group(3)}" if m.group(3) else ""))
         title = cells[2] if len(cells) >= 4 else cells[-1]
         published = u.parse_date(cells[-1])
         if published:
             title = f"{title} ({published})"
-        docs.setdefault(doc_id, u.Doc(doc_id=doc_id, title=f"Coast Guard Safety Alert: {title}", url=pdfs[0],
-                                      filename=u.safe_filename(doc_id), published=published))
+        _add(docs, doc_id, f"Coast Guard Safety Alert: {title}", pdfs[0], published)
     return list(docs.values())
 
 
-def discover_findings(html: str) -> list[u.Doc]:
+def discover_findings(*pages: str) -> list[u.Doc]:
+    """Findings of Concern from one or more pages of the (paged) table."""
     docs: dict[str, u.Doc] = {}
-    for cells, links in u.rows(html, FOC_URL):
-        pdfs = [h for h, _ in links if u.is_pdf_href(h)]
-        m = _FOC_FILE.search(pdfs[0]) if pdfs else None
-        if len(cells) < 3 or not m:
-            continue
-        doc_id = f"USCG FOC {m.group(1)}-{m.group(2)}"
-        published = u.parse_date(cells[-1])
-        title = cells[1] + (f" ({published})" if published else "")
-        docs.setdefault(doc_id, u.Doc(doc_id=doc_id, title=f"Coast Guard Finding of Concern: {title}",
-                                      url=pdfs[0], filename=u.safe_filename(doc_id), published=published))
+    for html in pages:
+        for cells, links in u.rows(html, FOC_URL):
+            pdfs = [h for h, _ in links if u.is_pdf_href(h)]
+            m = _FOC_FILE.search(pdfs[0]) if pdfs else None
+            if len(cells) < 3 or not m:
+                continue
+            doc_id = f"USCG FOC {m.group(1)}-{m.group(2)}"
+            published = u.parse_date(cells[-1])
+            title = cells[1] + (f" ({published})" if published else "")
+            if m.group(3):
+                title += f" (correction {m.group(3)})"
+            _add(docs, doc_id, f"Coast Guard Finding of Concern: {title}", pdfs[0], published)
     return list(docs.values())
+
+
+def finding_pages(html: str) -> list[str]:
+    """URLs of the Findings table's other pages, from page 1's pager links."""
+    pages = {absolute for absolute, _ in u.links(html, FOC_URL) if _PAGER.search(absolute)}
+    return sorted(pages)
 
 
 def discover_and_download(raw_dir: Path, failed_dir: Path, console=None) -> tuple[int, int]:
@@ -84,7 +111,9 @@ def discover_and_download(raw_dir: Path, failed_dir: Path, console=None) -> tupl
         logger.warning("uscg_safety_alert: no alerts listed; the page layout may have changed")
         return (0, 1)
     try:
-        findings = discover_findings(u.fetch_html(FOC_URL))
+        with u.client() as http:
+            first = u.fetch_html(FOC_URL, http)
+            findings = discover_findings(first, *[u.fetch_html(url, http) for url in finding_pages(first)])
     except Exception as exc:  # the alerts still refresh without them
         logger.warning("uscg_safety_alert: Findings of Concern page failed: %s", exc)
         findings = []

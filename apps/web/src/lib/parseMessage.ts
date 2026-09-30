@@ -298,11 +298,12 @@ const CITATION_PATTERNS: CitationPattern[] = [
     sourceHint: 'uscg_cvc',
     toSection: m => m[1],
   },
-  // USCG Marine Safety Alerts — "USCG SA 15-26", "Safety Alert 20-25 CH-1"
+  // USCG Marine Safety Alerts — "USCG SA 15-26", "Safety Alert 20-25 CH-1",
+  // "USCG SA 10-10(b)" (CG-INV lettered some alerts)
   {
-    re: /\b(?:USCG\s+SA|(?:USCG\s+)?(?:Marine\s+)?Safety\s+Alert)\s+(?:No\.\s*)?(\d{1,2}-\d{2})(?:\s+CH-?(\d+))?\b/g,
+    re: /\b(?:USCG\s+SA|(?:USCG\s+)?(?:Marine\s+)?Safety\s+Alert)\s+(?:No\.\s*)?(\d{1,2}-\d{2})(?:\s*\(([a-zA-Z])\))?(?:\s+CH-?(\d+))?(?![\w(])/g,
     sourceHint: 'uscg_safety_alert',
-    toSection: m => `USCG SA ${m[1]}${m[2] ? ` CH-${m[2]}` : ''}`,
+    toSection: m => `USCG SA ${m[1]}${m[2] ? `(${m[2].toLowerCase()})` : ''}${m[3] ? ` CH-${m[3]}` : ''}`,
   },
   // Findings of Concern from casualty investigations — "USCG FOC 006-26",
   // "Finding of Concern 006-26"

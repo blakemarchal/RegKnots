@@ -177,6 +177,31 @@ def test_findings_of_concern_discovery():
     assert docs[0].url.endswith("/INV/foc/USCGFOC_008-26.pdf") and " " not in docs[0].url
 
 
+def test_findings_span_pages_and_older_file_names():
+    page1 = """<table><tr><td><a href="/foc/USCGFOC_004_24.pdf">x</a></td><td>Older naming</td><td>3/1/2024</td></tr></table>
+    <a href="?udt_40515_param_page=2">2</a><a href="?udt_40515_param_page=3">3</a><a href="?udt_40515_param_page=2">2</a>"""
+    page2 = """<table><tr><td><a href="/foc/USCGFOC_017_23_Corr01.pdf">x</a></td><td>Corrected finding</td><td>9/1/2023</td></tr></table>"""
+    assert uscg_safety_alert.finding_pages(page1) == [
+        uscg_safety_alert.FOC_URL + "?udt_40515_param_page=2", uscg_safety_alert.FOC_URL + "?udt_40515_param_page=3"]
+    docs = uscg_safety_alert.discover_findings(page1, page2)
+    assert [d.doc_id for d in docs] == ["USCG FOC 004-24", "USCG FOC 017-23"]
+    assert docs[1].title.endswith("Corrected finding (2023-09-01) (correction 1)")
+
+
+def test_alert_letters_and_reused_numbers_each_keep_a_section():
+    html = """<table>
+    <tr><td>10-10 (a)</td><td><a href="/a/1010a.pdf">x</a></td><td>Wrong Directions</td><td>12/21/2010</td></tr>
+    <tr><td>10-10 (b)</td><td><a href="/a/1010b.pdf">x</a></td><td>Simple Failures Render CO2 System Inoperative</td><td>12/21/2010</td></tr>
+    <tr><td>01-17</td><td><a href="/a/Adv0117.pdf">x</a></td><td>COD services</td><td>05/16/2017</td></tr>
+    <tr><td>01-17</td><td><a href="/a/LL0117.pdf">x</a></td><td>Lingering Lye</td><td>03/28/2017</td></tr>
+    <tr><td>09-08</td><td><a href="/2009/0908.pdf">x</a></td><td>Cargo pump engines (update)</td><td>4/15/2009</td></tr>
+    <tr><td>09-08</td><td><a href="/1998/0908.pdf">x</a></td><td>Safety - We are the Enemy</td><td>6/7/1998</td></tr></table>"""
+    ids = [d.doc_id for d in uscg_safety_alert.discover(html)]
+    assert ids == ["USCG SA 10-10(a)", "USCG SA 10-10(b)", "USCG SA 01-17", "USCG SA 01-17 (2017-03-28)",
+                   "USCG SA 09-08", "USCG SA 09-08 (1998-06-07)"]
+    assert len({d.filename for d in uscg_safety_alert.discover(html)}) == 6
+
+
 # ── uscg_towing ──────────────────────────────────────────────────────────────
 
 @pytest.mark.parametrize("text,doc_id", [
