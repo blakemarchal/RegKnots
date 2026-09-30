@@ -63,14 +63,19 @@ class ECFRClient:
             return resp.json()
 
     async def fetch_full_xml(
-        self, title_number: int, as_of: date | None = None
+        self, title_number: int, as_of: date | None = None, part: int | None = None
     ) -> bytes:
         """Fetch the complete CFR title as XML. Returns raw bytes for lxml.
 
         Uses a 10-minute timeout — Title 46 can be 50-100 MB.
+
+        2026-09-30 — part: fetch just that part (the root is then the part's
+        DIV5). The endpoint requires a compressed response; httpx asks for one.
         """
         as_of = as_of or date.today()
         url = f"{VERSIONER}/full/{as_of.isoformat()}/title-{title_number}.xml"
+        if part is not None:
+            url += f"?part={part}"
         async with httpx.AsyncClient() as client:
             await self._throttle()
             response = await client.get(url, timeout=600.0)

@@ -23,7 +23,7 @@ from rich.progress import (
 )
 
 from ingest import store
-from ingest.cfr_scope import scope_sections
+from ingest.cfr_scope import CFR_PART_SCOPE, PART_FETCH, scope_sections
 from ingest.chunker import chunk_section
 from ingest.config import IngestSettings, settings as _default_settings
 from ingest.ecfr_client import ECFRClient
@@ -106,8 +106,14 @@ async def run_pipeline(
             fetch_task = progress.add_task(
                 f"Fetching Title {title_number} XML…", total=1
             )
-            xml_bytes = await ecfr.fetch_full_xml(title_number, as_of=as_of)
-            mb = len(xml_bytes) / 1_048_576
+            # 2026-09-30 — scoped titles (cfr_scope.PART_FETCH) come part by part.
+            if source in PART_FETCH:
+                part_xml = [await ecfr.fetch_full_xml(title_number, as_of=as_of, part=part)
+                            for part in sorted(CFR_PART_SCOPE[source])]
+                mb = sum(len(x) for x in part_xml) / 1_048_576
+            else:
+                xml_bytes = await ecfr.fetch_full_xml(title_number, as_of=as_of)
+                mb = len(xml_bytes) / 1_048_576
             progress.update(
                 fetch_task,
                 completed=1,
@@ -116,7 +122,10 @@ async def run_pipeline(
 
             # ── 4. Parse sections ────────────────────────────────────────────
             parse_task = progress.add_task("Parsing sections…", total=1)
-            sections = parse_title_xml(xml_bytes, title_number, as_of)
+            if source in PART_FETCH:
+                sections = [s for x in part_xml for s in parse_title_xml(x, title_number, as_of)]
+            else:
+                sections = parse_title_xml(xml_bytes, title_number, as_of)
             # 2026-09-25 — keep only the parts this source carries (cfr_scope.py).
             sections = scope_sections(source, sections)
             result.sections_found = len(sections)

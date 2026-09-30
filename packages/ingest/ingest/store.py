@@ -13,7 +13,7 @@ from datetime import date
 
 import asyncpg
 
-from ingest.models import EmbeddedChunk, TITLE_NAMES
+from ingest.models import EmbeddedChunk, title_name
 
 logger = logging.getLogger(__name__)
 
@@ -126,7 +126,7 @@ def _to_row(c: EmbeddedChunk) -> tuple:
     return (
         c.source,
         c.up_to_date_as_of.isoformat(),          # source_version
-        TITLE_NAMES[c.title_number],             # title
+        title_name(c.source, c.title_number),    # title
         c.section_number,
         c.section_title,
         c.chunk_text,                            # full_text
@@ -163,11 +163,28 @@ _SOURCE_TO_JURISDICTIONS: dict[str, list[str]] = {
     "nmc_checklist":    ["us"],
     "uscg_msm":         ["us"],
     "uscg_bulletin":    ["us"],
+    # 2026-09-30 — synced with rag/jurisdiction.py: these were backfilled in the
+    # database but missing here, so a re-ingest would have re-tagged them ['intl'].
+    "nmc_exam_bank":    ["us"],
+    # 2026-09-30 — U.S. inland / Coast Guard sources (docs/sprint-audits/corpus-gap-audit-inland-2026-09-29.md §4).
+    "cfr_40":         ["us"],  # EPA: vessel discharges (VIDA), oil discharge, MSDs, marine engines
+    "cfr_47":         ["us"],  # FCC: stations in the maritime services
+    "cfr_50":         ["us"],  # NOAA: right whale speed and approach rules
+    "cfr_29":         ["us"],  # OSHA: shipyards, marine terminals, longshoring
+    "usc_33":         ["us"],  # 33 USC maritime chapters: OPA 90, CWA 311/312, APPS, VBBRA, Rivers and Harbors
+    "uscg_cvc":       ["us"],  # CG-CVC policy letters, work instructions, forms
+    "uscg_towing":    ["us"],  # TVNCOE Subchapter M FAQs and guides
+    "uscg_safety_alert": ["us"],  # USCG Safety Alerts (CG-INV)
+    "uscg_waterways": ["us"],  # VTS user manuals, D8 Waterways Action Plans
+    "epa_vgp":        ["us"],  # EPA 2013 Vessel General Permit
     # UK national
     "mca_mgn":          ["uk"],
     "mca_msn":          ["uk"],
+    "coswp":            ["uk"],
     # Australian national
     "amsa_mo":          ["au"],
+    "au_statutes":      ["au"],
+    "nscv":             ["au"],
     # Liberian (LISCR) national
     "liscr_mn":         ["lr"],
     # Marshall Islands (IRI) national
@@ -176,6 +193,8 @@ _SOURCE_TO_JURISDICTIONS: dict[str, list[str]] = {
     "mpa_sc":           ["sg"],
     # Hong Kong (Sprint D6.22)
     "mardep_msin":      ["hk"],
+    "cy_dms":           ["cy"],
+    "pa_mmc":           ["pa"],
     # Canada (Sprint D6.22)
     "tc_ssb":           ["ca"],
     # Bahamas (Sprint D6.22)
@@ -209,6 +228,10 @@ _SOURCE_TO_JURISDICTIONS: dict[str, list[str]] = {
     "imo_hsc":          ["intl"],
     "imo_iamsar":       ["intl"],
     "mou_psc":          ["intl"],
+    "imo_symbols":      ["intl"],
+    "imo_mepc":         ["intl"],
+    "imo_msc":          ["intl"],
+    "mlc":              ["intl"],
     # International (universal)
     "solas":            ["intl"],
     "solas_supplement": ["intl"],

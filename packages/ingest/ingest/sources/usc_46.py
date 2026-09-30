@@ -168,7 +168,8 @@ def _find_title(root: ET.Element) -> ET.Element:
     return title
 
 
-def _walk_for_sections(elem: ET.Element, sections_out: list[Section], chapter_label: str | None = None):
+def _walk_for_sections(elem: ET.Element, sections_out: list[Section], chapter_label: str | None = None,
+                       *, title: int = 46, source: str = SOURCE, as_of: date = SOURCE_DATE):
     """Recursively walk the tree collecting <section> elements.
 
     Tracks the most-recent chapter heading so every section can be tagged
@@ -181,26 +182,30 @@ def _walk_for_sections(elem: ET.Element, sections_out: list[Section], chapter_la
         heading_elem = elem.find("u:heading", _NS)
         raw_num = (num_elem.get("value") or "") if num_elem is not None else ""
         raw_heading = _plain_text(heading_elem).strip() if heading_elem is not None else ""
-        new_label = f"46 USC Chapter {raw_num}".strip()
+        new_label = f"{title} USC Chapter {raw_num}".strip()
         if raw_heading:
             new_label = f"{new_label} — {raw_heading}"
         # Descend using this chapter's label
         for child in elem:
-            _walk_for_sections(child, sections_out, chapter_label=new_label)
+            _walk_for_sections(child, sections_out, chapter_label=new_label,
+                               title=title, source=source, as_of=as_of)
         return
 
     if tag == "section":
-        sec = _section_to_ingest(elem, chapter_label)
+        sec = _section_to_ingest(elem, chapter_label, title=title, source=source, as_of=as_of)
         if sec is not None:
             sections_out.append(sec)
         return
 
     # Subtitle, part, or other container: descend
     for child in elem:
-        _walk_for_sections(child, sections_out, chapter_label=chapter_label)
+        _walk_for_sections(child, sections_out, chapter_label=chapter_label,
+                           title=title, source=source, as_of=as_of)
 
 
-def _section_to_ingest(section_elem: ET.Element, chapter_label: str | None) -> Section | None:
+# 2026-09-30 — title / source / as_of are parameters so usc_33 reuses this walker.
+def _section_to_ingest(section_elem: ET.Element, chapter_label: str | None,
+                       *, title: int = 46, source: str = SOURCE, as_of: date = SOURCE_DATE) -> Section | None:
     if _is_repealed(section_elem):
         return None
     identifier = section_elem.get("identifier", "")
@@ -221,16 +226,16 @@ def _section_to_ingest(section_elem: ET.Element, chapter_label: str | None) -> S
     if not body.strip():
         return None
 
-    section_number = f"46 USC {raw_num}"
+    section_number = f"{title} USC {raw_num}"
     section_title = heading or f"Section {raw_num}"
 
     return Section(
-        source=SOURCE,
+        source=source,
         title_number=TITLE_NUMBER,
         section_number=section_number,
         section_title=section_title,
         full_text=body,
-        up_to_date_as_of=SOURCE_DATE,
+        up_to_date_as_of=as_of,
         parent_section_number=chapter_label,
     )
 

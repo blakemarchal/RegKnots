@@ -226,6 +226,10 @@ def test_a_scanned_nvic_is_read_from_its_ocr_text(tmp_path, monkeypatch):
 def test_extra_documents_are_parsed_when_their_pdf_is_present(tmp_path, monkeypatch):
     raw = tmp_path / "raw"
     _index(raw, [])
+    # 2026-09-30 — the list is empty in production (04-08 Ch-2 was retired); the
+    # mechanism stays for the next document the index doesn't list.
+    monkeypatch.setattr(nvic, "_EXTRA_DOCS", [(
+        nvic.NvicMeta("04-08 Ch-2", "Medical guidelines", date(2016, 4, 25), ""), "NVIC 04-08 Ch-2.pdf")])
     seen = []
     monkeypatch.setattr(nvic, "_parse_nvic_pdf", lambda path, meta: seen.append(path.name) or [
         Section(source="nvic", title_number=0, section_number=f"NVIC {meta.number} §1",

@@ -27,7 +27,25 @@ CFR_PART_SCOPE: dict[str, frozenset[int]] = {
         1520,                    # TSA: sensitive security information (33 CFR 104 plans)
         1570, 1572,              # TSA: TWIC and security threat assessments
     }),
+    # 2026-09-30 — titles we carry only a few maritime parts of
+    # (docs/sprint-audits/corpus-gap-audit-inland-2026-09-29.md §4).
+    "cfr_40": frozenset({
+        110,                     # discharge of oil (the sheen rule; reporting)
+        139,                     # VIDA national standards for vessel incidental discharges
+        140,                     # marine sanitation device standards, no-discharge zones
+        1042, 1043,              # marine diesel engines; MARPOL Annex VI engines and fuel (EPA)
+    }),
+    "cfr_47": frozenset({80}),                        # FCC stations in the maritime services
+    "cfr_50": frozenset({224}),                       # NOAA endangered marine species (right whale speed and approach rules)
+    "cfr_29": frozenset({1915, 1917, 1918, 1919}),    # OSHA shipyards, marine terminals, longshoring, gear certification
 }
+
+# 2026-09-30 — sources fetched one scoped part at a time
+# (ecfr_client.fetch_full_xml(part=…)) instead of as a whole title. Title 40 is
+# the largest CFR title; whole-title XML parsed in memory would not fit the
+# ingest unit's 1.5 GB cap, and the other three would download mostly unused
+# text. cfr_49 still takes the whole title.
+PART_FETCH: frozenset[str] = frozenset({"cfr_40", "cfr_47", "cfr_50", "cfr_29"})
 
 _PART_RE = re.compile(r"^\d+\s+CFR\s+(\d+)")
 

@@ -88,17 +88,19 @@ def test_other_sources_are_unscoped():
 
 
 def test_a_scoped_report_keeps_rows_of_documents_the_parse_did_not_produce():
-    """2026-09-27 — nvic: OCR'd NVICs, NVIC 04-08 Ch-2 or an NVIC that left the
-    USCG index are not in a --nvic run (or failed to parse); their rows stay."""
+    """2026-09-27 — nvic: OCR'd NVICs or an NVIC that left the USCG index are not
+    in a --nvic run (or failed to parse); their rows stay. 2026-09-30 — a retired
+    NVIC (nvic.RETIRED, e.g. 04-08 Ch-2) is the exception: its rows are stale."""
     from ingest.sources import nvic
     stored = [_row("NVIC 06-72 §4", 0), _row("NVIC 06-72 §4", 5),        # stale tail
               _row("NVIC 07-68 §1", 0), _row("NVIC 04-08 Ch-2 §1", 0), _row("odd name", 0)]
     chunks = [_chunk("NVIC 06-72 §4", 0), _chunk("NVIC 06-72 Encl.1", 0)]
     report = asyncio.run(prune.build_report(_Pool(stored), "nvic", chunks, nvic.prune_scope))
-    assert [(r["section_number"], r["chunk_index"]) for r in report.stale] == [("NVIC 06-72 §4", 5)]
-    assert report.kept_out_of_scope == {"NVIC 07-68": 1, "NVIC 04-08 Ch-2": 1, "odd name": 1}
+    assert [(r["section_number"], r["chunk_index"]) for r in report.stale] == [
+        ("NVIC 06-72 §4", 5), ("NVIC 04-08 Ch-2 §1", 0)]
+    assert report.kept_out_of_scope == {"NVIC 07-68": 1, "odd name": 1}
     assert report.missing == [("NVIC 06-72 Encl.1", 0)]
-    assert "3 rows of documents this parse did not produce kept" in report.summary_lines()[0]
+    assert "2 rows of documents this parse did not produce kept" in report.summary_lines()[0]
     unscoped = asyncio.run(prune.build_report(_Pool(stored), "nvic", chunks))
     assert len(unscoped.stale) == 4
 

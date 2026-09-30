@@ -42,7 +42,7 @@ _TITLE_OVERRIDES: dict[str, str] = {
 # Source tag for all COLREGs content
 SOURCE = "colregs"
 
-# title_number=0 → TITLE_NAMES[0] in store._to_row
+# title_number=0: non-CFR (store._to_row stores models.title_name(source, 0), the source name)
 TITLE_NUMBER = 0
 
 # Target token budget for merged chunks (never merge across this boundary)

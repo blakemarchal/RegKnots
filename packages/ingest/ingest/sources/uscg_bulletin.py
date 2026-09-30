@@ -142,6 +142,71 @@ _DENY_PHRASES = [
 ]
 
 
+# ── Ephemeral kinds (2026-09-30) ─────────────────────────────────────────
+#
+# Time-bound operational traffic: weekly Local Notice to Mariners notices,
+# broadcast notices to mariners (BNMs) and their updates, closures and river
+# stages, storm and port conditions, GPS / NANU / ice advisories. Stale by the
+# time anyone asks, and all of it tagged 'us', so it crowded every U.S. query:
+# 2,406 of 2,629 stored documents (corpus gap audit 2026-09-29 §3.3). Rejected
+# before Pass 1 (a Sector VTS "MSIB ... High Water" is still ephemeral) and
+# pruned from the corpus (prune_ephemeral). The live sources are NAVCEN's
+# LNMs and the sector MSIB pages.
+
+_EPHEMERAL: list[tuple[str, re.Pattern]] = [
+    ("outlook_or_lnm", re.compile(
+        r"\boutlook\b|\bdaily\b|(?:\b|\d)lnms?\b|local notices? to mariners|light list", re.I)),
+    ("broadcast_notice", re.compile(
+        r"\be?bnms?\b|\bumib\b|broadcast notice|\bupdate-\d+\b|\bupdate\s+0?\d{1,2}\b"
+        r"|^\s*cancell?ation\b|mariners are advised"
+        r"|^\s*(?:safety|update|scheduled|summary|security|marine event)\s*/", re.I)),
+    ("closure_or_river_stage", re.compile(
+        r"safety zones?|security zones?|\bclosures?\b|\bclosed\b|\bcloser\b|\bre-?open|\bopen to all\b"
+        r"|\brestrictions?\b|high water|low water|river stages?|\bgauge\b|\bgage\b|\bfalling\b|\brising\b"
+        r"|elevated winds|high winds|restricted visibility|impaired operations|system restored"
+        r"|safety measure|\bcat i{1,3}\b|\bdeviations?\b|temporary operating|revetment|dredg"
+        r"|^\s*vts\b", re.I)),
+    ("storm_or_port_condition", re.compile(
+        r"hurricane|tropical|\bstorms?\b|port conditions?|heavy weather|\bzulu\b|\byankee\b"
+        r"|x-ray|\bwhiskey\b", re.I)),
+    ("navigation_warning", re.compile(
+        r"\bnanu\b|\bgps\b|\bjday\b|iceberg|ice (?:conditions|report)"
+        r"|space operations|navigational warning|\bnavarea\b|\bhydro(?:lant|pac)\b", re.I)),
+    ("marine_event", re.compile(
+        r"marine event|regatta|fireworks|air show|grand prix|harborfest|mardi gras|boat parade", re.I)),
+    ("pandemic_measures", re.compile(r"covid|cor[oa]navirus", re.I)),
+]
+
+# Coast Guard internal messages (ALCOAST, ACN, ALAUX…) about units, training,
+# awards and personnel. The LLM pass accepted some as "ALCOAST_OPERATIONAL";
+# only those that also speak to mariners or boaters are kept.
+_INTERNAL_RE = re.compile(r"^\s*(?:ALCOAST|ACN|ALAUX|ALCGENL|ALCGPSC|ALCGRSV|ALCGOFF|ALCGCIV|ALDIST)\s+\d+/\d+", re.I)
+_MARINER_FACING_RE = re.compile(
+    r"visual distress|\bvhf\b|\bdsc\b|\bepirb|\bpfds?\b|life ?jackets?|recreational|boating safety"
+    r"|fire extinguisher|fire protection equipment|\brecall\b|merchant mariner|mariner credential"
+    r"|certificate of (?:number|documentation)|\bnvic\b|\bmarpol\b|\bsolas\b|\bstcw\b|ballast water"
+    r"|vessel inspection|commercial (?:fishing )?vessel|towing vessel|passenger vessel|\btwic\b|\bmarsec\b", re.I)
+
+
+def ephemeral_kind(subject: str) -> str | None:
+    """The ephemeral kind a bulletin subject belongs to, or None if durable."""
+    s = subject or ""
+    for kind, pattern in _EPHEMERAL:
+        if pattern.search(s):
+            return kind
+    return None
+
+
+def drop_reason(subject: str) -> str | None:
+    """Why a bulletin is not kept: an ephemeral kind, "internal_notice", or None."""
+    kind = ephemeral_kind(subject)
+    if kind:
+        return kind
+    if _INTERNAL_RE.search(subject or "") and not _MARINER_FACING_RE.search(subject or ""):
+        return "internal_notice"
+    return None
+
+
 @dataclass
 class ParsedBulletin:
     """Raw fields extracted from one bulletin HTML page, pre-filter."""
@@ -332,6 +397,27 @@ def _pass1_match(
         stamp = published_date.isoformat() if published_date else "undated"
         return f"NMC Announcement {stamp}", "NMC_ANNOUNCEMENT"
     return None
+
+
+# 2026-09-30 — subjects that name a maritime-regulatory instrument or topic
+# are accepted without the LLM (drop_reason has already removed the
+# ephemeral and internal kinds). E.g. "Amendments to STCW Basic Training
+# Requirements for Personal Safety and Social Responsibilities".
+_REGULATORY_SUBJECT_RE = re.compile(
+    r"\bSTCW\b|merchant mariners?|mariner credential|\bMMC\b|medical certificate"
+    r"|national maritime center|\bNMC\b|\bNVIC\b|policy letter|work instruction|safety alert"
+    r"|marine safety information|interim rule|final rule|proposed rule|rulemaking|federal register"
+    r"|subchapter [A-Z]\b|towing vessel|\b(?:33|46|49) CFR\b|\bMARSEC\b|\bTWIC\b|ballast water|\bVIDA\b"
+    r"|\bMARPOL\b|\bSOLAS\b|\bISM code\b|port state control|vessel inspection|certificate of inspection"
+    r"|marine casualty|drug (?:and|&) alcohol testing|\brecall\b|lithium|carbon monoxide", re.I)
+
+
+def _keyword_match(subject: str, published_date: date | None, gd_id: str) -> tuple[str, str] | None:
+    """A regulatory-keyword subject: (section_number, "KEYWORD_REGULATORY")."""
+    if not _REGULATORY_SUBJECT_RE.search(subject or ""):
+        return None
+    stamp = published_date.isoformat() if published_date else "undated"
+    return f"USCG REGULATORY {stamp} [{gd_id[:7]}]", "KEYWORD_REGULATORY"
 
 
 # ── Pass 2: Claude Haiku LLM classifier ─────────────────────────────────
@@ -626,6 +712,18 @@ _ALIAS_BUCKETS: list[tuple[str, tuple[str, ...], tuple[str, ...]]] = [
 ]
 
 _MAX_ALIASES = 8
+_ALIAS_VOCAB = {a.lower() for _name, _triggers, aliases in _ALIAS_BUCKETS for a in aliases}
+
+
+def strip_alias_tail(title: str) -> str:
+    """A stored section_title without the "(alias, alias)" block that
+    _title_with_aliases appends (its words would trip ephemeral_kind)."""
+    m = re.search(r"\s*\(([^()]*)\)\s*$", title or "")
+    if m:
+        items = {x.strip().lower() for x in m.group(1).split(",") if x.strip()}
+        if items and items <= _ALIAS_VOCAB:
+            return title[:m.start()]
+    return title
 
 
 def _select_aliases(subject: str, body: str) -> list[str]:
@@ -742,27 +840,53 @@ async def _fetch_and_prefilter_one(
         stats["rejected_parse"] += 1
         return None, None
 
-    # Pass 1 — subject-only deterministic match
-    p1 = _pass1_match(parsed.subject, parsed.published_date)
-    if p1 is not None:
-        canonical_id, bulletin_type = p1
+    verdict, detail = subject_verdict(parsed.subject, parsed.published_date, gd_id)
+    if verdict == "drop":
+        rejected_fh.write(f"{gd_id}\tdrop_{detail}\t{parsed.subject[:100]}\t\n")
+        stats["rejected"] += 1
+        stats["rejected_dropped"] = stats.get("rejected_dropped", 0) + 1
+        return None, None
+    if verdict == "accept":
+        canonical_id, bulletin_type = detail
         stats["accepted"] += 1
         stats["accepted_pass1"] += 1
         stats["accepted_by_type"][bulletin_type] = stats["accepted_by_type"].get(bulletin_type, 0) + 1
         # Return verdict encoded as "pass1|canonical_id|type"
         return parsed, f"pass1|{canonical_id}|{bulletin_type}"
-
-    # Pre-deny — cheap reject before LLM
-    deny_reason = _deny_prefilter(parsed.subject)
-    if deny_reason is not None:
+    if verdict == "deny":
         preview = parsed.body_text[:100].replace("\t", " ").replace("\n", " ")
-        rejected_fh.write(f"{gd_id}\t{deny_reason}\t{parsed.subject[:100]}\t{preview}\n")
+        rejected_fh.write(f"{gd_id}\t{detail}\t{parsed.subject[:100]}\t{preview}\n")
         stats["rejected"] += 1
         stats["rejected_predeny"] += 1
         return None, None
 
     # Candidate for Pass 2 LLM classification
     return parsed, None
+
+
+def subject_verdict(subject: str, published_date: date | None, gd_id: str):
+    """Decide a bulletin from its subject alone (2026-09-30).
+
+    ("drop", kind)          ephemeral or internal (drop_reason); checked first,
+                            since a Sector VTS "MSIB ... High Water" matches Pass 1
+    ("accept", (id, type))  Pass 1, or a regulatory keyword that is not a
+                            press or rescue release
+    ("deny", reason)        press / photo release, rescue or search report
+    ("ambiguous", None)     left to the LLM pass, when it runs
+    """
+    reason = drop_reason(subject)
+    if reason is not None:
+        return "drop", reason
+    p1 = _pass1_match(subject, published_date)
+    if p1 is not None:
+        return "accept", p1
+    deny = _deny_prefilter(subject)
+    if deny is not None:
+        return "deny", deny
+    kw = _keyword_match(subject, published_date, gd_id)
+    if kw is not None:
+        return "accept", kw
+    return "ambiguous", None
 
 
 def _build_accepted_from_parsed(
@@ -1086,3 +1210,237 @@ def parse_source(ids_file: Path) -> list[Section]:
     )
 
     return _build_sections(accepted)
+
+
+# ── Feed discovery (2026-09-30) ──────────────────────────────────────────
+#
+# The ids file came from a one-off Wayback crawl (April 2026), so discovery
+# stopped at its newest bulletin (2026-02-03). GovDelivery's public RSS feed
+# lists the account's latest 100 bulletins, about 30 hours of traffic, so
+# app.tasks.update_uscg_bulletins polls it daily (the CLI's --update). Each
+# new bulletin is decided from its subject (subject_verdict) and only the
+# accepted ones are fetched. Ambiguous ones are listed in feed_review.tsv;
+# the LLM pass classifies them only when USCG_BULLETIN_LLM=1. (Until 2026-08
+# the weekly refresh re-fetched the whole ids file and sent about 6,000
+# subjects a week to the LLM, most of them broadcast notices.)
+
+FEED_URL = "https://public.govdelivery.com/accounts/USDHSCG/feed.rss"
+FEED_SEEN = "feed_seen.txt"
+FEED_REVIEW = "feed_review.tsv"
+
+
+@dataclass
+class FeedItem:
+    gd_id: str
+    subject: str
+    published_date: date | None
+
+
+def parse_feed_xml(xml_text: str) -> list[FeedItem]:
+    """The feed's items as (GovDelivery id, subject, date)."""
+    import xml.etree.ElementTree as ET
+    from email.utils import parsedate_to_datetime
+
+    items: list[FeedItem] = []
+    for item in ET.fromstring(xml_text).iter("item"):
+        m = re.search(r"/bulletins/([0-9a-f]+)", item.findtext("link") or "")
+        if not m:
+            continue
+        published = None
+        try:
+            published = parsedate_to_datetime((item.findtext("pubDate") or "").strip()).date()
+        except (TypeError, ValueError):
+            pass
+        items.append(FeedItem(m.group(1), _strip_tags(item.findtext("title") or ""), published))
+    return items
+
+
+def seen_ids(ids_file: Path) -> set[str]:
+    """Every id already decided: the ids file plus feed_seen.txt."""
+    seen = set(_read_ids_file(ids_file)) if ids_file.exists() else set()
+    feed_seen = ids_file.parent / FEED_SEEN
+    if feed_seen.exists():
+        seen |= set(_read_ids_file(feed_seen))
+    return seen
+
+
+async def _process_feed_items(
+    items: list[FeedItem], anthropic_key: str | None, out_dir: Path,
+) -> tuple[list[AcceptedBulletin], list[FeedItem], dict]:
+    """Fetch and build the accepted items. Returns (accepted, for review, stats)."""
+    from collections import Counter
+
+    stats: Counter = Counter()
+    accepted: list[AcceptedBulletin] = []
+    review: list[FeedItem] = []
+    ambiguous: list[ParsedBulletin] = []
+    async with httpx.AsyncClient(headers={"User-Agent": _USER_AGENT}, follow_redirects=True) as client:
+        for it in items:
+            verdict, _detail = subject_verdict(it.subject, it.published_date, it.gd_id)
+            stats[f"feed_{verdict}"] += 1
+            if verdict == "ambiguous" and not anthropic_key:
+                review.append(it)
+            if verdict != "accept" and not (verdict == "ambiguous" and anthropic_key):
+                continue
+            html, _status = await _fetch_bulletin_html(client, it.gd_id)
+            parsed = _parse_bulletin_html(it.gd_id, html) if html else None
+            if parsed is None:
+                stats["fetch_or_parse_failed"] += 1
+                continue
+            # the page's subject and dateline are authoritative
+            verdict, detail = subject_verdict(parsed.subject, parsed.published_date, parsed.gd_id)
+            if verdict == "accept":
+                pdf_text = await _fetch_pdfs_for_accepted(client, parsed, stats)
+                accepted.append(_build_accepted_from_parsed(parsed, detail[0], detail[1], pdf_text, stats))
+            elif verdict == "ambiguous" and anthropic_key:
+                ambiguous.append(parsed)
+        if ambiguous:
+            with (out_dir / "llm_classifications.log").open("a", encoding="utf-8") as fh:
+                results = await _classify_batch(ambiguous, anthropic_key, fh)
+            for parsed in ambiguous:
+                res = results.get(parsed.gd_id)
+                if not (res and res[0]):
+                    stats["llm_rejected"] += 1
+                    continue
+                canonical, type_tag = _canonical_from_llm_accept(
+                    parsed.subject, res[1], parsed.published_date, parsed.gd_id)
+                pdf_text = await _fetch_pdfs_for_accepted(client, parsed, stats)
+                accepted.append(_build_accepted_from_parsed(parsed, canonical, type_tag, pdf_text, stats))
+    stats["accepted"] = len(accepted)
+    return accepted, review, dict(stats)
+
+
+def parse_feed(ids_file: Path) -> list[Section]:
+    """Sections for bulletins in the feed that no earlier run decided.
+
+    Every new id goes to feed_seen.txt, accepted ones also to the ids file
+    (so a full --fresh run keeps them), ambiguous ones to feed_review.tsv.
+    The feed covers about 30 hours, so a gap of more than a day misses
+    bulletins; the log warns when every item in the feed was new.
+    """
+    import concurrent.futures
+    import json
+
+    ids_file = Path(ids_file)
+    out_dir = ids_file.parent
+    out_dir.mkdir(parents=True, exist_ok=True)
+    resp = httpx.get(FEED_URL, headers={"User-Agent": _USER_AGENT}, timeout=_FETCH_TIMEOUT,
+                     follow_redirects=True)
+    resp.raise_for_status()
+    items = parse_feed_xml(resp.text)
+    seen = seen_ids(ids_file)
+    new = [it for it in items if it.gd_id not in seen]
+    logger.info("uscg_bulletin feed: %d items, %d new", len(items), len(new))
+    if items and len(new) == len(items) and seen:
+        logger.warning("uscg_bulletin feed: every item is new; bulletins older than the feed "
+                       "(about 30 hours) were missed since the last run")
+
+    anthropic_key = None
+    if os.environ.get("USCG_BULLETIN_LLM") == "1":
+        from ingest.config import settings as _ingest_settings
+        anthropic_key = _ingest_settings.anthropic_api_key or None
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        accepted, review, stats = pool.submit(
+            lambda: asyncio.run(_process_feed_items(new, anthropic_key, out_dir))).result()
+
+    if new:
+        with (out_dir / FEED_SEEN).open("a", encoding="utf-8") as fh:
+            fh.writelines(f"{it.gd_id}\n" for it in new)
+    if accepted:
+        with ids_file.open("a", encoding="utf-8") as fh:
+            fh.writelines(f"{a.gd_id}\n" for a in accepted)
+    if review:
+        review_path = out_dir / FEED_REVIEW
+        header = not review_path.exists()
+        with review_path.open("a", encoding="utf-8") as fh:
+            if header:
+                fh.write("gd_id\tdate\tsubject\n")
+            fh.writelines(f"{it.gd_id}\t{it.published_date or ''}\t{it.subject[:200]}\n" for it in review)
+    (out_dir / "feed_stats.json").write_text(json.dumps(
+        {"items": len(items), "new": len(new), **stats, "review": len(review)}, indent=2), encoding="utf-8")
+    logger.info("uscg_bulletin feed: %d accepted, %d for review, %s", len(accepted), len(review), stats)
+    return _build_sections(accepted)
+
+
+# ── Prune (2026-09-30) ───────────────────────────────────────────────────
+#
+# A parse of this source re-fetches every bulletin in the ids file, so the
+# generic stale report (parse, then compare) is not used. The stored rows are
+# judged by their titles instead: rows of ephemeral or internal kinds, and
+# second copies of one bulletin stored under different section numbers (the
+# LLM labelled it differently on different runs), are stale.
+
+_TYPE_ORDER = ("POLICY_LETTER", "NVIC", "NMC", "MSIB", "REGULATORY", "OTHER_REGULATORY")
+
+
+def _doc_rank(section_number: str) -> tuple:
+    """Which copy of a bulletin to keep: a Pass 1 id ("MSIB 07-20",
+    "NMC Announcement 2024-02-26") first, then LLM ids in _TYPE_ORDER."""
+    m = re.match(r"USCG (\S+) ", section_number)
+    if not m:
+        return (0, section_number)
+    kind = m.group(1)
+    return (1 + (_TYPE_ORDER.index(kind) if kind in _TYPE_ORDER else len(_TYPE_ORDER)), section_number)
+
+
+def gd_id_of(section_number: str, text: str) -> str | None:
+    """The GovDelivery id of a stored bulletin: its Source URL, or the
+    "[hex]" suffix _build_sections adds (7 characters for LLM ids)."""
+    m = re.search(r"/bulletins/([0-9a-f]+)", text or "")
+    if m:
+        return m.group(1)
+    m = re.search(r"\[([0-9a-f]{6,})\]\s*$", section_number or "")
+    return m.group(1) if m else None
+
+
+def prune_plan(docs: list[dict]) -> dict[str, str]:
+    """section_number -> why it goes, for stored documents
+    [{"section_number", "section_title", "gd_id"}]."""
+    drop: dict[str, str] = {}
+    by_gd: dict[str, list[str]] = {}
+    for d in docs:
+        reason = drop_reason(strip_alias_tail(d["section_title"] or ""))
+        if reason:
+            drop[d["section_number"]] = reason
+        elif d.get("gd_id"):
+            # LLM ids carry only the first 7 characters of the id
+            by_gd.setdefault(d["gd_id"][:7], []).append(d["section_number"])
+    for secs in by_gd.values():
+        if len(secs) > 1:
+            keep = min(secs, key=_doc_rank)
+            for sec in secs:
+                if sec != keep:
+                    drop[sec] = f"duplicate of {keep}"
+    return drop
+
+
+async def stale_report(pool):
+    """A prune.StaleReport of the stored rows prune_plan removes. Its
+    `produced` counts the rows kept, so a plan that would empty the source
+    is refused like an empty parse."""
+    from ingest.prune import StaleReport
+
+    rows = await pool.fetch(
+        "SELECT id, section_number, section_title, chunk_index, left(full_text, 300) AS head, "
+        "created_at::date AS created FROM regulations WHERE source = $1 "
+        "ORDER BY section_number, chunk_index",
+        SOURCE,
+    )
+    docs: dict[str, dict] = {}
+    for r in rows:
+        d = docs.setdefault(r["section_number"], {"section_number": r["section_number"],
+                                                  "section_title": r["section_title"] or "",
+                                                  "gd_id": None})
+        d["gd_id"] = d["gd_id"] or gd_id_of(r["section_number"], r["head"])
+    plan = prune_plan(list(docs.values()))
+    report = StaleReport(source=SOURCE, stored=len(rows))
+    for r in rows:
+        why = plan.get(r["section_number"])
+        if why is None:
+            report.produced += 1
+            continue
+        report.stale.append({"id": str(r["id"]), "section_number": r["section_number"],
+                             "chunk_index": r["chunk_index"], "created": str(r["created"]),
+                             "reason": why})
+    return report

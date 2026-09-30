@@ -156,12 +156,75 @@ _EXCLUDED_FILES: frozenset[str] = frozenset({
 })
 
 
-def _files_for(source: str) -> frozenset[str]:
+def _files_for(source: str, raw_dir: Path | None = None) -> frozenset[str]:
     if source == "nmc_policy":
         return _POLICY_FILES
     if source == "nmc_checklist":
-        return _CHECKLIST_FILES
+        listed = set(_checklist_index(raw_dir)) if raw_dir else set()
+        return _CHECKLIST_FILES | listed
     raise ValueError(f"nmc adapter called with unknown source={source!r}")
+
+
+# ── Checklist discovery (2026-09-30) ─────────────────────────────────────────
+#
+# NMC publishes 115 credential checklists (every national and STCW endorsement:
+# towing Master / Mate (Pilot) / Apprentice Mate, Great Lakes and Inland master
+# and mate, OUPV, tank vessel PIC, entry-level ratings, QMED, DDE…); four were
+# hand-placed here before. The web fallback was fetching the rest from
+# dco.uscg.mil (docs/sprint-audits/corpus-gap-audit-inland-2026-09-29.md §2).
+# discover_and_download_checklists() reads the checklist page and the four
+# Towing Officer Assessment Records (NVIC 03-16 enclosures 2-5), downloads them
+# into data/raw/nmc/ and lists them in checklists.json, which _files_for and
+# parse_source read. NMC revises checklists under the same file name; the
+# page's "?ver=" token changes, and uscg_docs.fetch_docs re-downloads then.
+
+CHECKLIST_URL = "https://www.dco.uscg.mil/nmc/checklist/"
+_CHECKLIST_INDEX = "checklists.json"
+_PQ = "https://www.dco.uscg.mil/Portals/9/NMC/pdfs/professional_qualifications/"
+_TOARS: list[tuple[str, str, str]] = [
+    ("TOAR Ocean and Near Coastal", _PQ + "oceannearcoastal_toar.pdf",
+     "Towing Officer Assessment Record — Ocean and Near Coastal (NVIC 03-16 Enclosure 2)"),
+    ("TOAR Great Lakes and Inland", _PQ + "greatlakesinland_toar.pdf",
+     "Towing Officer Assessment Record — Great Lakes and Inland (NVIC 03-16 Enclosure 3)"),
+    ("TOAR Western Rivers", _PQ + "WesternRivers_toar.pdf",
+     "Towing Officer Assessment Record — Western Rivers (NVIC 03-16 Enclosure 4)"),
+    ("TOAR Limited", _PQ + "limited_toar.pdf",
+     "Towing Officer Assessment Record — Limited, for limited local area towing (NVIC 03-16 Enclosure 5)"),
+]
+
+
+def _checklist_index(raw_dir: Path | None) -> dict[str, dict[str, str]]:
+    """checklists.json: file name -> {"doc_id", "title"}; empty before discovery."""
+    path = Path(raw_dir or ".") / _CHECKLIST_INDEX
+    if not raw_dir or not path.exists():
+        return {}
+    import json
+    return {d["filename"]: {"doc_id": d["doc_id"], "title": d["title"]}
+            for d in json.loads(path.read_text(encoding="utf-8"))}
+
+
+def discover_and_download_checklists(raw_dir: Path, failed_dir: Path, console=None) -> tuple[int, int]:
+    import json
+    from dataclasses import asdict
+    from ingest.sources import uscg_docs as u
+
+    docs: dict[str, u.Doc] = {}
+    for href, text in u.links(u.fetch_html(CHECKLIST_URL), CHECKLIST_URL):
+        if "/nmc/pdfs/checklists/" not in href.lower() or not u.is_pdf_href(href):
+            continue
+        filename = href.split("?", 1)[0].rsplit("/", 1)[-1].replace("%20", " ")
+        m = re.match(r"mcp_fm_nmc5_(\d+)_web\.pdf$", filename, re.I)
+        doc_id = f"MCP-FM-NMC5-{m.group(1)}" if m else filename.rsplit(".", 1)[0]
+        docs.setdefault(filename, u.Doc(doc_id=doc_id, title=text or doc_id, url=href, filename=filename))
+    if not docs:
+        logger.warning("nmc_checklist: the checklist page listed no PDFs; the layout may have changed")
+    for doc_id, url, title in _TOARS:
+        filename = url.rsplit("/", 1)[-1]
+        docs.setdefault(filename, u.Doc(doc_id=doc_id, title=title, url=url, filename=filename))
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    (raw_dir / _CHECKLIST_INDEX).write_text(
+        json.dumps([asdict(d) for d in docs.values()], indent=1), encoding="utf-8")
+    return u.fetch_docs(list(docs.values()), raw_dir, failed_dir, "nmc_checklist", console=console)
 
 
 # ── Per-document section metadata ────────────────────────────────────────────
@@ -609,10 +672,15 @@ _DASH_LINE = re.compile(r"^[\-\u2013\u2014]{4,}\s*$", re.MULTILINE)
 
 def _clean_text(text: str) -> str:
     """Minimal PDF cleanup — preserve everything that could inform an answer."""
+    from ingest.sources.uscg_docs import untriple
+
     text = text.replace("\x00", "")
     text = _IMAGE_PLACEHOLDER.sub("", text)
     text = _DASH_LINE.sub("", text)
     text = re.sub(r"\n{3,}", "\n\n", text)
+    # 2026-09-30 — the TOARs print headings in overstruck bold, which
+    # extracts as "TTTOOOWWWIIINNNGGG"
+    text = untriple(text)
     return text.strip()
 
 
@@ -681,7 +749,8 @@ def parse_source(raw_dir: Path, source: str) -> list[Section]:
         logger.error("NMC raw_dir does not exist: %s", raw_dir)
         return []
 
-    wanted = _files_for(source)
+    wanted = _files_for(source, raw_dir)
+    listed = _checklist_index(raw_dir) if source == "nmc_checklist" else {}
     sections: list[Section] = []
 
     on_disk = sorted(p.name for p in raw_dir.iterdir() if p.suffix.lower() == ".pdf")
@@ -711,6 +780,18 @@ def parse_source(raw_dir: Path, source: str) -> list[Section]:
             continue
 
         meta = _DOC_META.get(name)
+        effective = _infer_effective_date(name)
+        if name in listed:
+            # 2026-09-30 — a discovered checklist: the page's link text is the
+            # title (e.g. "National Mate Pilot of Towing OC,NC,GL-IN,WR"); the
+            # revision date is printed at the top ("July 14, 2026 MCP-FM-NMC5-28").
+            entry = listed[name]
+            number = meta["section_number"] if meta else entry["doc_id"]
+            meta = {"section_number": number, "section_title": f"{number} — {entry['title']}"}
+            from ingest.sources.uscg_docs import parse_date
+            printed = parse_date(cleaned[:300])
+            if printed:
+                effective = date.fromisoformat(printed)
         if meta is None:
             logger.warning("nmc/%s: %s has no _DOC_META entry — skipping", source, name)
             continue
@@ -724,7 +805,7 @@ def parse_source(raw_dir: Path, source: str) -> list[Section]:
             section_number=meta["section_number"],
             section_title=enriched_title[:500],
             full_text=cleaned,
-            up_to_date_as_of=_infer_effective_date(name),
+            up_to_date_as_of=effective,
             parent_section_number=None,
         )
         sections.append(section)

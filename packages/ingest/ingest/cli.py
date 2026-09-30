@@ -160,6 +160,34 @@ _PDF_SOURCE_CONFIG: dict[str, dict] = {
         "raw_dir": _DATA_RAW / "nvic",
         "adapter": "ingest.sources.nvic",
     },
+    # 2026-09-30 — U.S. inland / Coast Guard guidance (docs/sprint-audits/
+    # corpus-gap-audit-inland-2026-09-29.md §4). Each adapter discovers its
+    # documents from a listing page and downloads them (sources/uscg_docs.py);
+    # dco.uscg.mil answers the VPS with browser headers, not every network.
+    "uscg_cvc": {
+        "raw_dir": _DATA_RAW / "uscg_cvc",
+        "adapter": "ingest.sources.uscg_cvc",
+    },
+    "uscg_towing": {
+        "raw_dir": _DATA_RAW / "uscg_towing",
+        "adapter": "ingest.sources.uscg_towing",
+    },
+    "uscg_safety_alert": {
+        "raw_dir": _DATA_RAW / "uscg_safety_alert",
+        "adapter": "ingest.sources.uscg_safety_alert",
+    },
+    "uscg_waterways": {
+        "raw_dir": _DATA_RAW / "uscg_waterways",
+        "adapter": "ingest.sources.uscg_waterways",
+    },
+    "epa_vgp": {
+        "raw_dir": _DATA_RAW / "epa_vgp",
+        "adapter": "ingest.sources.epa_vgp",
+    },
+    "usc_33": {
+        "raw_dir": _DATA_RAW / "usc_33",
+        "adapter": "ingest.sources.usc_33",
+    },
     # Sprint D6.18 — UK MCA notices, two sources sharing one adapter
     # (mirrors the nmc_policy / nmc_checklist split).
     "mca_mgn": {
@@ -808,6 +836,39 @@ async def _run(
     _print_summary(all_results, console)
 
 
+async def _run_title_prune(source: str, adapter, pool: asyncpg.Pool, console: Console,
+                           apply: bool) -> IngestResult:
+    """2026-09-30 — --stale-report / --prune-stale from a report the adapter
+    builds from the stored rows (uscg_bulletin.stale_report), no parse."""
+    from collections import Counter
+
+    from ingest.prune import PruneRefused, apply_prune, write_report
+
+    result = IngestResult(source=source)
+    report = await adapter.stale_report(pool)
+    documents = {r["section_number"] for r in report.stale}
+    console.print(f"  {source}: {report.stored} rows stored; {len(report.stale)} stale rows "
+                  f"({len(documents)} documents); {report.produced} rows kept")
+    for why, n in Counter(r["reason"].split(" of ")[0] for r in report.stale).most_common():
+        console.print(f"    {n:5d}  {why}")
+    console.print(f"  report: {write_report(report)}")
+    if not apply:
+        return result
+    try:
+        backup = await apply_prune(pool, report)
+    except PruneRefused as exc:
+        console.print(f"  [red]{exc}[/red]")
+        result.errors += 1
+        result.error_details.append(str(exc))
+        return result
+    if backup is None:
+        console.print("  nothing to prune")
+        return result
+    result.pruned = len(report.stale)
+    console.print(f"  [green]pruned {result.pruned} rows; copy at {backup}[/green]")
+    return result
+
+
 async def _run_pdf_source(
     source: str,
     mode: str,
@@ -849,6 +910,27 @@ async def _run_pdf_source(
             )
             return IngestResult(source=source, errors=1)
         console.print(f"  [cyan]IDs file:[/cyan] {effective_ids_file}")
+        # 2026-09-30 — uscg_bulletin. A parse re-fetches every bulletin in the
+        # ids file, so the prune options judge the stored rows by title
+        # (adapter.stale_report), and --update reads only the bulletins in
+        # GovDelivery's feed that no earlier run decided (adapter.parse_feed).
+        # That list is partial: fresh mode (update mode's safeguard compares it
+        # with the whole source) and never a prune.
+        if prune in ("report", "apply") and hasattr(adapter, "stale_report"):
+            return await _run_title_prune(source, adapter, pool, console, apply=prune == "apply")
+        if mode == "update" and hasattr(adapter, "parse_feed"):
+            if prune:
+                console.print("  [yellow]--prune ignored: --update reads only new feed items[/yellow]")
+            return await run_pdf_pipeline(
+                source=source,
+                mode="fresh",
+                section_loader=lambda: adapter.parse_feed(Path(effective_ids_file)),
+                source_date=adapter.SOURCE_DATE,
+                pool=pool,
+                cfg=settings,
+                console=console,
+                enrich=enrich,
+            )
         section_loader = lambda: adapter.parse_source(Path(effective_ids_file))  # noqa: E731
         return await run_pdf_pipeline(
             source=source,
@@ -876,6 +958,11 @@ async def _run_pdf_source(
         # one module handles both nmc_policy and nmc_checklist buckets.
         if "nmc_source" in cfg:
             nmc_source = cfg["nmc_source"]
+            # 2026-09-30 — checklists are discovered and downloaded from the NMC
+            # checklist page (sources/nmc.py discover_and_download_checklists);
+            # the policy bucket is still hand-placed.
+            if nmc_source == "nmc_checklist" and hasattr(adapter, "discover_and_download_checklists"):
+                adapter.discover_and_download_checklists(raw_dir, _DATA_FAILED, console)
             console.print(
                 f"  [cyan]Reading:[/cyan] {raw_dir} ([bold]{nmc_source}[/bold] bucket)"
             )

@@ -52,6 +52,16 @@ _SOURCE_LABELS: dict[str, tuple[str, str]] = {
     "ism":    ("ISM Code Updated", "ISM Code (Safe Operation of Ships)"),
     "erg":    ("ERG Updated", "ERG (Emergency Response Guidebook)"),
     "nmc_memo": ("NMC Policy Update", "NMC (National Maritime Center credentialing guidance)"),
+    # 2026-09-30 inland / Coast Guard sources
+    "cfr_29": ("OSHA Maritime Rules Updated", "29 CFR 1915-1919 (OSHA shipyard, marine terminal and longshoring)"),
+    "cfr_40": ("EPA Vessel Rules Updated", "40 CFR (EPA vessel discharge and marine engine rules)"),
+    "cfr_47": ("FCC Maritime Radio Rules Updated", "47 CFR 80 (FCC maritime radio services)"),
+    "cfr_50": ("Right Whale Rules Updated", "50 CFR 224 (NOAA right whale vessel rules)"),
+    "nmc_checklist": ("NMC Checklist Updated", "NMC credential checklists and towing officer assessment records"),
+    "uscg_cvc": ("USCG Inspection Policy Updated", "CG-CVC policy letters and work instructions"),
+    "uscg_towing": ("Subchapter M Guidance Updated", "Coast Guard Subchapter M FAQs and towing vessel guides"),
+    "uscg_safety_alert": ("New USCG Safety Alert", "USCG Marine Safety Alerts"),
+    "uscg_waterways": ("Waterway Guidance Updated", "VTS user manuals and waterways action plans"),
 }
 
 

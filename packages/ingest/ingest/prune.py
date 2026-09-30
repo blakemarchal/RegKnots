@@ -127,6 +127,10 @@ async def build_report(pool: asyncpg.Pool, source: str, chunks, scope: Scope | N
     keys, duplicates = produced_keys(chunks)
     produced_hash = {(c.section_number, c.chunk_index): getattr(c, "content_hash", None) for c in chunks}
     documents = {scope(c.section_number) for c in chunks} if scope else None
+    if documents is not None:
+        # 2026-09-30 — a scope can name retired documents (nvic.RETIRED: cancelled
+        # circulars). Their rows count as stale although no parse produces them.
+        documents |= set(getattr(scope, "retired", ()))
     rows = await pool.fetch(
         "SELECT id, section_number, chunk_index, content_hash, created_at::date AS created "
         "FROM regulations WHERE source = $1",

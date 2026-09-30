@@ -169,17 +169,17 @@ class NvicMeta:
 
 # Documents the USCG index does not list, parsed with the NVICs: (meta, PDF file
 # name in data/raw/nvic). 2026-09-27 — until now ingested once by a separate script.
-_EXTRA_DOCS: list[tuple[NvicMeta, str]] = [
-    # NVIC 04-08 Change 2, medical and physical evaluation guidelines: the index
-    # never listed it, and Akamai blocks the PDF from the VPS, so a copy from the
-    # seamenschurch.org mirror was placed in data/raw/nvic/ (2026-04-18).
-    (NvicMeta(
-        number         = "04-08 Ch-2",
-        title          = "Medical and Physical Evaluation Guidelines for Merchant Mariner Credentials",
-        effective_date = date(2016, 4, 25),
-        pdf_url        = "https://www.dco.uscg.mil/Portals/9/DCO%20Documents/5p/5ps/NVIC/2008/NVIC%2004-08%20Ch-2.pdf",
-    ), "NVIC 04-08 Ch-2.pdf"),
-]
+# 2026-09-30 — NVIC 04-08 Ch-2 (medical) left this list: the index doesn't list
+# it because the Merchant Mariner Medical Manual cancelled it (see RETIRED).
+_EXTRA_DOCS: list[tuple[NvicMeta, str]] = []
+
+# NVICs USCG has cancelled that an earlier ingest stored. No parse produces them,
+# so prune_scope would keep their rows as "out of scope"; listing them here makes
+# a prune (--prune-stale / --prune) remove them. Keys are prune_scope names.
+RETIRED: dict[str, str] = {
+    "NVIC 04-08 Ch-2": "Cancelled 2019-09-09 by COMDTINST M16721.48, the Merchant Mariner "
+                       "Medical Manual (uscg_msm), with NVIC 01-14.",
+}
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
@@ -462,6 +462,9 @@ def prune_scope(section_number: str) -> str | None:
     """
     m = _SECTION_NVIC.match(section_number or "")
     return m.group(1) if m else None
+
+
+prune_scope.retired = frozenset(RETIRED)  # read by ingest/prune.py build_report
 
 
 def get_source_date(raw_dir: Path) -> date:
@@ -747,11 +750,17 @@ def _resolve_url(href: str) -> str:
 
 
 def _find_pdf_link_in_tag(tag) -> str | None:
-    """Return the first dco.uscg.mil PDF URL found inside *tag*, or None."""
+    """Return the first dco.uscg.mil PDF URL found inside *tag*, or None.
+
+    2026-09-30 — USCG serves most 2014+ NVICs as "….pdf?ver=…", and the
+    credentialing ones from an MMC folder whose path has raw spaces. The check
+    used to be href.endswith(".pdf"), which skipped every one of them: 36 current
+    circulars, including 03-16 (towing officers) and the STCW endorsement series.
+    """
     for a in tag.find_all("a", href=True):
-        href = a["href"]
-        if href.lower().endswith(".pdf"):
-            url = _resolve_url(href)
+        href = a["href"].strip()
+        if href.split("?", 1)[0].split("#", 1)[0].lower().endswith(".pdf"):
+            url = _resolve_url(href).replace(" ", "%20")
             if "dco.uscg.mil" in url:
                 return url
     return None

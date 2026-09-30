@@ -74,6 +74,28 @@ _MANIFEST: dict[str, tuple[str, str]] = {
     "CIM_16000_74.pdf":   ("16000.74",  "Marine Safety — International Conventions, Treaties, Standards, and Regulations"),
     "CIM_16000_75.pdf":   ("16000.75",  "Marine Safety — Carriage of Hazardous Materials"),
     "CIM_16000_76.pdf":   ("16000.76",  "Marine Safety — Outer Continental Shelf Activities"),
+    # 2026-09-30 — the Merchant Mariner Medical Manual. Not part of the MSM, but
+    # the same kind of COMDTINST manual; it cancelled NVIC 04-08 and NVIC 01-14
+    # on 2019-09-09 (and Part A of MSM Vol III Ch.4). See _DOC_OPTIONS.
+    "CIM_16721_48.pdf":   ("M16721.48", "Merchant Mariner Medical Manual"),
+}
+
+# 2026-09-30 — per-document options for manifest entries that differ from the
+# MSM volumes: the citation prefix (default "USCG MSM <cim>"), the chapter
+# heading pattern (default "CHAPTER N: TITLE"), the effective date (default
+# SOURCE_DATE), and a URL so discover_and_download can fetch the file itself.
+# media.defense.gov and dco.uscg.mil serve these to the VPS with browser
+# headers (probe 2026-09-30); from other networks they may return 403.
+_DOC_OPTIONS: dict[str, dict] = {
+    "CIM_16721_48.pdf": {
+        "prefix":     "COMDTINST M16721.48",
+        # "CHAPTER 12. CARDIOVASCULAR CONDITIONS". Upper case only: the table of
+        # contents ("Chapter 12: …") and cross-references ("Chapter 7 of this
+        # Manual") are title case.
+        "chapter_re": re.compile(r"^CHAPTER\s+(\d+)\.\s+([A-Z][A-Z ,/&()'-]+?)\s*$", re.MULTILINE),
+        "as_of":      date(2019, 9, 9),
+        "url":        "https://media.defense.gov/2019/Sep/11/2002181050/-1/-1/0/CIM_16721_48.PDF",
+    },
 }
 
 
@@ -124,16 +146,20 @@ def _collapse_whitespace(text: str) -> str:
     return text.strip()
 
 
-def _split_into_chapters(text: str, cim_number: str, title: str) -> list[tuple[str, str, str]]:
+def _split_into_chapters(
+    text: str, cim_number: str, title: str,
+    prefix: str | None = None, chapter_re: re.Pattern | None = None,
+) -> list[tuple[str, str, str]]:
     """Split cleaned text into (section_number, section_title, body) tuples
     by CHAPTER markers. If no CHAPTER markers exist (some docs use a
     different structure), the entire text becomes one Section.
     """
-    matches = list(_CHAPTER_RE.finditer(text))
+    prefix = prefix or f"USCG MSM {cim_number}"
+    matches = list((chapter_re or _CHAPTER_RE).finditer(text))
     if not matches:
         # No chapter structure found — emit the whole doc as one section.
         return [(
-            f"USCG MSM {cim_number}",
+            prefix,
             title,
             _collapse_whitespace(text),
         )]
@@ -149,7 +175,7 @@ def _split_into_chapters(text: str, cim_number: str, title: str) -> list[tuple[s
         if not body:
             continue
         sections.append((
-            f"USCG MSM {cim_number} Ch.{chap_num}",
+            f"{prefix} Ch.{chap_num}",
             f"{title} — Ch.{chap_num} {chap_title}",
             body,
         ))
@@ -159,15 +185,23 @@ def _split_into_chapters(text: str, cim_number: str, title: str) -> list[tuple[s
 # ── Public API ────────────────────────────────────────────────────────────
 
 def discover_and_download(raw_dir: Path, failed_dir: Path, console) -> tuple[int, int]:
-    """No-op discovery — files are manually placed by Blake.
+    """Files are manually placed by Blake, except those with a URL in _DOC_OPTIONS.
 
     The CLI's multi-PDF dispatch calls this before parse_source. For NVIC
     we use it to fetch live from the publisher; for USCG MSM the publisher
     (dco.uscg.mil) is Akamai-blocked, so files come in via scp instead.
     Reports the count of recognized files so the CLI summary is honest.
+    2026-09-30 — a manifest file with a URL that is missing is downloaded.
     """
-    if not raw_dir.exists():
-        return (0, 1)
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    failures = 0
+    for name, opts in _DOC_OPTIONS.items():
+        path = raw_dir / name
+        if path.exists() or not opts.get("url"):
+            continue
+        from ingest.sources.uscg_docs import download_file
+        if not download_file(opts["url"], path):
+            failures += 1
     found = sum(1 for p in raw_dir.glob("*.pdf") if p.name in _MANIFEST)
     skipped = sum(1 for p in raw_dir.glob("*.pdf") if p.name not in _MANIFEST)
     if console:
@@ -175,7 +209,7 @@ def discover_and_download(raw_dir: Path, failed_dir: Path, console) -> tuple[int
             f"  [cyan]USCG MSM:[/cyan] {found} recognized files, "
             f"{skipped} non-manifest skipped"
         )
-    return (found, 0)
+    return (found, failures)
 
 
 def get_source_date(raw_dir: Path) -> date:
@@ -205,13 +239,15 @@ def parse_source(raw_dir: Path) -> list[Section]:
             skipped.append(pdf_path.name)
             continue
         cim_number, title = manifest_entry
+        opts = _DOC_OPTIONS.get(pdf_path.name, {})
 
         logger.info("USCG MSM: parsing %s (%s)", pdf_path.name, cim_number)
         text = _extract_text(pdf_path)
         text = _dedupe_running_headers(text)
-        chapters = _split_into_chapters(text, cim_number, title)
+        chapters = _split_into_chapters(text, cim_number, title,
+                                        prefix=opts.get("prefix"), chapter_re=opts.get("chapter_re"))
 
-        parent = f"USCG MSM {cim_number}"
+        parent = opts.get("prefix") or f"USCG MSM {cim_number}"
         for sec_num, sec_title, body in chapters:
             if not body.strip():
                 continue
@@ -221,7 +257,7 @@ def parse_source(raw_dir: Path) -> list[Section]:
                 section_number=sec_num,
                 section_title=sec_title,
                 full_text=body,
-                up_to_date_as_of=SOURCE_DATE,
+                up_to_date_as_of=opts.get("as_of", SOURCE_DATE),
                 parent_section_number=parent,
             ))
         logger.info(

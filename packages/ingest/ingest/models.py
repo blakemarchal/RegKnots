@@ -11,6 +11,13 @@ SOURCE_TO_TITLE: dict[str, int] = {
     "cfr_33": 33,
     "cfr_46": 46,
     "cfr_49": 49,
+    # 2026-09-30 — scoped to their maritime parts (cfr_scope.py), fetched part
+    # by part: EPA vessel discharge and engine rules, FCC maritime radio, NOAA's
+    # right whale rule, OSHA's maritime standards.
+    "cfr_40": 40,
+    "cfr_47": 47,
+    "cfr_50": 50,
+    "cfr_29": 29,
 }
 
 TITLE_TO_SOURCE: dict[int, str] = {v: k for k, v in SOURCE_TO_TITLE.items()}
@@ -19,12 +26,23 @@ TITLE_NAMES: dict[int, str] = {
     33: "Title 33—Navigation and Navigable Waters",
     46: "Title 46—Shipping",
     49: "Title 49—Transportation",
-    # Non-CFR sources use title_number=0
-    0: "COLREGs — International/Inland Navigation Rules",
+    40: "Title 40—Protection of Environment",
+    47: "Title 47—Telecommunication",
+    50: "Title 50—Wildlife and Fisheries",
+    29: "Title 29—Labor",
 }
 
+
+def title_name(source: str, title_number: int) -> str:
+    """The regulations.title value. 2026-09-30 — non-CFR sources (title_number 0)
+    used to get TITLE_NAMES[0], "COLREGs — International/Inland Navigation Rules",
+    on every row; they now carry their source name. Nothing reads the column."""
+    return TITLE_NAMES.get(title_number) or source
+
 # Sources ingested from text/PDF/XML files (not eCFR API). title_number=0 for all.
-PDF_SOURCES: list[str] = ["abs_mvr", "amsa_mo", "au_statutes", "bg_verkehr", "bma_mn", "bv", "colregs", "coswp", "cy_dms", "dgmm_es", "erg", "fr_transport", "gr_ynanp", "iacs_csr", "iacs_pr", "iacs_ur", "imdg", "imdg_manual", "imdg_supplement", "imo_bwm", "imo_css", "imo_fss", "imo_hsc", "imo_iamsar", "imo_ibc", "imo_igc", "imo_igf", "imo_loadlines", "imo_lsa", "imo_mepc", "imo_msc", "imo_polar", "imo_symbols", "iri_mn", "ism", "ism_supplement", "it_capitaneria", "liscr_mn", "lr_lifting_code", "lr_rules", "mardep_msin", "marpol", "marpol_amend", "marpol_supplement", "mca_mgn", "mca_msn", "mlc", "mou_psc", "mpa_sc", "nma_rsv", "nmc_checklist", "nmc_exam_bank", "nmc_policy", "nscv", "nvic", "ocimf", "pa_mmc", "solas", "solas_supplement", "stcw", "stcw_amend", "stcw_supplement", "tc_ssb", "usc_46", "uscg_bulletin", "uscg_msm", "who_ihr"]
+PDF_SOURCES: list[str] = ["abs_mvr", "amsa_mo", "au_statutes", "bg_verkehr", "bma_mn", "bv", "colregs", "coswp", "cy_dms", "dgmm_es", "erg", "fr_transport", "gr_ynanp", "iacs_csr", "iacs_pr", "iacs_ur", "imdg", "imdg_manual", "imdg_supplement", "imo_bwm", "imo_css", "imo_fss", "imo_hsc", "imo_iamsar", "imo_ibc", "imo_igc", "imo_igf", "imo_loadlines", "imo_lsa", "imo_mepc", "imo_msc", "imo_polar", "imo_symbols", "iri_mn", "ism", "ism_supplement", "it_capitaneria", "liscr_mn", "lr_lifting_code", "lr_rules", "mardep_msin", "marpol", "marpol_amend", "marpol_supplement", "mca_mgn", "mca_msn", "mlc", "mou_psc", "mpa_sc", "nma_rsv", "nmc_checklist", "nmc_exam_bank", "nmc_policy", "nscv", "nvic", "ocimf", "pa_mmc", "solas", "solas_supplement", "stcw", "stcw_amend", "stcw_supplement", "tc_ssb", "usc_46", "uscg_bulletin", "uscg_msm", "who_ihr",
+               # 2026-09-30 — inland / Coast Guard guidance
+               "uscg_cvc", "uscg_towing", "uscg_safety_alert", "uscg_waterways", "epa_vgp", "usc_33"]
 
 
 # ── Data models ─────────────────────────────────────────────────────────────
