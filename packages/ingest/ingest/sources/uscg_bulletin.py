@@ -155,7 +155,8 @@ _DENY_PHRASES = [
 
 _EPHEMERAL: list[tuple[str, re.Pattern]] = [
     ("outlook_or_lnm", re.compile(
-        r"\boutlook\b|\bdaily\b|(?:\b|\d)lnms?\b|local notices? to mariners|light list", re.I)),
+        r"\boutlook\b|\bdaily\b|(?:\b|\d)lnms?\b|local notices? to mariners|light list"
+        r"|dispatchers? list", re.I)),
     ("broadcast_notice", re.compile(
         r"\be?bnms?\b|\bumib\b|broadcast notice|\bupdate-\d+\b|\bupdate\s+0?\d{1,2}\b"
         r"|^\s*cancell?ation\b|mariners are advised"

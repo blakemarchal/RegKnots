@@ -34,6 +34,15 @@ def test_versioned_and_spaced_links_are_discovered():
     assert found["03-16"].title.startswith("CH-7 Guidelines for Credentialing Officers of Towing Vessels")
 
 
+def test_the_stored_file_wins_over_a_broken_link_in_the_url_column():
+    # the 2000s page, NVIC 09-00 CH-1: the number links the file, the URL
+    # column holds a link that 404s
+    page = ('<table><tr><th>Number</th><th>URL</th><th>Subject</th></tr>'
+            '<tr><td><a href="/Portals/9/DCO%20Documents/5p/5ps/NVIC/2000/n9-00(Ch1).pdf?ver=2017">09-00(CH-1)</a></td>'
+            '<td><a href="/NVIC%2009-00,Change%201.pdf"></a></td><td>Carbon dioxide systems</td></tr></table>')
+    assert _discover(page)["09-00"].pdf_url.endswith("/NVIC/2000/n9-00(Ch1).pdf?ver=2017")
+
+
 def test_link_check_ignores_non_pdf_and_other_hosts():
     tag = BeautifulSoup('<p><a href="/NVIC/Year/2010/">page</a>'
                         '<a href="https://example.com/x.pdf">elsewhere</a></p>', "lxml")

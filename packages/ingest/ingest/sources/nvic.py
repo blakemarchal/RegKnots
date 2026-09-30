@@ -322,9 +322,11 @@ def _extract_table_nvics(
 
             # PDF link lives in the URL cell (column 1)
             pdf_url = _find_pdf_link_in_tag(cells[1] if len(cells) > 1 else row)
-            if not pdf_url:
-                # Some rows have the link in any cell — fall back to whole row
-                pdf_url = _find_pdf_link_in_tag(row)
+            if not pdf_url or "/Portals/" not in pdf_url:
+                # Some rows have the link in any cell — fall back to whole row.
+                # 2026-09-30: a stored file (/Portals/) anywhere in the row beats
+                # a URL-column link outside it (09-00 CH-1's 404s).
+                pdf_url = _find_pdf_link_in_tag(row) or pdf_url
             if not pdf_url:
                 continue
 
@@ -756,14 +758,18 @@ def _find_pdf_link_in_tag(tag) -> str | None:
     credentialing ones from an MMC folder whose path has raw spaces. The check
     used to be href.endswith(".pdf"), which skipped every one of them: 36 current
     circulars, including 03-16 (towing officers) and the STCW endorsement series.
+
+    A link under /Portals/ (where USCG stores the files) wins over the others:
+    the 09-00 CH-1 row also carries "/NVIC%2009-00,Change%201.pdf", which 404s.
     """
+    urls = []
     for a in tag.find_all("a", href=True):
         href = a["href"].strip()
         if href.split("?", 1)[0].split("#", 1)[0].lower().endswith(".pdf"):
             url = _resolve_url(href).replace(" ", "%20")
             if "dco.uscg.mil" in url:
-                return url
-    return None
+                urls.append(url)
+    return next((u for u in urls if "/Portals/" in u), urls[0] if urls else None)
 
 
 def _parse_nvic_number(text: str) -> str | None:

@@ -23,6 +23,7 @@ from ingest.sources import uscg_bulletin as b
     ("GPS OPERATIONAL ADVISORY JDAY 273", "navigation_warning"),
     ("New NANU 2026080", "navigation_warning"),
     ("Iceberg Products at 0000Z on 30 SEP 2026", "navigation_warning"),
+    ("29 Sep 2026 Dispatchers List", "outlook_or_lnm"),
     ("MSIB Vol XXV Issue 055 New Orleans Grand Prix", "marine_event"),
     ("MSIB 07-20 Ports and Facilities MSIB for Coranavirus", "pandemic_measures"),
     ("ALCOAST 316/26 - SEP 2026 VOTER REGISTRATION AND ELECTION PARTICIPATION", "internal_notice"),
