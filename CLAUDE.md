@@ -295,10 +295,10 @@ If a doc says "alembic head is 0045" but `alembic current` says `0092`, the doc 
   - Unverified citations are mostly the model's section numbers, not gaps: 46 CFR 10.215 is now 10.301–10.306, and 33 CFR 83.1 means 83.01.
   - Ranked acquisitions: NMC checklists (we have 4 of 115) plus the TOARs; CG-CVC policy letters, work instructions and forms (~80); the TVNCOE Sub M package; 196 USCG Safety Alerts; VTS manuals and waterway action plans; EPA VGP / VIDA (40 CFR 139). Tier 1 embeddings cost under $1.
 - **2026-09-30 inland / Coast Guard corpus SHIPPED** (Blake: "Greenlight all" on the 09-29 audit; no Anthropic spend). Commits `7a4b2b4` … `178797c`, migration **0119** (alembic head). Numbers and evidence: audit doc §7.
-  - **NVIC discovery fixed** (`.pdf?ver=` links): 244 circulars / 9,554 chunks, +36, incl. 03-16 (towing officers, the TOARs), the STCW endorsement series and 01-20/23/24/26. 04-08 Ch-2 and 09-94 (cancelled) retired and pruned, with 36 leftover 07-68 rows. **Image-only, not ingested:** 02-23, 10-02 CH-1, 03-75 and 09-00 CH-1.
+  - **NVIC discovery fixed** (`.pdf?ver=` links): all 248 active circulars / 9,754 chunks, +40, incl. 03-16 (towing officers, the TOARs), the STCW endorsement series and 01-20/23/24/26. 04-08 Ch-2 and 09-94 (cancelled) retired and pruned, with 36 leftover 07-68 rows. The image-only 02-23, 10-02 CH-1, 03-75 and 09-00 CH-1 came in through OCR.
   - **Merchant Mariner Medical Manual** (COMDTINST M16721.48, 25 chapters) in `uscg_msm`.
   - **Ten new sources** (migration 0119; shared helpers in `sources/uscg_docs.py`):
-    - `uscg_cvc`: CG-CVC letters, work instructions and forms. 12 letters are scans, incl. PL 15-06 CH-2 (VHF-DSC).
+    - `uscg_cvc`: CG-CVC letters, work instructions and forms. 12 of the letters are scans read through OCR, incl. PL 15-06 CH-2 (VHF-DSC).
     - `uscg_towing`: TVNCOE Sub M FAQs and the UTV Guidebook.
     - `uscg_safety_alert`: 181 Safety Alerts + 111 Findings of Concern.
     - `uscg_waterways`: 12 VTS manuals and 5 D8 WAPs.
@@ -321,8 +321,12 @@ If a doc says "alembic head is 0045" but `alembic current` says `0092`, the doc 
     - eCFR 5xx retries; brotli replies are re-requested without `br`.
     - OCR sidecars: `data/ocr/<source>/<stem>.txt`.
     - The prompt names every new source; `compare_synthesis_models` was **not** re-run (~$3–4).
-  - **Open:** OCR of the 4 NVICs + 12 CVC letters (~140 pages: ~$2–3 Claude vision, or tesseract on the VPS).
-  - Corpus **99,786 chunks / 76 sources**.
+  - **OCR: tesseract 5.3.4 on the VPS** (apt; Blake chose it because it's free).
+    - `python -m ingest.ocr --source nvic|uscg_cvc|…` (or `scripts/run_ingest.sh --ocr …`) writes `data/ocr/<source>/` sidecars for PDFs with no text layer.
+    - The 4 NVICs + 12 CVC letters were 196 pages, about 17 min; 88–97% of tokens read as words.
+    - `update_uscg_guidance` ends with an OCR pass.
+    - Harness unchanged at 0.9367 / 0.7593.
+  - Corpus **100,096 chunks / 76 sources**.
 See `docs/PROJECT_STATE.md` for a fuller operational snapshot and `docs/roadmap.md` for the prioritized backlog.
 
 

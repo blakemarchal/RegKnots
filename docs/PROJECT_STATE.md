@@ -8,7 +8,7 @@ Last updated: 2026-09-30 (inland / Coast Guard corpus: ten new sources, NVIC dis
 
 ## TL;DR
 
-RegKnot is a maritime-compliance RAG at **https://regknots.com**. Production stack live and healthy. **99,786 chunks across 76 sources** (2026-09-30, after the inland / Coast Guard corpus work; 91,801 across 66 on 2026-09-26) with 100% embedding coverage. Retrieval pipeline now includes multi-query rewrite, Haiku reranker, citation oracle, source-diversified fetch, jurisdiction filter, vessel-profile boosts, synonym + intent expansion; hybrid BM25+dense built, measured 2026-07-19 and rejected (dense wins) — prod `.env` carried it switched on until the 2026-09-10 fix, now dense. **96.1% A-or-A−** on the latest 152-question regression eval. First organic Captain-tier subscriber 2026-09-09. See the 2026-09-10 audit for the pre-push list.
+RegKnot is a maritime-compliance RAG at **https://regknots.com**. Production stack live and healthy. **100,096 chunks across 76 sources** (2026-09-30, after the inland / Coast Guard corpus work; 91,801 across 66 on 2026-09-26) with 100% embedding coverage. Retrieval pipeline now includes multi-query rewrite, Haiku reranker, citation oracle, source-diversified fetch, jurisdiction filter, vessel-profile boosts, synonym + intent expansion; hybrid BM25+dense built, measured 2026-07-19 and rejected (dense wins) — prod `.env` carried it switched on until the 2026-09-10 fix, now dense. **96.1% A-or-A−** on the latest 152-question regression eval. First organic Captain-tier subscriber 2026-09-09. See the 2026-09-10 audit for the pre-push list.
 
 ## Live production
 
@@ -31,14 +31,14 @@ RegKnot is a maritime-compliance RAG at **https://regknots.com**. Production sta
 - **Propose spec, wait for greenlight** before coding non-trivial work.
 - **Grep for Cassandra** before every commit.
 
-## Corpus snapshot — 99,786 chunks across 76 sources (live 2026-09-30, see `docs/corpus-status.md`)
+## Corpus snapshot — 100,096 chunks across 76 sources (live 2026-09-30, see `docs/corpus-status.md`)
 
 100% embedding coverage. Vector dim 1536. Top sources by chunk count:
 
 | Source | Chunks | Notes |
 |---|---|---|
 | `cfr_46` | 10,490 | Title 46 — Shipping |
-| `nvic` | 9,554 | 244 USCG NVICs; 36 added 2026-09-30 after the `.pdf?ver=` discovery fix |
+| `nvic` | 9,754 | All 248 active USCG NVICs; 40 added 2026-09-30 (the `.pdf?ver=` discovery fix; 4 scans via tesseract OCR) |
 | `cfr_33` | 7,214 | Title 33 — Navigation |
 | `bv` | 7,213 | Bureau Veritas NR467 |
 | `abs_mvr` | 5,851 | ABS Marine Vessel Rules |

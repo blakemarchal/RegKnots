@@ -249,13 +249,13 @@ new source is parsed locally and embedded with OpenAI (well under $1 in all).
   - 09-00 CH-1 (CO2 system safety): USCG's page links it twice; the URL column's link 404s. The
     adapter now takes the file under `/Portals/` from the number cell. It downloads now, but it
     is a scan too.
-  - **Four NVICs are image-only and not ingested:** 02-23 (offshore renewable energy, 70 pages),
-    10-02 CH-1 (vessel security guidelines, 9 pages), 03-75 (bulk grain) and 09-00 CH-1. That is
-    why 03-75 and 10-02 were in the discovery cache but not the database. OCR options: the existing
-    `scripts/ocr_scanned_nvics.py` (Claude vision) or tesseract on the VPS (not installed; free).
+  - **Four NVICs are image-only:** 02-23 (offshore renewable energy, 70 pages), 10-02 CH-1
+    (vessel security guidelines, 9 pages), 03-75 (bulk grain, 22 pages) and 09-00 CH-1 (18 pages).
+    That is why 03-75 and 10-02 were in the discovery cache but not the database. They were read
+    with tesseract (OCR, below) and ingested: 59 sections, 200 chunks.
   - Pruned: 172 rows (04-08 Ch-2 120, 09-94 16, and 36 leftover 07-68 §4 chunks from an April
     parse that the old link check had hidden). Backup `data/pruned/nvic-20260930-082907.csv.gz`.
-    NVIC now: 244 circulars, 3,115 sections, 9,554 chunks.
+    NVIC now: all 248 active circulars, 3,174 sections, 9,754 chunks.
 - **Medical guidance (§3.2).** NVIC 04-08 Ch-2 is retired and pruned. The **Merchant Mariner
   Medical Manual** (COMDTINST M16721.48, 297 pages) is in `uscg_msm`: 25 chapters, 284 chunks,
   cited as "COMDTINST M16721.48 Ch.12".
@@ -300,7 +300,7 @@ re-downloaded when its link's `?ver=` or revision changes) and embed only change
 
 | Source | What | Sections | Chunks |
 |---|---|---|---|
-| `uscg_cvc` | CG-CVC policy letters not marked cancelled (and the older CG-543 / CG-MOC / CG-PCV series), MMS work instructions (e.g. CVC-WI-013, initial ITV COI under TSMS; WI-038, Sub M TPOs), inspection forms (K- and T-boat checklists) | 87 | 1,268 |
+| `uscg_cvc` | CG-CVC policy letters not marked cancelled (and the older CG-543 / CG-MOC / CG-PCV series), MMS work instructions (e.g. CVC-WI-013, initial ITV COI under TSMS; WI-038, Sub M TPOs), inspection forms (K- and T-boat checklists) | 99 | 1,378 |
 | `uscg_towing` | TVNCOE: Sub M FAQs by part (1/2/15, 136–144, general, preamble), UTV Guidebook, applicability flowchart, ITV inspector job aid, small entity compliance guide | 16 | 283 |
 | `uscg_safety_alert` | 181 CG-INV Safety Alerts since 1996 and 111 Findings of Concern (the "advisories" share the alerts page) | 292 | 646 |
 | `uscg_waterways` | 12 NAVCEN VTS user manuals and 5 District 8 Waterways Action Plans (Lower / Upper Mississippi, Ohio, Illinois, Missouri) | 17 | 881 |
@@ -310,7 +310,7 @@ re-downloaded when its link's `?ver=` or revision changes) and embed only change
 | `cfr_47` | 47 CFR 80 | 337 | 492 |
 | `cfr_50` | 50 CFR 224 | 5 | 31 |
 | `cfr_29` | 29 CFR 1915, 1917, 1918, 1919 | 312 | 710 |
-| | **new sources, total** | **1,490** | **5,236** |
+| | **new sources, total** | **1,502** | **5,346** |
 
 `nmc_checklist` went from 6 documents / 33 chunks to 122 / 476: the 112 checklists on NMC's checklist page
 plus the four TOARs (NVIC 03-16 enclosures 2–5).
@@ -323,12 +323,24 @@ and 45 findings: CG-INV lettered some alert numbers (10-10 (a) / (b)) and reused
 1998, 2008 and 2009), and the Findings table is paged. Both fixed (`178797c`); 6 renamed rows
 pruned.
 
-**Twelve CG-CVC letters are scans with no text layer** and are not ingested yet: PL 18-02, 18-03
+**Twelve CG-CVC letters are scans with no text layer**, read with tesseract (below): PL 18-02, 18-03
 (UPV safety program), 16-01, 16-02 (non-metallic sea strainers on small passenger vessels), 16-03
 (5-knot test after replacing on-load release gear), 15-06 CH-2 (VHF-DSC installation on inspected
 passenger and fishing vessels, which §4 named), 15-02, 15-01, 14-03 (sea service on liftboats),
-13-04 CH-1, 11-11 CH-1 and CG-PCV PL 06-08. `uscg_docs.doc_sections` reads
-`data/ocr/uscg_cvc/<file stem>.txt` for them once OCR text exists.
+13-04 CH-1, 11-11 CH-1 and CG-PCV PL 06-08. They added 110 chunks; `uscg_docs.doc_sections` reads
+`data/ocr/uscg_cvc/<file stem>.txt` for a PDF with no text layer.
+
+### OCR (tesseract, Blake's pick: free)
+
+- tesseract 5.3.4 installed on the VPS from Ubuntu's repositories (`apt-get install tesseract-ocr`).
+- `python -m ingest.ocr --source nvic | uscg_cvc | …` (or `scripts/run_ingest.sh --ocr --source …`,
+  the same capped unit as an ingest) finds PDFs with no text layer and no sidecar, renders pages at
+  300 dpi (pdftoppm), reads them on one core and writes `data/ocr/nvic/<number>.txt` or
+  `data/ocr/<source>/<file stem>.txt`.
+- The 4 NVICs and 12 letters: 196 pages in about 17 minutes. 88–97% of tokens read as words; the
+  slips are small ("Smal!" for "Small", a stray bracket), which retrieval tolerates.
+- The monthly `update_uscg_guidance` ends with an OCR pass over nvic and the uscg_docs sources; the
+  next scheduled run ingests anything it wrote.
 
 ### Retrieval, answers and chips
 
@@ -366,6 +378,7 @@ passenger and fishing vessels, which §4 named), 15-02, 15-01, 14-03 (sea servic
 | after the data, old gold set | 0.8101 | 0.8734 | 0.6314 |
 | after the data, updated gold set | 0.8608 | 0.9114 | 0.6820 |
 | + keyword floor (deployed, final data) | **0.9367** | **0.9494** | **0.7593** |
+| + the OCR'd NVICs and letters | 0.9367 | 0.9494 | 0.7593 |
 
 - **The gold set rewarded what the plan removed.** C3 (type 2 diabetes) expected NVIC 04-08, cancelled
   in 2019; the top results are now NMC's Top 10 Medical Conditions and COMDTINST M16721.48 Ch.14,
@@ -384,9 +397,6 @@ passenger and fishing vessels, which §4 named), 15-02, 15-01, 14-03 (sea servic
 
 ### Not done
 
-- OCR of the four image-only NVICs and the twelve scanned CG-CVC letters (about 140 pages;
-  Claude vision roughly $2–3, or tesseract on the VPS, free). The sidecar path is in place for
-  both sources.
 - Subpart citations (§3.4); the one-off `regulations.title` UPDATE (§3.5).
 - Tier 2 items not taken: USCG forms (CG-2692 and others), ABS river and intracoastal rules, NTSB
   marine investigations, CG-ENG / CG-OES letters. Tier 3 (live gage / lock status, PSIX) remains.
