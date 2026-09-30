@@ -179,6 +179,8 @@ _EXTRA_DOCS: list[tuple[NvicMeta, str]] = []
 RETIRED: dict[str, str] = {
     "NVIC 04-08 Ch-2": "Cancelled 2019-09-09 by COMDTINST M16721.48, the Merchant Mariner "
                        "Medical Manual (uscg_msm), with NVIC 01-14.",
+    "NVIC 09-94": "Marine radar training and certification; marked Cancelled/Superseded "
+                  "on the USCG 1990s NVIC page (checked 2026-09-30).",
 }
 
 
