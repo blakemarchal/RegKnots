@@ -66,8 +66,7 @@ def discover_and_download(raw_dir: Path, failed_dir: Path, console=None) -> tupl
         if current == release and (raw_dir / XML_NAME).exists():
             return (1, 0)
         try:
-            resp = http.get(url)
-            resp.raise_for_status()
+            resp = u.get(http, url)
             with zipfile.ZipFile(io.BytesIO(resp.content)) as zf:
                 name = next(n for n in zf.namelist() if n.lower().endswith(".xml"))
                 (raw_dir / XML_NAME).write_bytes(zf.read(name))

@@ -72,6 +72,30 @@ def test_listing_sources_always_parse_on_update(tmp_path):
         assert adapter.get_source_date(tmp_path) == date.today()
 
 
+def test_a_brotli_reply_is_fetched_again_without_br():
+    # httpx needs the brotli package to decode br; without it the bytes come back
+    # compressed (the first VGP download, 2026-09-30)
+    pytest.importorskip("httpx")
+    for mod in ("brotli", "brotlicffi"):
+        try:
+            __import__(mod)
+            pytest.skip(f"{mod} installed: httpx would decode br")
+        except ImportError:
+            pass
+    import httpx
+    seen = []
+
+    def handler(request):
+        seen.append(request.headers.get("accept-encoding"))
+        if "br" in request.headers.get("accept-encoding", ""):
+            return httpx.Response(200, headers={"content-encoding": "br"}, content=b"\x85\xd8\r\xa3")
+        return httpx.Response(200, content=b"%PDF-1.7 body")
+
+    with httpx.Client(transport=httpx.MockTransport(handler), headers=u.BROWSER_HEADERS) as http:
+        assert u.get(http, "https://www.epa.gov/x.pdf").content == b"%PDF-1.7 body"
+    assert seen == ["gzip, deflate, br", "gzip, deflate"]
+
+
 def test_a_failed_download_keeps_parsing_the_old_copy(tmp_path, monkeypatch):
     (tmp_path / "a.pdf").write_bytes(b"%PDF-old")
     (tmp_path / "downloaded.json").write_text(json.dumps({"a.pdf": "https://x/a.pdf?ver=1"}))
@@ -204,6 +228,31 @@ def test_usc_33_scope():
     assert usc_33.in_scope("33 USC 1321") and usc_33.in_scope("33 USC 2716a")
     assert usc_33.in_scope("33 USC 409") and usc_33.in_scope("33 USC 1203")
     assert not usc_33.in_scope("33 USC 1251") and not usc_33.in_scope("33 USC 901")
+
+
+def test_ecfr_part_fetch_retries_a_502(monkeypatch):
+    import asyncio
+
+    import httpx
+
+    from ingest import ecfr_client
+
+    calls = []
+
+    def handler(request):
+        calls.append(str(request.url))
+        return httpx.Response(502) if len(calls) == 1 else httpx.Response(200, content=b"<DIV5/>")
+
+    real_client = httpx.AsyncClient
+    monkeypatch.setattr(ecfr_client.httpx, "AsyncClient",
+                        lambda **kw: real_client(transport=httpx.MockTransport(handler), **kw))
+
+    async def no_sleep(_seconds):
+        return None
+
+    monkeypatch.setattr(ecfr_client.asyncio, "sleep", no_sleep)
+    body = asyncio.run(ecfr_client.ECFRClient(rate_limit=0).fetch_full_xml(29, part=1918))
+    assert body == b"<DIV5/>" and len(calls) == 2 and calls[0].endswith("title-29.xml?part=1918")
 
 
 def test_scoped_titles():

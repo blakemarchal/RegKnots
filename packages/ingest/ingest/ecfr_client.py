@@ -77,11 +77,22 @@ class ECFRClient:
         if part is not None:
             url += f"?part={part}"
         async with httpx.AsyncClient() as client:
-            await self._throttle()
-            response = await client.get(url, timeout=600.0)
-            response.raise_for_status()
-            self._last_request = asyncio.get_event_loop().time()
-            return response.content
+            for attempt in (1, 2, 3):
+                await self._throttle()
+                try:
+                    response = await client.get(url, timeout=600.0)
+                except httpx.TransportError:
+                    if attempt == 3:
+                        raise
+                else:
+                    if response.status_code < 500 or attempt == 3:
+                        response.raise_for_status()
+                        self._last_request = asyncio.get_event_loop().time()
+                        return response.content
+                # 2026-09-30 — eCFR answers with the odd 502 (the first Title 29
+                # ingest failed on part 1918 that way): two retries, 10 s then 30 s apart.
+                await asyncio.sleep(10 * 3 ** (attempt - 1))
+        raise AssertionError("unreachable")
 
     async def fetch_full_text(
         self, title_number: int, as_of: date | None = None

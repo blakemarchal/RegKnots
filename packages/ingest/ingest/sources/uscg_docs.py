@@ -76,13 +76,26 @@ def client() -> httpx.Client:
     return httpx.Client(timeout=TIMEOUT, follow_redirects=True, headers=BROWSER_HEADERS)
 
 
+def get(http: httpx.Client, url: str) -> httpx.Response:
+    """GET *url*. A brotli-encoded reply is asked for again without "br".
+
+    2026-09-30 — the browser headers offer br, and httpx needs the brotli
+    package (not installed) to decode it, so it hands back the compressed bytes.
+    epa.gov serves br (the first VGP download failed the %PDF check that way);
+    dco.uscg.mil has not so far.
+    """
+    resp = http.get(url)
+    if resp.headers.get("content-encoding", "").lower() == "br":
+        resp = http.get(url, headers={"Accept-Encoding": "gzip, deflate"})
+    resp.raise_for_status()
+    return resp
+
+
 def fetch_html(url: str, http: httpx.Client | None = None) -> str:
     own = http is None
     http = http or client()
     try:
-        resp = http.get(url)
-        resp.raise_for_status()
-        return resp.text
+        return get(http, url).text
     finally:
         if own:
             http.close()
@@ -109,8 +122,7 @@ def download_file(url: str, path: Path, http: httpx.Client | None = None) -> boo
     own = http is None
     http = http or client()
     try:
-        resp = http.get(url)
-        resp.raise_for_status()
+        resp = get(http, url)
         body = resp.content
         if path.suffix.lower() == ".pdf" and not body.startswith(b"%PDF"):
             raise ValueError(f"not a PDF ({resp.headers.get('content-type', '?')}, {len(body)} bytes)")
