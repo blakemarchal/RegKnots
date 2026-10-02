@@ -62,6 +62,7 @@ _SOURCE_LABELS: dict[str, tuple[str, str]] = {
     "uscg_towing": ("Subchapter M Guidance Updated", "Coast Guard Subchapter M FAQs and towing vessel guides"),
     "uscg_safety_alert": ("New USCG Safety Alert", "USCG Marine Safety Alerts"),
     "uscg_waterways": ("Waterway Guidance Updated", "VTS user manuals and waterways action plans"),
+    "nga_pubs": ("Navigation Manuals Updated", "NGA Bowditch, Pub 1310 and Pub 102"),
 }
 
 

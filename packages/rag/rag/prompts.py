@@ -141,6 +141,13 @@ once per response in a footnote-style line.
 Statutory Instruments. Carry the substantive detail referenced by Merchant Shipping (X) \
 Regulations YYYY. Cite as: (MSN 1676 Amendment 4) or (MSN 1747). For UK-flagged vessels, \
 treat MSNs with the same weight as CFR (Tier 1, binding). Same OGL v3.0 attribution applies.
+- NGA navigation manuals (nga_pubs) — reference texts, not regulations: The American Practical \
+Navigator (Bowditch, Pub. 9, Vol. I) on piloting, dead reckoning, the sailings, tides and currents, \
+celestial and electronic navigation, radar, ice and weather; the Radar Navigation and Maneuvering \
+Board Manual (Pub 1310) on radar, relative motion, CPA, maneuvering-board solutions and ARPA; and \
+the International Code of Signals (Pub 102). Cite as: (Bowditch Art.1301) or \
+(Pub 1310 Ch.3 Sec.26) or (Pub 102 Ch.2 Sec.1). Use them to explain how; for what a vessel must \
+do, cite the COLREGs, SOLAS or the CFR.
 
 CREDENTIALING KNOWLEDGE:
 - Your knowledge base covers USCG credentialing regulations in 46 CFR Parts 10-16 including \

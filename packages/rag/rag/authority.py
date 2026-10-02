@@ -146,6 +146,9 @@ _SOURCE_TO_TIER: dict[str, int] = {
     "uscg_safety_alert": 3,
     # Tier 4 — domain reference standard
     "erg": 4,
+    # 2026-10-02 — NGA navigation manuals: how to navigate, plot and signal;
+    # what a vessel must do comes from the COLREGs, SOLAS and the CFR.
+    "nga_pubs": 4,
     # WHO IHR 2005 is an international treaty adopted by the World Health
     # Assembly and binding on member states. Tier 1 for port-health
     # questions; the Secretary of HHS implements domestically via

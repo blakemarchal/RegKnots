@@ -188,6 +188,12 @@ _PDF_SOURCE_CONFIG: dict[str, dict] = {
         "raw_dir": _DATA_RAW / "usc_33",
         "adapter": "ingest.sources.usc_33",
     },
+    # 2026-10-02 — NGA navigation manuals (Bowditch Vol. I, Pub 1310, Pub 102)
+    # from msi.nga.mil's publications API; see sources/nga_pubs.py.
+    "nga_pubs": {
+        "raw_dir": _DATA_RAW / "nga_pubs",
+        "adapter": "ingest.sources.nga_pubs",
+    },
     # Sprint D6.18 — UK MCA notices, two sources sharing one adapter
     # (mirrors the nmc_policy / nmc_checklist split).
     "mca_mgn": {

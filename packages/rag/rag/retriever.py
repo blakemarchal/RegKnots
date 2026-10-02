@@ -205,7 +205,10 @@ SOURCE_GROUPS: dict[str, tuple[str, ...]] = {
     # vetting / inspection-questionnaire queries.
     "ocimf": ("ocimf",),
     # IMO reference manuals (operational guidance, not binding rule).
-    "imo_ref": ("imo_iamsar",),
+    # 2026-10-02 — the NGA navigation manuals (Bowditch, Pub 1310 radar and
+    # maneuvering board, Pub 102 signals) share the group: same reference
+    # layer, and no extra query in the per-group fan-out.
+    "imo_ref": ("imo_iamsar", "nga_pubs"),
     # Port State Control regimes (Tokyo MOU + Paris MOU).
     "mou": ("mou_psc",),
 }

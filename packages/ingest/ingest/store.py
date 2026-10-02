@@ -177,6 +177,8 @@ _SOURCE_TO_JURISDICTIONS: dict[str, list[str]] = {
     "uscg_safety_alert": ["us"],  # USCG Safety Alerts (CG-INV)
     "uscg_waterways": ["us"],  # VTS user manuals, D8 Waterways Action Plans
     "epa_vgp":        ["us"],  # EPA 2013 Vessel General Permit
+    # 2026-10-02 — NGA navigation manuals: navigation practice, any flag
+    "nga_pubs":       ["intl"],
     # UK national
     "mca_mgn":          ["uk"],
     "mca_msn":          ["uk"],
