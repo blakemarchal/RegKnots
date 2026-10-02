@@ -71,6 +71,17 @@ class EmbedderClient:
 
         return results
 
+    async def embed_texts(self, texts: list[str]) -> list[list[float]]:
+        """Embed plain strings in batches of BATCH_SIZE (2026-10-02: the exam
+        questions' related-regulation lookup, ingest/exam_questions.py)."""
+        from types import SimpleNamespace
+
+        out: list[list[float]] = []
+        for i in range(0, len(texts), BATCH_SIZE):
+            batch = [SimpleNamespace(chunk_text=t) for t in texts[i : i + BATCH_SIZE]]
+            out.extend(await self._embed_with_retry(batch))
+        return out
+
     async def _embed_with_retry(self, batch: list[Chunk]) -> list[list[float]]:
         texts = [c.chunk_text for c in batch]
 

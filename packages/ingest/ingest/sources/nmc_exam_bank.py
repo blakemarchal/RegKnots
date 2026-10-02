@@ -89,6 +89,9 @@ _TOPIC_RULES: list[tuple[str, str]] = [
     ("nav_deck_general_safety", "nav_deck_general"),
     ("nav_and_deck_general-safety", "nav_deck_general"),
     ("nav_and_deck_general", "nav_deck_general"),
+    # 2026-10-02 — q345/q346 and q400 were falling through to uncategorized.
+    ("nav_deck_gen_safety", "nav_deck_general"),
+    ("nav_deck_general-safety", "nav_deck_general"),
     ("nav_general_near_coastal", "nav_general"),
     ("nav_general_oceans_nc", "nav_general"),
     ("nav_general_western_rivers", "nav_general"),
@@ -105,6 +108,16 @@ _TOPIC_RULES: list[tuple[str, str]] = [
     ("deck_general_safety", "deck_general"),
     ("deck_general-safety", "deck_general"),
     ("deck_general", "deck_general"),
+    ("dk_general_safety", "deck_general"),          # q451 (2026-10-02)
+
+    # 2026-10-02 — the QMED engine-rating exams (q800–q808), uncategorized until now.
+    ("junior_engineer", "qmed"),
+    ("electrician", "qmed"),
+    ("refrigerating_engineer", "qmed"),
+    ("oiler", "qmed"),
+    ("fireman_watertender", "qmed"),
+    ("machinist", "qmed"),
+    ("pump_technician", "qmed"),
 
     # Specialty endorsements
     ("tankship_dangerous_liquids", "tankship_dangerous"),
@@ -136,6 +149,7 @@ _TOPIC_LABELS: dict[str, str] = {
     "engine_electrical": "Engine — Electrical / Electronic / Control",
     "engine_safety_env": "Engineering Safety + Environmental Protection",
     "engine_general": "Engine — General Subjects",
+    "qmed": "QMED — Engine Ratings",
     "tankship_dangerous": "Tankship — Dangerous Liquids",
     "tankship_gases": "Tankship — Liquefied Gases",
     "lifeboatman": "Lifeboatman / Survival Craft",

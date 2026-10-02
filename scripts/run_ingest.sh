@@ -59,8 +59,18 @@ if [ -t 1 ]; then TTY_FLAG="--pty"; else TTY_FLAG="--pipe"; fi
 
 # 2026-09-30 — `scripts/run_ingest.sh --ocr --source uscg_cvc` runs the
 # tesseract OCR of scanned PDFs (python -m ingest.ocr) in the same capped unit.
+# 2026-10-02 — `--module ingest.<name>` runs another ingest-package module the
+# same way, e.g. `--module ingest.exam_questions` (the /practice question bank).
 MODULE=ingest.cli
-if [[ "${1:-}" == "--ocr" ]]; then MODULE=ingest.ocr; shift; fi
+if [[ "${1:-}" == "--ocr" ]]; then
+    MODULE=ingest.ocr; shift
+elif [[ "${1:-}" == "--module" ]]; then
+    MODULE="${2:-}"; shift 2 || true
+    if [[ ! "${MODULE}" =~ ^ingest\.[a-z_]+$ ]]; then
+        echo "ERROR: --module takes ingest.<name>, e.g. ingest.exam_questions" >&2
+        exit 2
+    fi
+fi
 
 exec systemd-run \
     --unit="${UNIT}" \
