@@ -3,7 +3,10 @@
 A free user's trial is 7 days and 50 messages (FREE_TRIAL_MESSAGE_CAP). After
 it, instead of a hard paywall, the user keeps settings.free_plan_monthly_cap
 questions per rolling 30-day cycle: the same users.monthly_message_count /
-message_cycle_started_at counters the Cadet and Mate caps use.
+message_cycle_started_at counters the Cadet and Mate caps use. Trial messages
+don't use up the free plan: the first question after the trial starts a fresh
+cycle (start_cycle), and when the 50 trial messages run out before the
+trial's last day, the trial ends then.
 
 Free-plan answers across all users are also counted per calendar month in
 free_plan_usage; at settings.free_plan_global_monthly_cap the free plan
@@ -27,12 +30,46 @@ from app.config import settings
 from app.plans import FREE_TRIAL_MESSAGE_CAP
 
 
+def trial_over_at(row, now: datetime) -> datetime:
+    """When the trial ended: trial_ends_at, or now when the 50 trial messages
+    ran out before the trial's last day."""
+    ends = row["trial_ends_at"]
+    return now if ends is None or ends > now else ends
+
+
 def cycle_used(row, now: datetime) -> tuple[int, datetime]:
-    """(questions used this 30-day cycle, when the cycle resets)."""
+    """(questions used this 30-day cycle, when the cycle resets). A cycle that
+    began during the trial counts as not started: the free plan's first cycle
+    begins with the first question after the trial (start_cycle)."""
     start = row["message_cycle_started_at"]
-    if start is None or now - start >= timedelta(days=30):
+    if start is None or start < trial_over_at(row, now) or now - start >= timedelta(days=30):
         return 0, now + timedelta(days=30)
-    return row["monthly_message_count"], start + timedelta(days=30)
+    return row["monthly_message_count"] or 0, start + timedelta(days=30)
+
+
+async def start_cycle(pool, user_id: uuid.UUID, row, now: datetime):
+    """Start the free plan's first 30-day cycle at the first question after the
+    trial, so trial messages don't count against it; when the 50 trial messages
+    ran out early, the trial ends now. Returns the row as updated. The WHERE
+    clause re-checks against the stored row, so two requests racing at the
+    switch reset the cycle once."""
+    start = row["message_cycle_started_at"]
+    if start is not None and start >= trial_over_at(row, now):
+        return row
+    await pool.execute(
+        """
+        UPDATE users
+        SET trial_ends_at = LEAST(trial_ends_at, $2),
+            message_cycle_started_at = $2,
+            monthly_message_count = 0
+        WHERE id = $1
+          AND (message_cycle_started_at IS NULL OR message_cycle_started_at < LEAST(trial_ends_at, $2))
+        """,
+        user_id, now,
+    )
+    ends = row["trial_ends_at"]
+    return {**dict(row), "trial_ends_at": now if ends is None or ends > now else ends,
+            "message_cycle_started_at": now, "monthly_message_count": 0}
 
 
 def _day(d) -> str:
@@ -77,13 +114,14 @@ async def state(pool, row, now: datetime | None = None) -> FreePlanState | None:
     return FreePlanState(cap=cap, used=used, remaining=max(0, cap - used), resets_at=resets_at, paused=paused)
 
 
-async def check_allowance(pool, row, now: datetime | None = None) -> None:
+async def check_allowance(pool, row, user_id: uuid.UUID, now: datetime | None = None) -> None:
     """Raise 402 unless this post-trial free user may ask another question."""
     now = now or datetime.now(timezone.utc)
-    fp = await state(pool, row, now)
-    if fp is None:
+    if settings.free_plan_monthly_cap <= 0:
         raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED,
                             detail="Trial expired or message limit reached. Subscribe to continue.")
+    row = await start_cycle(pool, user_id, row, now)
+    fp = await state(pool, row, now)
     if fp.remaining <= 0:
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,

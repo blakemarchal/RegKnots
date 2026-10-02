@@ -311,7 +311,7 @@ async def _run_chat_preflight(
             # questions per 30-day cycle under a global monthly cap
             # (app/free_plan.py). Raises 402 with the reason when out.
             from app import free_plan as _free_plan
-            await _free_plan.check_allowance(pool, sub_row)
+            await _free_plan.check_allowance(pool, sub_row, uuid.UUID(current_user.user_id))
 
     # ── Per-tier monthly cap gate (Sprint D6.2 + D6.91) ────────────────────
     # Cadet plan caps at 25 messages per rolling 30-day cycle.
