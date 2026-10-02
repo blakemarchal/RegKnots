@@ -39,6 +39,21 @@ logger = logging.getLogger(__name__)
 
 RAW_DIR = Path(__file__).resolve().parents[3] / "data" / "raw" / "nmc"
 RELATED_EF_SEARCH = 400
+# Where a USCG exam answer may point: U.S. regulations and Coast Guard guidance,
+# the IMO instruments U.S. ships sail under, and the NGA navigation manuals.
+# Not class-society rules or other flags' codes: on the first load (2026-10-02)
+# ~950 questions matched BV, ABS, Lloyd's or the UK's COSWP, and a COSWP
+# section is not "the rule behind" a USCG exam answer.
+RELATED_SOURCES = (
+    "cfr_33", "cfr_46", "cfr_49", "cfr_40", "cfr_47", "cfr_50", "cfr_29", "usc_46", "usc_33",
+    "colregs", "nvic", "uscg_msm", "uscg_cvc", "uscg_towing", "uscg_safety_alert", "uscg_waterways",
+    "nmc_policy", "nmc_checklist", "epa_vgp",
+    "solas", "solas_supplement", "stcw", "stcw_supplement", "stcw_amend", "marpol", "marpol_supplement",
+    "marpol_amend", "ism", "ism_supplement", "imdg", "imdg_supplement", "mlc", "erg",
+    "imo_lsa", "imo_fss", "imo_igc", "imo_ibc", "imo_hsc", "imo_loadlines", "imo_css", "imo_bwm",
+    "imo_polar", "imo_igf", "imo_mepc", "imo_msc", "imo_symbols",
+    "nga_pubs",
+)
 
 _QUESTION = re.compile(r"^(\d{1,3})\.\s*(.*)$")
 _CHOICE = re.compile(r"^([A-F])\.\s*(.*)$")
@@ -187,12 +202,11 @@ async def _related(questions: list[Question], pool) -> dict[tuple[str, int], tup
                 """
                 SELECT source, section_number, section_title, 1 - (embedding <=> $1::vector) AS sim
                 FROM regulations
-                WHERE embedding IS NOT NULL AND source <> 'nmc_exam_bank'
-                  AND jurisdictions && ARRAY['us', 'intl']::text[]
+                WHERE embedding IS NOT NULL AND source = ANY($2::text[])
                 ORDER BY embedding <=> $1::vector
                 LIMIT 1
                 """,
-                literal,
+                literal, list(RELATED_SOURCES),
             )
         return (q.source_file, q.number), (row["source"], row["section_number"], row["section_title"],
                                            float(row["sim"])) if row else None
@@ -210,9 +224,12 @@ async def load(questions: list[Question], related: bool = True) -> None:
     pool = await asyncpg.create_pool(dsn, min_size=1, max_size=5)
     try:
         rel = await _related(questions, pool) if related else {}
+        # A lookup run replaces the stored related section (a question may now
+        # have none); --no-related keeps what is there.
+        keep = "COALESCE(EXCLUDED.{c}, exam_questions.{c})" if not related else "EXCLUDED.{c}"
         async with pool.acquire() as conn, conn.transaction():
             await conn.executemany(
-                """
+                f"""
                 INSERT INTO exam_questions (source_file, number, pool, part, exam, topic_key, topic_label,
                     stem, choices, answer, needs_figure, related_source, related_section, related_title,
                     related_similarity, updated_at)
@@ -222,10 +239,10 @@ async def load(questions: list[Question], related: bool = True) -> None:
                     topic_key = EXCLUDED.topic_key, topic_label = EXCLUDED.topic_label,
                     stem = EXCLUDED.stem, choices = EXCLUDED.choices, answer = EXCLUDED.answer,
                     needs_figure = EXCLUDED.needs_figure,
-                    related_source = COALESCE(EXCLUDED.related_source, exam_questions.related_source),
-                    related_section = COALESCE(EXCLUDED.related_section, exam_questions.related_section),
-                    related_title = COALESCE(EXCLUDED.related_title, exam_questions.related_title),
-                    related_similarity = COALESCE(EXCLUDED.related_similarity, exam_questions.related_similarity),
+                    related_source = {keep.format(c='related_source')},
+                    related_section = {keep.format(c='related_section')},
+                    related_title = {keep.format(c='related_title')},
+                    related_similarity = {keep.format(c='related_similarity')},
                     updated_at = now()
                 """,
                 [(q.source_file, q.number, q.pool, q.part, q.exam, q.topic_key, q.topic_label, q.stem,
