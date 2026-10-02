@@ -25,7 +25,8 @@ email.json holds the content; the script adds the offer link, the signature and 
       "lead_id": "ob-0128",
       "paragraphs": ["One sentence about them.", "The hook question and answer."],
       "greeting": "optional; default 'Hello,' (e.g. 'Hi Dana,')",
-      "cta": "optional; the sentence the link follows (default: the fleet-trial offer)",
+      "cta": "optional; the sentence the link follows (default: the offer's own sentence)",
+      "offer": "optional; fleet (default), practice or partner — see OFFERS",
       "thread_id": "optional; the sent message's Gmail thread id, for a follow-up"
     }
 
@@ -64,6 +65,33 @@ DEFAULT_CTA = (
     "free for 30 days on the fleet plan, no card needed:"
 )
 LINK_TEXT = "set up your first boat"
+
+# 2026-10-02 — one offer per niche. fleet: towing companies, the fleet trial via the
+# /fleet redirect. practice: schools, the free /practice page. partner: the
+# Subchapter M TPOs, the landing page (/ redirects to /landing with the query).
+OFFERS = {
+    "fleet": {"path": "/fleet", "cta": DEFAULT_CTA, "link_text": LINK_TEXT, "expect": "redirect"},
+    "practice": {
+        "path": "/practice",
+        "cta": (
+            "We built a free practice page from the NMC's published sample exams: students pick a "
+            "topic, answer 10 questions, and see the right answer and, where one applies, the regulation "
+            "behind it. No sign-up, no ads:"
+        ),
+        "link_text": "open the practice questions",
+        "expect": "ok",
+    },
+    "partner": {
+        "path": "/",
+        "cta": (
+            "RegKnot gives compliance answers in seconds with exact CFR citations, tailored to each "
+            "boat, built with Captain Karynn Marchal, USCG Master Unlimited. If it helps to look "
+            "before we talk:"
+        ),
+        "link_text": "see RegKnot",
+        "expect": "redirect",
+    },
+}
 OPT_OUT = "If this isn't useful, reply 'no thanks' and I won't write again."
 
 CONFIG_DIR = Path.home() / ".regknots"
@@ -71,9 +99,10 @@ CLIENT_FILE = Path(os.environ.get("REGKNOTS_GMAIL_CLIENT", CONFIG_DIR / "gmail_c
 TOKEN_FILE = Path(os.environ.get("REGKNOTS_GMAIL_TOKEN", CONFIG_DIR / "gmail_token.json"))
 
 
-def offer_link(lead_id: str) -> str:
-    """The short link; /fleet redirects to the fleet-trial signup and adds the tracking tags."""
-    return f"{SITE}/fleet?src={lead_id}"
+def offer_link(lead_id: str, offer: str = "fleet") -> str:
+    """The one link in the email. /fleet redirects to the fleet-trial signup and adds the
+    tracking tags; every link carries src=<lead id>, the signup attribution code."""
+    return f"{SITE}{OFFERS[offer]['path']}?src={lead_id}"
 
 
 def load_email(path: str) -> dict:
@@ -87,12 +116,16 @@ def load_email(path: str) -> dict:
         sys.exit(f"{path}: paragraphs must be a list of strings")
     if re.search(r"https?://|www\.", " ".join(data["paragraphs"] + [data.get("cta", ""), data.get("greeting", "")])):
         sys.exit(f"{path}: put no links in the text; the script adds the offer link")
+    if data.setdefault("offer", "fleet") not in OFFERS:
+        sys.exit(f"{path}: offer must be one of {', '.join(OFFERS)}, got {data['offer']!r}")
     return data
 
 
 def render_text(data: dict) -> str:
-    cta = data.get("cta") or DEFAULT_CTA
-    parts = [data.get("greeting") or "Hello,", *data["paragraphs"], f"{cta} {offer_link(data['lead_id'])}"]
+    offer = OFFERS[data.get("offer", "fleet")]
+    cta = data.get("cta") or offer["cta"]
+    link = offer_link(data["lead_id"], data.get("offer", "fleet"))
+    parts = [data.get("greeting") or "Hello,", *data["paragraphs"], f"{cta} {link}"]
     signature = "\n".join([
         "Blake Marchal",
         "Co-founder, RegKnot",
@@ -104,13 +137,14 @@ def render_text(data: dict) -> str:
 
 def render_html(data: dict) -> str:
     esc = html.escape
-    cta = data.get("cta") or DEFAULT_CTA
-    link = esc(offer_link(data["lead_id"]), quote=True)
+    offer = OFFERS[data.get("offer", "fleet")]
+    cta = data.get("cta") or offer["cta"]
+    link = esc(offer_link(data["lead_id"], data.get("offer", "fleet")), quote=True)
     p = '<p style="margin:0 0 14px 0;">{}</p>'
     body = [p.format(esc(data.get("greeting") or "Hello,"))]
     body += [p.format(esc(text)) for text in data["paragraphs"]]
     body.append(p.format(
-        f'{esc(cta)} <a href="{link}" style="color:#0f766e;font-weight:bold;">{LINK_TEXT}</a>.'
+        f'{esc(cta)} <a href="{link}" style="color:#0f766e;font-weight:bold;">{esc(offer["link_text"])}</a>.'
     ))
     signature = f"""\
 <table cellpadding="0" cellspacing="0" border="0" style="margin:22px 0 16px 0;border-collapse:collapse;">
@@ -189,21 +223,24 @@ def gmail(open_browser: bool = True):
     return service
 
 
-def check_link_live() -> None:
-    """Refuse to draft an email whose link would 404: /fleet must redirect."""
+def check_link_live(offer: str = "fleet") -> None:
+    """Refuse to draft an email whose link would not work: /fleet and / must redirect,
+    /practice must answer 200."""
 
     class NoRedirect(urllib.request.HTTPRedirectHandler):
         def redirect_request(self, *args, **kwargs):
             return None
 
+    url = offer_link("ob-0000", offer)
     opener = urllib.request.build_opener(NoRedirect)
     try:
-        opener.open(urllib.request.Request(offer_link("ob-0000"), method="HEAD"), timeout=15)
+        opener.open(urllib.request.Request(url, method="HEAD"), timeout=15)
         status = 200
     except urllib.error.HTTPError as exc:
         status = exc.code
-    if status not in (301, 302, 307, 308):
-        sys.exit(f"{offer_link('ob-0000')} answered {status}, not a redirect; deploy /fleet first.")
+    want = (301, 302, 307, 308) if OFFERS[offer]["expect"] == "redirect" else (200,)
+    if status not in want:
+        sys.exit(f"{url} answered {status}, expected {'a redirect' if want[0] != 200 else '200'}; deploy it first.")
 
 
 def reply_headers_for(service, thread_id: str) -> dict:
@@ -220,7 +257,7 @@ def reply_headers_for(service, thread_id: str) -> dict:
 
 
 def save_draft(data: dict, draft_id: str | None) -> None:
-    check_link_live()
+    check_link_live(data.get("offer", "fleet"))
     service = gmail()
     reply = reply_headers_for(service, data["thread_id"]) if data.get("thread_id") else None
     message = {"raw": base64.urlsafe_b64encode(build_message(data, reply).as_bytes()).decode()}

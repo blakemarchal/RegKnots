@@ -59,3 +59,32 @@ make the boat fast to its tow, with the dates of each examination, which gear wa
 examined it. The results of the 33 CFR 164.76 inspections go in the Towing Vessel Record, the
 logbook or your TSMS (46 CFR 140.820).
 **Fits:** harbor tug and fleeting operators; anyone with face wires.
+
+# Schools (niche `school`, offer `practice`) — 2026-10-02
+
+Schools are offered the free practice page for their students, not a subscription. These
+are product facts, not regulatory answers; do not add regulatory claims to a school email.
+
+## S1 — Free practice questions for their students
+**Point:** RegKnot's free practice page uses the NMC's own published sample exams: deck
+(Rules of the Road, deck general, navigation, stability), engine (motor, steam, electrical,
+QMED) and endorsements (lifeboatman, tankship, barge). Students pick a topic and answer 10
+questions; each answer shows the correct choice and, where one applies, the regulation it
+comes from. No sign-up, no ads, free for anyone. Instructors are welcome to send their classes.
+**Fits:** any school with license, endorsement or STCW courses. Mention the courses the row
+lists (`service`) in the first sentence. The `practice` offer line the script adds already
+describes the page, so the body needs only that first sentence and one more from this point
+(the topics that match their courses, or that instructors are welcome to send their classes).
+
+# Subchapter M TPOs (niche `tpo`, offer `partner`) — 2026-10-02
+
+The six Coast Guard-approved third-party organizations audit TSMSs and survey towing vessels
+(46 CFR 139.115). The email asks for a short conversation, not a sale. One per run at most;
+Blake may rewrite these before sending.
+
+## P1 — The records their auditors check
+**Point:** Operators keep ten kinds of records in the Towing Vessel Record, the official
+logbook or the TSMS (46 CFR 140.915), and crews ask what goes where. RegKnot answers those
+questions with the exact citation, set up for each boat. Ask whether a short call makes sense
+about whether it would help the operators they audit.
+**Fits:** all six TPOs.
