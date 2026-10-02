@@ -53,6 +53,8 @@ class _Conn:
             return {"d30": 4899, "alltime": 8895, "invoices": 6, "last_paid": NOW}
         if "AS new_7d" in sql:
             return {"new_7d": 2, "open": 205}
+        if "FROM practice_quiz_starts" in sql:
+            return {"q7": 3, "q30": 9}
         raise AssertionError(f"unexpected fetchrow: {sql[:80]}")
 
     async def fetchval(self, sql, *args):
@@ -61,6 +63,10 @@ class _Conn:
             return 4899
         if "trial_ends_at BETWEEN" in sql:
             return 0
+        if "src:practice" in sql:
+            return 2
+        if "FROM free_plan_usage" in sql:
+            return 41
         raise AssertionError(f"unexpected fetchval: {sql[:80]}")
 
 
@@ -94,6 +100,9 @@ def conn(monkeypatch):
 
 def test_dashboard_shapes_trends_funnel_money_and_quality(conn):
     d = asyncio.run(DASH.dashboard(_admin=None, exclude_internal=True, weeks=26))
+    assert (d.growth.practice_quizzes_7d, d.growth.practice_quizzes_30d, d.growth.practice_signups_30d,
+            d.growth.free_plan_answers_month) == (3, 9, 2, 41)
+    assert d.growth.free_plan_cap_month == 500
     assert [w.questions for w in d.weeks] == [2, 0]
     assert d.funnel.asked == 40 and d.funnel.returned == 15 and d.funnel.paying == 2
     assert d.revenue.mrr_cents == 4899 and d.revenue.paid_alltime_cents == 8895
@@ -111,7 +120,9 @@ def test_dashboard_shapes_trends_funnel_money_and_quality(conn):
 
 def test_dashboard_filters_internal_accounts_only_when_asked(conn):
     asyncio.run(DASH.dashboard(_admin=None, exclude_internal=True, weeks=26))
-    assert all("is_admin IS NOT TRUE" in s for s in conn.sql)
+    # 2026-10-02 — anonymous quiz starts and the monthly free-plan total have no user to filter
+    user_less = ("FROM practice_quiz_starts", "FROM free_plan_usage")
+    assert all("is_admin IS NOT TRUE" in s for s in conn.sql if not any(t in s for t in user_less))
     conn.sql.clear()
     asyncio.run(DASH.dashboard(_admin=None, exclude_internal=False, weeks=26))
     assert not any("is_admin IS NOT TRUE" in s for s in conn.sql)

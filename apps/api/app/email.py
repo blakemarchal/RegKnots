@@ -334,6 +334,14 @@ async def send_trial_expiring_email(to_email: str, full_name: str, messages_used
     """
     raw_first = full_name.split()[0] if full_name.strip() else "Mariner"
     first_name = _html_lib.escape(raw_first)
+    # 2026-10-02 — the account stays open on the free plan (app/free_plan.py).
+    cap = settings.free_plan_monthly_cap
+    after_trial = (
+        f"When the trial ends your account stays open on the free plan, with {cap} "
+        "questions every 30 days. If you want more than that, there are three plans:"
+        if cap > 0 else
+        "If you've found it useful and want to keep going, we now offer three plans:"
+    )
     html = _html(f"""
       <h1>Your RegKnot trial ends in 3 days</h1>
       <p>
@@ -347,7 +355,7 @@ async def send_trial_expiring_email(to_email: str, full_name: str, messages_used
         work. Just hit reply to this email; I read every response personally.
       </p>
       <p>
-        If you've found it useful and want to keep going, we now offer three plans:
+        {after_trial}
       </p>
       <ul style="padding-left:20px; margin:0 0 16px;">
         <li style="color:#6b7594; font-size:14px; line-height:1.7;">

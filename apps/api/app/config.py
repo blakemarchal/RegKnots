@@ -34,6 +34,15 @@ class Settings(BaseSettings):
     # subscription gate in chat.py now handles trial expiry and limits.
     pilot_mode: bool = False
 
+    # 2026-10-02 — the free plan (app/free_plan.py): after the trial a free
+    # user keeps this many questions per 30-day cycle (0 = no free plan: the
+    # old hard paywall), and free-plan answers across all users stop at the
+    # global monthly cap so a campaign can't overrun the Claude bill
+    # (~$0.05-0.13 per Opus answer). Env REGKNOTS_FREE_PLAN_MONTHLY_CAP /
+    # REGKNOTS_FREE_PLAN_GLOBAL_MONTHLY_CAP.
+    free_plan_monthly_cap: int = 10
+    free_plan_global_monthly_cap: int = 500
+
     # Stripe — no REGKNOTS_ prefix in .env
     stripe_secret_key: str = Field(default="", validation_alias="STRIPE_SECRET_KEY")
     stripe_webhook_secret: str = Field(default="", validation_alias="STRIPE_WEBHOOK_SECRET")

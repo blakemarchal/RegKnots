@@ -9,6 +9,7 @@ from pydantic import BaseModel
 
 from app.auth.deps import get_current_user
 from app.auth.schemas import CurrentUser
+from app import free_plan
 from app.db import get_pool
 from app.plans import MATE_MESSAGE_CAP, message_cap_for_tier
 from app.stripe_service import create_billing_portal_session, create_checkout_session, handle_webhook_event
@@ -99,6 +100,11 @@ class BillingStatus(BaseModel):
     # If set (e.g. 'womenoffshore'), upgrade flows should surface promo
     # price IDs rather than standard prices. Null means standard pricing.
     referral_source: str | None
+    # 2026-10-02 — the free plan (app/free_plan.py): a free user whose trial
+    # is over keeps monthly_message_cap questions per cycle; paused means the
+    # month's global free-plan cap is reached (resets on the 1st).
+    free_plan: bool = False
+    free_plan_paused: bool = False
 
 
 _FREE_MESSAGE_LIMIT = 50
@@ -131,6 +137,7 @@ async def billing_status(
     cycle_start = row["message_cycle_started_at"]
     trial_active = tier == "free" and trial_ends_at is not None and trial_ends_at > now
     is_privileged = bool(row["is_admin"]) or bool(row["is_internal"])
+    free_plan_state = None
 
     # Compute cycle reset — Mate users see this roll over every 30 days.
     # If the cycle has already expired, the UI should show "resets now" /
@@ -149,12 +156,18 @@ async def billing_status(
     elif tier != "free":
         needs_subscription = False
         messages_remaining = None
-    elif trial_active:
-        needs_subscription = message_count >= _FREE_MESSAGE_LIMIT
-        messages_remaining = max(0, _FREE_MESSAGE_LIMIT - message_count)
+    elif trial_active and message_count < _FREE_MESSAGE_LIMIT:
+        needs_subscription = False
+        messages_remaining = _FREE_MESSAGE_LIMIT - message_count
     else:
+        # 2026-10-02 — trial over: the free plan, or the paywall when it is off
         needs_subscription = True
         messages_remaining = 0
+        free_plan_state = await free_plan.state(pool, row, now)
+        if free_plan_state is not None:
+            # 50 trial messages used before day 7: the trial is over for
+            # every screen that reads this, the free plan has taken over.
+            trial_active = False
 
     # Paused = full lockout — but still let privileged users through.
     if sub_status == "paused" and not is_privileged:
@@ -167,7 +180,14 @@ async def billing_status(
         monthly_messages_remaining: int | None = None
     else:
         monthly_message_cap = message_cap_for_tier(tier)
-        if monthly_message_cap is not None:
+        if free_plan_state is not None and sub_status != "paused":
+            monthly_message_cap = free_plan_state.cap
+            monthly_count = free_plan_state.used
+            monthly_messages_remaining = 0 if free_plan_state.paused else free_plan_state.remaining
+            needs_subscription = monthly_messages_remaining == 0
+            messages_remaining = monthly_messages_remaining
+            cycle_resets_at = free_plan_state.resets_at
+        elif monthly_message_cap is not None:
             monthly_messages_remaining = max(0, monthly_message_cap - monthly_count)
             # If Mate user has already hit the cap, also set needs_subscription
             # so the frontend knows to surface an upgrade prompt even though
@@ -208,6 +228,8 @@ async def billing_status(
         monthly_messages_remaining=monthly_messages_remaining,
         cycle_resets_at=cycle_resets_at.isoformat() if cycle_resets_at else None,
         referral_source=row["referral_source"],
+        free_plan=free_plan_state is not None,
+        free_plan_paused=bool(free_plan_state and free_plan_state.paused),
     )
 
 

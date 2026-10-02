@@ -15,6 +15,7 @@ from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
 from app.auth.schemas import CurrentUser
+from app.config import settings
 from app.db import get_pool
 from app.routers.admin import require_admin
 
@@ -64,6 +65,15 @@ class Attention(BaseModel):
     trials_ending_7d: int
 
 
+class Growth(BaseModel):
+    """2026-10-02 — the free practice page and the free plan."""
+    practice_quizzes_7d: int
+    practice_quizzes_30d: int
+    practice_signups_30d: int       # signed up from a /practice link or landing
+    free_plan_answers_month: int    # free-plan answers this calendar month
+    free_plan_cap_month: int        # settings.free_plan_global_monthly_cap
+
+
 class RecentSignup(BaseModel):
     id: str
     email: str
@@ -97,6 +107,7 @@ class Dashboard(BaseModel):
     revenue: Revenue
     quality: Quality
     attention: Attention
+    growth: Growth
     recent_signups: list[RecentSignup]
     recent_questions: list[RecentQuestion]
     recent_payments: list[RecentPayment]
@@ -247,6 +258,24 @@ async def dashboard(
             ORDER BY m.created_at DESC LIMIT 8
             """
         )
+        practice = await conn.fetchrow(
+            """
+            SELECT count(*) FILTER (WHERE created_at > now() - interval '7 days') AS q7,
+                   count(*) FILTER (WHERE created_at > now() - interval '30 days') AS q30
+            FROM practice_quiz_starts
+            """
+        )
+        practice_signups = await conn.fetchval(
+            f"""
+            SELECT count(*) FROM users u
+            WHERE u.created_at > now() - interval '30 days'
+              AND (u.signup_source = 'src:practice'
+                   OR u.signup_attribution->>'landing_path' LIKE '/practice%'){uf}
+            """
+        )
+        free_answers = await conn.fetchval(
+            "SELECT answers FROM free_plan_usage WHERE month = date_trunc('month', now())::date"
+        )
         payments = await conn.fetch(
             f"""
             SELECT u.email, be.amount_paid_cents, be.subscription_tier, be.billing_interval, be.paid_at
@@ -277,6 +306,13 @@ async def dashboard(
             open_audit_causes=_counts(cause_rows, "cause", empty="unclassified"),
         ),
         attention=Attention(trials_ending_7d=trials_ending or 0),
+        growth=Growth(
+            practice_quizzes_7d=practice["q7"] or 0,
+            practice_quizzes_30d=practice["q30"] or 0,
+            practice_signups_30d=practice_signups or 0,
+            free_plan_answers_month=free_answers or 0,
+            free_plan_cap_month=settings.free_plan_global_monthly_cap,
+        ),
         recent_signups=[
             RecentSignup(id=str(r["id"]), email=r["email"], full_name=r["full_name"], role=r["role"],
                          created_at=r["created_at"], signup_source=r["signup_source"], questions=r["questions"])

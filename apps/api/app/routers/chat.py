@@ -307,10 +307,11 @@ async def _run_chat_preflight(
         trial_expired = sub_row["trial_ends_at"] < datetime.now(timezone.utc)
         over_limit = sub_row["message_count"] >= 50
         if trial_expired or over_limit:
-            raise HTTPException(
-                status_code=status.HTTP_402_PAYMENT_REQUIRED,
-                detail="Trial expired or message limit reached. Subscribe to continue.",
-            )
+            # 2026-10-02 — the free plan instead of a hard paywall: a few
+            # questions per 30-day cycle under a global monthly cap
+            # (app/free_plan.py). Raises 402 with the reason when out.
+            from app import free_plan as _free_plan
+            await _free_plan.check_allowance(pool, sub_row)
 
     # ── Per-tier monthly cap gate (Sprint D6.2 + D6.91) ────────────────────
     # Cadet plan caps at 25 messages per rolling 30-day cycle.
@@ -867,6 +868,14 @@ async def _persist_chat_outcome(
         """,
         user_id,
     )
+
+    # 2026-10-02 — count a free-plan answer toward the month's global cap
+    # (app/free_plan.py); a counting failure never fails the persist.
+    try:
+        from app import free_plan as _free_plan
+        await _free_plan.record_if_free_plan(pool, user_id, conversation_id)
+    except Exception:
+        logger.exception("free plan: failed to record the answer for user %s", user_id)
 
     # Fire background title generation for brand-new conversations
     if is_new_conversation:
