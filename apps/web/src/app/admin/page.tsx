@@ -129,6 +129,19 @@ export default function AdminDashboard() {
     }
     const pastDue = stats.subs_past_due + stats.subs_paused
     if (pastDue) items.push({ key: 'pastdue', text: `${plural(pastDue, 'subscription')} past due or paused`, href: '/admin/users?filter=paused', tone: 'red' })
+    // 2026-10-02 — the free plan's monthly pool is the Claude spend guard for free users.
+    const growth = dash?.growth
+    if (growth && growth.free_plan_cap_month > 0 && growth.free_plan_answers_month >= growth.free_plan_cap_month * 0.8) {
+      const paused = growth.free_plan_answers_month >= growth.free_plan_cap_month
+      items.push({
+        key: 'freeplan',
+        text: paused
+          ? `Free plan paused for the rest of the month (${growth.free_plan_answers_month} of ${growth.free_plan_cap_month} answers used)`
+          : `Free plan at ${growth.free_plan_answers_month} of ${growth.free_plan_cap_month} answers this month; it pauses at the cap`,
+        href: '/admin',
+        tone: paused ? 'red' : 'amber',
+      })
+    }
     if (dash?.attention.trials_ending_7d) {
       items.push({ key: 'trials', text: `${plural(dash.attention.trials_ending_7d, 'trial')} ending in the next 7 days`, href: '/admin/users?filter=trial', tone: 'amber' })
     }
@@ -443,6 +456,40 @@ export default function AdminDashboard() {
               </>
             )}
           </Card>
+
+          {/* 2026-10-02 — the free practice page and the free plan */}
+          {(!dash || dash.growth) && (
+            <Card title="Free practice · free plan" action={<Link href="/practice" className="font-mono text-[11px] text-[#2dd4bf] hover:underline">Open /practice →</Link>}>
+              {!dash?.growth ? <Skeleton className="h-[110px] border-0" /> : (
+                <>
+                  <dl className="grid grid-cols-3 gap-3 font-mono">
+                    <div>
+                      <dt className={`text-[10px] uppercase tracking-wider ${TEXT_MUTED}`}>Quizzes 7d</dt>
+                      <dd className="text-lg font-bold text-[#f0ece4]">{dash.growth.practice_quizzes_7d.toLocaleString()}</dd>
+                    </div>
+                    <div>
+                      <dt className={`text-[10px] uppercase tracking-wider ${TEXT_MUTED}`}>Quizzes 30d</dt>
+                      <dd className="text-lg font-bold text-[#f0ece4]">{dash.growth.practice_quizzes_30d.toLocaleString()}</dd>
+                    </div>
+                    <div>
+                      <dt className={`text-[10px] uppercase tracking-wider ${TEXT_MUTED}`}>Signups 30d</dt>
+                      <dd className="text-lg font-bold text-[#2dd4bf]">{dash.growth.practice_signups_30d.toLocaleString()}</dd>
+                    </div>
+                  </dl>
+                  <div className="mt-3 pt-3 border-t border-white/5">
+                    <div className="flex items-baseline justify-between gap-2 font-mono text-[11px] mb-1.5">
+                      <span className="text-[#f0ece4]/80">Free-plan answers this month</span>
+                      <span className="tabular-nums text-[#f0ece4]/70">
+                        {dash.growth.free_plan_answers_month.toLocaleString()} / {dash.growth.free_plan_cap_month.toLocaleString()}
+                      </span>
+                    </div>
+                    <MeterBar value={dash.growth.free_plan_answers_month} max={dash.growth.free_plan_cap_month}
+                      color={dash.growth.free_plan_answers_month >= dash.growth.free_plan_cap_month ? '#f87171' : '#2dd4bf'} />
+                  </div>
+                </>
+              )}
+            </Card>
+          )}
 
           <Card title="Newest signups" action={<Link href="/admin/users" className="font-mono text-[11px] text-[#2dd4bf] hover:underline">Users →</Link>}>
             {!dash ? <Skeleton className="h-[160px] border-0" /> : dash.recent_signups.length === 0 ? (

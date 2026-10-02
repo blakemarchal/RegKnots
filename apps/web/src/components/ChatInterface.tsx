@@ -1033,6 +1033,40 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
         </div>
       )}
 
+      {/* ── Free-plan banner (2026-10-02) ──────────────────────────────
+          After the trial a free account keeps a few questions every 30
+          days (apps/api/app/free_plan.py) while the month's free pool
+          lasts. Running out sends the next send to /pricing (402). */}
+      {billing && billing.tier === 'free' && billing.free_plan && !billing.unlimited && (() => {
+        const cap = billing.monthly_message_cap ?? 0
+        const left = billing.monthly_messages_remaining ?? 0
+        const resets = billing.cycle_resets_at
+          ? new Date(billing.cycle_resets_at).toLocaleDateString(undefined, { month: 'long', day: 'numeric' })
+          : null
+        const out = left === 0
+        const label = billing.free_plan_paused
+          ? "This month's free questions are used up. They come back on the 1st."
+          : out
+          ? `You've used your ${cap} free questions.${resets ? ` More on ${resets}.` : ''}`
+          : `Free plan: ${left} of ${cap} questions left${resets ? ` (resets ${resets})` : ''}`
+        const tone = out
+          ? 'bg-rose-950/40 border-rose-800/30 text-rose-400'
+          : left <= 3
+          ? 'bg-amber-950/40 border-amber-800/30 text-amber-400'
+          : 'bg-slate-900/60 border-slate-800/40 text-slate-400'
+        return (
+          <div className={`flex-shrink-0 flex items-center justify-between gap-3 px-4 py-2 border-b ${tone}`}>
+            <p className="font-mono text-xs">{label}</p>
+            <button
+              onClick={() => router.push('/pricing')}
+              className="font-mono text-xs font-bold text-[#2dd4bf] hover:underline whitespace-nowrap"
+            >
+              Upgrade
+            </button>
+          </div>
+        )
+      })()}
+
       {/* ── Per-tier monthly-cap banner (Sprint D6.2 + D6.91) ──────────
           Renders for any capped paid tier: Cadet (25-msg) and Mate
           (100-msg). Thresholds scale by percentage of cap so the banner

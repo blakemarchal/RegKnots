@@ -239,6 +239,12 @@ export default function EducationLanding() {
           <p className="font-mono text-xs text-[#6b7594]/80 mb-2">
             $14.99 / month, billed monthly. Cancel anytime. Free trial &mdash; no card required.
           </p>
+          {/* 2026-10-02 — the free practice page */}
+          <p className="font-mono text-sm mt-4">
+            <Link href="/practice" className="text-[#2dd4bf] hover:underline">
+              Or practice free with the official USCG sample questions &rarr;
+            </Link>
+          </p>
         </div>
       </section>
 

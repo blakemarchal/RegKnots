@@ -63,7 +63,7 @@ const FAQ_ITEMS: FaqItem[] = [
   {
     category: 'Account & Billing',
     q: 'What does the free trial include?',
-    a: 'The 7-day free trial gives you 50 messages to test RegKnot with your real compliance questions. All regulation sources and features are available during the trial. No credit card required to start.',
+    a: 'The 7-day free trial gives you 50 messages to test RegKnot with your real compliance questions. All regulation sources and features are available during the trial. No credit card required to start. When the trial ends your account stays open on the free plan, with 10 questions every 30 days. The [USCG exam practice](/practice) is free for everyone, no account needed.',
   },
   {
     category: 'Account & Billing',

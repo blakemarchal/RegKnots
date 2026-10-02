@@ -208,7 +208,7 @@ export default function LandingPage() {
             animate-[heroFadeUp_0.8s_ease-out_0.55s]"
           style={{ animationFillMode: 'both' }}
         >
-          7-day free trial · 50 messages · No credit card required
+          7-day free trial · then 10 free questions every 30 days · No credit card required
         </p>
 
         {/* D6.61 — competitive wedge tagline. Single mariner-vault apps
@@ -315,13 +315,13 @@ export default function LandingPage() {
               keeps breathing room. */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
             <PricingCard
-              name="Free Trial"
+              name="Free"
               price="$0"
-              priceSub="for 7 days"
+              priceSub="7-day trial, then free"
               features={[
-                '7-day free trial',
-                '50 messages during trial',
-                'Full feature access',
+                '7-day trial: 50 messages, full access',
+                'Then 10 free questions every 30 days',
+                'Free USCG exam practice',
                 'Upgrade or cancel anytime',
               ]}
               smallPrint="No credit card required to start."

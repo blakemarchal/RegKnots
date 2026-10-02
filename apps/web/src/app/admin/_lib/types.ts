@@ -79,6 +79,14 @@ export interface DashboardData {
     open_audit_causes: Record<string, number>
   }
   attention: { trials_ending_7d: number }
+  // 2026-10-02 — the free /practice page and the free plan after the trial
+  growth?: {
+    practice_quizzes_7d: number
+    practice_quizzes_30d: number
+    practice_signups_30d: number      // signed up from /practice
+    free_plan_answers_month: number   // free-plan answers this calendar month (UTC)
+    free_plan_cap_month: number       // the plan pauses for everyone at this many
+  }
   recent_signups: {
     id: string
     email: string

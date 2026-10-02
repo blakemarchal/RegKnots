@@ -139,6 +139,13 @@ test('2026-09-30: chips for the inland / Coast Guard sources', () => {
     ['EPA 2013 VGP 5.1', 'epa_vgp'],
     ['EPA 2013 VGP App.A', 'epa_vgp'],
   ])
+  assert.deepEqual(hits('Bowditch Art.1301, Bowditch Article 2405, Pub 1310 Ch.3 Sec.26, Pub. 102 Ch.2 Sec.1 and Pub 102 Appendix'), [
+    ['Bowditch Art.1301', 'nga_pubs'],
+    ['Bowditch Art.2405', 'nga_pubs'],
+    ['Pub 1310 Ch.3 Sec.26', 'nga_pubs'],
+    ['Pub 102 Ch.2 Sec.1', 'nga_pubs'],
+    ['Pub 102 Appendix', 'nga_pubs'],
+  ])
   assert.deepEqual(hits('40 CFR 139.21, 47 CFR 80.1085, 50 CFR 224.105, 29 CFR 1918.2 and 33 USC 1321'), [
     ['40 CFR 139.21', 'cfr_40'],
     ['47 CFR 80.1085', 'cfr_47'],

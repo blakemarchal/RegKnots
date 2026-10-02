@@ -125,6 +125,10 @@ export function LandingFooter({ extraLinks = [], onContactClick, homeHref }: Pro
               {label}
             </Link>
           ))}
+          {/* 2026-10-02 — the free practice page, linked from every marketing page */}
+          <Link href="/practice" className="font-mono text-xs text-[#6b7594] hover:text-[#f0ece4]/80 transition-colors">
+            USCG Exam Practice
+          </Link>
           <Link href="/terms" className="font-mono text-xs text-[#6b7594] hover:text-[#f0ece4]/80 transition-colors">
             Terms
           </Link>

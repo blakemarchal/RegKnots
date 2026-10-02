@@ -346,6 +346,25 @@ const CITATION_PATTERNS: CitationPattern[] = [
     toSection: m => `EPA 2013 VGP ${m[1].replace(/^App(?:endix\s*|\.\s*)/, 'App.')}`,
   },
 
+  // 2026-10-02 — NGA navigation manuals: "Bowditch Art.1301" (or "Bowditch
+  // Article 1301", "Bowditch §1301"), "Pub 1310 Ch.3 Sec.26",
+  // "Pub 102 Ch.2 Sec.1", "Pub 102 Appendix"
+  {
+    re: /\bBowditch\s+(?:Art(?:icle)?\.?\s*|§\s*)(\d{3,4})\b/g,
+    sourceHint: 'nga_pubs',
+    toSection: m => `Bowditch Art.${m[1]}`,
+  },
+  {
+    re: /\bPub\.?\s*(102|1310)\s+Ch\.\s*(\d)\s+Sec\.\s*(\d{1,2})\b/g,
+    sourceHint: 'nga_pubs',
+    toSection: m => `Pub ${m[1]} Ch.${m[2]} Sec.${m[3]}`,
+  },
+  {
+    re: /\bPub\.?\s*102\s+Appendix\b/g,
+    sourceHint: 'nga_pubs',
+    toSection: () => 'Pub 102 Appendix',
+  },
+
   // IMO Specialty Codes — HSC, IGC, IBC, BWM, Polar, IGF, CSS, IAMSAR
   // The Codes use MSC.XXX(YY) resolution refs or Ch.X.Y sections.
   // Capture the full identifier the model writes; rely on the

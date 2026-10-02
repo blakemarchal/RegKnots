@@ -54,6 +54,12 @@ export interface BillingStatus {
   // Sprint D6.3b — charity-partner referral. Non-null value grants
   // lifetime promo pricing on upgrade flows.
   referral_source: string | null
+  // 2026-10-02 — the free plan after the trial (apps/api/app/free_plan.py).
+  // When true, monthly_message_cap / monthly_messages_remaining /
+  // cycle_resets_at describe the free questions left this cycle;
+  // free_plan_paused means this month's free pool is used up (back on the 1st).
+  free_plan?: boolean
+  free_plan_paused?: boolean
 }
 
 export interface VesselSummary {

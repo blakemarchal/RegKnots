@@ -87,6 +87,29 @@ const TIER_DISPLAY: Record<Tier, {
   captain: { name: 'Captain', monthly: 39.99, monthlyPromo: 29.99, annualEq: 29.99, annualTotal: 359.88 },
 }
 
+// 2026-10-02 — the free card. "10" matches the API's settings.free_plan_monthly_cap.
+const FREE_FEATURES = [
+  '7-day trial: 50 messages, full access',
+  'Then 10 free questions every 30 days',
+  'Free USCG exam practice',
+  'Upgrade or cancel anytime',
+]
+
+// 2026-10-02 — why a free-plan account is looking at plans.
+function freePlanNote(b: BillingStatus): string {
+  const cap = b.monthly_message_cap ?? 10
+  if (b.free_plan_paused) {
+    return 'This month’s free questions are used up. They come back on the 1st. Subscribe to keep asking.'
+  }
+  const resets = b.cycle_resets_at
+    ? new Date(b.cycle_resets_at).toLocaleDateString(undefined, { month: 'long', day: 'numeric' })
+    : null
+  if (b.needs_subscription) {
+    return `You’ve used your ${cap} free questions for this cycle.${resets ? ` They reset on ${resets}.` : ''} Subscribe to keep asking.`
+  }
+  return `Free plan: ${b.monthly_messages_remaining ?? 0} of ${cap} questions left this cycle.`
+}
+
 export default function PricingPage() {
   const [interval, setInterval] = useState<Interval>('monthly')
   const [loading, setLoading] = useState<string | null>(null)
@@ -185,7 +208,9 @@ export default function PricingPage() {
           Pick your plan
         </h1>
         <p className="font-mono text-sm text-[#6b7594] text-center max-w-md mb-4">
-          {billing?.needs_subscription && billing.trial_active
+          {billing?.free_plan
+            ? freePlanNote(billing)
+            : billing?.needs_subscription && billing.trial_active
             ? `You’ve used ${billing.message_count} of 50 free messages. Subscribe to continue.`
             : billing?.needs_subscription
             ? 'Your free trial has ended. Subscribe to continue.'
@@ -240,19 +265,19 @@ export default function PricingPage() {
           <div className="flex flex-col rounded-2xl p-6 border border-white/8 bg-[#0b1020]">
             <div className="mb-4">
               <p className="font-display text-xl font-bold text-[#f0ece4]/80 tracking-wide">
-                Free Trial
+                Free
               </p>
               <p className="font-mono text-3xl font-bold text-[#f0ece4]/80 mt-1">$0</p>
-              <p className="font-mono text-xs text-[#6b7594]">7 days</p>
+              <p className="font-mono text-xs text-[#6b7594]">7-day trial, then free</p>
               <p className="font-mono text-xs text-[#6b7594] mt-1.5 leading-snug">
                 No credit card required
               </p>
             </div>
             <p className="font-mono text-xs text-[#6b7594] mb-4 leading-relaxed">
-              Try RegKnot risk-free before you commit. Upgrade any time during the trial.
+              Try everything for 7 days. After that, keep asking a few questions every month for free.
             </p>
             <ul className="flex flex-col gap-2 mb-6 flex-1">
-              {['50 messages during trial', 'Full feature access', 'Upgrade or cancel anytime'].map(p => (
+              {FREE_FEATURES.map(p => (
                 <li key={p} className="flex items-start gap-2">
                   <svg className="w-3.5 h-3.5 text-[#6b7594] mt-0.5 flex-shrink-0" viewBox="0 0 16 16" fill="currentColor">
                     <path d="M13.854 3.646a.5.5 0 0 1 0 .708l-7 7a.5.5 0 0 1-.708 0l-3.5-3.5a.5.5 0 1 1 .708-.708L6.5 10.293l6.646-6.647a.5.5 0 0 1 .708 0z"/>
@@ -265,6 +290,12 @@ export default function PricingPage() {
               <div className="text-center">
                 <p className="font-mono text-xs text-[#6b7594]">
                   Your free trial is active.
+                </p>
+              </div>
+            ) : billing?.free_plan ? (
+              <div className="text-center">
+                <p className="font-mono text-xs text-[#6b7594]">
+                  You&apos;re on the free plan.
                 </p>
               </div>
             ) : showSubscribed ? (

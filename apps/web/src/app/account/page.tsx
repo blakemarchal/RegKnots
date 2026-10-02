@@ -912,6 +912,10 @@ function AccountContent() {
                   <p className="font-mono text-sm text-[#f0ece4]/80">
                     {billing.trial_active
                       ? `Free trial — ${billing.messages_remaining ?? 0} messages remaining`
+                      : billing.free_plan
+                      ? billing.free_plan_paused
+                        ? 'Free plan — this month’s free questions are used up (back on the 1st)'
+                        : `Free plan — ${billing.monthly_messages_remaining ?? 0} of ${billing.monthly_message_cap ?? 0} questions left this cycle`
                       : 'No active subscription'}
                   </p>
                   {hasWorkspaces && (
