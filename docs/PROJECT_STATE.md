@@ -2,13 +2,13 @@
 
 **One-page operational snapshot for humans and fresh Claude Code sessions.**
 
-Last updated: 2026-09-30 (inland / Coast Guard corpus: ten new sources, NVIC discovery fix, Medical Manual, `uscg_bulletin` pruned + daily feed, keyword floor; `docs/sprint-audits/corpus-gap-audit-inland-2026-09-29.md` §7. 2026-09-26: question-audit follow-up deployed, SOLAS / cfr_49 cleanup applied, Anthropic credits exhausted; audit `docs/sprint-audits/question-audit-2026-09-25.md`; Opus 5.5 low is the default answer model; system audit 2026-09-10)
+Last updated: 2026-10-02 (free /practice page from the NMC sample exams, a capped free plan after the trial, outreach to MVUS towing companies, schools and TPOs with a phone list, NGA navigation manuals `nga_pubs`; migration 0120; `docs/specs/growth-practice-free-plan-2026-10-02.md`. 2026-09-30: inland / Coast Guard corpus: ten new sources, NVIC discovery fix, Medical Manual, `uscg_bulletin` pruned + daily feed, keyword floor; `docs/sprint-audits/corpus-gap-audit-inland-2026-09-29.md` §7. 2026-09-26: question-audit follow-up deployed, SOLAS / cfr_49 cleanup applied, Anthropic credits exhausted; audit `docs/sprint-audits/question-audit-2026-09-25.md`; Opus 5.5 low is the default answer model; system audit 2026-09-10)
 
 ---
 
 ## TL;DR
 
-RegKnot is a maritime-compliance RAG at **https://regknots.com**. Production stack live and healthy. **100,096 chunks across 76 sources** (2026-09-30, after the inland / Coast Guard corpus work; 91,801 across 66 on 2026-09-26) with 100% embedding coverage. Retrieval pipeline now includes multi-query rewrite, Haiku reranker, citation oracle, source-diversified fetch, jurisdiction filter, vessel-profile boosts, synonym + intent expansion; hybrid BM25+dense built, measured 2026-07-19 and rejected (dense wins) — prod `.env` carried it switched on until the 2026-09-10 fix, now dense. **96.1% A-or-A−** on the latest 152-question regression eval. First organic Captain-tier subscriber 2026-09-09. See the 2026-09-10 audit for the pre-push list.
+RegKnot is a maritime-compliance RAG at **https://regknots.com**. Production stack live and healthy. **102,472 chunks across 77 sources** (2026-10-02, after the NGA navigation manuals; 100,096 across 76 on 2026-09-30, after the inland / Coast Guard corpus work) with 100% embedding coverage. Retrieval pipeline now includes multi-query rewrite, Haiku reranker, citation oracle, source-diversified fetch, jurisdiction filter, vessel-profile boosts, synonym + intent expansion; hybrid BM25+dense built, measured 2026-07-19 and rejected (dense wins) — prod `.env` carried it switched on until the 2026-09-10 fix, now dense. **96.1% A-or-A−** on the latest 152-question regression eval. First organic Captain-tier subscriber 2026-09-09. See the 2026-09-10 audit for the pre-push list.
 
 ## Live production
 
@@ -16,7 +16,7 @@ RegKnot is a maritime-compliance RAG at **https://regknots.com**. Production sta
 - **API health:** https://regknots.com/api/health — `{"status":"healthy"}`
 - **VPS:** `root@68.183.130.3` (shared box, hostname `spiritflow-prod-01`)
 - **Repo paths:** local `C:\Users\Blake\Documents\RegKnots`, VPS `/opt/RegKnots` (NOT `/root/RegKnots`)
-- **Alembic head:** `0119`
+- **Alembic head:** `0120`
 - **Services:** `regknots-api`, `regknots-web`, `regknots-worker` — all systemd, all active
 - **DB:** `docker exec regknots-postgres psql -U regknots -d regknots` (PG 16.13 + pgvector, 1528 MB)
 - **Deploy:** `scripts/deploy.sh` + `scripts/smoke.sh` (shipped 2026-05-07; 3-stage smoke catches stale-build failure mode)
@@ -31,7 +31,7 @@ RegKnot is a maritime-compliance RAG at **https://regknots.com**. Production sta
 - **Propose spec, wait for greenlight** before coding non-trivial work.
 - **Grep for Cassandra** before every commit.
 
-## Corpus snapshot — 100,096 chunks across 76 sources (live 2026-09-30, see `docs/corpus-status.md`)
+## Corpus snapshot — 102,472 chunks across 77 sources (live 2026-10-02, see `docs/corpus-status.md`)
 
 100% embedding coverage. Vector dim 1536. Top sources by chunk count:
 
@@ -50,7 +50,7 @@ RegKnot is a maritime-compliance RAG at **https://regknots.com**. Production sta
 | `iacs_ur` | 2,981 | IACS Unified Requirements |
 | `nmc_exam_bank` | 2,938 | NMC exam bank (Study Tools) |
 
-Plus 64 more sources, among them the 2026-09-30 inland / Coast Guard set (`uscg_cvc`, `uscg_towing`, `uscg_safety_alert`, `uscg_waterways`, `epa_vgp`, `usc_33`, `cfr_40` / `cfr_47` / `cfr_50` / `cfr_29`), `solas`, `marpol`, `colregs`, `stcw`, `ism` (+ supplements), `usc_46`, `who_ihr`, `erg`, `nmc_policy` / `nmc_checklist`, `uscg_bulletin` (durable bulletins only since 2026-09-30, daily from the GovDelivery feed), foreign-flag regulators, IMO codes and the OCIMF public layer. See `docs/corpus-status.md` for the full table, tiers and refresh schedules.
+Plus 65 more sources, among them `nga_pubs` (2026-10-02: Bowditch Vol. I, Pub 1310, Pub 102; 2,376 chunks), the 2026-09-30 inland / Coast Guard set (`uscg_cvc`, `uscg_towing`, `uscg_safety_alert`, `uscg_waterways`, `epa_vgp`, `usc_33`, `cfr_40` / `cfr_47` / `cfr_50` / `cfr_29`), `solas`, `marpol`, `colregs`, `stcw`, `ism` (+ supplements), `usc_46`, `who_ihr`, `erg`, `nmc_policy` / `nmc_checklist`, `uscg_bulletin` (durable bulletins only since 2026-09-30, daily from the GovDelivery feed), foreign-flag regulators, IMO codes and the OCIMF public layer. See `docs/corpus-status.md` for the full table, tiers and refresh schedules.
 
 **Embedding model:** `text-embedding-3-small` (April + May audits both agree the upgrade to `-large` is not the bottleneck).
 
@@ -80,6 +80,8 @@ Plus 64 more sources, among them the 2026-09-30 inland / Coast Guard set (`uscg_
 ## Recent shipped work (reverse chronological)
 
 168 commits since 2026-04-22 (last PROJECT_STATE refresh). Selected highlights:
+
+- **2026-10-02 (growth):** public `/practice` page (the NMC's 11,955 sample-exam questions, 10,544 servable, nearest regulation or NGA manual per answer); a free plan after the trial (10 questions per 30-day cycle, the free plan pauses at 500 answers a month); outreach leads from the USCG vessel documentation file (991 towing companies), NMC's approved-course list (145 schools) and the six Sub M TPOs, with a phone list for companies that publish no email; NGA navigation manuals `nga_pubs`. Migration 0120. CLAUDE.md has the detail.
 
 - **2026-05-07 (D6.83 + Sprint B):** `/education` landing page; Study Tools toggle propagates to nav without refresh; account toggle to hide Quizzes & Guides; Phase A5 + quiz bug fixes; A4 take-the-quiz interactive flow; A3 frontend `/study`; A2 backend (router + persistence); A1 curated `nmc_exam_bank` ingest adapter
 - **2026-05-07:** `scripts/deploy.sh` + `scripts/smoke.sh` (boring deploys; 3-stage smoke)
