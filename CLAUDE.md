@@ -50,7 +50,7 @@ If a doc says "alembic head is 0045" but `alembic current` says `0092`, the doc 
 - **VPS:** `root@68.183.130.3` (hostname `spiritflow-prod-01` — shared with another tenant, RegKnots' repo lives at `/opt/RegKnots`).
 - **Postgres:** Docker container `regknots-postgres`. `docker exec regknots-postgres psql -U regknots -d regknots -c "..."`.
 - **Services:** `regknots-api`, `regknots-web`, `regknots-worker` (systemd).
-- **Caddy:** `/etc/caddy/Caddyfile` — TLS via ACME, on-demand certs gated by `/api/domain-check`.
+- **Caddy:** `/etc/caddy/Caddyfile` — TLS via ACME, on-demand certs gated by `/api/domain-check`: since 2026-10-03 only the apex, www and `REGKNOTS_TLS_SUBDOMAINS` (`app/hosts.py`). The same Caddy serves four other tenants' sites; a restart blips all of them.
 - **Logs:** journald. `journalctl -u regknots-api -n 100 --no-pager`.
 
 ## Operating norms
@@ -338,6 +338,14 @@ If a doc says "alembic head is 0045" but `alembic current` says `0092`, the doc 
   - **Dense harness:** 0.9367 / 0.9494 / MRR **0.7657** (was 0.7593), no pair gained or lost; `dense-prod` not run.
   - **Outreach** (`scripts/outreach/`): `build_leads.py --source mvus` (USCG vessel documentation file: 991 current towing companies + 243 existing rows confirmed), `--source nmc-courses` (145 schools, niche `school`, offered /practice), `--source tpo` (the six Sub M TPOs). `gmail_draft.py` `offer`: fleet / practice / partner. `call_list.py` + `call_script.md`: 42 phone-only leads. The `regknots-outreach` task now drafts 10 a weekday (7 towing, 2 schools, 1 TPO) and marks phone-only companies `call`. dco.uscg.mil's Akamai refuses curl everywhere; the ingest package's httpx client gets the files from the VPS.
   - Corpus **102,472 chunks / 77 sources**.
+- **2026-10-03 security: only our hostnames get a certificate** (Blake: "Greenlight 1, 2 and 4"; deployed `f82f4d0`).
+  - **Found while checking a signup:** a bot registered through `onlinebank.regknots.com` from a Hetzner datacenter IP, 11 s after landing (random-suffix Yahoo address, unverified). Marked `is_internal`; Blake will delete it if it never asks anything.
+  - **Cause:** DNS has a wildcard record, Caddy serves `*.regknots.com` with on-demand TLS, and `/domain-check` approved every `*.regknots.com` name (April's "enterprise subdomains" commit). Scanners trying names made Caddy request a certificate for each: 1,108 junk certificates (onlinebank, payment, login, id-sso, admin, …), ~1,700 hostnames hit since 09-30, and Let's Encrypt refusing 5,000–13,000 requests a day ("too many certificates (50) already issued for regknots.com"). CORS trusted the same names with credentials (`allow_origin_regex`).
+  - **Fix:** `app/hosts.py` — our hosts are the apex, www and `REGKNOTS_TLS_SUBDOMAINS` (empty). `domain_check` approves only those; CORS allows only those (localhost only in development). A new random subdomain now fails the TLS handshake. The "request a custom subdomain" copy is off /landing and /whitelisting.
+  - **To give a client a subdomain:** add it to `REGKNOTS_TLS_SUBDOMAINS` in `/opt/RegKnots/.env` ("maersk" or "maersk.regknots.com", comma-separated), restart `regknots-api`, add its DNS record if the wildcard record is gone; Caddy obtains the certificate on the first visit.
+  - **Cleanup:** the junk certificates were removed from Caddy's store (backup `/root/caddy-junk-certs-20261004.tar.gz`, list `/root/caddy-junk-names-20261004.txt`); other tenants' certificates untouched. Caddy (up since 08-11) still holds them in memory until it restarts. regknots.com / www certificates are valid to Dec 27–28.
+  - Pending with Blake: delete the wildcard `*` DNS record at Namecheap (keep www and the mail records).
+  - Not new and not ours: web log "Server Reference ID … Received "x"" (6–17k/day) is scanners probing Next.js server actions; Next 15.5.26 rejects them. The one unresolved Sentry issue is Facebook's in-app browser ("Java object is gone").
 See `docs/PROJECT_STATE.md` for a fuller operational snapshot and `docs/roadmap.md` for the prioritized backlog.
 
 
@@ -373,4 +381,4 @@ Full audit report (models, retrieval, UX, product packaging): see the 2026-07-18
 
 ---
 
-*Last updated 2026-10-02 (free /practice page, capped free plan, MVUS / school / TPO outreach with a call list, NGA manuals `nga_pubs`, migration 0120; earlier: inland / Coast Guard corpus: ten new sources, NVIC discovery fix, Medical Manual, uscg_bulletin pruned + daily feed, keyword floor, migration 0119; earlier: corpus gap audit; self-serve account deletion + migration 0118; admin redesign + customer UX pass; CFR paragraph chips; video ads first cut). When this drifts from reality, fix it — that's the rule.*
+*Last updated 2026-10-03 (security: only our hostnames get a TLS certificate or credentialed CORS, junk certificates cleared; earlier: free /practice page, capped free plan, MVUS / school / TPO outreach with a call list, NGA manuals `nga_pubs`, migration 0120; earlier: inland / Coast Guard corpus: ten new sources, NVIC discovery fix, Medical Manual, uscg_bulletin pruned + daily feed, keyword floor, migration 0119; earlier: corpus gap audit; self-serve account deletion + migration 0118; admin redesign + customer UX pass; CFR paragraph chips; video ads first cut). When this drifts from reality, fix it — that's the rule.*
