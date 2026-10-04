@@ -11,6 +11,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
+from app.hosts import cors_origins
 
 if settings.sentry_dsn:
     sentry_sdk.init(
@@ -58,8 +59,10 @@ app = FastAPI(title="RegKnot API", version="0.1.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_origins,
-    allow_origin_regex=r"^https://([a-z0-9-]+\.)?regknots\.com$",
+    # 2026-10-03 — our hosts only (app/hosts.py). The regex trusted every
+    # https://*.regknots.com origin with credentials, the same names the
+    # wildcard TLS gate handed certificates to.
+    allow_origins=cors_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

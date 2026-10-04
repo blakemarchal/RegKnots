@@ -43,6 +43,12 @@ class Settings(BaseSettings):
     free_plan_monthly_cap: int = 10
     free_plan_global_monthly_cap: int = 500
 
+    # 2026-10-03 — client subdomains that may get a TLS certificate and call
+    # the API with credentials, comma-separated ("maersk" or
+    # "maersk.regknots.com"). Every other *.regknots.com name is refused
+    # (app/hosts.py). Env REGKNOTS_TLS_SUBDOMAINS.
+    tls_subdomains: str = ""
+
     # Stripe — no REGKNOTS_ prefix in .env
     stripe_secret_key: str = Field(default="", validation_alias="STRIPE_SECRET_KEY")
     stripe_webhook_secret: str = Field(default="", validation_alias="STRIPE_WEBHOOK_SECRET")

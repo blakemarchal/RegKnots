@@ -3,6 +3,7 @@ import redis.asyncio as aioredis
 
 from app.config import settings
 from app.db import get_pool
+from app.hosts import is_allowed
 
 router = APIRouter(tags=["health"])
 
@@ -13,10 +14,11 @@ async def domain_check(domain: str = ""):
 
     Caddy calls this before issuing a certificate for an unknown hostname.
     Returning 200 authorizes Caddy to obtain a cert; any other status blocks it.
-    This prevents abuse of on-demand TLS by random domains pointed at our IP.
+    2026-10-03 — only our hosts (app/hosts.py: the apex, www and configured
+    client subdomains). Approving every *.regknots.com name let scanners make
+    Caddy request a certificate for each name they tried.
     """
-    domain = domain.strip().lower()
-    if domain == "regknots.com" or domain.endswith(".regknots.com"):
+    if is_allowed(domain):
         return {"ok": True}
     raise HTTPException(status_code=403, detail="Domain not allowed")
 
