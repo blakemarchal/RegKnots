@@ -2,7 +2,7 @@
 
 **One-page operational snapshot for humans and fresh Claude Code sessions.**
 
-Last updated: 2026-10-02 (free /practice page from the NMC sample exams, a capped free plan after the trial, outreach to MVUS towing companies, schools and TPOs with a phone list, NGA navigation manuals `nga_pubs`; migration 0120; `docs/specs/growth-practice-free-plan-2026-10-02.md`. 2026-09-30: inland / Coast Guard corpus: ten new sources, NVIC discovery fix, Medical Manual, `uscg_bulletin` pruned + daily feed, keyword floor; `docs/sprint-audits/corpus-gap-audit-inland-2026-09-29.md` §7. 2026-09-26: question-audit follow-up deployed, SOLAS / cfr_49 cleanup applied, Anthropic credits exhausted; audit `docs/sprint-audits/question-audit-2026-09-25.md`; Opus 5.5 low is the default answer model; system audit 2026-09-10)
+Last updated: 2026-10-05 (PDF and Word uploads in chat: kept in the user's account when the internal check finds them maritime, others deleted after 7 days; migration 0121; `docs/specs/chat-document-upload-2026-10-05.md`. 2026-10-03: only our hostnames get a TLS certificate. 2026-10-02: free /practice page from the NMC sample exams, a capped free plan after the trial, outreach to MVUS towing companies, schools and TPOs with a phone list, NGA navigation manuals `nga_pubs`; migration 0120; `docs/specs/growth-practice-free-plan-2026-10-02.md`. 2026-09-30: inland / Coast Guard corpus: ten new sources, NVIC discovery fix, Medical Manual, `uscg_bulletin` pruned + daily feed, keyword floor; `docs/sprint-audits/corpus-gap-audit-inland-2026-09-29.md` §7. 2026-09-26: question-audit follow-up deployed, SOLAS / cfr_49 cleanup applied, Anthropic credits exhausted; audit `docs/sprint-audits/question-audit-2026-09-25.md`; Opus 5.5 low is the default answer model; system audit 2026-09-10)
 
 ---
 
@@ -16,7 +16,7 @@ RegKnot is a maritime-compliance RAG at **https://regknots.com**. Production sta
 - **API health:** https://regknots.com/api/health — `{"status":"healthy"}`
 - **VPS:** `root@68.183.130.3` (shared box, hostname `spiritflow-prod-01`)
 - **Repo paths:** local `C:\Users\Blake\Documents\RegKnots`, VPS `/opt/RegKnots` (NOT `/root/RegKnots`)
-- **Alembic head:** `0120`
+- **Alembic head:** `0121`
 - **Services:** `regknots-api`, `regknots-web`, `regknots-worker` — all systemd, all active
 - **DB:** `docker exec regknots-postgres psql -U regknots -d regknots` (PG 16.13 + pgvector, 1528 MB)
 - **Deploy:** `scripts/deploy.sh` + `scripts/smoke.sh` (shipped 2026-05-07; 3-stage smoke catches stale-build failure mode)
@@ -80,6 +80,8 @@ Plus 65 more sources, among them `nga_pubs` (2026-10-02: Bowditch Vol. I, Pub 13
 ## Recent shipped work (reverse chronological)
 
 168 commits since 2026-04-22 (last PROJECT_STATE refresh). Selected highlights:
+
+- **2026-10-05 (documents):** PDF and Word files attach in chat (up to 3 per question). Each is read, embedded and checked by Haiku; a maritime document is kept in the user's account (3 on free and trial, 20 on paid) and later answers consult it, anything else is deleted after 7 days. A document stays attached for its conversation; answers cite `[Doc: title §section]`. Account → My Documents; admin → Documents, with audit-logged text view; privacy page updated. Own tables (`user_documents`, `user_document_chunks`), never `regulations`. Migration 0121. Admin emails now carry a reply-to. CLAUDE.md has the detail.
 
 - **2026-10-02 (growth):** public `/practice` page (the NMC's 11,955 sample-exam questions, 10,544 servable, nearest regulation or NGA manual per answer); a free plan after the trial (10 questions per 30-day cycle, the free plan pauses at 500 answers a month); outreach leads from the USCG vessel documentation file (991 towing companies), NMC's approved-course list (145 schools) and the six Sub M TPOs, with a phone list for companies that publish no email; NGA navigation manuals `nga_pubs`. Migration 0120. CLAUDE.md has the detail.
 

@@ -1,8 +1,17 @@
 # PDF and Word uploads in chat (spec, 2026-10-05)
 
-**Status: proposed.** Blake, 2026-10-05: "it makes sense to add PDF uploads. We can run an
-internal check on the doc and save it to their data if it's useful to help us give them better
-answers and train on."
+**Status: shipped 2026-10-05** (migration 0121; deployed `6be8d6d`). Blake, 2026-10-05: "it
+makes sense to add PDF uploads. We can run an internal check on the doc and save it to their data
+if it's useful to help us give them better answers and train on." His answers to the open
+questions: the privacy wording as proposed, non-maritime documents deleted after 7 days, the
+limits as proposed, and admins may open a document's text (audit-logged).
+
+**Changed while building:** a document stays attached for the rest of the conversation it came in
+(a follow-up such as "and the drill section?" is about the document already on the table), so a
+non-maritime document serves its conversation, not only its first question. Passages from other
+kept documents are introduced to the model as possibly loosely related. The 0.45 similarity floor
+was measured on prod with a 10-page document: relevant questions scored 0.57–0.72, a generic
+question 0.38–0.44, a different maritime topic 0.29–0.33, an unrelated one 0.01–0.04.
 
 **Why:** a crew member asked RegKnot to review their ship's SMS emergency procedure and asked
 "i can not attach our manual?" (2026-10-06). In chat the paperclip takes photos only (JPEG, PNG,
@@ -109,9 +118,9 @@ already embeds every question. Proposed additions:
 
 About two to three days, most of it the attach flow in the web client and the account page.
 
-## Open questions for Blake
+## Decisions (Blake, 2026-10-05)
 
-1. The privacy wording above.
-2. Not-maritime documents: delete after 7 days (proposed), or keep them unused?
-3. Limits: 3 kept documents on free and trial, 20 on paid?
-4. Admin can open a document's text for review, audit-logged: yes?
+1. The privacy wording above: yes (shipped with "no other user can open them", since admins can).
+2. Not-maritime documents: deleted after 7 days.
+3. Limits: 3 kept documents on free and trial, 20 on paid.
+4. Admins can open a document's text for review, audit-logged.

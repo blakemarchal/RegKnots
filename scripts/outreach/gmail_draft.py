@@ -32,7 +32,8 @@ email.json holds the content; the script adds the offer link, the signature and 
 
 "offer": "none" is a note to an existing user (2026-10-05): the same branded signature, but no
 lead_id, no tracking link and no opt-out line. It may end with one plain link to a page on the
-site: "link": "/login", with "cta" (the sentence before it) and "link_text".
+site: "link": "/login", with "cta" (the sentence before it) and "link_text". Any email may set
+"signoff" (e.g. "Thanks for trying RegKnot,"), placed after the link, above the signature.
 
 Credentials live outside the repo: the OAuth client in ~/.regknots/gmail_client.json and the
 saved token in ~/.regknots/gmail_token.json (override with REGKNOTS_GMAIL_CLIENT and
@@ -120,7 +121,7 @@ def load_email(path: str) -> dict:
         sys.exit(f"{path}: lead_id must look like ob-0128, got {data['lead_id']!r}")
     if not isinstance(data["paragraphs"], list) or not all(isinstance(p, str) for p in data["paragraphs"]):
         sys.exit(f"{path}: paragraphs must be a list of strings")
-    if re.search(r"https?://|www\.", " ".join(data["paragraphs"] + [data.get("cta", ""), data.get("greeting", "")])):
+    if re.search(r"https?://|www\.", " ".join(data["paragraphs"] + [data.get(k, "") for k in ("cta", "greeting", "signoff")])):
         sys.exit(f"{path}: put no links in the text; the script adds the link")
     if not note and data["offer"] not in OFFERS:
         sys.exit(f"{path}: offer must be one of {', '.join(OFFERS)} or {NOTE}, got {data['offer']!r}")
@@ -144,7 +145,11 @@ def render_text(data: dict) -> str:
     end = closing(data)
     parts = [data.get("greeting") or "Hello,", *data["paragraphs"]]
     if end:
-        parts.append(f"{end[0]} {end[1]}".strip())
+        sentence, url, link_text = end
+        # a note names its link in the text ("… open RegKnot: https://…"); outreach keeps "<cta> <url>"
+        parts.append((f"{sentence} {link_text}: {url}" if data.get("offer") == NOTE else f"{sentence} {url}").strip())
+    if data.get("signoff"):
+        parts.append(data["signoff"])
     signature = "\n".join([
         "Blake Marchal",
         "Co-founder, RegKnot",
@@ -167,6 +172,8 @@ def render_html(data: dict) -> str:
             f'{esc(sentence)} <a href="{esc(url, quote=True)}" style="color:#0f766e;font-weight:bold;">'
             f'{esc(link_text)}</a>.'.lstrip()
         ))
+    if data.get("signoff"):
+        body.append(p.format(esc(data["signoff"])))
     signature = f"""\
 <table cellpadding="0" cellspacing="0" border="0" style="margin:22px 0 16px 0;border-collapse:collapse;">
   <tr>
