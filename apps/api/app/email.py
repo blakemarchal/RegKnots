@@ -1048,6 +1048,9 @@ async def send_custom_email(to_email: str, subject: str, body_text: str) -> None
         "to": [to_email],
         "subject": f"RegKnot — {subject}",
         "html": html,
+        # 2026-10-05 — mail.regknots.com takes no inbound mail, so without this
+        # a reply to an admin email reached no one.
+        "reply_to": ["support@regknots.com"],
     })
 
 
