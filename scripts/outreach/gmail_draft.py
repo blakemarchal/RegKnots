@@ -26,9 +26,13 @@ email.json holds the content; the script adds the offer link, the signature and 
       "paragraphs": ["One sentence about them.", "The hook question and answer."],
       "greeting": "optional; default 'Hello,' (e.g. 'Hi Dana,')",
       "cta": "optional; the sentence the link follows (default: the offer's own sentence)",
-      "offer": "optional; fleet (default), practice or partner — see OFFERS",
+      "offer": "optional; fleet (default), practice, partner (see OFFERS), or none",
       "thread_id": "optional; the sent message's Gmail thread id, for a follow-up"
     }
+
+"offer": "none" is a note to an existing user (2026-10-05): the same branded signature, but no
+lead_id, no tracking link and no opt-out line. It may end with one plain link to a page on the
+site: "link": "/login", with "cta" (the sentence before it) and "link_text".
 
 Credentials live outside the repo: the OAuth client in ~/.regknots/gmail_client.json and the
 saved token in ~/.regknots/gmail_token.json (override with REGKNOTS_GMAIL_CLIENT and
@@ -93,6 +97,7 @@ OFFERS = {
     },
 }
 OPT_OUT = "If this isn't useful, reply 'no thanks' and I won't write again."
+NOTE = "none"   # "offer": "none" — a note to an existing user, not outreach
 
 CONFIG_DIR = Path.home() / ".regknots"
 CLIENT_FILE = Path(os.environ.get("REGKNOTS_GMAIL_CLIENT", CONFIG_DIR / "gmail_client.json"))
@@ -107,45 +112,61 @@ def offer_link(lead_id: str, offer: str = "fleet") -> str:
 
 def load_email(path: str) -> dict:
     data = json.loads(Path(path).read_text(encoding="utf-8"))
-    for key in ("to", "subject", "lead_id", "paragraphs"):
+    note = data.setdefault("offer", "fleet") == NOTE
+    for key in ("to", "subject", "paragraphs") + (() if note else ("lead_id",)):
         if not data.get(key):
             sys.exit(f"{path}: missing {key!r}")
-    if not LEAD_ID.match(data["lead_id"]):
+    if data.get("lead_id") and not LEAD_ID.match(data["lead_id"]):
         sys.exit(f"{path}: lead_id must look like ob-0128, got {data['lead_id']!r}")
     if not isinstance(data["paragraphs"], list) or not all(isinstance(p, str) for p in data["paragraphs"]):
         sys.exit(f"{path}: paragraphs must be a list of strings")
     if re.search(r"https?://|www\.", " ".join(data["paragraphs"] + [data.get("cta", ""), data.get("greeting", "")])):
-        sys.exit(f"{path}: put no links in the text; the script adds the offer link")
-    if data.setdefault("offer", "fleet") not in OFFERS:
-        sys.exit(f"{path}: offer must be one of {', '.join(OFFERS)}, got {data['offer']!r}")
+        sys.exit(f"{path}: put no links in the text; the script adds the link")
+    if not note and data["offer"] not in OFFERS:
+        sys.exit(f"{path}: offer must be one of {', '.join(OFFERS)} or {NOTE}, got {data['offer']!r}")
+    if note and data.get("link") and not re.fullmatch(r"/[\w\-/]*", data["link"]):
+        sys.exit(f"{path}: link must be a path on the site such as /login, got {data['link']!r}")
     return data
 
 
-def render_text(data: dict) -> str:
+def closing(data: dict) -> tuple[str, str, str] | None:
+    """(sentence, url, link text) for the email's one link: the offer link, or for a note
+    its optional plain site link; None for a note without one."""
+    if data.get("offer") == NOTE:
+        if not data.get("link"):
+            return None
+        return data.get("cta") or "", f"{SITE}{data['link']}", data.get("link_text") or "open RegKnot"
     offer = OFFERS[data.get("offer", "fleet")]
-    cta = data.get("cta") or offer["cta"]
-    link = offer_link(data["lead_id"], data.get("offer", "fleet"))
-    parts = [data.get("greeting") or "Hello,", *data["paragraphs"], f"{cta} {link}"]
+    return data.get("cta") or offer["cta"], offer_link(data["lead_id"], data["offer"]), offer["link_text"]
+
+
+def render_text(data: dict) -> str:
+    end = closing(data)
+    parts = [data.get("greeting") or "Hello,", *data["paragraphs"]]
+    if end:
+        parts.append(f"{end[0]} {end[1]}".strip())
     signature = "\n".join([
         "Blake Marchal",
         "Co-founder, RegKnot",
         "regknots.com · hello@regknots.com",
         "20 N Sandpiper St, La Marque, TX 77568",
     ])
-    return "\n\n".join(parts + [signature, OPT_OUT]) + "\n"
+    footer = [] if data.get("offer") == NOTE else [OPT_OUT]
+    return "\n\n".join(parts + [signature, *footer]) + "\n"
 
 
 def render_html(data: dict) -> str:
     esc = html.escape
-    offer = OFFERS[data.get("offer", "fleet")]
-    cta = data.get("cta") or offer["cta"]
-    link = esc(offer_link(data["lead_id"], data.get("offer", "fleet")), quote=True)
+    end = closing(data)
     p = '<p style="margin:0 0 14px 0;">{}</p>'
     body = [p.format(esc(data.get("greeting") or "Hello,"))]
     body += [p.format(esc(text)) for text in data["paragraphs"]]
-    body.append(p.format(
-        f'{esc(cta)} <a href="{link}" style="color:#0f766e;font-weight:bold;">{esc(offer["link_text"])}</a>.'
-    ))
+    if end:
+        sentence, url, link_text = end
+        body.append(p.format(
+            f'{esc(sentence)} <a href="{esc(url, quote=True)}" style="color:#0f766e;font-weight:bold;">'
+            f'{esc(link_text)}</a>.'.lstrip()
+        ))
     signature = f"""\
 <table cellpadding="0" cellspacing="0" border="0" style="margin:22px 0 16px 0;border-collapse:collapse;">
   <tr>
@@ -160,7 +181,7 @@ def render_html(data: dict) -> str:
     </td>
   </tr>
 </table>"""
-    footer = f'<p style="margin:0;font-size:12px;color:#6b7280;">{esc(OPT_OUT)}</p>'
+    footer = "" if data.get("offer") == NOTE else f'<p style="margin:0;font-size:12px;color:#6b7280;">{esc(OPT_OUT)}</p>'
     return (
         '<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.55;color:#1f2937;">'
         + "".join(body) + signature + footer + "</div>"
@@ -223,24 +244,31 @@ def gmail(open_browser: bool = True):
     return service
 
 
-def check_link_live(offer: str = "fleet") -> None:
+def check_link_live(data: dict) -> None:
     """Refuse to draft an email whose link would not work: /fleet and / must redirect,
-    /practice must answer 200."""
+    /practice must answer 200, a note's site link must answer 200 or redirect."""
 
     class NoRedirect(urllib.request.HTTPRedirectHandler):
         def redirect_request(self, *args, **kwargs):
             return None
 
-    url = offer_link("ob-0000", offer)
+    redirects = (301, 302, 307, 308)
+    if data.get("offer") == NOTE:
+        if not data.get("link"):
+            return
+        url, want = f"{SITE}{data['link']}", (200, *redirects)
+    else:
+        offer = data.get("offer", "fleet")
+        url = offer_link("ob-0000", offer)
+        want = redirects if OFFERS[offer]["expect"] == "redirect" else (200,)
     opener = urllib.request.build_opener(NoRedirect)
     try:
         opener.open(urllib.request.Request(url, method="HEAD"), timeout=15)
         status = 200
     except urllib.error.HTTPError as exc:
         status = exc.code
-    want = (301, 302, 307, 308) if OFFERS[offer]["expect"] == "redirect" else (200,)
     if status not in want:
-        sys.exit(f"{url} answered {status}, expected {'a redirect' if want[0] != 200 else '200'}; deploy it first.")
+        sys.exit(f"{url} answered {status}, expected {' or '.join(map(str, want))}; deploy it first.")
 
 
 def reply_headers_for(service, thread_id: str) -> dict:
@@ -257,7 +285,7 @@ def reply_headers_for(service, thread_id: str) -> dict:
 
 
 def save_draft(data: dict, draft_id: str | None) -> None:
-    check_link_live(data.get("offer", "fleet"))
+    check_link_live(data)
     service = gmail()
     reply = reply_headers_for(service, data["thread_id"]) if data.get("thread_id") else None
     message = {"raw": base64.urlsafe_b64encode(build_message(data, reply).as_bytes()).decode()}
@@ -269,7 +297,7 @@ def save_draft(data: dict, draft_id: str | None) -> None:
     else:
         draft = drafts.create(userId="me", body={"message": message}).execute()
     print(json.dumps({"draft_id": draft["id"], "thread_id": draft["message"].get("threadId"),
-                      "to": data["to"], "lead_id": data["lead_id"]}))
+                      "to": data["to"], "lead_id": data.get("lead_id")}))
 
 
 def main() -> None:
@@ -296,7 +324,7 @@ def main() -> None:
         data = load_email(args.email_json)
         out = Path(args.dry_run)
         out.mkdir(parents=True, exist_ok=True)
-        stem = data["lead_id"]
+        stem = data.get("lead_id") or "note"
         (out / f"{stem}.txt").write_text(render_text(data), encoding="utf-8")
         (out / f"{stem}.html").write_text(render_html(data), encoding="utf-8")
         (out / f"{stem}.eml").write_bytes(build_message(data).as_bytes())
