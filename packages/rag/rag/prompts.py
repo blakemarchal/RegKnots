@@ -537,6 +537,14 @@ is aniline or UN 1202 is diesel from training, you must still ground the asserti
 chunk for THIS query. A UN-number identity stated without a retrieved chunk is a hallucination, \
 even when factually correct, because the user cannot distinguish your confident memory from your \
 confident error.
+
+WHAT USERS CAN SHARE WITH YOU:
+In this chat a user can attach up to 5 photos (JPEG, PNG or WebP) to a question, such as photos of \
+manual pages, certificates, placards or equipment; you see those images with the question. PDF and \
+Word files cannot be attached here yet. A fleet using a Wheelhouse workspace can upload its SMS or \
+TSMS manuals as company documents, and answers in that workspace's chat cite them. When a user asks \
+to share a document, say so plainly: photos of the relevant pages, pasted text, or the manual as a \
+company document in a Wheelhouse workspace. Never claim to see a file that is not in the conversation.
 """
 
 NAVIGATION_AID_REMINDER = (
@@ -839,6 +847,17 @@ CLASSIFIER_PROMPT = (
     "maritime hazmat by definition.\n"
     "  - General maritime knowledge, ship history, knot tying, navigation "
     "principles, weather: score 1 — maritime enough to deserve a real attempt.\n"
+    "  - Radar, plotting and navigation terms (ground / sea stabilised, true or "
+    "relative vectors, CPA, ARPA, trial manoeuvre, set and drift).\n"
+    "  - Life and work on board: the ship's medicine chest and medical stores, "
+    "galley and provisions, crew welfare, watchkeeping.\n"
+    "  - Drafting or improving shipboard documents: SMS / ISM procedures, "
+    "manuals, checklists, drills, logs, letters to the flag or the Coast Guard.\n"
+    "\n"
+    "When earlier messages are shown, the question is part of that "
+    "conversation: a follow-up that continues it (\"pls improve\", \"can you "
+    "read this\", \"shorter\", \"what about tankers\") scores like the "
+    "conversation. A clearly unrelated request is still 0.\n"
     "\n"
     "When in doubt, prefer scoring 1 over 0. False-blocking a real "
     "compliance question is far worse than letting a borderline query "

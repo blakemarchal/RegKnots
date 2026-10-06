@@ -56,12 +56,14 @@ _SCORE_SCHEMA = obj({"score": {"type": "integer", "enum": [0, 1, 2, 3]}})
 
 
 async def _classify_once(
-    query: str, client: AsyncAnthropic, model: str,
+    query: str, client: AsyncAnthropic, model: str, context: str | None = None,
 ) -> int | None:
     """Run a single classification pass with the given model.
 
     Returns the integer score 0-3, or None on a refusal or unusable output
-    (caller decides whether to retry, escalate, or default).
+    (caller decides whether to retry, escalate, or default). `context` is
+    the conversation so far (rag.followup.router_context), None on a first
+    turn.
     """
     # 2026-09-28 — structured output instead of "first digit in the text".
     # Sonnet 5.5 at effort `low` answered the prompt's "Return ONE digit" with
@@ -79,7 +81,7 @@ async def _classify_once(
         messages=[
             {
                 "role": "user",
-                "content": f"{CLASSIFIER_PROMPT}\n\nQuestion: {query}",
+                "content": _classifier_content(query, context),
             }
         ],
     )
@@ -87,8 +89,19 @@ async def _classify_once(
     return score if score in (0, 1, 2, 3) else None
 
 
-async def route_query(query: str, client: AsyncAnthropic) -> RouteDecision:
+def _classifier_content(query: str, context: str | None) -> str:
+    earlier = f"Earlier in this conversation:\n{context}\n\n" if context else ""
+    return f"{CLASSIFIER_PROMPT}\n\n{earlier}Question: {query}"
+
+
+async def route_query(
+    query: str, client: AsyncAnthropic, context: str | None = None,
+) -> RouteDecision:
     """Classify query complexity and return the appropriate model selection.
+
+    2026-10-05 — `context` carries the conversation so far for a message
+    mid-thread (rag.followup.router_context); both passes see it. Without
+    it, follow-ups such as "pls improve" were refused as off-topic.
 
     Pipeline:
       1. Haiku scores the query 0-3.
@@ -112,7 +125,7 @@ async def route_query(query: str, client: AsyncAnthropic) -> RouteDecision:
     compliance scenarios that touch military/government cargo.
     """
     try:
-        primary = await _classify_once(query, client, MODEL_MAP[1])
+        primary = await _classify_once(query, client, MODEL_MAP[1], context)
         if primary is None:
             raise ValueError("primary classifier returned no valid score")
     except Exception as exc:
@@ -129,7 +142,7 @@ async def route_query(query: str, client: AsyncAnthropic) -> RouteDecision:
     # cost of false-blocking a real maritime question.
     if primary == 0:
         try:
-            confirm = await _classify_once(query, client, MODEL_MAP[2])
+            confirm = await _classify_once(query, client, MODEL_MAP[2], context)
             if confirm is None:
                 # Sonnet response unparseable — err toward allow, since
                 # a hard-refusal needs both passes to agree.

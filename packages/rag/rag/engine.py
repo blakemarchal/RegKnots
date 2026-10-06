@@ -33,7 +33,7 @@ from anthropic import (
 from rag.citation_norm import cfr_variants
 from rag.context import build_context
 from rag.fallback import FALLBACK_MODEL_ID, fallback_chat
-from rag.followup import compose_followup_query, compose_reason, detect_followup
+from rag.followup import compose_followup_query, compose_reason, detect_followup, router_context
 from rag.hedge import detect_hedge
 from rag.query_distill import LENGTH_THRESHOLD_CHARS
 from rag.models import ChatMessage, ChatResponse, CitedRegulation
@@ -2774,7 +2774,10 @@ async def chat_with_progress(
     # searches with the primary search; a 30-connection pool): see
     # docs/sprint-audits/llm-surface-audit-2026-09-22.md, U1.
     yield {"event": "status", "data": "Analyzing your question…"}
-    route_task = asyncio.create_task(route_query(query, anthropic_client))
+    # 2026-10-05 — the classifier sees the conversation for a follow-up.
+    route_task = asyncio.create_task(
+        route_query(query, anthropic_client, context=router_context(conversation_history))
+    )
     retrieval_task = None
     company_task = None
     try:

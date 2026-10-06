@@ -160,12 +160,12 @@ export function InputBar({
               aria-label={
                 imagesAtCap
                   ? `Image cap reached (${MAX_IMAGES} max)`
-                  : 'Attach images'
+                  : 'Attach photos'
               }
               title={
                 imagesAtCap
                   ? `Up to ${MAX_IMAGES} images per question`
-                  : 'Attach images (don\'t upload IDs or personal info)'
+                  : 'Attach photos: JPEG, PNG or WebP, up to 5 (no IDs or personal info)'
               }
               className="flex-shrink-0 w-8 h-8 mb-0.5 rounded-xl flex items-center justify-center
                 text-[#6b7594] hover:text-[#2dd4bf] hover:bg-white/5

@@ -57,7 +57,7 @@ class _Pool:
 def test_chat_passes_the_users_focus_to_retrieval(monkeypatch):
     seen = {}
 
-    async def route(query, client):
+    async def route(query, client, context=None):
         return RouteDecision(score=2, model="claude-sonnet-5-5", is_off_topic=False)
 
     async def retrieve(**kw):

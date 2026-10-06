@@ -59,7 +59,7 @@ class _Pool:
 def _synthesis_kwargs(monkeypatch, route_model: str, floor: str | None) -> dict:
     seen: dict = {}
 
-    async def route(query, client):
+    async def route(query, client, context=None):
         return RouteDecision(score=1, model=route_model, is_off_topic=False)
 
     async def retrieve(**kw):

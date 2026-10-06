@@ -199,7 +199,7 @@ def test_off_topic_cancels_in_flight_retrieval(monkeypatch):
             raise
         return []
 
-    async def route(query, client):
+    async def route(query, client, context=None):
         await asyncio.sleep(0.05)          # let retrieval start first
         return RouteDecision(score=0, model="", is_off_topic=True)
 
@@ -229,7 +229,7 @@ def test_client_disconnect_during_routing_cancels_both_tasks(monkeypatch):
             state["retrieval_cancelled"] = True
             raise
 
-    async def slow_route(query, client):
+    async def slow_route(query, client, context=None):
         try:
             await asyncio.sleep(30)
         except asyncio.CancelledError:

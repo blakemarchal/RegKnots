@@ -131,6 +131,23 @@ def compose_reason(query: str, history_len: int) -> str | None:
     return None
 
 
+def router_context(history, *, max_chars: int = 300) -> str | None:
+    """What the off-topic check sees besides the new message mid-conversation
+    (2026-10-05): the conversation's first question and the previous user
+    message. On their own, follow-ups like "pls improve" and "can u read this"
+    read as casual chat: both classifier passes refused them in a conversation
+    about a shipboard SMS emergency procedure (2026-10-06), as they had
+    "ground stabilised vector 60 min" in June. None on a first turn."""
+    users = [(m.content or "").strip() for m in history if m.role == "user"]
+    users = [u for u in users if u]
+    if not users:
+        return None
+    lines = [f"First question: {users[0][:max_chars]}"]
+    if len(users) > 1:
+        lines.append(f"Previous message: {users[-1][:max_chars]}")
+    return "\n".join(lines)
+
+
 def compose_followup_query(
     prior_user_message: str | None,
     current_query: str,
