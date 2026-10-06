@@ -453,8 +453,28 @@ export function ChatMessage({
     // alignment. Clicking a thumbnail opens it full-size in a new tab
     // (simplest UX; no lightbox needed for v1).
     const imageAttachments = message.image_attachments ?? []
+    const documents = message.documents ?? []
     return (
       <div className="flex flex-col items-end px-4 py-1.5 animate-[fadeSlideIn_0.2s_ease-out]">
+        {/* 2026-10-05 — documents attached to this turn */}
+        {documents.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 mb-1.5 justify-end max-w-[82%]">
+            {documents.map((d) => (
+              <span
+                key={d.id}
+                className="inline-flex items-center gap-1.5 max-w-full rounded-lg border border-white/15 bg-black/30
+                  px-2.5 py-1 font-mono text-xs text-[#f0ece4]"
+              >
+                <svg className="w-3.5 h-3.5 shrink-0 text-[#2dd4bf]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                  <path d="M14 2v6h6" />
+                </svg>
+                <span className="truncate max-w-[200px]">{d.title}</span>
+                {d.pages ? <span className="text-[#6b7594]">{d.pages} pp</span> : null}
+              </span>
+            ))}
+          </div>
+        )}
         {imageAttachments.length > 0 && (
           <div className="flex flex-wrap gap-1.5 mb-1.5 justify-end max-w-[82%]">
             {imageAttachments.map((img, idx) => (
@@ -500,6 +520,10 @@ export function ChatMessage({
     message.citations.map(c => [c.section_number, { source: c.source, title: c.section_title }]),
   )
   const footerCitations = extractFooterCitations(message.content, citationMapForFooter)
+  // 2026-10-05 — the "Corpus-verified" count covers regulations only: a
+  // citation of the user's own document ([Doc: …]) or the fleet's ([Company: …])
+  // is not checked against the regulation corpus.
+  const verifiedCount = footerCitations.filter(c => c.source !== 'doc' && c.source !== 'company').length
 
   return (
     <div
@@ -549,7 +573,7 @@ export function ChatMessage({
                 that fail before the answer ships, so the chips below
                 are corpus-verified by definition. Green lane = trust;
                 the amber lane is reserved for web-fallback cautions. */}
-            {!message.cancelled && !isStreaming && (
+            {!message.cancelled && !isStreaming && verifiedCount > 0 && (
               <div className="mb-2">
                 <span
                   className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium
@@ -559,7 +583,7 @@ export function ChatMessage({
                   <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                     <path d="M20 6L9 17l-5-5" />
                   </svg>
-                  Corpus-verified · {footerCitations.length} citation{footerCitations.length === 1 ? '' : 's'}
+                  Corpus-verified · {verifiedCount} citation{verifiedCount === 1 ? '' : 's'}
                 </span>
               </div>
             )}

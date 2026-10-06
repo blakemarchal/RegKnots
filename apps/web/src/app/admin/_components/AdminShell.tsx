@@ -36,6 +36,7 @@ const NAV: { group: string; items: NavItem[] }[] = [
       { href: '/admin/chats', label: 'Conversations' },
       { href: '/admin/hedge-audit', label: 'Hedge audit', badge: 'hedged' },
       { href: '/admin/citations', label: 'Citation errors', badge: 'citations' },
+      { href: '/admin/documents', label: 'Documents' },
       { href: '/admin/web-fallback', label: 'Web fallback' },
     ],
   },

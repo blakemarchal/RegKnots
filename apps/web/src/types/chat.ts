@@ -67,6 +67,25 @@ export interface ChatImageAttachment {
   size_bytes: number  // decoded byte length
 }
 
+// 2026-10-05 — a PDF or Word document the user attached to a turn
+// (apps/api/app/user_docs.py). Titles only: the text stays on the server.
+export interface ChatDocumentRef {
+  id: string
+  title: string
+  pages?: number | null
+}
+
+// A document picked in the input bar: uploaded straight away, then read by
+// the server; the question can be sent once it is ready.
+export interface PendingDocument {
+  key: string                       // client id from the moment it is picked
+  id?: string                       // server id once uploaded
+  title: string
+  status: 'uploading' | 'pending' | 'ready' | 'failed'
+  pages?: number | null
+  error?: string
+}
+
 export interface Message {
   id: string
   role: 'user' | 'assistant'
@@ -85,6 +104,8 @@ export interface Message {
   // Sprint D6.97 Phase 2 — images attached by the user to this turn.
   // Rendered as thumbnails in the user message bubble.
   image_attachments?: ChatImageAttachment[]
+  // 2026-10-05 — documents attached to this turn (user messages).
+  documents?: ChatDocumentRef[]
 }
 
 export interface ApiResponse {

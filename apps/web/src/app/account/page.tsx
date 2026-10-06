@@ -20,6 +20,7 @@ import {
 // in the "How we scope answers" section is the single source of truth
 // for "who you are" at the user level.
 import { PERSONA_OPTIONS } from '@/lib/personaOptions'
+import { MyDocuments } from '@/components/MyDocuments'
 
 // Sprint D6.27 — translate the database `subscription_tier` value into
 // the user-facing tier name. Legacy 'pro' subscribers (early users from
@@ -1144,6 +1145,9 @@ function AccountContent() {
               Manage Credentials
             </a>
           </section>
+
+          {/* ── My documents (2026-10-05) ───────────────────────── */}
+          <MyDocuments />
 
           {/* ── Re-run setup wizard ───────────────────────────────── */}
           <section className="bg-[#111827] border border-white/8 rounded-xl p-5 flex flex-col gap-3">

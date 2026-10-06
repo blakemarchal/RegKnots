@@ -3,6 +3,7 @@
 import { useRef, useEffect, type KeyboardEvent, type ChangeEvent } from 'react'
 import { useVoiceInput } from '@/lib/useVoiceInput'
 import type { ResizedImage } from '@/utils/image_resize'
+import type { PendingDocument } from '@/types/chat'
 
 // Sprint D6.34 / D6.52 — verbosity selection type. Always one of the
 // three concrete values. ChatInterface initializes from the user's
@@ -29,8 +30,21 @@ interface Props {
   // button is shown and clicking opens the file picker.
   imagesEnabled?: boolean
   pendingImages?: ResizedImage[]
-  onAddImages?: (files: FileList) => void
+  // 2026-10-05 — every picked file goes to onAddFiles; ChatInterface sends
+  // photos to the image path and uploads PDF / Word files as documents.
+  onAddFiles?: (files: FileList) => void
   onRemoveImage?: (index: number) => void
+  pendingDocs?: PendingDocument[]
+  onRemoveDoc?: (key: string) => void
+  // true while a picked document is still uploading or being read
+  docsBusy?: boolean
+}
+
+function docStatus(d: PendingDocument): string {
+  if (d.status === 'uploading') return 'Uploading…'
+  if (d.status === 'pending') return 'Reading…'
+  if (d.status === 'failed') return d.error ?? "Couldn't read this file"
+  return d.pages ? `${d.pages} pages` : 'Ready'
 }
 
 const MAX_IMAGES = 5
@@ -39,8 +53,11 @@ export function InputBar({
   value, onChange, onSend, loading, onStop,
   imagesEnabled = false,
   pendingImages = [],
-  onAddImages,
+  onAddFiles,
   onRemoveImage,
+  pendingDocs = [],
+  onRemoveDoc,
+  docsBusy = false,
 }: Props) {
   const ref = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -62,20 +79,20 @@ export function InputBar({
   function onKey(e: KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
-      if (!loading && value.trim()) onSend()
+      // 2026-10-05 — like the send button, Enter waits for an attached document
+      if (!loading && !docsBusy && value.trim()) onSend()
     }
   }
 
   function openFilePicker() {
     if (loading) return
-    if (pendingImages.length >= MAX_IMAGES) return
     fileInputRef.current?.click()
   }
 
   function handleFileChange(e: ChangeEvent<HTMLInputElement>) {
     const files = e.target.files
-    if (files && files.length > 0 && onAddImages) {
-      onAddImages(files)
+    if (files && files.length > 0 && onAddFiles) {
+      onAddFiles(files)
     }
     // Reset value so picking the same file twice still fires onChange.
     e.target.value = ''
@@ -83,7 +100,10 @@ export function InputBar({
 
   // D6.97 Phase 2 — allow send when there's text OR at least one image.
   // Image-only queries are valid ("what is this?" implied by the image).
-  const canSend = !loading && (value.trim().length > 0 || pendingImages.length > 0)
+  // 2026-10-05 — a ready document is enough to send; send waits while one is
+  // still uploading or being read.
+  const canSend = !loading && !docsBusy &&
+    (value.trim().length > 0 || pendingImages.length > 0 || pendingDocs.some(d => d.status === 'ready'))
   const imagesAtCap = pendingImages.length >= MAX_IMAGES
 
   return (
@@ -106,6 +126,37 @@ export function InputBar({
                   flex items-center justify-center text-[10px] leading-none
                   hover:bg-red-500/30 hover:border-red-400/60
                   transition-colors duration-150"
+              >
+                ×
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* 2026-10-05 — attached documents (PDF / Word) */}
+      {imagesEnabled && pendingDocs.length > 0 && (
+        <div className="flex flex-wrap gap-2 mb-2 px-1">
+          {pendingDocs.map((d) => (
+            <div
+              key={d.key}
+              title={d.status === 'failed' ? d.error : d.title}
+              className={`flex items-center gap-2 max-w-full rounded-lg border px-2.5 py-1.5 font-mono text-xs
+                ${d.status === 'failed'
+                  ? 'border-red-500/40 bg-red-500/10 text-red-300'
+                  : 'border-white/15 bg-black/30 text-[#f0ece4]'}`}
+            >
+              <svg className="w-3.5 h-3.5 shrink-0 text-[#2dd4bf]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                <path d="M14 2v6h6" />
+              </svg>
+              <span className="truncate max-w-[160px]">{d.title}</span>
+              <span className={`truncate max-w-[220px] ${d.status === 'failed' ? '' : 'text-[#6b7594]'}`}>{docStatus(d)}</span>
+              <button
+                onClick={() => onRemoveDoc?.(d.key)}
+                aria-label={`Remove ${d.title}`}
+                className="ml-0.5 w-4 h-4 rounded-full flex items-center justify-center text-[10px] leading-none
+                  text-[#6b7594] hover:text-red-300"
               >
                 ×
               </button>
@@ -149,23 +200,19 @@ export function InputBar({
             <input
               ref={fileInputRef}
               type="file"
-              accept="image/jpeg,image/png,image/webp"
+              accept="image/jpeg,image/png,image/webp,application/pdf,.pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.docx"
               multiple
               onChange={handleFileChange}
               className="hidden"
             />
             <button
               onClick={openFilePicker}
-              disabled={loading || imagesAtCap}
-              aria-label={
-                imagesAtCap
-                  ? `Image cap reached (${MAX_IMAGES} max)`
-                  : 'Attach photos'
-              }
+              disabled={loading}
+              aria-label="Attach photos or documents"
               title={
                 imagesAtCap
-                  ? `Up to ${MAX_IMAGES} images per question`
-                  : 'Attach photos: JPEG, PNG or WebP, up to 5 (no IDs or personal info)'
+                  ? `Up to ${MAX_IMAGES} photos per question; you can still attach a PDF or Word file`
+                  : 'Attach photos (JPEG, PNG, WebP) or a PDF or Word document (no IDs or personal info)'
               }
               className="flex-shrink-0 w-8 h-8 mb-0.5 rounded-xl flex items-center justify-center
                 text-[#6b7594] hover:text-[#2dd4bf] hover:bg-white/5

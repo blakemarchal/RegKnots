@@ -154,3 +154,11 @@ test('2026-09-30: chips for the inland / Coast Guard sources', () => {
     ['33 USC 1321', 'usc_33'],
   ])
 })
+
+test('2026-10-05: chips for the user own documents and the fleet company documents', () => {
+  const hits = text => scanCitations(text).map(h => [h.sectionNumber, h.sourceHint])
+  assert.deepEqual(hits('Your manual sets monthly drills [Doc: SMS Manual §8 Emergency Preparedness], stricter than [Company: TSMS Manual §4.2 Drills].'), [
+    ['Doc: SMS Manual §8 Emergency Preparedness', 'doc'],
+    ['Company: TSMS Manual §4.2 Drills', 'company'],
+  ])
+})

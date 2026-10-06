@@ -82,6 +82,9 @@ export async function sendMessageStream(
   // is the resized output from utils/image_resize.ts (data_url + dims).
   // Backend preflight enforces ≤ 5 images and ≤ 10 MB per image.
   images?: { data_url: string; width: number; height: number }[],
+  // 2026-10-05 — ids of the caller's documents attached to this turn
+  // (uploaded first via POST /me/documents; the server checks each).
+  documentIds?: string[],
 ): Promise<void> {
   const body = JSON.stringify({
     query,
@@ -90,6 +93,7 @@ export async function sendMessageStream(
     ...(verbosity ? { verbosity } : {}),
     ...(workspaceId ? { workspace_id: workspaceId } : {}),
     ...(images && images.length > 0 ? { images } : {}),
+    ...(documentIds && documentIds.length > 0 ? { document_ids: documentIds } : {}),
   })
 
   const doFetch = (token: string | null): Promise<Response> =>

@@ -184,6 +184,19 @@ export function CitationSheet({ source, sectionNumber, sectionTitle, onClose, wo
     // reverse proxy into extra path segments.
     setLoading(true)
     setError(false)
+    // 2026-10-05 — a citation of the user's own document (attached in chat).
+    if (viewing.source === 'doc') {
+      apiRequest<CompanyCitation>(`/me/documents/citation?ref=${encodeURIComponent(viewing.sectionNumber)}`)
+        .then((c) => {
+          setDetail({
+            source: 'doc', section_number: `${c.title} §${c.section}`, section_title: c.section,
+            full_text: c.text, effective_date: null, up_to_date_as_of: null, copyrighted: false, references: [],
+          })
+          setLoading(false)
+        })
+        .catch(() => { setError(true); setLoading(false) })
+      return
+    }
     // 2026-09-27 — a company citation resolves inside the chat's workspace.
     if (viewing.source === 'company') {
       if (!workspaceId) { setError(true); setLoading(false); return }
@@ -349,6 +362,8 @@ export function CitationSheet({ source, sectionNumber, sectionTitle, onClose, wo
             <p className="font-mono text-sm text-muted italic">
               {viewing.source === 'company'
                 ? "This section isn't in your fleet's documents any more."
+                : viewing.source === 'doc'
+                ? "This section isn't in your documents any more."
                 : 'Regulation text unavailable.'}
             </p>
           )}

@@ -65,6 +65,14 @@ const CITATION_PATTERNS: CitationPattern[] = [
     sourceHint: 'company',
     toSection: m => `Company: ${m[1].trim()} §${m[2].trim()}`,
   },
+  // 2026-10-05 — the user's own documents attached in chat:
+  // [Doc: SMS Manual §4.2 Emergency Drills], resolved through
+  // GET /me/documents/citation (owner only).
+  {
+    re: /\[Doc:\s*([^\]§]+?)\s*§\s*([^\]]+?)\s*\]/g,
+    sourceHint: 'doc',
+    toSection: m => `Doc: ${m[1].trim()} §${m[2].trim()}`,
+  },
   // 46 CFR 91.60-10 / (33 CFR 153) / 49 CFR 172.101
   //
   // Sprint D6.90 — sourceHint is now Title-aware. The regulations.cfr_*

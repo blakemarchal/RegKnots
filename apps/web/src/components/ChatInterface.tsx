@@ -4,7 +4,8 @@ import { useState, useCallback, useEffect, useRef } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import type { Message } from '@/types/chat'
 import { sendMessageStream, cancelChat } from '@/lib/mockApi'
-import { apiRequest } from '@/lib/api'
+import { apiRequest, apiUpload, ApiError } from '@/lib/api'
+import type { UserDocumentDTO } from '@/components/MyDocuments'
 import { useAuthStore } from '@/lib/auth'
 import type { BillingStatus } from '@/lib/auth'
 import { ChatThread } from './ChatThread'
@@ -26,7 +27,7 @@ import { flagForFocus, isFlagUnknown, readFlagPromptDismissed, writeFlagPromptDi
 import type { VesselProfileForPrompts } from '@/lib/vesselPrompts'
 import { useViewMode } from '@/lib/useViewMode'
 import { resizeImageForChat, ImageRejectedError, type ResizedImage } from '@/utils/image_resize'
-import type { ChatImageAttachment } from '@/types/chat'
+import type { ChatDocumentRef, ChatImageAttachment, PendingDocument } from '@/types/chat'
 
 // D6.97 Phase 2 — image upload is gated by NEXT_PUBLIC_CHAT_IMAGE_UPLOAD_ENABLED
 // build-time env var. When 'true', the paperclip button is rendered in
@@ -37,6 +38,13 @@ import type { ChatImageAttachment } from '@/types/chat'
 // flag still requires one deploy cycle.
 const IMAGE_UPLOAD_ENABLED = process.env.NEXT_PUBLIC_CHAT_IMAGE_UPLOAD_ENABLED === 'true'
 const MAX_IMAGES_PER_QUERY = 5
+// 2026-10-05 — PDF / Word attachments (apps/api/app/user_docs.py)
+const MAX_DOCS_PER_QUERY = 3
+const DOC_MIME = new Set(['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'])
+const isDocFile = (f: File) => DOC_MIME.has(f.type) || /\.(pdf|docx)$/i.test(f.name)
+const DEFAULT_DOC_QUESTION = 'Please review the attached document.'
+const DOC_POLL_MS = 1500
+const DOC_POLL_LIMIT_MS = 180_000
 
 interface ConversationMessage {
   role: string
@@ -48,6 +56,8 @@ interface ConversationMessage {
   // Sprint D6.97 Phase 2 — image attachments restored on conversation
   // hydration. Empty for assistant messages and pre-D6.97 user messages.
   image_attachments?: ChatImageAttachment[]
+  // 2026-10-05 — documents attached to a user message
+  documents?: ChatDocumentRef[]
 }
 
 interface Props {
@@ -73,6 +83,10 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
   // dispatches add/remove. Cleared in handleSend after the images are
   // captured into the user message.
   const [pendingImages, setPendingImages] = useState<ResizedImage[]>([])
+  // 2026-10-05 — documents picked for the next question; each uploads at once
+  // and is polled until the server has read it.
+  const [pendingDocs, setPendingDocs] = useState<PendingDocument[]>([])
+  const removedDocKeys = useRef<Set<string>>(new Set())
   const [imageError, setImageError] = useState<string | null>(null)
   // Sprint D6.88 Phase 3 — inline indicator for the post-stream web
   // fallback dispatch phase. The model's streamed answer renders
@@ -372,6 +386,7 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
           // D6.97 Phase 2 — restore image thumbnails on conversation
           // reload. Empty for assistant messages and pre-D6.97 history.
           image_attachments: r.image_attachments ?? [],
+          documents: r.documents ?? [],
         }))
         setMessages(restored)
         // Sync vessel selector if the conversation has one. Skip when
@@ -499,6 +514,7 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
                 // D6.97 Phase 2 — preserve image thumbnails through the
                 // recovery hydration path too.
                 image_attachments: r.image_attachments ?? [],
+                documents: r.documents ?? [],
               }))
               setMessages(restored)
               setConversationId(convId)
@@ -594,7 +610,7 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
   // pendingImages, respecting the 5-image cap. Errors surface in a
   // small banner above the input row; the rest of the queue still
   // adds.
-  const handleAddImages = useCallback(async (files: FileList) => {
+  const handleAddImages = useCallback(async (files: FileList | File[]) => {
     const remaining = MAX_IMAGES_PER_QUERY - pendingImages.length
     if (remaining <= 0) {
       setImageError(`Up to ${MAX_IMAGES_PER_QUERY} images per question.`)
@@ -631,6 +647,79 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
     setImageError(null)
   }, [])
 
+  // 2026-10-05 — PDF / Word attachments. Upload on pick, then poll the
+  // server until it has read the file (ready) or given up on it (failed).
+  const updateDoc = useCallback((key: string, patch: Partial<PendingDocument>) => {
+    setPendingDocs(prev => prev.map(d => (d.key === key ? { ...d, ...patch } : d)))
+  }, [])
+
+  const pollDoc = useCallback(async (key: string, id: string) => {
+    const started = Date.now()
+    while (Date.now() - started < DOC_POLL_LIMIT_MS) {
+      await new Promise(resolve => setTimeout(resolve, DOC_POLL_MS))
+      if (removedDocKeys.current.has(key)) return
+      let doc: UserDocumentDTO
+      try {
+        doc = await apiRequest<UserDocumentDTO>(`/me/documents/${id}`)
+      } catch {
+        continue
+      }
+      if (doc.status === 'pending') continue
+      updateDoc(key, doc.status === 'ready'
+        ? { status: 'ready', pages: doc.pages }
+        : { status: 'failed', error: doc.error ?? "Couldn't read this file." })
+      return
+    }
+    updateDoc(key, { status: 'failed', error: 'Reading this file is taking too long. Try again.' })
+  }, [updateDoc])
+
+  const addDocument = useCallback(async (file: File) => {
+    const key = crypto.randomUUID()
+    setPendingDocs(prev => [...prev, { key, title: file.name, status: 'uploading' }])
+    const form = new FormData()
+    form.append('file', file)
+    try {
+      const doc = await apiUpload<UserDocumentDTO>('/me/documents', form)
+      if (removedDocKeys.current.has(key)) {
+        // removed while it was uploading: don't keep it
+        apiRequest(`/me/documents/${doc.id}`, { method: 'DELETE' }).catch(() => {})
+        return
+      }
+      updateDoc(key, { id: doc.id, title: doc.title, status: 'pending' })
+      void pollDoc(key, doc.id)
+    } catch (err) {
+      updateDoc(key, { status: 'failed', error: err instanceof ApiError ? err.message : 'Upload failed. Try again.' })
+    }
+  }, [pollDoc, updateDoc])
+
+  const handleAddFiles = useCallback((files: FileList) => {
+    const all = Array.from(files)
+    const docs = all.filter(isDocFile)
+    const images = all.filter(f => !isDocFile(f))
+    if (images.length > 0) void handleAddImages(images)
+    if (docs.length === 0) return
+    const room = MAX_DOCS_PER_QUERY - pendingDocs.length
+    if (room <= 0) {
+      setImageError(`Up to ${MAX_DOCS_PER_QUERY} documents per question.`)
+      return
+    }
+    if (docs.length > room) {
+      setImageError(`Only the first ${room} documents were attached (up to ${MAX_DOCS_PER_QUERY} per question).`)
+    }
+    docs.slice(0, room).forEach(f => { void addDocument(f) })
+  }, [handleAddImages, addDocument, pendingDocs.length])
+
+  // Removing a document before sending deletes the upload too (one still
+  // uploading is deleted when its upload returns, in addDocument).
+  const handleRemoveDoc = useCallback((key: string) => {
+    removedDocKeys.current.add(key)
+    const doc = pendingDocs.find(d => d.key === key)
+    if (doc?.id && doc.status !== 'failed') {
+      apiRequest(`/me/documents/${doc.id}`, { method: 'DELETE' }).catch(() => {})
+    }
+    setPendingDocs(prev => prev.filter(d => d.key !== key))
+  }, [pendingDocs])
+
   // 2026-09-29 — one send path. Starter prompts, ?q= deep links and Resend
   // used a second copy (handlePrompt) with no Stop wiring and no answer-length
   // choice, which reported every failure as "Connection lost": a 402, 403 or
@@ -641,8 +730,11 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
     text: string,
     { fresh = false, withImages = true }: { fresh?: boolean; withImages?: boolean } = {},
   ) => {
-    const query = text.trim()
     const images = withImages ? pendingImages : []
+    // 2026-10-05 — documents ready to go with this turn; a document on its
+    // own is a question ("review this").
+    const docsForTurn = withImages ? pendingDocs.filter(d => d.status === 'ready' && d.id) : []
+    const query = text.trim() || (docsForTurn.length > 0 ? DEFAULT_DOC_QUESTION : '')
     // D6.97 Phase 2 — image-only queries are allowed. The send button
     // gates this client-side via canSend; this guard is defense-in-depth.
     if ((!query && images.length === 0) || loading) return
@@ -672,12 +764,15 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
       content: query,
       citations: [],
       image_attachments: imageAttachmentsForMsg,
+      documents: docsForTurn.map(d => ({ id: d.id as string, title: d.title, pages: d.pages ?? null })),
       created_at: new Date().toISOString(),
     }
     setMessages(prev => (fresh ? [userMsg] : [...prev, userMsg]))
     setInput('')
     if (withImages) {
       setPendingImages([])
+      // a document still uploading or being read stays for the next question
+      setPendingDocs(prev => prev.filter(d => d.status === 'uploading' || d.status === 'pending'))
       setImageError(null)
     }
     setLoading(true)
@@ -819,6 +914,7 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
         // preflight rejects ≤ 5 / ≤ 10 MB; the client-side resize keeps
         // each well under the cap.
         imagesPayload.length > 0 ? imagesPayload : undefined,
+        docsForTurn.length > 0 ? docsForTurn.map(d => d.id as string) : undefined,
       )
     } catch (err) {
       // D6.85 Fix C — distinguish user-initiated abort from real errors.
@@ -907,7 +1003,7 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
       streamingAccumRef.current = ''
       streamingConvIdRef.current = null
     }
-  }, [loading, conversationId, router, setBilling, writePending, clearPending, recoveryLoop, verbosity, savedVerbosity, activeWorkspaceId, pendingImages])
+  }, [loading, conversationId, router, setBilling, writePending, clearPending, recoveryLoop, verbosity, savedVerbosity, activeWorkspaceId, pendingImages, pendingDocs])
 
   const handleSend = useCallback(() => { void sendText(input) }, [sendText, input])
 
@@ -1286,8 +1382,11 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
           onStop={handleStop}
           imagesEnabled={IMAGE_UPLOAD_ENABLED}
           pendingImages={pendingImages}
-          onAddImages={handleAddImages}
+          onAddFiles={handleAddFiles}
           onRemoveImage={handleRemoveImage}
+          pendingDocs={pendingDocs}
+          onRemoveDoc={handleRemoveDoc}
+          docsBusy={pendingDocs.some(d => d.status === 'uploading' || d.status === 'pending')}
         />
         {rateLimitMsg && (
           <p className="px-4 py-2 font-mono text-xs text-amber-400 bg-amber-950/30 border-t border-amber-800/20">
