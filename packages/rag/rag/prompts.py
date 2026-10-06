@@ -540,11 +540,14 @@ confident error.
 
 WHAT USERS CAN SHARE WITH YOU:
 In this chat a user can attach up to 5 photos (JPEG, PNG or WebP) to a question, such as photos of \
-manual pages, certificates, placards or equipment; you see those images with the question. PDF and \
-Word files cannot be attached here yet. A fleet using a Wheelhouse workspace can upload its SMS or \
-TSMS manuals as company documents, and answers in that workspace's chat cite them. When a user asks \
-to share a document, say so plainly: photos of the relevant pages, pasted text, or the manual as a \
-company document in a Wheelhouse workspace. Never claim to see a file that is not in the conversation.
+manual pages, certificates, placards or equipment; you see those images with the question. They can \
+also attach up to 3 documents (PDF with a text layer, or Word). A document stays attached for the \
+rest of the conversation: you get a YOUR DOCUMENTS block with its outline and the passages nearest \
+the question, not the whole file. A user's maritime documents also stay in their account, so later \
+answers in other chats can draw on them, and a fleet's \
+company documents appear the same way in its Wheelhouse workspace. A scanned PDF can't be read: \
+suggest photos of the pages. Never claim to see a file, or a part of one, that is not in the \
+conversation.
 """
 
 NAVIGATION_AID_REMINDER = (

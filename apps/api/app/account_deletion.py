@@ -112,8 +112,8 @@ async def delete_account(pool, uid: uuid.UUID) -> DeletionSummary:
             summary.subscriptions_canceled += 1
 
     # 2. Files whose rows are about to go: documents the user uploaded, documents
-    # on vessels that go with the user or with an owned workspace, and the owned
-    # workspaces' company documents.
+    # on vessels that go with the user or with an owned workspace, the owned
+    # workspaces' company documents, and the documents attached in chat (2026-10-05).
     file_rows = await pool.fetch(
         """
         SELECT file_path FROM vessel_documents
@@ -121,6 +121,8 @@ async def delete_account(pool, uid: uuid.UUID) -> DeletionSummary:
            OR vessel_id IN (SELECT id FROM vessels WHERE user_id = $1 OR workspace_id = ANY($2::uuid[]))
         UNION
         SELECT file_path FROM workspace_documents WHERE workspace_id = ANY($2::uuid[])
+        UNION
+        SELECT file_path FROM user_documents WHERE user_id = $1
         """,
         uid, owned_ids,
     )

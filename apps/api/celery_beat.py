@@ -83,4 +83,10 @@ celery.conf.beat_schedule = {
         # re-synced from Stripe. Daily at 12:30 UTC.
         "schedule": crontab(hour=12, minute=30),
     },
+    "purge-user-documents-daily": {
+        "task": "app.tasks.purge_user_documents",
+        # 2026-10-05 — chat-attached documents the internal check found not
+        # maritime are deleted 7 days after upload (app/user_docs.py).
+        "schedule": crontab(hour=4, minute=40),
+    },
 }

@@ -208,6 +208,35 @@ def _validate_and_parse_images(
     return parsed
 
 
+async def _validate_documents(body: "ChatRequestBody", current_user: CurrentUser, pool: asyncpg.Pool) -> None:
+    """2026-10-05 — documents attached to a question must be the caller's own and
+    processed (app/user_docs.py). Duplicates are dropped in place."""
+    from app import user_docs
+
+    ids = list(dict.fromkeys(body.document_ids or []))
+    body.document_ids = ids
+    if not ids:
+        return
+    if len(ids) > user_docs.MAX_PER_MESSAGE:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"Attach at most {user_docs.MAX_PER_MESSAGE} documents to a question.")
+    rows = await pool.fetch(
+        "SELECT id, title, status, error FROM user_documents WHERE user_id = $1 AND id = ANY($2::uuid[])",
+        uuid.UUID(current_user.user_id), ids,
+    )
+    found = {r["id"]: r for r in rows}
+    for doc_id in ids:
+        row = found.get(doc_id)
+        if row is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "A document attached to this question wasn't found.")
+        if row["status"] == "pending":
+            raise HTTPException(status.HTTP_409_CONFLICT,
+                                f"Still reading {row['title']}. Send your question when it's ready.")
+        if row["status"] != "ready":
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                row["error"] or f"{row['title']} couldn't be read.")
+
+
 async def _run_chat_preflight(
     body: "ChatRequestBody",
     current_user: CurrentUser,
@@ -254,6 +283,7 @@ async def _run_chat_preflight(
     # user-message INSERT below; storing the data_urls upfront means the
     # conversation rehydrates cleanly on reload without a second fetch.
     parsed_images = _validate_and_parse_images(body, current_user)
+    await _validate_documents(body, current_user, pool)
 
     # ── Email verification gate (soft — 5 messages before required) ─────────
     if not current_user.email_verified:
@@ -692,12 +722,13 @@ async def _run_chat_preflight(
         await pool.execute(
             """
             INSERT INTO messages
-                (conversation_id, role, content, cited_regulation_ids, image_attachments)
-            VALUES ($1, 'user', $2, '{}', $3::jsonb)
+                (conversation_id, role, content, cited_regulation_ids, image_attachments, document_ids)
+            VALUES ($1, 'user', $2, '{}', $3::jsonb, $4::uuid[])
             """,
             conversation_id,
             body.query,
             image_attachments_json,
+            body.document_ids or None,
         )
     except Exception as exc:
         logger.warning(
@@ -968,7 +999,8 @@ async def chat_endpoint(
         precision_mode=precision_mode_enabled,
         # 2026-07-19 Wk3 — API-layer live data (active whale-zone SMAs).
         live_context_block=_build_whale_live_block(body.query),
-        company_context=await _company_context(pool, conversation_id, openai_api_key),
+        company_context=await _document_context(
+            pool, conversation_id, uuid.UUID(current_user.user_id), body.document_ids, openai_api_key),
         # 2026-09-23 — minimum synthesis model (default Opus 5.5).
         synthesis_model_floor=settings.synthesis_model_floor or None,
     )
@@ -1140,7 +1172,8 @@ async def chat_stream_endpoint(
                 # 2026-07-19 Wk3 — API-layer live data (active whale-zone
                 # SMAs). None unless the query has whale-zone intent.
                 live_context_block=_build_whale_live_block(body.query),
-                company_context=await _company_context(pool, conversation_id, openai_api_key),
+                company_context=await _document_context(
+                    pool, conversation_id, uuid.UUID(current_user.user_id), body.document_ids, openai_api_key),
                 # 2026-09-23 — minimum synthesis model (default Opus 5.5).
                 synthesis_model_floor=settings.synthesis_model_floor or None,
             ):
@@ -1385,6 +1418,35 @@ async def _company_context(pool: asyncpg.Pool, conversation_id: uuid.UUID, opena
     return provide
 
 
+async def _document_context(pool: asyncpg.Pool, conversation_id: uuid.UUID, user_id: uuid.UUID,
+                            document_ids: list[uuid.UUID], openai_api_key: str):
+    """2026-10-05 — the engine's documents callback: the fleet's company
+    documents in a workspace chat (_company_context), and the user's own
+    documents in any chat: the ones attached in this conversation, and their
+    kept documents when close to the question (app/user_docs.py). Either block
+    may be absent, and one failing doesn't drop the other."""
+    from app import user_docs
+
+    company = await _company_context(pool, conversation_id, openai_api_key)
+
+    async def mine(query: str) -> str | None:
+        ids = await user_docs.conversation_documents(pool, conversation_id, user_id, document_ids)
+        return await user_docs.context_block(pool, user_id, ids, openai_api_key, query)
+
+    async def provide(query: str) -> str | None:
+        blocks = await asyncio.gather(
+            company(query) if company else asyncio.sleep(0, result=None),
+            mine(query),
+            return_exceptions=True,
+        )
+        for b in blocks:
+            if isinstance(b, BaseException):
+                logger.warning("document context skipped: %s: %s", type(b).__name__, str(b)[:200])
+        joined = "\n\n".join(b for b in blocks if isinstance(b, str) and b)
+        return joined or None
+    return provide
+
+
 def _build_whale_live_block(message: str) -> str | None:
     """2026-07-19 Wk3 — live whale-zone context for chat.
 
@@ -1598,6 +1660,10 @@ class ChatRequestBody(BaseModel):
     # (≤ 10 MB decoded). Empty list when the user attached no images
     # (today's behavior).
     images: list[ChatImageInput] = []
+    # 2026-10-05 — the caller's own documents attached to this question
+    # (app/user_docs.py): uploaded first via POST /me/documents, at most 3,
+    # checked in the preflight.
+    document_ids: list[uuid.UUID] = []
 
 
 class ChatCancelBody(BaseModel):

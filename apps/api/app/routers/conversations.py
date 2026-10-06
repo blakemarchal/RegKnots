@@ -94,6 +94,8 @@ class ConversationMessage(BaseModel):
     # for assistant messages and for any user message persisted before
     # D6.97 Phase 2 ran the 0103 migration.
     image_attachments: list[dict] = []
+    # 2026-10-05 — documents attached to a user message: [{id, title, pages}]
+    documents: list[dict] = []
 
 
 # ── Endpoints ──────────────────────────────────────────────────────────────────
@@ -377,13 +379,21 @@ async def get_conversation_messages(
         rows = await conn.fetch(
             """
             SELECT role, content, cited_regulation_ids, created_at,
-                   tier_metadata, cancelled, image_attachments
+                   tier_metadata, cancelled, image_attachments, document_ids
             FROM messages
             WHERE conversation_id = $1
             ORDER BY created_at ASC
             """,
             conversation_id,
         )
+        # 2026-10-05 — titles of attached documents (a deleted one shows as such)
+        doc_ids = list({d for r in rows for d in (r["document_ids"] or [])})
+        doc_titles = {
+            r["id"]: {"title": r["title"], "pages": r["pages"]}
+            for r in (await conn.fetch(
+                "SELECT id, title, pages FROM user_documents WHERE id = ANY($1::uuid[])", doc_ids)
+                if doc_ids else [])
+        }
 
     result: list[ConversationMessage] = []
     for row in rows:
@@ -451,6 +461,10 @@ async def get_conversation_messages(
                 tier_metadata=tier_md,
                 cancelled=bool(row["cancelled"]) if row["cancelled"] is not None else False,
                 image_attachments=image_attachments,
+                documents=[
+                    {"id": str(d), **doc_titles.get(d, {"title": "Deleted document", "pages": None})}
+                    for d in (row["document_ids"] or [])
+                ],
             )
         )
 

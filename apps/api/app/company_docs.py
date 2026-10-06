@@ -58,14 +58,15 @@ class UnreadableDocument(ValueError):
 
 # ── Extraction ────────────────────────────────────────────────────────────────
 
-def extract_pages(path: str | Path, mime_type: str) -> list[str]:
-    """Text per page for a PDF, one element for other types."""
+def extract_pages(path: str | Path, mime_type: str, max_pages: int = MAX_PAGES) -> list[str]:
+    """Text per page for a PDF, one element for other types. (2026-10-05:
+    max_pages, so chat uploads in app/user_docs.py can cap lower.)"""
     path = Path(path)
     if mime_type == "application/pdf":
         from pypdf import PdfReader
         reader = PdfReader(str(path))
-        if len(reader.pages) > MAX_PAGES:
-            raise UnreadableDocument(f"This PDF has {len(reader.pages)} pages; the limit is {MAX_PAGES}.")
+        if len(reader.pages) > max_pages:
+            raise UnreadableDocument(f"This PDF has {len(reader.pages)} pages; the limit is {max_pages}.")
         pages = [(p.extract_text() or "") for p in reader.pages]
         if sum(len(p.strip()) for p in pages) < _MIN_TEXT_CHARS:
             raise UnreadableDocument(

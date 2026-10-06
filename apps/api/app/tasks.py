@@ -1362,3 +1362,51 @@ async def _process_company_document_async(document_id: str):
         await company_docs.process_document(pool, uuid.UUID(document_id), settings.openai_api_key)
     finally:
         await pool.close()
+
+
+@celery.task(name="app.tasks.process_user_document", soft_time_limit=600, time_limit=660)
+def process_user_document(document_id: str):
+    """2026-10-05 — extract, chunk, embed and check one document a user attached
+    in chat (app/user_docs.py). Status ends as ready or failed; never raises."""
+    _run_async(_process_user_document_async(document_id))
+
+
+async def _process_user_document_async(document_id: str):
+    import uuid
+
+    import asyncpg
+    from anthropic import AsyncAnthropic
+    from app import user_docs
+    from app.config import settings
+
+    dsn = settings.database_url.replace("postgresql+asyncpg://", "postgresql://")
+    pool = await asyncpg.create_pool(dsn, min_size=1, max_size=2)
+    client = AsyncAnthropic(api_key=settings.anthropic_api_key)
+    try:
+        await user_docs.process_document(pool, uuid.UUID(document_id), settings.openai_api_key, client)
+    finally:
+        await client.close()
+        await pool.close()
+
+
+@celery.task(name="app.tasks.purge_user_documents")
+def purge_user_documents():
+    """2026-10-05 — delete chat-attached documents past their delete_after (the
+    internal check found them not maritime: 7 days after upload) and failed
+    uploads older than 7 days, files included."""
+    return _run_async(_purge_user_documents_async())
+
+
+async def _purge_user_documents_async():
+    import asyncpg
+    from app import user_docs
+    from app.config import settings
+
+    dsn = settings.database_url.replace("postgresql+asyncpg://", "postgresql://")
+    pool = await asyncpg.create_pool(dsn, min_size=1, max_size=1)
+    try:
+        removed = await user_docs.purge(pool)
+        logger.info("purge_user_documents: %d removed", removed)
+        return {"removed": removed}
+    finally:
+        await pool.close()
