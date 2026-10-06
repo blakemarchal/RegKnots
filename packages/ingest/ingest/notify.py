@@ -167,6 +167,9 @@ async def _send_immediate_alerts(
                 "to": [row["email"]],
                 "subject": f"{title} — RegKnot",
                 "html": _build_alert_html(first_name, title, body),
+                # 2026-10-06 — mail.regknots.com takes no mail; a reply goes to
+                # Google Workspace (as app.email.send_email does in the API)
+                "reply_to": ["support@regknots.com"],
             })
             sent += 1
             logger.info("notify: sent immediate alert to %s for %s", row["email"], source)

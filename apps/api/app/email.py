@@ -73,6 +73,19 @@ async def send_with_throttle(
 
 resend.api_key = settings.resend_api_key
 
+# 2026-10-06 — app email goes out through Resend from mail.regknots.com, which
+# takes no mail (no MX, no A record), so a reply bounced unless the email set
+# reply_to. Every send goes through send_email(): a reply reaches Google
+# Workspace — the email's own reply_to, else support@ (an alias of
+# blake@regknots.com). tests/test_email_reply_to.py keeps direct sends out.
+DEFAULT_REPLY_TO = ["support@regknots.com"]
+
+
+def send_email(params: dict):
+    """resend.Emails.send with a reply-to that reaches a person."""
+    params.setdefault("reply_to", DEFAULT_REPLY_TO)
+    return resend.Emails.send(params)
+
 
 # Sprint D6.92 — tier-aware copy helpers for subscription lifecycle
 # emails. Pre-D6.92 every lifecycle email said "RegKnot Pro" — a dead
@@ -172,7 +185,7 @@ async def send_welcome_email(to_email: str, full_name: str) -> None:
         Set up your vessel profile first for the most accurate answers.
       </p>
     """)
-    resend.Emails.send({
+    send_email({
         "from": FROM_EMAIL,
         "to": [to_email],
         "subject": f"Welcome aboard, {raw_first}",
@@ -199,7 +212,7 @@ async def send_verification_email(to_email: str, full_name: str, token: str) -> 
         If you didn't create a RegKnot account, you can safely ignore this email.
       </p>
     """)
-    resend.Emails.send({
+    send_email({
         "from": FROM_EMAIL,
         "to": [to_email],
         "subject": "Verify your email — RegKnot",
@@ -224,7 +237,7 @@ async def send_support_confirmation_email(to_email: str, full_name: str, subject
         directly to this email.
       </p>
     """)
-    resend.Emails.send({
+    send_email({
         "from": FROM_EMAIL,
         "to": [to_email],
         "reply_to": ["support@regknots.com"],
@@ -262,7 +275,7 @@ async def send_support_reply_email(
         <p style="color:rgba(240,236,228,0.7); white-space:pre-wrap; margin:0; font-size:13px;">{safe_original}</p>
       </div>
     """)
-    resend.Emails.send({
+    send_email({
         "from": CAPTAIN_EMAIL,
         "to": [to_email],
         "reply_to": ["support@regknots.com"],
@@ -289,7 +302,7 @@ async def send_password_changed_email(to_email: str, full_name: str) -> None:
         at <a href="mailto:support@regknots.com" style="color:#2dd4bf;">support@regknots.com</a>.
       </p>
     """)
-    resend.Emails.send({
+    send_email({
         "from": FROM_EMAIL,
         "to": [to_email],
         "subject": "Your RegKnot password was changed",
@@ -315,7 +328,7 @@ async def send_password_reset_email(to_email: str, reset_token: str) -> None:
         Your password won't change until you click the link above.
       </p>
     """)
-    resend.Emails.send({
+    send_email({
         "from": FROM_EMAIL,
         "to": [to_email],
         "subject": "Reset your RegKnot password",
@@ -378,7 +391,7 @@ async def send_trial_expiring_email(to_email: str, full_name: str, messages_used
         Either way, thanks for trying RegKnot. Your feedback shapes what we build next.
       </p>
     """)
-    resend.Emails.send({
+    send_email({
         "from": CAPTAIN_EMAIL,
         "to": [to_email],
         "subject": "Your RegKnot trial ends in 3 days — quick favor first",
@@ -414,7 +427,7 @@ async def send_waitlist_confirmed_email(to_email: str, full_name: str) -> None:
       </p>
       <a href="{APP_URL}" class="cta">Learn More</a>
     """)
-    resend.Emails.send({
+    send_email({
         "from": FROM_EMAIL,
         "to": [to_email],
         "subject": f"You're on the RegKnot waitlist, {raw_first}",
@@ -448,7 +461,7 @@ async def send_subscription_cancelled_email(
         support chat in the app. Fair winds.
       </p>
     """)
-    resend.Emails.send({
+    send_email({
         "from": CAPTAIN_EMAIL,
         "to": [to_email],
         "subject": "Your RegKnot subscription has been cancelled",
@@ -484,7 +497,7 @@ async def send_subscription_confirmed_email(
       </ul>
       <a href="{APP_URL}" class="cta">Start Asking Questions</a>
     """)
-    resend.Emails.send({
+    send_email({
         "from": CAPTAIN_EMAIL,
         "to": [to_email],
         "subject": f"{welcome_title}, {raw_first}",
@@ -515,7 +528,7 @@ async def send_payment_failed_email(
         If you believe this is an error, reply to this email and we'll look into it.
       </p>
     """)
-    resend.Emails.send({
+    send_email({
         "from": CAPTAIN_EMAIL,
         "to": [to_email],
         "subject": f"RegKnot — Action Required: Payment Failed",
@@ -546,7 +559,7 @@ async def send_subscription_paused_email(
         Your vessel profiles and chat history are saved and will be waiting for you.
       </p>
     """)
-    resend.Emails.send({
+    send_email({
         "from": CAPTAIN_EMAIL,
         "to": [to_email],
         "subject": "RegKnot — Your Subscription is Paused",
@@ -569,7 +582,7 @@ async def send_charity_suggestion_email(
         )
     else:
         website_html = ""
-    resend.Emails.send({
+    send_email({
         "from": FROM_EMAIL,
         "to": ["hello@regknots.com"],
         "reply_to": user_email,
@@ -684,7 +697,7 @@ def render_founding_member_email(full_name: str | None) -> tuple[str, str]:
 
 async def send_founding_member_email(to: str, name: str | None) -> None:
     subject, html = render_founding_member_email(name)
-    resend.Emails.send({
+    send_email({
         "from": CAPTAIN_EMAIL,
         "to": [to],
         "reply_to": ["hello@regknots.com"],
@@ -729,7 +742,7 @@ async def send_contact_inquiry_email(
       <p style="white-space: pre-wrap; color:#f0ece4;">{safe_message}</p>
     """)
 
-    resend.Emails.send({
+    send_email({
         "from": FROM_EMAIL,
         "to": ["hello@regknots.com"],
         "reply_to": from_email,
@@ -756,7 +769,7 @@ async def send_subscription_resumed_email(
       </p>
       <a href="{APP_URL}" class="cta">Start Asking Questions</a>
     """)
-    resend.Emails.send({
+    send_email({
         "from": CAPTAIN_EMAIL,
         "to": [to_email],
         "subject": f"RegKnot — Welcome Back! Subscription Resumed",
@@ -788,7 +801,7 @@ async def send_workspace_trial_ending_email(
       </p>
       <a href="{workspaces_url}" class="cta">Add Payment Method</a>
     """)
-    resend.Emails.send({
+    send_email({
         "from": FROM_EMAIL,
         "to": [to_email],
         "subject": f"5 days left — add a card to keep {workspace_name}",
@@ -816,7 +829,7 @@ async def send_workspace_trial_ended_email(
       </p>
       <a href="{workspaces_url}" class="cta">Add Payment Method</a>
     """)
-    resend.Emails.send({
+    send_email({
         "from": FROM_EMAIL,
         "to": [to_email],
         "subject": f"Trial ended — {workspace_name} is read-only",
@@ -843,7 +856,7 @@ async def send_workspace_card_pending_reminder_email(
       </p>
       <a href="{workspaces_url}" class="cta">Add Payment Method</a>
     """)
-    resend.Emails.send({
+    send_email({
         "from": FROM_EMAIL,
         "to": [to_email],
         "subject": f"5 days left — {workspace_name} will be archived",
@@ -870,7 +883,7 @@ async def send_workspace_archived_email(
       </p>
       <a href="{workspaces_url}" class="cta">Restore Workspace</a>
     """)
-    resend.Emails.send({
+    send_email({
         "from": FROM_EMAIL,
         "to": [to_email],
         "subject": f"{workspace_name} archived — 90 days to restore",
@@ -897,7 +910,7 @@ async def send_workspace_subscription_confirmed_email(
       </p>
       <a href="{workspace_url}" class="cta">Open Workspace</a>
     """)
-    resend.Emails.send({
+    send_email({
         "from": FROM_EMAIL,
         "to": [to_email],
         "subject": f"{workspace_name} Wheelhouse activated",
@@ -925,7 +938,7 @@ async def send_workspace_payment_failed_email(
       </p>
       <a href="{workspaces_url}" class="cta">Update Payment Method</a>
     """)
-    resend.Emails.send({
+    send_email({
         "from": FROM_EMAIL,
         "to": [to_email],
         "subject": f"Card declined for {workspace_name}",
@@ -967,7 +980,7 @@ async def send_off_topic_abuse_alert(
         full query log for context.
       </p>
     """)
-    resend.Emails.send({
+    send_email({
         "from": FROM_EMAIL,
         "to": ["blakemarchal@gmail.com"],
         "subject": (
@@ -1023,7 +1036,7 @@ async def send_workspace_invite_email(
         you click the link.
       </p>
     """)
-    resend.Emails.send({
+    send_email({
         "from": FROM_EMAIL,
         "to": [to_email],
         "subject": f"You're invited to {workspace_name} on RegKnot",
@@ -1043,7 +1056,7 @@ async def send_custom_email(to_email: str, subject: str, body_text: str) -> None
       <p style="white-space: pre-wrap; color: #f0ece4;">{safe_body}</p>
       <a href="{APP_URL}" class="cta">Open RegKnot</a>
     """)
-    resend.Emails.send({
+    send_email({
         "from": CAPTAIN_EMAIL,
         "to": [to_email],
         "subject": f"RegKnot — {subject}",
@@ -1094,7 +1107,7 @@ async def send_credential_expiry_email(
         You can adjust reminder settings in your Account page.
       </p>
     """)
-    resend.Emails.send({
+    send_email({
         "from": FROM_EMAIL,
         "to": [to_email],
         "subject": f"{headline} — RegKnot",
@@ -1134,7 +1147,7 @@ async def send_regulation_digest_email(
         You can adjust digest frequency in your Account settings.
       </p>
     """)
-    resend.Emails.send({
+    send_email({
         "from": FROM_EMAIL,
         "to": [to_email],
         "subject": f"{count} regulation update{'s' if count != 1 else ''} this week — RegKnot",
@@ -1168,7 +1181,7 @@ async def send_regulation_alert_email(
         Adjust your alert preferences in Account settings.
       </p>
     """)
-    resend.Emails.send({
+    send_email({
         "from": FROM_EMAIL,
         "to": [to_email],
         "subject": f"{source_label} — RegKnot",

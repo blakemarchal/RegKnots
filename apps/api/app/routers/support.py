@@ -194,6 +194,7 @@ async def support_email(
     import html as _html_lib
 
     import resend
+    from app.email import send_email
     from app.email import FROM_EMAIL, send_support_confirmation_email
 
     display_name = user.full_name or user.email
@@ -208,7 +209,7 @@ async def support_email(
     safe_body = _html_lib.escape(body.message.strip()).replace("\n", "<br>")
 
     try:
-        resend.Emails.send({
+        send_email({
             "from": FROM_EMAIL,
             "to": ["support@regknots.com"],
             "reply_to": user.email,

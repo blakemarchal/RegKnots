@@ -556,6 +556,7 @@ def _send_amendment_alert(findings: list[dict]):
     """Send alert email about new SOLAS/STCW supplement references."""
     try:
         import resend
+        from app.email import send_email
         from app.config import settings
         resend.api_key = settings.resend_api_key
 
@@ -588,7 +589,7 @@ def _send_amendment_alert(findings: list[dict]):
             conv_summary |= entry["conventions"]
         scope = ", ".join(sorted(conv_summary)) if conv_summary else "IMO"
 
-        resend.Emails.send({
+        send_email({
             "from": "RegKnot <hello@mail.regknots.com>",
             "to": ["hello@regknots.com"],
             "subject": "New IMO amendments detected — RegKnot",
@@ -634,6 +635,7 @@ def hedge_audit_weekly_digest():
 async def _hedge_audit_weekly_digest_async():
     import asyncpg
     import resend
+    from app.email import send_email
     from app.config import settings
 
     resend.api_key = settings.resend_api_key
@@ -705,7 +707,7 @@ async def _hedge_audit_weekly_digest_async():
             f"</p>"
         )
 
-        resend.Emails.send({
+        send_email({
             "from": "RegKnot <hello@mail.regknots.com>",
             "to": ["blakemarchal@gmail.com"],
             "subject": (
@@ -1038,6 +1040,7 @@ def _send_erg_release_alert(db_year: int, hits: list[tuple[str, str, int]]):
     """Send heads-up email when PHMSA appears to list a newer ERG edition."""
     try:
         import resend
+        from app.email import send_email
         from app.config import settings
         resend.api_key = settings.resend_api_key
 
@@ -1057,7 +1060,7 @@ def _send_erg_release_alert(db_year: int, hits: list[tuple[str, str, int]]):
         )
         newest = max(y for _, _, y in unique_hits)
 
-        resend.Emails.send({
+        send_email({
             "from": "RegKnot <hello@mail.regknots.com>",
             "to": ["hello@regknots.com"],
             "subject": f"Possible new ERG edition detected ({newest}) — RegKnot",
@@ -1275,6 +1278,7 @@ def _send_nmc_admin_digest(new_findings: list[dict], *, already_ingested_count: 
     """
     try:
         import resend
+        from app.email import send_email
         from app.config import settings
         resend.api_key = settings.resend_api_key
 
@@ -1291,7 +1295,7 @@ def _send_nmc_admin_digest(new_findings: list[dict], *, already_ingested_count: 
                 f"already-ingested corpus content and were auto-skipped.)</em></p>"
             )
 
-        resend.Emails.send({
+        send_email({
             "from": "RegKnot <hello@mail.regknots.com>",
             "to": [_NMC_DIGEST_RECIPIENT],
             "subject": f"RegKnot NMC digest — {len(new_findings)} new doc(s) to review",

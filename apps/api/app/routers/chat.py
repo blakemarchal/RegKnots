@@ -1572,9 +1572,10 @@ async def _check_missing_regulation_request(
     try:
         # Email admin
         import resend
+        from app.email import send_email
         from app.config import settings
         resend.api_key = settings.resend_api_key
-        resend.Emails.send({
+        send_email({
             "from": "RegKnot <hello@mail.regknots.com>",
             "to": ["hello@regknots.com"],
             "subject": f"Regulation source requested: {labels}",
