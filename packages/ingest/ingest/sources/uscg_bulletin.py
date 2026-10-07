@@ -425,7 +425,7 @@ def _keyword_match(subject: str, published_date: date | None, gd_id: str) -> tup
 
 # The same small model as the app (rag.llm.SIDECAR_MODEL); ingest does not
 # import rag, so it reads the same env var with the same default.
-_LLM_MODEL = os.environ.get("SIDECAR_MODEL") or "claude-haiku-4-5-20251001"
+_LLM_MODEL = os.environ.get("SIDECAR_MODEL") or "claude-haiku-5-5"
 _LLM_MAX_CONCURRENCY = 10
 _LLM_CONFIDENCE_THRESHOLD = 0.7
 _LLM_TIMEOUT = 30.0

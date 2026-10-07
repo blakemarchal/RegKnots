@@ -39,11 +39,11 @@ logger = logging.getLogger(__name__)
 
 # 2026-09-28 — one place for the small model behind the router, distill,
 # rewrite, rerank, hedge judge, citation check, hedge audit, conversation
-# titles, the support bot and the fast study guide. Haiku 5.5 is due the week
-# of 2026-10-05: switching is this default (or SIDECAR_MODEL in the env) plus a
-# measurement (retrieval harness dense-prod arm, the hedge judge's gold set,
-# latency). apps/api/app/routers/chat.py maps any claude-haiku-* ID to "haiku".
-SIDECAR_MODEL: str = os.environ.get("SIDECAR_MODEL") or "claude-haiku-4-5-20251001"
+# titles, the support bot and the fast study guide. 2026-10-07 — Haiku 5.5
+# (claude-haiku-5-5; accepts effort and structured outputs per /v1/models).
+# SIDECAR_MODEL=claude-haiku-4-5-20251001 in the env rolls back without a
+# deploy. apps/api/app/routers/chat.py maps any claude-haiku-* ID to "haiku".
+SIDECAR_MODEL: str = os.environ.get("SIDECAR_MODEL") or "claude-haiku-5-5"
 
 # Room for thinking on a short call to a model that thinks by default.
 _THINKING_HEADROOM = 2048

@@ -43,6 +43,8 @@ router = APIRouter(prefix="/chat", tags=["chat"])
 # swaps over to OpenAI GPT-4o.
 _MODEL_ALIAS: dict[str, str] = {
     "claude-haiku-4-5-20251001": "haiku",
+    # 2026-10-07 — Haiku 5.5 is SIDECAR_MODEL (4.5 kept, D6.73 rule).
+    "claude-haiku-5-5": "haiku",
     # 2026-07-18 model refresh — Sonnet 5 / Opus 4.8 are the live IDs.
     "claude-sonnet-5": "sonnet",
     # 2026-09-28 — Sonnet 5.5 (router.MODEL_MAP[2], the Sonnet features).

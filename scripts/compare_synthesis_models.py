@@ -85,6 +85,8 @@ if PROMPT_AB:
 ROUTER = {HAIKU: "haiku", SONNET: "sonnet_today", OPUS: "opus_low"}
 # $/MTok: input, output, 5-minute cache write, cache read (claude-api skill, 2026-09-28;
 # Sonnet 5.5 is priced as Sonnet 5). Update the HAIKU row when SIDECAR_MODEL changes.
+# 2026-10-07 — SIDECAR_MODEL is Haiku 5.5; the row below is still Haiku 4.5's
+# price (5.5's wasn't published on launch day). Correct it before quoting costs.
 PRICES = {HAIKU: (1.00, 5.00, 1.25, 0.10), SONNET: (2.00, 10.00, 2.50, 0.20), OPUS: (4.00, 20.00, 5.00, 0.20)}
 
 GOLD = [("F1", "V2"), ("F2", "V1"), ("F5", "V5"), ("C1", "V3"), ("C3", "V1"), ("E1", "V1"),
