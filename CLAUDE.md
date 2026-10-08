@@ -369,6 +369,12 @@ If a doc says "alembic head is 0045" but `alembic current` says `0092`, the doc 
   - **Outbound app email is still Resend** (`RESEND_API_KEY`; domain `mail.regknots.com` with `send.mail` MX/SPF and `resend._domainkey.mail`). Deleting that domain or the key in the Resend account stops verification, password reset, receipts, reminders, digests and admin email. `RESEND_FROM_EMAIL` in the prod `.env` is unused (the from addresses are hard-coded in `app/email.py`).
   - **Replies:** `mail.regknots.com` has no MX or A record, so a reply bounced unless the email set reply_to (27 of 34 sends didn't). `app.email.send_email()` now defaults reply_to to support@ (an email's own reply_to still wins); `tests/test_email_reply_to.py` fails on any direct `resend.Emails.send`. The ingest notifier sets the same reply_to.
   - Port 25 is blocked outbound from the VPS (DigitalOcean) and from Blake's laptop, so SMTP recipient checks can't run from either.
+- **2026-10-08 the Captain's manila hedge → COSWP retagged UK** (Blake's go; data only, no deploy).
+  - "Pilot ladders can have Manila line." (10-08 00:50 UTC, Haiku 5.5 sidecar): the answer was right but said 46 CFR 163.003-11 (Materials) wasn't retrieved. It is in the corpus and answers exactly (mildew-resistant manila or dacron/polypropylene-core, ≥ 24 kN, ≥ 60 mm). 3 of 8 slots were COSWP.
+  - **Cause:** COSWP's 660 rows carried `['intl']`. `store.py` only gained `coswp → ["uk"]` on 09-30 and COSWP (ingested 05-27) was never re-ingested, so a UK code reached U.S.-flag answers. All other 76 sources match the code map.
+  - **Fix:** `UPDATE regulations SET jurisdictions = ARRAY['uk'] WHERE source = 'coswp'` (660 rows; backup `data/pruned/coswp-jurisdictions-before-20261008.csv.gz`). Naming COSWP still pulls it in for any flag. Dense harness unchanged 0.9367 / 0.7563 (no gold pair involves COSWP). Replay on prod: 163.003-11 #1 with rerank (7 of 7 runs before and after), #5 without; 0 COSWP rows after.
+  - Yesterday's miss was rerank-pool variance on top of the COSWP crowding. The hedge-audit classifier called it CORPUS_GAP and suggested an NVIC ingest; it doesn't check the corpus, so treat its gap calls with care.
+  - A note to the Captain (the answer, the cause, what's improved since April) is a draft in blake@regknots.com.
 See `docs/PROJECT_STATE.md` for a fuller operational snapshot and `docs/roadmap.md` for the prioritized backlog.
 
 
