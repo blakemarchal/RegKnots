@@ -292,6 +292,19 @@ class Settings(BaseSettings):
         default=True, validation_alias="MODEL_LED_GROUNDING_ENABLED",
     )
 
+    # 2026-10-08 — answer pipeline phase 1 (docs/specs/answer-pipeline-2026-10-08.md).
+    # whole_sections: the answer model reads every chunk of each selected
+    # section within 20K tokens (rag.sections) instead of 6K of loose chunks.
+    # provenance_prompt: the sources-and-gaps rule replaces the rules that made
+    # answers narrate what the search didn't find (rag.prompts.PROVENANCE_*).
+    # Off until scripts/compare_synthesis_models.py --phase1-ab has run on prod.
+    whole_sections_enabled: bool = Field(
+        default=False, validation_alias="WHOLE_SECTIONS_ENABLED",
+    )
+    provenance_prompt_enabled: bool = Field(
+        default=False, validation_alias="PROVENANCE_PROMPT_ENABLED",
+    )
+
     # ── D6.84 Sprint A — Confidence tier router ──────────────────────────
     # Three-mode flag controlling the additive tier_router layer.
     #

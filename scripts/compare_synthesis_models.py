@@ -31,6 +31,13 @@ Run on the VPS (~35 min, ~$6 for 16 questions); results land in data/eval/model_
 (opus_low) against the model-led grounding in rag.prompts.MODEL_LED_GROUNDING (opus_led),
 both on the production default, Opus 5.5 at effort low. Questions: 10 gold, the Captain's
 two, and real user questions whose answers hedged (HEDGED). ~$6-7.
+
+2026-10-08 — `--phase1-ab` compares the answer pipeline as shipped ("today": 6K tokens of loose
+chunks, the model-led prompt) with phase 1 ("phase1": whole sections within 20K tokens, the
+sources-and-gaps prompt; docs/specs/answer-pipeline-2026-10-08.md). Each question is captured
+twice through the real engine, once per configuration; both judges see the phase-1 context (a
+superset of today's). Adds `plumbing`: answers that describe the search ("didn't surface",
+"retrieved", "excerpts"). 16 questions incl. this week's real hedges, ~$7.
 """
 import asyncio
 import copy
@@ -64,8 +71,10 @@ from rag.prompts import MODEL_LED_GROUNDING  # noqa: E402
 import eval_rag_baseline as G  # noqa: E402
 
 PROMPT_AB = "--prompt-ab" in sys.argv
+PHASE1_AB = "--phase1-ab" in sys.argv
 OUT = REPO / "data" / "eval" / "model_compare" / (
-    time.strftime("%Y%m%d-%H%M%S", time.gmtime()) + ("-prompt-ab" if PROMPT_AB else ""))
+    time.strftime("%Y%m%d-%H%M%S", time.gmtime())
+    + ("-prompt-ab" if PROMPT_AB else "-phase1-ab" if PHASE1_AB else ""))
 OUT.mkdir(parents=True, exist_ok=True)
 
 HAIKU, SONNET, OPUS = SIDECAR_MODEL, "claude-sonnet-5-5", "claude-opus-5-5"
@@ -82,7 +91,19 @@ if PROMPT_AB:
         "opus_low": VARIANTS["opus_low"],
         "opus_led": {**VARIANTS["opus_low"], "system_edits": MODEL_LED_GROUNDING},
     }
+# 2026-10-08 — engine flags per captured configuration (--phase1-ab captures twice).
+CAPTURE_FLAGS: dict[str, dict] = {}
+if PHASE1_AB:
+    VARIANTS = {"today": VARIANTS["opus_low"], "phase1": VARIANTS["opus_low"]}
+    CAPTURE_FLAGS = {
+        "today": {"model_led_grounding_enabled": True, "whole_sections_enabled": False,
+                  "provenance_prompt_enabled": False},
+        "phase1": {"model_led_grounding_enabled": True, "whole_sections_enabled": True,
+                   "provenance_prompt_enabled": True},
+    }
 ROUTER = {HAIKU: "haiku", SONNET: "sonnet_today", OPUS: "opus_low"}
+# Answers that describe the search instead of answering (the 2026-10 hedges).
+PLUMBING = re.compile(r"retriev|excerpt|surfac|in this query|knowledge base|didn'?t come up|not in what I", re.I)
 # $/MTok: input, output, 5-minute cache write, cache read (claude-api skill, 2026-09-28;
 # Sonnet 5.5 is priced as Sonnet 5). Update the HAIKU row when SIDECAR_MODEL changes.
 # 2026-10-07 — Haiku 5.5 (SIDECAR_MODEL), prompts up to 100K tokens; over 100K
@@ -104,6 +125,13 @@ HEDGED: list[tuple[str, str]] = [
     ("I am on a Panamian flagged MODU. The fast rescue craft is not equipped with distress flares, or "
      "smoke signals as required by SOLAS. Does the MODU code not require distress signals in the the "
      "fast recuse craft?", "V0"),                                                         # 05-14, no profile
+]
+# --phase1-ab: this week's real hedges and the Captain's lifeboat question (her vessel profile)
+WEEK: list[str] = [
+    "Pilot ladders can have Manila line.",                                   # 2026-10-08
+    "Pilot ladder step thickness",                                           # 2026-10-08
+    "Solas ch v reg 23 pilot ladder",                                        # 2026-10-09
+    "SOLAS Chapter III, Part B, Section I, Regulation 20 life boat lowering",  # 2026-09-23
 ]
 LABELS = ["A", "B", "C", "D", "E", "F"]
 
@@ -145,7 +173,7 @@ def gold_profile(vc: str) -> dict:
     return p
 
 
-async def capture(query, profile, pool, client, okey, conv_id, user_id) -> dict:
+async def capture(query, profile, pool, client, okey, conv_id, user_id, flags: dict | None = None) -> dict:
     box: dict = {}
     orig_ret, orig_route = E.retrieve_enhanced, E.route_query
     m = client.messages
@@ -175,9 +203,9 @@ async def capture(query, profile, pool, client, okey, conv_id, user_id) -> dict:
             web_fallback_enabled=False, hedge_judge_enabled=False,
             # 2026-09-27 — capture with the shipped prompt; --prompt-ab captures the
             # strict baseline and applies the edits itself (opus_led).
-            model_led_grounding_enabled=(not PROMPT_AB) and settings.model_led_grounding_enabled,
             query_rewrite_enabled=settings.query_rewrite_enabled,
             reranker_enabled=settings.reranker_enabled,
+            **(flags or {"model_led_grounding_enabled": (not PROMPT_AB) and settings.model_led_grounding_enabled}),
         ):
             pass
     except _Captured:
@@ -259,6 +287,7 @@ async def post_checks(r: dict, q, vc, chunks, pool) -> None:
     r["unverified"] = await E._verify_text_citations(cits, pool)
     r["ungrounded_un"] = E._verify_un_claims(ans, chunks or [])
     r["hedge"] = detect_hedge(ans)
+    r["plumbing"] = bool(PLUMBING.search(ans))
     r["chars"] = len(ans)
     if q is not None:
         exp = G._expected_for_vessel(q, vc)
@@ -303,9 +332,16 @@ def user_text(kwargs: dict) -> str:
 async def one_question(item, pool, client, oai, okey, conv_id, user_id, rng) -> dict:
     qid, query, profile, q, vc = item
     rec: dict = {"qid": qid, "vessel": vc, "query": query}
-    box = await capture(query, profile, pool, client, okey, conv_id, user_id)
+    boxes: dict[str, dict] = {}
+    if CAPTURE_FLAGS:
+        for name, flags in CAPTURE_FLAGS.items():
+            boxes[name] = await capture(query, profile, pool, client, okey, conv_id, user_id, flags)
+        box = boxes[list(CAPTURE_FLAGS)[-1]]          # the judges see phase 1's (larger) context
+        rec["context_chars"] = {n: len(user_text(b["kwargs"])) for n, b in boxes.items() if "kwargs" in b}
+    else:
+        box = await capture(query, profile, pool, client, okey, conv_id, user_id)
     rec.update({k: box.get(k) for k in ("route_model", "route_score", "off_topic", "pre_synthesis_s")})
-    if "kwargs" not in box:
+    if "kwargs" not in box or any("kwargs" not in b for b in boxes.values()):
         rec["skipped"] = "no synthesis request (off-topic or engine short-circuit)"
         return rec
     base = box["kwargs"]
@@ -314,9 +350,10 @@ async def one_question(item, pool, client, oai, okey, conv_id, user_id, rng) -> 
     rec["user_chars"] = len(umsg)
     rec["runs"] = {}
     for name in VARIANTS:
-        r = await run_variant(client, base, name)
+        vbox = boxes.get(name, box)
+        r = await run_variant(client, vbox["kwargs"], name)
         if "error" not in r:
-            await post_checks(r, q, vc, box.get("chunks"), pool)
+            await post_checks(r, q, vc, vbox.get("chunks"), pool)
         rec["runs"][name] = r
         print(f"    {qid:6} {name:13} ttft={r.get('ttft')} total={r.get('total')} out={(r.get('usage') or {}).get('output')} "
               f"stop={r.get('stop')} unverified={r.get('unverified')} {r.get('error', '')}", flush=True)
@@ -377,7 +414,7 @@ def ranks(scores: dict[str, float]) -> dict[str, float]:
 def summarize(recs: list[dict]) -> dict:
     done = [r for r in recs if "runs" in r]
     rows = {}
-    for name in list(VARIANTS) + ([] if PROMPT_AB else ["router_mix"]):
+    for name in list(VARIANTS) + ([] if (PROMPT_AB or PHASE1_AB) else ["router_mix"]):
         per = []
         for r in done:
             v = ROUTER.get(r.get("route_model"), "sonnet_today") if name == "router_mix" else name
@@ -419,6 +456,7 @@ def summarize(recs: list[dict]) -> dict:
             "ungrounded_un": sum(len(x.get("ungrounded_un") or []) for x in runs),
             "wrong_sub_mentions": sum(len(x.get("wrong_sub") or []) for x in runs),
             "hedged": sum(1 for x in runs if x.get("hedge")),
+            "plumbing": sum(1 for x in runs if x.get("plumbing")),
             "chars_median": med([x["chars"] for x in runs]),
             "judge_opus_overall": judged("opus", "overall"),
             "judge_gpt_overall": judged("gpt4o", "overall"),
@@ -442,7 +480,7 @@ async def main() -> None:
     okey = getattr(settings, "openai_api_key", "") or os.environ.get("OPENAI_API_KEY", "")
     oai = AsyncOpenAI(api_key=okey)
     Q = {q.qid: q for q in G.QUESTIONS}
-    gold = GOLD[:10] if PROMPT_AB else GOLD
+    gold = GOLD[:10] if PROMPT_AB else GOLD[:6] if PHASE1_AB else GOLD
     items = [(qid, Q[qid].query, gold_profile(vc), Q[qid], vc) for qid, vc in gold]
     row = await pool.fetchrow("SELECT * FROM vessels WHERE imo_mmsi = '9333022'")
     cap_profile = {k: v for k, v in {
@@ -451,9 +489,12 @@ async def main() -> None:
         "route_types": list(row["route_types"] or []), "cargo_types": list(row["cargo_types"] or []),
     }.items() if v not in (None, [], {})}
     items += [(f"REAL{i + 1}", qq, cap_profile, None, "captain") for i, qq in enumerate(REAL)]
-    if PROMPT_AB:
+    if PROMPT_AB or PHASE1_AB:
+        hedged = HEDGED[:4] if PHASE1_AB else HEDGED
         items += [(f"HEDGE{i + 1}", qq, gold_profile(vc) if vc != "V0" else None, None, vc)
-                  for i, (qq, vc) in enumerate(HEDGED)]
+                  for i, (qq, vc) in enumerate(hedged)]
+    if PHASE1_AB:
+        items += [(f"WEEK{i + 1}", qq, cap_profile, None, "captain") for i, qq in enumerate(WEEK)]
 
     user_id = await pool.fetchval("SELECT id FROM users WHERE email = 'blakemarchal@gmail.com'")
     conv_id = uuid4()
@@ -513,7 +554,7 @@ async def main() -> None:
     print("\n=== META", json.dumps(meta))
     cols = ["n", "ttft_median", "ttft_p90", "total_median", "output_tokens_mean", "thinking_share", "truncated",
             "cost_cold_mean", "cost_warm_mean", "gold_specific_hit", "gold_any_hit", "answers_with_unverified",
-            "unverified_total", "ungrounded_un", "wrong_sub_mentions", "hedged", "chars_median",
+            "unverified_total", "ungrounded_un", "wrong_sub_mentions", "hedged", "plumbing", "chars_median",
             "judge_opus_overall", "judge_gpt_overall", "judge_opus_accuracy", "judge_gpt_accuracy",
             "mean_rank_opus", "mean_rank_gpt", "best_opus", "best_gpt", "errors_flagged_opus", "errors_flagged_gpt"]
     print("=== VARIANTS")

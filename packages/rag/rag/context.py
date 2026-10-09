@@ -26,11 +26,13 @@ _ENCODER = tiktoken.get_encoding("cl100k_base")
 MAX_CONTEXT_TOKENS = 6_000
 
 
-def build_context(chunks: list[dict]) -> tuple[str, list[CitedRegulation]]:
+def build_context(chunks: list[dict], max_tokens: int = MAX_CONTEXT_TOKENS) -> tuple[str, list[CitedRegulation]]:
     """Build Claude context string and citation list from retrieved chunks.
 
     Args:
         chunks: Retrieved regulation dicts (ordered best-first).
+        max_tokens: 2026-10-08 — whole-section reading (rag.sections) passes
+            its larger budget; the default keeps the original 6,000.
 
     Returns:
         Tuple of (context_str, cited_regulations).
@@ -54,7 +56,7 @@ def build_context(chunks: list[dict]) -> tuple[str, list[CitedRegulation]]:
         )
         block_tokens = len(_ENCODER.encode(block))
 
-        if total_tokens + block_tokens > MAX_CONTEXT_TOKENS:
+        if total_tokens + block_tokens > max_tokens:
             continue  # drop — budget exhausted for this chunk
 
         parts.append(block)

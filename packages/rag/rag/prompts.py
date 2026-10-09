@@ -776,6 +776,79 @@ MODEL_LED_GROUNDING: tuple[tuple[str, str], ...] = (
 )
 
 
+# 2026-10-08 — answer pipeline phase 1: "sources and gaps". 7 of 18 external
+# answers in 60 days told the user what the search did not find ("didn't
+# surface", "not in the excerpts retrieved here", whole "What I didn't
+# retrieve" sections), driven by five overlapping rules written for 4.x-era
+# synthesis plus the model-led patches above. This replaces all of them with
+# one rule: cite the library where it covers a point, answer confidently
+# from knowledge where it doesn't, never describe the search. Behind
+# PROVENANCE_PROMPT_ENABLED; Precision Mode keeps the strict posture.
+# (start marker, end marker, replacement): the text from the start marker up
+# to the end marker is replaced; each marker occurs exactly once.
+PROVENANCE_RULES = """\
+- SOURCES AND GAPS. The regulation text in your context is RegKnot's library. Answer the user's whole \
+question:
+  * Where the library text covers a point, state it and cite it inline.
+  * Where it does not, answer from your own knowledge of U.S. and international maritime regulation when \
+you are confident, stated plainly and without an inline citation. Name a specific instrument (a CFR \
+section, SOLAS regulation, IMO resolution, NVIC, Marine Order or form number) only when you are confident \
+it exists and says what you attribute to it.
+  * Never invent a section number, figure, date, interval or form number. When an exact figure or number \
+matters and you are not certain of it, give what you know without it and name who publishes it (e.g. "the \
+IMO's pilot transfer standard", "the NMC").
+  * If neither the library text nor your confident knowledge answers the question, say so in one plain \
+sentence at the top, then give the most useful next step: who to ask (the cognizant OCMI, the NMC, the \
+vessel's class society or flag administration), which document to pull, or a narrower question to ask.
+- NEVER DESCRIBE YOUR OWN SEARCH. The user does not see your context and gains nothing from how it was \
+assembled. Never write "retrieved", "excerpts", "surfaced", "the context provided", "my knowledge base", \
+"in this query" or "didn't come up", and never add a section about what you did or did not find. Write \
+the way an experienced officer briefs a colleague: the rule, where it is written, and who to confirm it \
+with when that matters.
+- NEVER ASSERT NON-EXISTENCE. A form, regulation, requirement or procedure missing from the library text \
+is not evidence that it does not exist. Never say there is no form, rule or requirement for something \
+unless a cited regulation says so. Forms (CG-NNN), local procedures and contact details often live outside \
+regulation text; the CG-835 is a real, routine USCG form. Say what you know about it and where the user \
+gets it.
+"""
+
+PROVENANCE_BLOCK_EDITS: tuple[tuple[str, str, str], ...] = (
+    # the two base grounding bullets
+    ("- Base answers ONLY on the provided regulation context.", "- 29 CFR: only OSHA's maritime standards",
+     PROVENANCE_RULES),
+    # COVERAGE, NO HALLUCINATED RECOMMENDATIONS, COVERAGE ANTI-PATTERN, NEVER ASSERT NON-EXISTENCE
+    ("- COVERAGE — your knowledge base includes the sources listed above.", "- This tool is a navigation aid only.",
+     ""),
+)
+PROVENANCE_TEXT_EDITS: tuple[tuple[str, str], ...] = (
+    ("I did not retrieve the verified entry for UN [NUMBER] in this query. Pull the manifest",
+     "I can't confirm the Dangerous Goods List entry for UN [NUMBER] from the regulation text I have. Check "
+     "the manifest"),
+)
+PROVENANCE_LEAD_EDITS: tuple[tuple[str, str], ...] = (
+    ("For a partial-coverage case (the retrieved regulations don't fully",
+     "For a partial-coverage case (the regulations don't fully"),
+    ('NEVER bury the conclusion under "the retrieved context does not specify..." or similar regulatory-silence '
+     'phrasing.',
+     'NEVER bury the conclusion under regulatory-silence phrasing ("the regulations do not specify...").'),
+    ('an explicit "I don\'t know this from the retrieved context" in that first sentence',
+     'a plain "I can\'t confirm this" in that first sentence'),
+)
+
+
+def apply_block_edits(text: str, edits: tuple[tuple[str, str, str], ...]) -> str:
+    """Replace each [start marker, end marker) span; each marker required exactly once."""
+    for start, end, new in edits:
+        for marker in (start, end):
+            if text.count(marker) != 1:
+                raise ValueError(f"prompt block marker found {text.count(marker)} times: {marker[:60]!r}")
+        i, j = text.index(start), text.index(end)
+        if j <= i:
+            raise ValueError(f"prompt block end precedes start: {start[:40]!r}")
+        text = text[:i] + new + text[j:]
+    return text
+
+
 def apply_prompt_edits(text: str, edits: tuple[tuple[str, str], ...]) -> str:
     """Apply (old, new) replacements, each old text required exactly once."""
     for old, new in edits:
@@ -790,6 +863,7 @@ def assemble_system_prompt(
     lead_with_answer: bool = True,
     precision_mode: bool = False,
     model_led: bool = False,
+    provenance: bool = False,
 ) -> str:
     """Return the system prompt with optional D6.86 lead-with-answer
     block + D6.97 AUTHORITY HIERARCHY DECISION block (always) +
@@ -802,15 +876,20 @@ def assemble_system_prompt(
     users.precision_mode_enabled at request time.
     """
     prompt = SYSTEM_PROMPT
+    lead = LEAD_WITH_ANSWER_BLOCK
     # 2026-09-27 — model-led grounding, except for Precision Mode users, who
-    # asked for the strict posture.
-    if model_led and not precision_mode:
+    # asked for the strict posture. 2026-10-08 — the sources-and-gaps rule
+    # (PROVENANCE_*) supersedes it when on, with the same Precision exception.
+    if provenance and not precision_mode:
+        prompt = apply_prompt_edits(apply_block_edits(prompt, PROVENANCE_BLOCK_EDITS), PROVENANCE_TEXT_EDITS)
+        lead = apply_prompt_edits(lead, PROVENANCE_LEAD_EDITS)
+    elif model_led and not precision_mode:
         prompt = apply_prompt_edits(prompt, MODEL_LED_GROUNDING)
     prompt = prompt + "\n\n" + AUTHORITY_HIERARCHY_BLOCK
     if precision_mode:
         prompt = prompt + "\n\n" + PRECISION_MODE_OVERLAY
     if lead_with_answer:
-        prompt = prompt + "\n\n" + LEAD_WITH_ANSWER_BLOCK
+        prompt = prompt + "\n\n" + lead
     return prompt
 
 CLASSIFIER_PROMPT = (

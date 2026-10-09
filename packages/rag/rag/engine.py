@@ -1709,6 +1709,10 @@ async def chat(
     lead_with_answer_enabled: bool = True,
     # 2026-09-27 — model-led grounding (rag.prompts.MODEL_LED_GROUNDING)
     model_led_grounding_enabled: bool = False,
+    # 2026-10-08 — answer pipeline phase 1: read whole sections (rag.sections)
+    # and the sources-and-gaps prompt (rag.prompts.PROVENANCE_GROUNDING).
+    whole_sections_enabled: bool = False,
+    provenance_prompt_enabled: bool = False,
     # Sprint D6.97 Phase 2 — image attachments for this turn. Empty list
     # = today's behavior (text-only). When non-empty, the engine forces
     # a vision-capable model (Sonnet/Opus, not Haiku) and builds a
@@ -1789,6 +1793,8 @@ async def chat(
         judge_on_cited_enabled=judge_on_cited_enabled,
         lead_with_answer_enabled=lead_with_answer_enabled,
         model_led_grounding_enabled=model_led_grounding_enabled,
+        whole_sections_enabled=whole_sections_enabled,
+        provenance_prompt_enabled=provenance_prompt_enabled,
         images=images,
         precision_mode=precision_mode,
         live_context_block=live_context_block,
@@ -2724,6 +2730,10 @@ async def chat_with_progress(
     lead_with_answer_enabled: bool = True,
     # 2026-09-27 — model-led grounding (rag.prompts.MODEL_LED_GROUNDING)
     model_led_grounding_enabled: bool = False,
+    # 2026-10-08 — answer pipeline phase 1: read whole sections (rag.sections)
+    # and the sources-and-gaps prompt (rag.prompts.PROVENANCE_GROUNDING).
+    whole_sections_enabled: bool = False,
+    provenance_prompt_enabled: bool = False,
     # Sprint D6.97 Phase 2 — see chat() for full contract. Streaming
     # path consumes images identically; the only difference is the
     # synthesis call uses messages.stream() instead of messages.create().
@@ -2888,6 +2898,7 @@ async def chat_with_progress(
         lead_with_answer=lead_with_answer_enabled,
         precision_mode=precision_mode,
         model_led=model_led_grounding_enabled,
+        provenance=provenance_prompt_enabled,
     )
 
     # D6.58 — off-topic short-circuit (streaming path). Same gate as
@@ -2915,7 +2926,14 @@ async def chat_with_progress(
     logger.info(f"Retrieved {len(chunks)} chunks")
 
     # Stage 3: Build context
-    context_str, cited = build_context(chunks)
+    # 2026-10-08 — read whole sections, not loose chunks (rag.sections):
+    # the Captain's "SOLAS ch v reg 23" got 3 of the regulation's 4 chunks.
+    if whole_sections_enabled:
+        from rag.sections import CONTEXT_TOKENS, expand_sections
+        chunks = await expand_sections(pool, chunks, query)
+        context_str, cited = build_context(chunks, max_tokens=CONTEXT_TOKENS)
+    else:
+        context_str, cited = build_context(chunks)
 
     # 2026-07-19 Wk3 — live-context injection. Reg-change intent pulls a
     # recent-ingest summary (auto, engine-side); whale-zone and other
