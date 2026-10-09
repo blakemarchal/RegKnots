@@ -208,10 +208,12 @@ QUESTIONS: list[TestQuestion] = [
         expected={
             # V1 containership: Subchapter I CO2 rule.
             "V1": [r"46 CFR 95\.15", r"SOLAS\s*Ch\.?\s*II-2"],
-            # V5 towing: Subchapter M CO2 rule OR honest-limit acknowledgment
-            # of the Subchapter M applicability table not being retrieved.
-            # Retrieval weakness flagged for later tuning sprint.
-            "V5": [r"46 CFR 144\.240", r"Subchapter M", r"SOLAS\s*Ch\.?\s*II-2"],
+            # V5 towing: Subchapter M's engine-room rule (142.315; 142.300 for
+            # excepted vessels) or Part 27's twin for uninspected towing
+            # vessels. 2026-10-09 — was "46 CFR 144.240" (no such section)
+            # and SOLAS II-2, which does not apply to an inland 198 GT
+            # towboat; the pair could pass with no towing rule retrieved.
+            "V5": [r"46 CFR 142\.3(00|15)\b", r"46 CFR 27\.30[35]\b", r"Subchapter M"],
         },
         wrong_sub=[
             r"46 CFR 195\.",
@@ -752,7 +754,10 @@ QUESTIONS: list[TestQuestion] = [
         vessels=["V1", "V5"],
         expected={
             "V1": [r"46 CFR 95\.", r"SOLAS.*II-2", r"CO2", r"fixed fire"],
-            "V5": [r"46 CFR 144\.", r"Subchapter M", r"SOLAS.*II-2", r"fixed fire"],
+            # 2026-10-09 — was 46 CFR 144 (construction; no fire-suppression
+            # rule), SOLAS II-2 and "fixed fire" (matched other subchapters'
+            # titles). It passed at rank 1 on SOLAS with no towing rule.
+            "V5": [r"46 CFR 142\.3(00|15|25)\b", r"46 CFR 27\.30[35]\b", r"Subchapter M"],
         },
         wrong_sub=[
             r"46 CFR 195\.",       # Subchapter U (research)
@@ -944,6 +949,17 @@ QUESTIONS: list[TestQuestion] = [
         query="Regulation 17 of MARPOL Annex I: what operations must be recorded in the Oil Record Book Part I?",
         vessels=["V1"],
         expected=[r"MARPOL Annex I Reg\.17\b", r"MARPOL Annex I App\.III\b"],
+    ),
+
+    # ── 2026-10-09: the towing vessel's own subchapter ──────────────────
+    # The vessel-applicability filter listed 46 CFR 136-139 (Subchapter M:
+    # certification, vessel compliance, TSMS, TPOs) as forbidden for towing
+    # vessels, so a towing profile never saw Part 138.
+    TestQuestion(
+        qid="A27-1",
+        query="What does our TSMS have to include?",
+        vessels=["V5"],
+        expected=[r"46 CFR 138\."],
     ),
 ]
 

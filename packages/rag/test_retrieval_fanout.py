@@ -110,8 +110,11 @@ def test_retrieve_queries_only_groups_that_can_match(monkeypatch):
     monkeypatch.setattr(R, "SOURCE_GROUPS", GROUPS)
     monkeypatch.setattr(R, "_CANDIDATES_PER_GROUP", {"big": 12})
 
-    async def embed(key, query):
-        return "[0.1]"
+    embedded = []
+
+    async def embed_many(key, queries):
+        embedded.append(list(queries))
+        return ["[0.1]", "[0.2]"][:len(queries)]
 
     async def available(pool):
         return set(STATS)
@@ -125,15 +128,100 @@ def test_retrieve_queries_only_groups_that_can_match(monkeypatch):
         calls.append((tuple(sources), k, tuple(sorted(juris or []))))
         return [_row(len(calls) * 10, 0.7 - 0.01 * len(calls), source=sources[0])]
 
-    monkeypatch.setattr(R, "_embed_query", embed)
+    lane_calls = []
+
+    async def fake_lane(pool, vec, parts, k):
+        lane_calls.append((vec, parts, k))
+        # row 10 is also the first group's row: it keeps the higher similarity
+        return [_row(10, 0.95, source="a"), _row(99, 0.5, source="cfr_46")]
+
+    monkeypatch.setattr(R, "_embed_queries", embed_many)
     monkeypatch.setattr(R, "_get_available_sources", available)
     monkeypatch.setattr(R, "_get_source_stats", stats)
     monkeypatch.setattr(R, "_fetch_group", fake_group)
+    monkeypatch.setattr(R, "_fetch_vessel_lane", fake_lane)
     profile = {"vessel_type": "Containership", "flag_state": "United States"}
-    out = asyncio.run(R.retrieve("fire drill frequency", _AnyPool(), "key", vessel_profile=profile, limit=8))
+    out = asyncio.run(R.retrieve("fire drill frequency on my vessel", _AnyPool(), "key",
+                                 vessel_profile=profile, limit=8))
     assert [c[0] for c in calls] == [("a",), ("b",), ("e",)]        # foreign + untagged skipped
     assert all(c[2] == ("intl", "us") for c in calls)
-    assert {10, 20, 30} <= {c["id"] for c in out}
+    assert {10, 20, 30, 99} <= {c["id"] for c in out}
+    # one embedding call for the question and its vessel phrasing
+    assert embedded == [["fire drill frequency on my vessel", "fire drill frequency on my containership"]]
+    assert lane_calls == [("[0.2]", R._vessel_lane_parts(profile), R._VESSEL_LANE_K)]
+    assert [c["similarity"] for c in out if c["id"] == 10] == [0.95]
+    assert sum(1 for c in out if c["id"] == 10) == 1
+    # no "my vessel": the lane searches with the question's own embedding
+    embedded.clear(), lane_calls.clear()
+    asyncio.run(R.retrieve("fire drill frequency", _AnyPool(), "key", vessel_profile=profile))
+    assert embedded == [["fire drill frequency"]]
+    assert lane_calls == [("[0.1]", R._vessel_lane_parts(profile), R._VESSEL_LANE_K)]
+
+
+def test_no_vessel_lane_without_a_mapped_type_or_us_scope(monkeypatch):
+    monkeypatch.setattr(R, "SOURCE_GROUPS", {"big": ("a",)})
+    embedded = []
+
+    async def embed_many(key, queries):
+        embedded.append(list(queries))
+        return ["[0.1]"]
+
+    async def available(pool):
+        return {"a"}
+
+    async def stats(pool):
+        return {"a": (100, frozenset({"us", "uk"}))}
+
+    async def fake_group(pool, vec, sources, k, juris):
+        return [_row(1, 0.7, source="a")]
+
+    async def fake_lane(*a):
+        raise AssertionError("no lane expected")
+
+    monkeypatch.setattr(R, "_embed_queries", embed_many)
+    monkeypatch.setattr(R, "_get_available_sources", available)
+    monkeypatch.setattr(R, "_get_source_stats", stats)
+    monkeypatch.setattr(R, "_fetch_group", fake_group)
+    monkeypatch.setattr(R, "_fetch_vessel_lane", fake_lane)
+    for profile in (None, {"vessel_type": "Other"},
+                    {"vessel_type": "Towing / Tugboat", "flag_state": "United Kingdom"}):
+        asyncio.run(R.retrieve("fire drill frequency", _AnyPool(), "key", vessel_profile=profile))
+    assert embedded == [["fire drill frequency"]] * 3
+
+
+def test_vessel_context_query():
+    tow = {"vessel_type": "Towing / Tugboat"}
+    assert (R._vessel_context_query("Do I need a fixed CO2 system on my vessel?", tow)
+            == "Do I need a fixed CO2 system on my towing vessel?")
+    assert (R._vessel_context_query("Is our boat's EPIRB due for service?", tow)
+            == "Is our towing vessel's EPIRB due for service?")
+    assert R._vessel_context_query("What does our TSMS have to include?", tow) is None
+    # another vessel is not the user's own
+    assert R._vessel_context_query("Who gives way to the vessel on my starboard side?", tow) is None
+    assert R._vessel_context_query("anything on my vessel", {"vessel_type": "Other"}) is None
+    assert R._vessel_context_query("anything", None) is None
+
+
+def test_vessel_lane_parts_and_pattern():
+    tow = R._vessel_lane_parts({"vessel_type": "Towing / Tugboat"})
+    assert tow == ["27", "136", "137", "138", "139", "140", "141", "142", "143", "144"]
+    assert R._vessel_lane_parts({"vessel_type": "Other"}) is None
+    assert R._vessel_lane_parts({}) is None
+
+    class _Capture:
+        async def fetch(self, sql, *params):
+            self.sql, self.params = sql, params
+            return [{"id": 1, "similarity": 0.5}]
+
+    pool = _Capture()
+    out = asyncio.run(R._fetch_vessel_lane(pool, "[0.1]", tow, 8))
+    assert out == [{"id": 1, "similarity": 0.5}]
+    assert "MATERIALIZED" in pool.sql and pool.params[0] == "[0.1]" and pool.params[2] == 8
+    import re
+    pat = re.compile(pool.params[1])
+    assert pat.search("46 CFR 142.315") and pat.search("46 CFR 27.303") and pat.search("46 CFR 138.220")
+    assert not pat.search("46 CFR 95.05-10") and not pat.search("46 CFR 270.1")
+    assert not pat.search("33 CFR 138.40")
 
 
 def test_reformulations_start_before_the_primary_finishes(monkeypatch):
@@ -197,3 +285,19 @@ def test_vessel_filter_applies_to_title_46_only():
               c("49 CFR 176.83", "cfr_49"), c("SOLAS Ch.III Reg.20", "solas")]
     kept = R._filter_by_vessel_applicability(chunks, {"vessel_type": "Containership"})
     assert [k["id"] for k in kept] == [k["id"] for k in chunks if k["id"] != "46 CFR 34.01-1"]
+
+
+def test_towing_keeps_all_of_subchapter_m():
+    """2026-10-09 — 46 CFR 136-139 (certification, compliance, TSMS, TPOs) are
+    Subchapter M; the towing map had them forbidden. OSVs (Subchapter L,
+    Parts 125-134) now drop them."""
+    def c(sec):
+        return {"id": sec, "source": "cfr_46", "section_number": sec}
+    sub_m = [c(f"46 CFR {p}.100") for p in range(136, 145)]
+    other = [c("46 CFR 95.05-10"), c("46 CFR 125.100")]
+    kept = R._filter_by_vessel_applicability(sub_m + other, {"vessel_type": "Towing / Tugboat"})
+    assert [k["id"] for k in kept] == [k["id"] for k in sub_m]
+    kept = R._filter_by_vessel_applicability(sub_m + other, {"vessel_type": "OSV / Offshore Support"})
+    assert [k["id"] for k in kept] == ["46 CFR 125.100"]
+    for mapping in R._VESSEL_TYPE_CFR_APPLICABILITY.values():
+        assert not mapping["applicable"] & mapping["forbidden"]

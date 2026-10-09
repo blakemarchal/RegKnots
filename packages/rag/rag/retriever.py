@@ -1463,13 +1463,18 @@ def _extract_keywords(query: str) -> list[str]:
 
 
 async def _embed_query(openai_api_key: str, query: str) -> str:
+    return (await _embed_queries(openai_api_key, [query]))[0]
+
+
+async def _embed_queries(openai_api_key: str, queries: list[str]) -> list[str]:
+    """Embed several strings in one API call; vector literals in input order."""
     oai = AsyncOpenAI(api_key=openai_api_key)
     try:
-        resp = await oai.embeddings.create(model=_EMBED_MODEL, input=[query])
+        resp = await oai.embeddings.create(model=_EMBED_MODEL, input=queries)
     finally:
         await oai.close()
-    embedding = resp.data[0].embedding
-    return "[" + ",".join(f"{x:.8f}" for x in embedding) + "]"
+    data = sorted(resp.data, key=lambda d: d.index)
+    return ["[" + ",".join(f"{x:.8f}" for x in d.embedding) + "]" for d in data]
 
 
 # ── Keyword search (identifier + broad keyword) ─────────────────────────────
@@ -1882,8 +1887,6 @@ async def retrieve(
     """
     t0 = time.perf_counter()
 
-    vec_literal = await _embed_query(openai_api_key, query)
-
     # Sprint D6.19 — D3 jurisdiction filter. Computes the per-query
     # allow-set from {base ∪ flag-derived ∪ query-explicit}. Returns
     # None for the "no signal" case (generic question, no profile),
@@ -1896,6 +1899,21 @@ async def retrieve(
     juris_list = list(juris_allow) if juris_allow is not None else None
     if juris_list is not None:
         logger.info("Jurisdiction filter active: %s", sorted(juris_list))
+
+    # 2026-10-09 — vessel lane (see _VESSEL_LANE_K): the vessel type's own
+    # 46 CFR parts, searched with the question, or with its "my vessel"
+    # phrased for the type (embedded in the same API call as the question).
+    lane_parts = None
+    lane_query = None
+    if not sources and (juris_list is None or "us" in juris_list):
+        lane_parts = _vessel_lane_parts(vessel_profile)
+        if lane_parts:
+            lane_query = _vessel_context_query(query, vessel_profile)
+    if lane_query:
+        vec_literal, lane_vec = await _embed_queries(openai_api_key, [query, lane_query])
+    else:
+        vec_literal = await _embed_query(openai_api_key, query)
+        lane_vec = vec_literal if lane_parts else None
 
     if sources:
         # Explicit source filter — single query, no diversification.
@@ -1970,10 +1988,30 @@ async def retrieve(
         stats = await _get_source_stats(pool)
         planned = _plan_groups(available, stats, juris_list)
         active_groups = [name for name, _, _ in planned]
-        results_per_group = await asyncio.gather(*(
+        fetches = [
             _fetch_group(pool, vec_literal, sources_, k, juris_list)
             for _, sources_, k in planned
-        ))
+        ]
+        if lane_vec is not None:
+            fetches.append(_fetch_vessel_lane(pool, lane_vec, lane_parts, _VESSEL_LANE_K))
+        results_per_group = list(await asyncio.gather(*fetches))
+        if lane_vec is not None:
+            # The lane re-finds rows the cfr group may already hold (groups
+            # never share a row); such a row keeps the higher similarity.
+            lane_rows = results_per_group.pop()
+            by_id = {c["id"]: c for rows in results_per_group for c in rows}
+            fresh = []
+            for c in lane_rows:
+                dup = by_id.get(c["id"])
+                if dup is None:
+                    fresh.append(c)
+                elif float(c["similarity"]) > float(dup["similarity"]):
+                    dup["similarity"] = c["similarity"]
+            results_per_group.append(fresh)
+            logger.info(
+                "Vessel lane: %r over 46 CFR %s → %s", lane_query or query,
+                ",".join(lane_parts), [c["section_number"] for c in lane_rows],
+            )
 
         candidates = []
         seen_ids: set = set()
@@ -2419,7 +2457,11 @@ _VESSEL_TYPE_CFR_APPLICABILITY: dict[str, dict[str, frozenset[str]]] = {
     },
     "towing / tugboat": {
         "applicable": frozenset({
-            # Subchapter M — Towing Vessels (primary, since 2016)
+            # Subchapter M — Towing Vessels (primary, since 2016). 2026-10-09 —
+            # Parts 136-139 (certification, vessel compliance, TSMS, TPOs) are
+            # Subchapter M too; they had been listed as forbidden, so every
+            # towing profile lost Part 138 (TSMS) and 136 (certificates).
+            "136", "137", "138", "139",
             "140", "141", "142", "143", "144",
             # Part 27 — fire/lifesaving for uninspected vessels ≥65ft that
             # pre-date Subchapter M phase-in
@@ -2433,8 +2475,9 @@ _VESSEL_TYPE_CFR_APPLICABILITY: dict[str, dict[str, frozenset[str]]] = {
             "90", "91", "92", "93", "94", "95", "96", "97", "98", "105",
             "107", "108", "109",
             "114", "115", "116", "117", "118", "119", "120", "121", "122",
+            # Subchapter L — OSV (Parts 125-134)
             "125", "126", "127", "128", "129", "130", "131", "132",
-            "133", "134", "135", "136", "137", "138", "139",
+            "133", "134",
             "165", "166", "167", "168", "169",
             "175", "176", "177", "178", "179", "180", "181", "182",
             "183", "184", "185", "186", "187",
@@ -2444,9 +2487,10 @@ _VESSEL_TYPE_CFR_APPLICABILITY: dict[str, dict[str, frozenset[str]]] = {
     },
     "osv / offshore support": {
         "applicable": frozenset({
-            # Subchapter L — Offshore Supply Vessels (primary)
+            # Subchapter L — Offshore Supply Vessels (primary). 2026-10-09 —
+            # Parts 125-134; 136-139 are Subchapter M (towing), now forbidden.
             "125", "126", "127", "128", "129", "130", "131", "132",
-            "133", "134", "135", "136", "137", "138", "139",
+            "133", "134",
             # Some OSVs carry dangerous bulk liquids → Subchapter D/O apply
             "30", "31", "32", "33", "34", "35", "36", "37", "38", "39",
         }),
@@ -2457,6 +2501,7 @@ _VESSEL_TYPE_CFR_APPLICABILITY: dict[str, dict[str, frozenset[str]]] = {
             "90", "91", "92", "93", "94", "95", "96", "97", "98", "105",
             "107", "108", "109",
             "114", "115", "116", "117", "118", "119", "120", "121", "122",
+            "136", "137", "138", "139",
             "140", "141", "142", "143", "144",
             "165", "166", "167", "168", "169",
             "175", "176", "177", "178", "179", "180", "181", "182",
@@ -2512,6 +2557,95 @@ _VESSEL_TYPE_CFR_APPLICABILITY: dict[str, dict[str, frozenset[str]]] = {
     },
     # Other / unspecified falls through to no filter.
 }
+
+
+# ── Vessel lane: the vessel type's own 46 CFR parts ──────────────────────
+#
+# 2026-10-09 (F5 / V5 audit). The filter above runs after the fetch, so it
+# can only remove. "Do I need a fixed CO2 system on my vessel?" for an inland
+# towboat: the cfr group's HNSW fetch returned 10 rows, every one a parallel
+# CO2 rule from another subchapter (46 CFR 95.05-10, 169.564, 76.05-20,
+# 118.410, 28.320, …), the filter dropped all ten, and the answer was built
+# from BV, IGC, FSS and SOLAS. The first Subchapter M row ranked 133rd in the
+# cfr sources by cosine: the question says "my vessel", and the vessel's own
+# parts don't embed near a generic CO2 question.
+#
+# So one more fetch per retrieve(): an exact search over the type's applicable
+# 46 CFR parts (towing: 294 rows, ~30 ms via the (source, section_number, …)
+# index), with the question's "my vessel" replaced by the type's noun ("my
+# towing vessel": within the towing parts 27.305 goes from 2nd to 1st and
+# 142.315 from 9th to 7th, and 137.300 drydock intervals drops out of 1st), or
+# the question as asked when it doesn't say "my vessel". Lane rows rank by
+# that similarity next to everything else.
+# Measured, dense harness (docs/sprint-audits/f5-subchapter-m-retrieval-2026-10-09.md):
+# appending "(tank vessel)" / "(containership)" to every question instead cost
+# 0.029 MRR on containership and tanker pairs (generic Subchapter D / I rows
+# outranked the ERG guide and the fire-pump rules); substitution moves none.
+_VESSEL_LANE_K = 8
+
+_VESSEL_TYPE_NOUN: dict[str, str] = {
+    "containership": "containership",
+    "bulk carrier": "bulk carrier",
+    "tanker": "tank vessel",
+    "passenger vessel": "passenger vessel",
+    "ferry": "ferry",
+    "towing / tugboat": "towing vessel",
+    "osv / offshore support": "offshore supply vessel",
+    "fish processing": "fish processing vessel",
+    "research vessel": "oceanographic research vessel",
+}
+
+_OWN_VESSEL_RE = re.compile(r"\b(my|our|this)\s+(?:vessel|boat|ship)\b", re.IGNORECASE)
+
+
+def _vessel_type_key(vessel_profile: dict | None) -> str:
+    return ((vessel_profile or {}).get("vessel_type") or "").strip().lower()
+
+
+def _vessel_lane_parts(vessel_profile: dict | None) -> list[str] | None:
+    """The profile's applicable 46 CFR parts, numerically sorted; None when
+    the vessel type has no applicability entry or noun."""
+    vt = _vessel_type_key(vessel_profile)
+    mapping = _VESSEL_TYPE_CFR_APPLICABILITY.get(vt)
+    if not mapping or vt not in _VESSEL_TYPE_NOUN or not mapping["applicable"]:
+        return None
+    return sorted(mapping["applicable"], key=int)
+
+
+def _vessel_context_query(query: str, vessel_profile: dict | None) -> str | None:
+    """The question with "my vessel" phrased for the profile's vessel type, or
+    None when the question doesn't refer to the user's vessel that way."""
+    noun = _VESSEL_TYPE_NOUN.get(_vessel_type_key(vessel_profile))
+    if not noun or not _OWN_VESSEL_RE.search(query):
+        return None
+    return _OWN_VESSEL_RE.sub(lambda m: f"{m.group(1)} {noun}", query, count=1)
+
+
+async def _fetch_vessel_lane(
+    pool: asyncpg.Pool, vec_literal: str, parts: list[str], k: int,
+) -> list[dict]:
+    """Top-k cfr_46 rows in `parts`, by exact cosine. The CTE keeps the
+    planner off the HNSW index, whose ef_search window would be filtered down
+    to nothing for a subset this small."""
+    rows = await pool.fetch(
+        """
+        WITH lane AS MATERIALIZED (
+            SELECT id, source, section_number, section_title, full_text, embedding
+            FROM regulations
+            WHERE source = 'cfr_46' AND embedding IS NOT NULL
+              AND section_number ~ $2
+        )
+        SELECT id, source, section_number, section_title, full_text,
+               1 - (embedding <=> $1::vector) AS similarity
+        FROM lane
+        ORDER BY embedding <=> $1::vector
+        LIMIT $3
+        """,
+        vec_literal,
+        r"^46 CFR (" + "|".join(parts) + r")\.",
+        k,
+    )
+    return [dict(r) for r in rows]
 
 
 _CFR_PART_RE = re.compile(r"^(\d{1,3})\s+CFR\s+(\d{1,3})", re.IGNORECASE)
@@ -2608,7 +2742,10 @@ def _rerank(
     profile_terms: list[str] = []
     if vessel_profile:
         if vessel_profile.get("vessel_type"):
-            profile_terms.append(vessel_profile["vessel_type"].lower())
+            vt = vessel_profile["vessel_type"].lower()
+            # 2026-10-09 — "towing / tugboat" and "osv / offshore support"
+            # appear in no chunk; match the noun the regulations use.
+            profile_terms.append(_VESSEL_TYPE_NOUN.get(vt, vt) if "/" in vt else vt)
         if vessel_profile.get("route_type"):
             profile_terms.append(vessel_profile["route_type"].lower())
         for cargo in vessel_profile.get("cargo_types") or []:

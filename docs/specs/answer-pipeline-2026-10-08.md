@@ -81,7 +81,9 @@ Phase 2's web step is the structural answer to that.
   memory. Retrieval never returns 142.240 for that question in either configuration (4 of 4
   runs return SOLAS, the FSS Code, ABS and the HSC Code for an inland Sub M towboat): a
   retrieval gap phase 1 exposes. Follow-up: Sub M fire-protection retrieval for towing vessels;
-  phase 2's coverage check would research it.
+  phase 2's coverage check would research it. **2026-10-09:** 142.240 is the inspection / testing
+  section; the rule is 142.315. Diagnosis and fix:
+  `docs/sprint-audits/f5-subchapter-m-retrieval-2026-10-09.md`.
 - The Reg.23 answer now has no errors per either judge and names A.1045(27) correctly, but
   dates the amendments "2024" (MSC 110 adopted them on 26 June 2025). The Opus judge believed
   "MSC.550(108), 2024" too. Model memory of recent instruments is stale; grounding fixes it.

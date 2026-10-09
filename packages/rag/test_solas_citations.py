@@ -188,8 +188,8 @@ def test_cited_section_keeps_all_its_chunks(monkeypatch):
     monkeypatch.setattr(R, "SOURCE_GROUPS", {"imo": ("solas",), "cfr": ("cfr_46",)})
     stats = {"solas": (1700, frozenset({"intl"})), "cfr_46": (30000, frozenset({"us"}))}
 
-    async def embed(key, query):
-        return "[0.1]"
+    async def embed(key, queries):
+        return ["[0.1]"] * len(queries)
 
     async def available(pool):
         return set(stats)
@@ -203,7 +203,11 @@ def test_cited_section_keeps_all_its_chunks(monkeypatch):
                     _row("u1", 0.60, "SOLAS Ch.III Reg.19")]
         return [_row("c1", 0.62, "46 CFR 199.180", source="cfr_46")]
 
-    monkeypatch.setattr(R, "_embed_query", embed)
+    async def no_lane(*a):
+        return []
+
+    monkeypatch.setattr(R, "_embed_queries", embed)
+    monkeypatch.setattr(R, "_fetch_vessel_lane", no_lane)
     monkeypatch.setattr(R, "_get_available_sources", available)
     monkeypatch.setattr(R, "_get_source_stats", source_stats)
     monkeypatch.setattr(R, "_fetch_group", fake_group)
