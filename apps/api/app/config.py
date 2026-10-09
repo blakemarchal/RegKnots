@@ -297,12 +297,14 @@ class Settings(BaseSettings):
     # section within 20K tokens (rag.sections) instead of 6K of loose chunks.
     # provenance_prompt: the sources-and-gaps rule replaces the rules that made
     # answers narrate what the search didn't find (rag.prompts.PROVENANCE_*).
-    # Off until scripts/compare_synthesis_models.py --phase1-ab has run on prod.
+    # On since 2026-10-09 after --phase1-ab on prod (16 questions): answers
+    # describing the search 15 -> 0, Opus judge 6.81 -> 8.44, errors flagged
+    # 39 -> 13 (GPT-4o 5 -> 0), +$0.02 per answer. Set false to revert.
     whole_sections_enabled: bool = Field(
-        default=False, validation_alias="WHOLE_SECTIONS_ENABLED",
+        default=True, validation_alias="WHOLE_SECTIONS_ENABLED",
     )
     provenance_prompt_enabled: bool = Field(
-        default=False, validation_alias="PROVENANCE_PROMPT_ENABLED",
+        default=True, validation_alias="PROVENANCE_PROMPT_ENABLED",
     )
 
     # ── D6.84 Sprint A — Confidence tier router ──────────────────────────
