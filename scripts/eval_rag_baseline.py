@@ -60,9 +60,12 @@ class VesselProfile:
     profile_dict: dict = field(init=False)
 
     def __post_init__(self):
+        # 2026-10-09 — the shape chat.py sends: route_types is a list. The
+        # harness used to send route_type, a key prod never sets, and so
+        # measured a route boost prod didn't have.
         self.profile_dict = {
             "vessel_type": self.vessel_type,
-            "route_type": self.route_type,
+            "route_types": [self.route_type] if self.route_type else [],
             "cargo_types": self.cargo_types,
         }
 

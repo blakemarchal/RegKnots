@@ -105,6 +105,34 @@ Dense harness, prod DB, 2026-10-09 (files `data/eval/retrieval/20261009-02*`). "
 
 - **The reranker doesn't see the vessel.** It scored SOLAS II-2 Reg.10 and the FSS Code 4, the same as 142.315, because "my vessel" carries no type. Passing the vessel type and route to `rerank_chunks` (or the "my towing vessel" phrasing) would order them. That is a prompt change, so it needs `--arm dense-prod` before and after (~$0.30 at Haiku 5.5 prices).
 - **N-F1/V5** stays a miss on the dense arm. Widening the "my vessel" substitution to "my engine room" and similar phrases would reach it, but the same rule hit containership and tanker pairs in variant A. Not done.
-- **`route_types` vs `route_type`**: the harness gives a +0.05 route boost that prod never applies. Aligning them changes prod ranking for every profile; measure first.
+- **`route_types` vs `route_type`**: measured and resolved; see §7.
 - **Applicability by route / tonnage** (SOLAS for an inland 198 GT towboat) is not attempted. N1/V5 expects COLREGS, which is tagged `intl` too, so a blanket `intl` demotion for inland routes would lose it.
 - The other vessel types' forbidden lists still label 125–139 "Subchapter L". 136–139 are forbidden for those types either way, so this is cosmetic.
+
+## 7. The route boost prod never had (follow-up, same day)
+
+`_rerank` gave +0.05 to chunks containing the profile's `route_type`. Chat sends `route_types` (the `vessels` column, a list) and never `route_type`, so prod never had the boost. The eval harnesses sent `route_type` (`eval_rag_baseline.VesselProfile.profile_dict`; `compare_synthesis_models` sends both keys), so every dense baseline before this one measured a boost prod didn't apply.
+
+Dense harness, 80-pair corrected set, lane fix in place (`data/eval/retrieval/20261009-03*`):
+
+| profiles | route boost | strong / weak / MRR |
+|---|---|---|
+| harness shape (`route_type`) | on | 0.9375 / 0.9625 / 0.7646 |
+| prod shape (`route_types`), retriever ignores it | off | **0.9500 / 0.9750 / 0.7874** |
+| prod shape, retriever reads `route_types` too | on | 0.9375 / 0.9625 / 0.7646 |
+
+- Turning the boost on for prod measured worse: F1/V1 lost (4 → miss), N-AUTH2/V1 1 → 6, N-C1/V5 1 → 4, N-V2/V1 4 → 7; gains N-C2/V5 4 → 1 and N-S1/V1 4 → 2.
+- The route term "international" adds 0.05 to every IMO and foreign-flag chunk, ahead of the U.S. rule a U.S. containership needs.
+- **Change:** `_rerank` no longer reads a route at all. Prod is unchanged; the harnesses now measure what prod does, whichever key they send.
+- `eval_rag_baseline` now sends `route_types`, as chat does.
+
+**The honest before / after for this whole change**, with prod-shaped profiles:
+
+| gold set | deployed (`db76a13`) | after | pairs |
+|---|---|---|---|
+| corrected, 80 pairs | 0.9250 / 0.9500 / 0.7582 | **0.9500 / 0.9750 / 0.7874** | F5/V5 and A27-1/V5 miss → 1, F1/V5 3 → 1, E1/V5 2 → 6 |
+| original, 79 pairs | 0.9494 / 0.9747 / 0.7804 | 0.9494 / 0.9747 / 0.7847 | F1/V5 3 → 1, E1/V5 2 → 6 |
+
+- No pair lost on either set.
+- The final code gives identical numbers with the old `route_type` profiles.
+- **New dense baseline: 0.9500 / 0.9750 / 0.7874 (80 pairs).** Earlier baselines include the route boost.

@@ -2746,8 +2746,13 @@ def _rerank(
             # 2026-10-09 — "towing / tugboat" and "osv / offshore support"
             # appear in no chunk; match the noun the regulations use.
             profile_terms.append(_VESSEL_TYPE_NOUN.get(vt, vt) if "/" in vt else vt)
-        if vessel_profile.get("route_type"):
-            profile_terms.append(vessel_profile["route_type"].lower())
+        # 2026-10-09 — no route term. This read route_type, a key chat never
+        # sends (it sends route_types, a list), so prod never had the boost;
+        # only the eval harnesses sent route_type and measured it. Turning it
+        # on for prod measured worse on the dense harness (80 pairs, 0.9500 /
+        # 0.7874 → 0.9375 / 0.7646, F1/V1 lost): "international" lifts every
+        # IMO and foreign-flag chunk over the U.S. rule
+        # (docs/sprint-audits/f5-subchapter-m-retrieval-2026-10-09.md §7).
         for cargo in vessel_profile.get("cargo_types") or []:
             profile_terms.append(cargo.lower())
 

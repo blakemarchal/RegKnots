@@ -287,6 +287,22 @@ def test_vessel_filter_applies_to_title_46_only():
     assert [k["id"] for k in kept] == [k["id"] for k in chunks if k["id"] != "46 CFR 34.01-1"]
 
 
+def test_no_route_boost():
+    """2026-10-09 — routes don't boost: prod (route_types) never had it, and
+    the harnesses' route_type read measured worse. Both keys rank alike."""
+    def chunks():
+        return [{"id": "a", "source": "x", "full_text": "Inland waters rule", "similarity": 0.5},
+                {"id": "b", "source": "x", "full_text": "Ocean rule", "similarity": 0.5}]
+
+    def score(profile):
+        return {c["id"]: round(c["_score"], 3) for c in R._rerank(chunks(), "q", profile)}
+
+    for profile in ({"route_types": ["inland"]}, {"route_type": "inland"}, {}):
+        assert score(profile) == {"a": 0.5, "b": 0.5}
+    # the cargo and vessel-type terms still apply
+    assert score({"vessel_type": "Towing / Tugboat", "cargo_types": ["ocean"]})["b"] == 0.55
+
+
 def test_towing_keeps_all_of_subchapter_m():
     """2026-10-09 — 46 CFR 136-139 (certification, compliance, TSMS, TPOs) are
     Subchapter M; the towing map had them forbidden. OSVs (Subchapter L,
