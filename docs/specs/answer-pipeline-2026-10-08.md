@@ -142,13 +142,46 @@ gap, under a "Checking Coast Guard and IMO sources…" status (the current fallb
 **Risks:** web pages can be wrong or stale (allowlist, verified quotes, labelled as web, never
 as library); prompt injection from pages (quotes only, treated as data); cost (caps above).
 
-**Open questions for Blake:**
-1. Allowlist: Coast Guard, eCFR / Federal Register / GovInfo, IMO, EPA, NOAA, PHMSA, OSHA, FCC,
-   MARAD, MCA, AMSA, MPA. Add class societies (ABS, DNV, LR) and flag registries (IRI, LISCR)?
-2. Web research for free-plan users too, or paid plans only?
-3. Should a web hit on a public document queue an automatic ingest, or wait for review?
+**Decisions (Blake, 2026-10-09):** "We can be liberal with the sites. Web search for free, they
+need to be convinced to convert. Good with recommendation, I think we ingest a legit hit."
 
-**Effort:** 2-3 days, then the A/B.
+**Built 2026-10-09 (`7c21cff`, `0122`), behind `ANSWER_PIPELINE_V2_ENABLED` until the A/B:**
+- `rag/coverage.py`, `rag/web_research.py` (Haiku 5.5 + `web_search_20250305`, 3 searches per
+  item, 25 s budget, quotes checked on the page with an 8 s cap), engine wiring, the verifier
+  exemption for web-sourced citations, the post-answer machinery off the hot path under v2.
+- Allowlist (`rag/web_fallback.py`) widened: ILO, EU, UN bodies, more flag administrations and
+  registries, P&I clubs, industry bodies, more government suffixes. Free plan included.
+- Caps: 30 researched items per user per day, 2,000 a month across users (`WEB_RESEARCH_*`).
+- Auto-ingest (`app/web_ingest.py`, Celery `ingest_web_gaps` every 15 min, 25 a day): a found
+  gap whose verified quote is on an official domain (regulators, IMO / ILO / IACS / EU, flags and
+  registries, class societies; not commentary, not the CFR, which is already complete) is fetched,
+  re-checked, chunked, embedded and added as source `web_ingest`, jurisdictions by domain.
+- Migration 0122: `corpus_gaps`, `messages.web_sources`, the `web_ingest` source.
+- Web: `[Web: domain — title]` link chips (sky blue), a "From official websites (not RegKnot's
+  library)" footer; admin > Answers > Corpus gaps (dismiss, remove an ingested document).
+- Live check on prod (Mediterranean ECA question): coverage 4.0 s found 3 missing facts;
+  research 11.0 s found IMO's page (1 May 2025, quote verified), flagged a conflicting secondary
+  reading, and returned NOT FOUND for the U.S. implementation item rather than guessing.
+
+**A/B 2026-10-09 (`--pipeline-ab`, `data/eval/model_compare/*-pipeline-ab/`), 15 of 21 scored:**
+the Anthropic credit balance ran out at question 16, so WEEK4 and all five gap questions failed.
+
+| | phase 1 (live) | v2 |
+|---|---|---|
+| Opus judge overall / accuracy | 7.47 / 7.20 | 8.53 / 8.53 |
+| GPT-4o judge overall / accuracy | 9.40 / 9.87 | 9.67 / 9.93 |
+| errors flagged (Opus / GPT-4o) | 37 / 1 | 17 / 0 |
+| judged best (Opus / GPT-4o) | 3 / 6 | 12 / 9 |
+| web research used | 0 / 15 | 13 / 15 |
+| question → synthesis call, median | 7.8 s | **30.4 s** |
+| first token after synthesis starts, median | 6.5 s | 5.6 s |
+| cost per answer, warm | $0.086 | $0.093 (+ research, not counted) |
+
+Better answers, but the coverage check called 13 of 15 questions partial and each paid ~22 s of
+research before the first token. **Not switched on.** Tuned (no spend): the check now judges only
+the core of the question (`full` is the usual case; related details don't count), at most 2
+items; research budget 25 → 15 s, quote check 8 → 6 s. Re-run `--pipeline-ab` when credits are
+back (~$8-10) to measure the web-used rate, the latency and the gap questions before turning it on.
 
 ## Database
 

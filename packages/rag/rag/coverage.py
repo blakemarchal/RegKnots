@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
 
-MAX_MISSING = 3
+MAX_MISSING = 2   # 2026-10-09 A/B: 3 items researched on 13 of 15 questions, +22 s
 _CONTEXT_CHARS = 90_000   # the library text the answer model reads (≤ ~20K tokens)
 
 _PROMPT = """\
@@ -25,18 +25,20 @@ You check whether a maritime compliance assistant has what it needs to answer a 
 Below are the mariner's question, their vessel, the conversation so far (if any), and the LIBRARY TEXT \
 the assistant will answer from: regulation and guidance excerpts from its own library.
 
-Decide whether the library text contains what a complete, correct answer for this vessel needs.
-- full: it contains the requirements, figures, dates and sources the answer needs.
-- partial: it covers the core but lacks specific facts the answer needs.
-- none: it does not address the question.
+Decide whether the library text answers the CORE of the question for this vessel: the specific thing \
+the mariner asked, not everything related to it.
+- full: the library text states the rule, figure, date or document the question asks for. This is the \
+usual case. Return full even if related details, background, other jurisdictions or follow-on topics \
+are missing; the assistant handles those.
+- partial: the library covers the topic but lacks the one specific fact the question turns on (the \
+figure, interval or date asked for, the section that sets the requirement, whether an instrument is in \
+force or amended, a form or document the question names).
+- none: the library text does not address the question.
 
-For partial or none, list at most 3 missing items. A missing item is a specific fact the answer needs \
-and the library text does not contain: a requirement or its section, a figure, interval or date, a form, \
-a procedure, the current version or status of an instrument (adopted, amended, in force, cancelled), \
-or a document the question names. Do not list background, definitions, or anything the text already \
-states. For each, write a web search query that names the likely authority and instrument, e.g. \
-"USCG 46 CFR 142.240 towing vessel fixed fire extinguishing system" or \
-"IMO MSC.576(110) pilot transfer performance standards entry into force".
+For partial or none, list at most 2 missing items, each a fact without which the answer to the question \
+asked would be wrong or incomplete. Never list nice-to-know details. For each, write a web search query \
+that names the likely authority and instrument, e.g. "USCG 46 CFR 142.240 towing vessel fixed fire \
+extinguishing system" or "IMO MSC.576(110) pilot transfer performance standards entry into force".
 
 A greeting, a thank-you, a question about RegKnot itself, or a request to rewrite or format the \
 previous answer needs no library text: return full."""

@@ -16,7 +16,7 @@ RegKnot is a maritime-compliance RAG at **https://regknots.com**. Production sta
 - **API health:** https://regknots.com/api/health — `{"status":"healthy"}`
 - **VPS:** `root@68.183.130.3` (shared box, hostname `spiritflow-prod-01`)
 - **Repo paths:** local `C:\Users\Blake\Documents\RegKnots`, VPS `/opt/RegKnots` (NOT `/root/RegKnots`)
-- **Alembic head:** `0121`
+- **Alembic head:** `0122`
 - **Services:** `regknots-api`, `regknots-web`, `regknots-worker` — all systemd, all active
 - **DB:** `docker exec regknots-postgres psql -U regknots -d regknots` (PG 16.13 + pgvector, 1528 MB)
 - **Deploy:** `scripts/deploy.sh` + `scripts/smoke.sh` (shipped 2026-05-07; 3-stage smoke catches stale-build failure mode)

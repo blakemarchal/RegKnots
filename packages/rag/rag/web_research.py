@@ -36,8 +36,8 @@ from rag.web_fallback import (
 logger = logging.getLogger(__name__)
 
 RESEARCH_MODEL = os.environ.get("WEB_RESEARCH_MODEL") or "claude-haiku-5-5"
-RESEARCH_BUDGET_S = 25.0
-VERIFY_TIMEOUT_S = 8.0
+RESEARCH_BUDGET_S = 15.0   # 2026-10-09: was 25; research ran 11 s in the live check
+VERIFY_TIMEOUT_S = 6.0
 MAX_SEARCHES = 3
 
 _SYSTEM = """You research one specific fact for a maritime compliance assistant, using the web_search \

@@ -385,6 +385,11 @@ If a doc says "alembic head is 0045" but `alembic current` says `0092`, the doc 
   - **`ingest/tag_check.py`** runs in every deploy (stored jurisdiction tags vs the code map).
   - **E2E on prod (~$0.15):** the Captain's Reg.23 question now returns paragraphs 1–8, MSC.576(110) adopted 26 June 2025 / in force 2028, A.1045(27) until then, no narration.
   - **Phase 2 (coverage check → web research → one answer → gap queue) awaits Blake's go** on the spec's open questions (allowlist, free plan, auto-ingest).
+- **2026-10-09 answer pipeline phase 2 BUILT, OFF** (Blake: liberal allowlist, free plan included, ingest legit hits; `7c21cff`, migration **0122**, alembic head). Spec §Phase 2 has the design and numbers.
+  - `rag/coverage.py` (Haiku 5.5, structured: full / partial / none + ≤2 missing facts) → `rag/web_research.py` (Haiku 5.5 + `web_search_20250305`, allowlist in `rag/web_fallback.py`, quotes checked on the page, 15 s budget) → a WEB FINDINGS block in `context_str` → one answer with `[Web: domain — title]` chips (sky blue, a separate footer; "Corpus-verified" stays library-only). The verifier treats a citation a finding states as sourced. Under v2 the post-answer judge runs in the background; oracle / web card / Layer C off.
+  - Gaps → `corpus_gaps`; `app/web_ingest.py` + Celery `ingest_web_gaps` (every 15 min, ≤25/day) add verified official-site documents as source `web_ingest` (jurisdictions by domain; `ingest/tag_check.py` skips it). Admin > Answers > Corpus gaps. Caps `WEB_RESEARCH_DAILY_CAP` 30 / `_MONTHLY_CAP` 2,000.
+  - **A/B (15 of 21 scored):** Opus judge 7.47 → 8.53, errors flagged 37 → 17, best 3 → 12; but web research ran on 13 of 15 and question → synthesis went 7.8 → 30.4 s. **`ANSWER_PIPELINE_V2_ENABLED` stays false.** Coverage check tuned to the core question (≤2 items), research budget 25 → 15 s; re-run `--pipeline-ab` (~$8-10) before switching on.
+  - **INCIDENT: Anthropic credits exhausted ~2026-10-09 03:30 UTC during the A/B** (question 16 on). No external user traffic in the window; until Blake adds credits every answer falls back to GPT-4o.
 See `docs/PROJECT_STATE.md` for a fuller operational snapshot and `docs/roadmap.md` for the prioritized backlog.
 
 

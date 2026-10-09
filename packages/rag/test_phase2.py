@@ -18,7 +18,7 @@ def test_coverage_parses_and_caps(monkeypatch):
             {"item": f"fact {i}", "search_query": f"q {i}"} for i in range(5)]})
     monkeypatch.setattr("rag.llm.create_json", fake)
     cov = asyncio.run(C.check_coverage(None, question="q", library_text="text", vessel_line="Containership"))
-    assert cov.status == "partial" and [m.item for m in cov.missing] == ["fact 0", "fact 1", "fact 2"]
+    assert cov.status == "partial" and [m.item for m in cov.missing] == ["fact 0", "fact 1"]
 
 
 def test_coverage_full_has_no_missing_and_failure_is_full(monkeypatch):
