@@ -43,6 +43,13 @@ superset of today's). Adds `plumbing`: answers that describe the search ("didn't
 ("v2": coverage check, web research before writing). The phase-1 set plus GAPS, questions whose
 answer is known to be outside the corpus. Adds `web_used`, `web_sources_cited` and the time from
 the question to the synthesis call per variant. ~$10.
+
+2026-10-09 — `--session-judge` (Blake: use the Claude subscription for evaluation work): the
+answers still come from the production API (they are what is measured) and GPT-4o still judges,
+but the Opus judge call is replaced by a blind packet per question in OUT/judge_packets/
+(labels shuffled; the label map stays in results.json). Grade the packets in a Claude Code
+session (subagents, same JUDGE_SYSTEM rubric), save each as OUT/session_grades/<qid>.json, then
+`python scripts/merge_session_grades.py OUT`. Saves the Opus judge (~40% of a run).
 """
 import asyncio
 import copy
@@ -78,6 +85,7 @@ import eval_rag_baseline as G  # noqa: E402
 PROMPT_AB = "--prompt-ab" in sys.argv
 PHASE1_AB = "--phase1-ab" in sys.argv
 PIPELINE_AB = "--pipeline-ab" in sys.argv
+SESSION_JUDGE = "--session-judge" in sys.argv
 OUT = REPO / "data" / "eval" / "model_compare" / (
     time.strftime("%Y%m%d-%H%M%S", time.gmtime())
     + ("-prompt-ab" if PROMPT_AB else "-phase1-ab" if PHASE1_AB else "-pipeline-ab" if PIPELINE_AB else ""))
@@ -385,6 +393,14 @@ async def one_question(item, pool, client, oai, okey, conv_id, user_id, rng) -> 
         rng.shuffle(order)
         lab2var = dict(zip(LABELS, order))
         content = judge_input(umsg, {lab: rec["runs"][v]["answer"] for lab, v in lab2var.items()})
+        if SESSION_JUDGE and jname == "opus":
+            # 2026-10-09 — graded in a Claude Code session instead (see the module docstring)
+            (OUT / "judge_packets").mkdir(exist_ok=True)
+            (OUT / "judge_packets" / f"{qid}.json").write_text(json.dumps(
+                {"qid": qid, "rubric": JUDGE_SYSTEM, "labels": sorted(lab2var), "content": content},
+                indent=1), encoding="utf-8")
+            rec["judges"]["session"] = {"order": lab2var, "pending": True}
+            continue
         try:
             data, usage = await (judge_opus(client, content) if jname == "opus" else judge_gpt(oai, content))
         except Exception as exc:  # noqa: BLE001
