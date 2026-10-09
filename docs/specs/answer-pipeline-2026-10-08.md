@@ -1,6 +1,6 @@
 # Answer pipeline: library first, then the web, then a useful "couldn't find it" (spec, 2026-10-08)
 
-**Status:** Phase 1 built and deployed behind flags (off), A/B running. Phase 2 proposed.
+**Status:** Phase 1 **live since 2026-10-09** (`4a7d26d`; results below). Phase 2 proposed.
 Blake, 2026-10-08: "User prompt > do we have the data? yes - answer; no - check the internet
 via a regular Claude chat type question > did we find an answer? yes - answer; no - we say
 that we cannot find it with smart and useful dialogue. If our prompt builder is off, let's
@@ -62,6 +62,34 @@ Captain's 2, 4 earlier hedges, this week's 4), each captured twice through the r
 errors-flagged don't get worse, and nothing new turns up unverified. Watch item: with the
 narration gone, does the model state numbers from memory more readily (the MSC.532 error)?
 Phase 2's web step is the structural answer to that.
+
+**Result (2026-10-09, `data/eval/model_compare/20261009-011747-phase1-ab/`, $4.13):**
+
+| | today | phase 1 |
+|---|---|---|
+| answers describing the search | 15 / 16 | 0 (the metric's 3 hits are "non-skid surface") |
+| hedge phrases (`detect_hedge`) | 7 | 1 |
+| Opus judge overall / accuracy | 6.81 / 6.81 | 8.44 / 8.31 |
+| GPT-4o judge overall / accuracy | 9.44 / 9.69 | 9.56 / 10.0 |
+| errors flagged (Opus / GPT-4o) | 39 / 5 | 13 / 0 |
+| judged best (Opus / GPT-4o) | 4 / 7 | 12 / 9 |
+| first token median / p90 | 6.1 / 15.4 s | 6.8 / 8.7 s |
+| cost per answer, warm cache | $0.064 | $0.083 |
+| unverified citations | 3 | 3 |
+
+- One regression, F5 (fixed CO2, inland towboat): phase 1 no longer names 46 CFR 142.240 from
+  memory. Retrieval never returns 142.240 for that question in either configuration (4 of 4
+  runs return SOLAS, the FSS Code, ABS and the HSC Code for an inland Sub M towboat): a
+  retrieval gap phase 1 exposes. Follow-up: Sub M fire-protection retrieval for towing vessels;
+  phase 2's coverage check would research it.
+- The Reg.23 answer now has no errors per either judge and names A.1045(27) correctly, but
+  dates the amendments "2024" (MSC 110 adopted them on 26 June 2025). The Opus judge believed
+  "MSC.550(108), 2024" too. Model memory of recent instruments is stale; grounding fixes it.
+- **Found while ingesting the pilot-transfer resolutions:** the IMO chapter / paragraph
+  splitters dropped the text before the first chapter and every short chapter. MSC.572(110)
+  kept 6% of its text, the STCW amendments MSC.503(105) 41%, MEPC.353(78) 50%, MSC.402(96)
+  83%, and ~12 more lost their preamble (entry-into-force clauses). Fixed (`5aeeebb`); all 15
+  `imo_codes` sources re-ingested.
 
 ## Phase 2 — proposed: check before writing, research the gaps, answer once
 
