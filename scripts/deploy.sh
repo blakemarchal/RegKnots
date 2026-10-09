@@ -74,6 +74,12 @@ cd apps/api
 /root/.local/bin/uv run alembic upgrade head 2>&1 | grep -E "^(INFO|ERROR)" | tail -5
 cd ../..
 
+# 2026-10-08 — stored jurisdiction tags vs the code map (ingest/tag_check.py).
+# Reports drift (COSWP carried 'intl' for four months); never fails the deploy.
+echo ""
+echo "[corpus] jurisdiction tags"
+(cd packages/ingest && /root/.local/bin/uv run python -m ingest.tag_check 2>&1 | grep -v -i warn | tail -12) || true
+
 if [[ "$SKIP_BUILD" != "1" ]]; then
     echo ""
     echo "[pnpm] install --frozen-lockfile"

@@ -398,6 +398,31 @@ _CURATED_BY_CODE: dict[str, list[CodeDocMeta]] = {
             effective_date=date(2011, 11, 30),
             parent_label="IMO Assembly Resolution",
         ),
+        # 2026-10-08 — pilot transfer arrangements. The Captain's pilot-ladder
+        # questions (2026-10-08/09) needed the standard SOLAS V/23 points to
+        # (A.1045(27)) and the 2025 amendments, which an answer misdated from
+        # memory as "MSC.532(107), 2023". In force 1 January 2028.
+        CodeDocMeta(
+            code="A.1045(27)",
+            title="Pilot Transfer Arrangements (the IMO standard referenced by SOLAS V/23 until the 2028 Performance Standards)",
+            pdf_url=f"{_IMO_CDN}/AssemblyDocuments/A.1045(27).pdf",
+            effective_date=date(2011, 11, 30),
+            parent_label="IMO Assembly Resolution",
+        ),
+        CodeDocMeta(
+            code="MSC.572(110)",
+            title="Amendments to SOLAS Chapters II-2 and V, incl. Regulation V/23 Pilot Transfer Arrangements (adopted 26 June 2025, in force 1 January 2028)",
+            pdf_url=f"{_IMO_CDN}/MSCResolutions/MSC.572(110).pdf",
+            effective_date=date(2028, 1, 1),
+            parent_label="IMO MSC Resolution",
+        ),
+        CodeDocMeta(
+            code="MSC.576(110)",
+            title="Performance Standards for Pilot Transfer Arrangements (adopted 26 June 2025, in force 1 January 2028)",
+            pdf_url=f"{_IMO_CDN}/MSCResolutions/MSC.576(110).pdf",
+            effective_date=date(2028, 1, 1),
+            parent_label="IMO MSC Resolution",
+        ),
     ],
 
     # Sprint D6.41 — STCW amendments since the 2017 Consolidated Edition.
