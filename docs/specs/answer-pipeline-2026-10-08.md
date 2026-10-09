@@ -183,6 +183,29 @@ the core of the question (`full` is the usual case; related details don't count)
 items; research budget 25 → 15 s, quote check 8 → 6 s. Re-run `--pipeline-ab` when credits are
 back (~$8-10) to measure the web-used rate, the latency and the gap questions before turning it on.
 
+**Re-run 2026-10-09 after tuning, all 21 scored (`20261009-032747-pipeline-ab`, $4.07 API).**
+Graded with `--session-judge`: the Opus judge replaced by four blind grading agents in a Claude
+Code session on Blake's subscription (Blake: "route here to use my subscription limit"), same
+rubric, shuffled labels, merged by `scripts/merge_session_grades.py`; GPT-4o judged as before.
+
+| | phase 1 | v2 |
+|---|---|---|
+| session judge overall / accuracy | 8.24 / 8.43 | 8.38 / 8.62 |
+| errors flagged (session judge) | 16 | 9 |
+| judged best (session / GPT-4o) | 9 / 9 | 12 / 12 |
+| GPT-4o overall | 9.52 | 9.67 |
+| web research used | 0 / 21 | 8 / 21 |
+| added before synthesis, no web (13) | — | +1.9 s median |
+| added before synthesis, web (8) | — | +16.7 s median |
+
+- On the 8 researched questions v2 won 6 (4 of 5 gap questions, each +1, errors removed), lost
+  HEDGE3 by 1 and F5 by 2. F5: research returned NOT FOUND and the library still lacked
+  46 CFR 142.315 (the towboat retrieval fix, in a separate session, closes that for both arms).
+- The 13 unresearched questions take the same path in both arms; their swings are run-to-run noise.
+- This run's retrieval carried the harness-only route boost on both arms (fixed separately).
+
+**Switched on 2026-10-09** (`ANSWER_PIPELINE_V2_ENABLED` default true).
+
 ## Database
 
 No structural refactor needed: `regulations` (source, section_number, chunk_index) already

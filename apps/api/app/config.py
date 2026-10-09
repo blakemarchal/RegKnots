@@ -311,9 +311,12 @@ class Settings(BaseSettings):
     # check coverage before writing, research the gaps on official websites,
     # log them to corpus_gaps; legit hits are ingested (app/web_ingest.py).
     # Blake: web research for every plan, free included ("they need to be
-    # convinced to convert"). Off until --pipeline-ab has run on prod.
+    # convinced to convert"). On since 2026-10-09 after --pipeline-ab on prod
+    # (21 questions, blind session judge + GPT-4o): errors flagged 16 -> 9,
+    # judged best 9 -> 12 on both judges; web research on 8 of 21, +16.7 s
+    # median when it runs, +1.9 s when it doesn't. Set false to revert.
     answer_pipeline_v2_enabled: bool = Field(
-        default=False, validation_alias="ANSWER_PIPELINE_V2_ENABLED",
+        default=True, validation_alias="ANSWER_PIPELINE_V2_ENABLED",
     )
     # researched items (one per missing fact): per user per day, all users per month
     web_research_daily_cap: int = Field(default=30, validation_alias="WEB_RESEARCH_DAILY_CAP")
