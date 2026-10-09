@@ -724,6 +724,62 @@ def parse_source(raw_dir: Path, imo_code: str) -> list[Section]:
     return sections
 
 
+# ── Keep every character (2026-10-08) ──────────────────────────────────────
+#
+# Both splitters used to drop the text before the first chapter and any chapter
+# body under 300 / 400 characters. Measured on prod 2026-10-08: MSC.572(110)
+# kept 6% of its text (the SOLAS V/23 amendment was gone), the STCW amendments
+# MSC.503(105) 41%, MEPC.353(78) 50%, MSC.402(96) 83%, and about a dozen more
+# lost their preamble, which is where an amendment resolution states when it
+# enters into force. Now the preamble is a section named for the resolution
+# itself and a short body joins the section before it; chapter numbering is
+# unchanged.
+
+_PREAMBLE_MIN_CHARS = 200
+
+
+def _assemble(text: str, first_start: int, bodies: list[tuple[str, str, str]], min_chars: int,
+              meta: "CodeDocMeta", source_code: str) -> list[Section]:
+    """bodies: (ch_num, title, body) in document order. Short bodies merge into the
+    previous section (or the preamble); the preamble becomes `{resolution}` itself."""
+    preamble = text[:first_start].strip()
+    merged: list[list[str]] = []          # [ch_num, title, body]
+    for ch_num, title, body in bodies:
+        if len(body) < min_chars:
+            if merged:
+                merged[-1][2] += "\n\n" + body
+            else:
+                preamble = (preamble + "\n\n" + body).strip()
+            continue
+        merged.append([ch_num, title, body])
+    if not merged:
+        return []
+    sections: list[Section] = []
+    if len(preamble) >= _PREAMBLE_MIN_CHARS:
+        sections.append(Section(
+            source=source_code, title_number=TITLE_NUMBER,
+            section_number=meta.section_number,
+            section_title=f"{meta.parent_label} {meta.code} — {meta.title}",
+            full_text=preamble,
+            up_to_date_as_of=SOURCE_DATE,
+            parent_section_number=meta.parent_section_number,
+            published_date=meta.effective_date,
+        ))
+    elif preamble:
+        merged[0][2] = preamble + "\n\n" + merged[0][2]
+    for ch_num, title, body in merged:
+        sections.append(Section(
+            source=source_code, title_number=TITLE_NUMBER,
+            section_number=f"{meta.section_number} Ch.{ch_num}",
+            section_title=title,
+            full_text=body,
+            up_to_date_as_of=SOURCE_DATE,
+            parent_section_number=meta.section_number,
+            published_date=meta.effective_date,
+        ))
+    return sections
+
+
 # ── Chapter-aware splitting (Sprint post-D6.83) ────────────────────────────
 
 # Match a "CHAPTER N — TITLE" heading on its own line. The heading uses
@@ -774,16 +830,11 @@ def _split_into_chapters(
     # Sort by file position so we can slice ranges between them.
     ordered = sorted(by_number.items(), key=lambda kv: kv[1].start())
 
-    sections: list[Section] = []
+    bodies: list[tuple[str, str, str]] = []
     for i, (ch_num, m) in enumerate(ordered):
         start = m.start()
         end = ordered[i + 1][1].start() if i + 1 < len(ordered) else len(text)
         body = text[start:end].strip()
-        # Skip too-short bodies (likely a TOC entry that survived the
-        # last-occurrence dedup, e.g. when the chapter appears 3+ times
-        # in the doc).
-        if len(body) < 300:
-            continue
         ch_title = m.group(2).strip().rstrip("—-:").strip()
         # Keep BOTH the resolution code AND the chapter in the section_number
         # so the citation verifier's existing LIKE-match patterns continue
@@ -791,19 +842,11 @@ def _split_into_chapters(
         #   - LIKE '%MSC.370(93)%'  (yesterday's IMO-family fix in engine.py)
         #   - LIKE '%Ch.4%'         (chapter-precise queries)
         # Format: "IMO IGC Code MSC.370(93) Ch.4"
-        section_number = f"{meta.section_number} Ch.{ch_num}"
-        section_title = f"{meta.parent_label} Chapter {ch_num} — {ch_title}"
-        sections.append(Section(
-            source=source_code, title_number=TITLE_NUMBER,
-            section_number=section_number,
-            section_title=section_title,
-            full_text=body,
-            up_to_date_as_of=SOURCE_DATE,
-            parent_section_number=meta.section_number,  # parent is the resolution
-            published_date=meta.effective_date,
-        ))
+        bodies.append((ch_num, f"{meta.parent_label} Chapter {ch_num} — {ch_title}", body))
 
-    return sections
+    # 2026-10-08 — keep the preamble; a short body (a TOC entry that survived
+    # the last-occurrence dedup) joins its neighbour instead of being dropped.
+    return _assemble(text, ordered[0][1].start(), bodies, 300, meta, source_code)
 
 
 # ── Paragraph-aware splitting (Sprint D6.97 #47) ───────────────────────
@@ -899,7 +942,7 @@ def _split_by_paragraph_chapter(
         key=lambda ch: chapter_first_subpara_offset[ch],
     )
 
-    sections: list[Section] = []
+    bodies: list[tuple[str, str, str]] = []
     for i, ch_num in enumerate(sorted_chapters):
         start = chapter_first_subpara_offset[ch_num]
         if i + 1 < len(sorted_chapters):
@@ -907,27 +950,14 @@ def _split_by_paragraph_chapter(
         else:
             end = len(text)
         body = text[start:end].strip()
-        if len(body) < 400:
-            continue
         chapter_title_hint = chapter_first_subpara_title.get(
             ch_num, f"Chapter {ch_num}",
         )
-        section_number = f"{meta.section_number} Ch.{ch_num}"
-        section_title = (
-            f"{meta.parent_label} Chapter {ch_num} — {chapter_title_hint}"
-        )
-        sections.append(Section(
-            source=source_code,
-            title_number=TITLE_NUMBER,
-            section_number=section_number,
-            section_title=section_title,
-            full_text=body,
-            up_to_date_as_of=SOURCE_DATE,
-            parent_section_number=meta.section_number,
-            published_date=meta.effective_date,
-        ))
+        bodies.append((ch_num, f"{meta.parent_label} Chapter {ch_num} — {chapter_title_hint}", body))
 
-    return sections
+    # 2026-10-08 — keep the preamble (the resolution clauses, incl. entry into
+    # force) and fold a short chapter into its neighbour instead of dropping it.
+    return _assemble(text, chapter_first_subpara_offset[sorted_chapters[0]], bodies, 400, meta, source_code)
 
 
 def get_source_date(raw_dir: Path) -> date:
