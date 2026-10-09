@@ -826,6 +826,7 @@ async def _persist_chat_outcome(
     vessel_update: dict | None,
     is_new_conversation: bool,
     tier_metadata_json: str | None = None,
+    web_sources_json: str | None = None,
 ) -> None:
     """Persist the assistant side of a completed chat turn.
 
@@ -860,8 +861,8 @@ async def _persist_chat_outcome(
         """
         INSERT INTO messages
             (conversation_id, role, content, model_used, tokens_used, cited_regulation_ids,
-             tier_metadata)
-        VALUES ($1, 'assistant', $2, $3, $4, $5, $6::jsonb)
+             tier_metadata, web_sources)
+        VALUES ($1, 'assistant', $2, $3, $4, $5, $6::jsonb, $7::jsonb)
         """,
         conversation_id,
         answer,
@@ -869,6 +870,7 @@ async def _persist_chat_outcome(
         total_tokens,
         cited_ids,
         tier_metadata_json,
+        web_sources_json,  # 2026-10-08 — phase 2 web sources (chips + footer on reload)
     )
 
     # Apply vessel profile updates from chat response
@@ -994,6 +996,9 @@ async def chat_endpoint(
         model_led_grounding_enabled=settings.model_led_grounding_enabled,
         whole_sections_enabled=settings.whole_sections_enabled,
         provenance_prompt_enabled=settings.provenance_prompt_enabled,
+        pipeline_v2_enabled=settings.answer_pipeline_v2_enabled,
+        web_research_daily_cap=settings.web_research_daily_cap,
+        web_research_monthly_cap=settings.web_research_monthly_cap,
         # D6.97 Phase 2 — image attachments parsed by the preflight.
         # Empty list when no images uploaded; engine routes to multimodal
         # Claude only when non-empty.
@@ -1169,6 +1174,9 @@ async def chat_stream_endpoint(
                 model_led_grounding_enabled=settings.model_led_grounding_enabled,
                 whole_sections_enabled=settings.whole_sections_enabled,
                 provenance_prompt_enabled=settings.provenance_prompt_enabled,
+                pipeline_v2_enabled=settings.answer_pipeline_v2_enabled,
+                web_research_daily_cap=settings.web_research_daily_cap,
+                web_research_monthly_cap=settings.web_research_monthly_cap,
                 # D6.97 Phase 2 — image attachments parsed by preflight.
                 images=parsed_images,
                 # D6.97 (C) — Precision Mode flag from
@@ -1264,6 +1272,8 @@ async def chat_stream_endpoint(
                             vessel_update=final_data.get("vessel_update"),
                             is_new_conversation=is_new_conversation,
                             tier_metadata_json=tier_metadata_json,
+                            web_sources_json=(json.dumps(final_data["web_sources"])
+                                              if final_data.get("web_sources") else None),
                         ),
                         timeout=_PERSIST_TIMEOUT_SECONDS,
                     )

@@ -141,6 +141,21 @@ EXACT_TRUSTED_DOMAINS: frozenset[str] = frozenset({
     "bimco.org",
     # WHO + IMO joint
     "who.int",
+    # 2026-10-08 — answer pipeline phase 2 (rag.web_research). Blake: "We can
+    # be liberal with the sites." UN agencies, EU law, more flag states and
+    # registries, P&I clubs and industry bodies whose guidance mariners use.
+    "ilo.org",                         # MLC 2006
+    "un.org", "unece.org", "iho.int", "wmo.int", "iala-aism.org", "fao.org",
+    "europa.eu",                       # EUR-Lex, EMSA, DG MOVE
+    "law.cornell.edu",                 # LII copies of the CFR / USC
+    "dma.dk", "transportstyrelsen.se", "traficom.fi", "sjofartsverket.se",
+    "amp.gob.pa", "panamashipregistry.com", "cishipping.com", "iomshipregistry.com",
+    "dms.gov.cy", "transport.gov.mt", "marad.dot.gov",
+    "imca-int.com", "sigtto.org", "nautinst.org", "ics-shipping.org", "worldshipping.org",
+    "ukpandi.com", "gard.no", "skuld.com", "standard-club.com", "nepia.com",
+    "britanniapandi.com", "swedishclub.com", "westpandi.com", "steamshipmutual.com",
+    "americanclub.com", "shipownersclub.com", "londonpandi.com", "igpandi.org",
+    "korean-register.or.kr", "tasneefmaritime.ae", "turkloydu.org", "prs.pl", "crs.hr",
 })
 
 # Wildcard suffixes — entries here match any subdomain of the listed TLD.
@@ -169,6 +184,9 @@ WILDCARD_TRUSTED_SUFFIXES: tuple[str, ...] = (
     ".gov.in",        # India
     ".gov.za",        # South Africa
     ".gov.br",        # Brazil
+    # 2026-10-08 — phase 2: more flag and port states
+    ".gov.cy", ".gov.mt", ".gob.pa", ".gov.ph", ".gov.my", ".gov.ae", ".gov.nz",
+    ".go.id", ".gov.ie", ".gov.lr", ".gov.mh", ".gov.bh", ".gov.qa", ".gov.sa",
 )
 
 

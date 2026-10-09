@@ -1414,3 +1414,26 @@ async def _purge_user_documents_async():
         return {"removed": removed}
     finally:
         await pool.close()
+
+
+@celery.task(name="app.tasks.ingest_web_gaps", soft_time_limit=600, time_limit=660)
+def ingest_web_gaps():
+    """2026-10-08 — add the official documents the phase-2 web research found
+    to the library (app/web_ingest.py): a few found corpus_gaps per run,
+    within WEB_INGEST_DAILY_CAP."""
+    return _run_async(_ingest_web_gaps_async())
+
+
+async def _ingest_web_gaps_async():
+    import asyncpg
+    from app import web_ingest
+    from app.config import settings
+
+    dsn = settings.database_url.replace("postgresql+asyncpg://", "postgresql://")
+    pool = await asyncpg.create_pool(dsn, min_size=1, max_size=2)
+    try:
+        result = await web_ingest.run(pool, settings.openai_api_key, settings.web_ingest_daily_cap)
+        logger.info("ingest_web_gaps: %s", result)
+        return result
+    finally:
+        await pool.close()

@@ -307,6 +307,20 @@ class Settings(BaseSettings):
         default=True, validation_alias="PROVENANCE_PROMPT_ENABLED",
     )
 
+    # 2026-10-08 — answer pipeline phase 2 (rag.coverage + rag.web_research):
+    # check coverage before writing, research the gaps on official websites,
+    # log them to corpus_gaps; legit hits are ingested (app/web_ingest.py).
+    # Blake: web research for every plan, free included ("they need to be
+    # convinced to convert"). Off until --pipeline-ab has run on prod.
+    answer_pipeline_v2_enabled: bool = Field(
+        default=False, validation_alias="ANSWER_PIPELINE_V2_ENABLED",
+    )
+    # researched items (one per missing fact): per user per day, all users per month
+    web_research_daily_cap: int = Field(default=30, validation_alias="WEB_RESEARCH_DAILY_CAP")
+    web_research_monthly_cap: int = Field(default=2000, validation_alias="WEB_RESEARCH_MONTHLY_CAP")
+    # documents app.tasks.ingest_web_gaps may add per day
+    web_ingest_daily_cap: int = Field(default=25, validation_alias="WEB_INGEST_DAILY_CAP")
+
     # ── D6.84 Sprint A — Confidence tier router ──────────────────────────
     # Three-mode flag controlling the additive tier_router layer.
     #

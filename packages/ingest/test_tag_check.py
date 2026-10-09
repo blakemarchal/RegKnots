@@ -8,5 +8,6 @@ def test_drift_reports_only_mismatched_groups():
         {"source": "coswp", "jurisdictions": ["intl"], "n": 660},      # the 2026-10-08 case
         {"source": "coswp", "jurisdictions": ["uk"], "n": 3},
         {"source": "made_up_source", "jurisdictions": ["intl"], "n": 1},  # unknown source defaults to intl
+        {"source": "web_ingest", "jurisdictions": ["us"], "n": 4},       # tagged per document: skipped
     ]
     assert drift(rows) == [("coswp", ["intl"], ["uk"], 660)]

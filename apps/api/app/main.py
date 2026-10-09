@@ -20,7 +20,7 @@ if settings.sentry_dsn:
         environment=settings.environment,
     )
 from app.db import init_pool, close_pool, close_redis
-from app.routers import admin, admin_dashboard, admin_documents, auth, billing, checklists, coming_up, company_documents, contact, credentials, documents, dossier, export, health, chat, logs, me, onboarding, practice, preferences, sea_service, sea_time, study, transcribe, user_documents, vessels, regulations, conversations, notifications, support, survey, waitlist, web_fallback, whale_zones, workspaces
+from app.routers import admin, admin_dashboard, admin_documents, admin_gaps, auth, billing, checklists, coming_up, company_documents, contact, credentials, documents, dossier, export, health, chat, logs, me, onboarding, practice, preferences, sea_service, sea_time, study, transcribe, user_documents, vessels, regulations, conversations, notifications, support, survey, waitlist, web_fallback, whale_zones, workspaces
 
 logger = logging.getLogger(__name__)
 
@@ -107,3 +107,4 @@ app.include_router(whale_zones.router)
 app.include_router(practice.router)   # 2026-10-02 — free public USCG exam practice
 app.include_router(user_documents.router)   # 2026-10-05 — PDF / Word attachments in chat
 app.include_router(admin_documents.router)  # 2026-10-05 — admin view of chat attachments
+app.include_router(admin_gaps.router)       # 2026-10-08 — corpus gaps (answer pipeline phase 2)

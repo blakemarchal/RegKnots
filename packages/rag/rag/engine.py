@@ -1380,6 +1380,57 @@ async def _regenerate_answer(
             return None
 
 
+def _drop_web_sourced(unverified: list[str], web_findings: list | None) -> list[str]:
+    if not web_findings or not unverified:
+        return unverified
+    from rag.web_research import externally_sourced
+    kept = [u for u in unverified if not externally_sourced(u, web_findings)]
+    if len(kept) < len(unverified):
+        logger.info("citations sourced by web findings: %s", [u for u in unverified if u not in kept])
+    return kept
+
+
+async def _web_research_allowed(pool, user_id, daily_cap: int, monthly_cap: int) -> bool:
+    """2026-10-08 — researched items (corpus_gaps.web_searched) under both caps.
+    Fail-open: a failed count allows it (each request researches at most 3 items)."""
+    try:
+        row = await pool.fetchrow(
+            """
+            SELECT count(*) FILTER (WHERE user_id = $1 AND created_at > now() - interval '1 day') AS mine,
+                   count(*) AS month
+            FROM corpus_gaps
+            WHERE web_searched AND created_at > date_trunc('month', now())
+            """,
+            user_id,
+        )
+        return row["mine"] < daily_cap and row["month"] < monthly_cap
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("web research cap check failed (allowing): %s: %s", type(exc).__name__, str(exc)[:160])
+        return True
+
+
+async def _log_gaps(pool, *, user_id, conversation_id, question: str, coverage, findings: list) -> None:
+    """2026-10-08 — one corpus_gaps row per missing item; the ingest task
+    (app.tasks.ingest_web_gaps) picks up found items on official sites."""
+    import json as _json
+    from rag.web_research import findings_payload
+    by_item = {f["item"]: f for f in findings_payload(findings)}
+    for m in coverage.missing:
+        f = by_item.get(m.item)
+        status = "open" if f is None else ("found" if f["found"] else "not_found")
+        await pool.execute(
+            """
+            INSERT INTO corpus_gaps (user_id, conversation_id, question, item, search_query, coverage,
+                                     web_searched, found, answer, sources, status, latency_ms, error)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11, $12, $13)
+            """,
+            user_id, conversation_id, question[:2000], m.item, m.search_query, coverage.status,
+            f is not None, bool(f and f["found"]), (f or {}).get("answer") or None,
+            _json.dumps((f or {}).get("sources") or []), status, (f or {}).get("latency_ms"),
+            (f or {}).get("error"),
+        )
+
+
 async def _finalize_answer(
     *,
     answer: str,
@@ -1393,6 +1444,7 @@ async def _finalize_answer(
     openai_api_key: str,
     effective_system_prompt: str,
     chunks: list[dict] | None = None,
+    web_findings: list | None = None,
 ) -> tuple[str, list[CitedRegulation], list[str], dict | None, int, int, bool]:
     """Vessel-update extraction, citation verification, regeneration, cleanup.
 
@@ -1416,6 +1468,9 @@ async def _finalize_answer(
     all_unverified = list(
         dict.fromkeys(unverified_from_context + unverified_from_text)
     )
+    # 2026-10-08 — a citation a web finding states (an instrument outside the
+    # library, e.g. a 2025 IMO resolution) is sourced, not invented.
+    all_unverified = _drop_web_sourced(all_unverified, web_findings)
 
     # Sprint D6.16 Fix 5 — UN-claim grounding check. Catches the case where
     # the model produced a confident UN-number identity (e.g. "UN 2734 =
@@ -1512,9 +1567,9 @@ async def _finalize_answer(
     # too — if the regen still hallucinates a UN identity, we want to know.
     new_text_citations = _extract_all_text_citations(new_answer)
     unverified_from_text_2 = await _verify_text_citations(new_text_citations, pool)
-    all_unverified_2 = list(
+    all_unverified_2 = _drop_web_sourced(list(
         dict.fromkeys(unverified_from_context + unverified_from_text_2)
-    )
+    ), web_findings)
     ungrounded_un_2 = _verify_un_claims(new_answer, chunks or [])
 
     if not all_unverified_2 and not ungrounded_un_2:
@@ -1732,6 +1787,10 @@ async def chat(
     company_context: Callable[[str], Awaitable[str | None]] | None = None,
     # 2026-09-23 — minimum synthesis model; see chat_with_progress.
     synthesis_model_floor: str | None = None,
+    # 2026-10-08 — answer pipeline phase 2; see chat_with_progress.
+    pipeline_v2_enabled: bool = False,
+    web_research_daily_cap: int = 30,
+    web_research_monthly_cap: int = 2000,
 ) -> ChatResponse:
     """Run the full RAG pipeline and return a ChatResponse.
 
@@ -1800,6 +1859,9 @@ async def chat(
         live_context_block=live_context_block,
         company_context=company_context,
         synthesis_model_floor=synthesis_model_floor,
+        pipeline_v2_enabled=pipeline_v2_enabled,
+        web_research_daily_cap=web_research_daily_cap,
+        web_research_monthly_cap=web_research_monthly_cap,
     ):
         # Discard status/delta/delta_reset — non-streaming caller only
         # needs the terminal payload. Every chat_with_progress path
@@ -2760,6 +2822,14 @@ async def chat_with_progress(
     # None = pure complexity routing. chat.py passes
     # settings.synthesis_model_floor. See _apply_model_floor().
     synthesis_model_floor: str | None = None,
+    # 2026-10-08 — answer pipeline phase 2 (rag.coverage, rag.web_research):
+    # check whether the library covers the question before writing; research
+    # the missing items on official websites; write once with both; log the
+    # gaps (corpus_gaps). The post-answer judge / oracle / web card no longer
+    # gate anything. Caps: researched items per user per day, all users per month.
+    pipeline_v2_enabled: bool = False,
+    web_research_daily_cap: int = 30,
+    web_research_monthly_cap: int = 2000,
 ) -> AsyncIterator[dict]:
     """Same RAG pipeline as chat() but yields lightweight progress events.
 
@@ -2979,6 +3049,31 @@ async def chat_with_progress(
             "data": f"Found {len(chunks)} relevant regulation sections",
         }
 
+    # 2026-10-08 — answer pipeline phase 2: does the library text cover the
+    # question? If not, research the missing items on official websites now,
+    # before writing, and fold the findings INTO context_str (the judge, the
+    # citation checks and regeneration must see the same world; see above).
+    coverage = None
+    web_findings: list = []
+    if pipeline_v2_enabled:
+        from rag.coverage import check_coverage, vessel_line
+        _vline = vessel_line(vessel_profile)
+        coverage = await check_coverage(
+            anthropic_client, question=query, library_text=context_str, vessel_line=_vline,
+            history=router_context(conversation_history) or "",
+        )
+        logger.info("coverage: %s, missing=%s", coverage.status, [m.item for m in coverage.missing])
+        if coverage.missing and await _web_research_allowed(
+                pool, user_id, web_research_daily_cap, web_research_monthly_cap):
+            from rag.web_research import format_block, research
+            yield {"event": "status", "data": "Checking Coast Guard, IMO and other official sources…"}
+            web_findings = await research(anthropic_client, coverage.missing, question=query, vessel=_vline)
+            _web_block = format_block(web_findings)
+            if _web_block:
+                context_str = context_str + "\n\n" + _web_block
+            logger.info("web research: %d/%d found",
+                        sum(1 for f in web_findings if f.found), len(web_findings))
+
     # Stage 4: Construct messages and call Claude
     messages = _build_chat_messages(
         query, conversation_history, vessel_profile, context_str, credential_context,
@@ -3104,6 +3199,7 @@ async def chat_with_progress(
         openai_api_key=openai_api_key,
         effective_system_prompt=effective_system_prompt,
         chunks=chunks,
+        web_findings=web_findings,
     )
     input_tokens += regen_in
     output_tokens += regen_out
@@ -3132,6 +3228,23 @@ async def chat_with_progress(
         regex_matched
         or (judge_on_cited_enabled and len(verified_cited) >= 1)
     )
+
+    # 2026-10-08 — phase 2 researched the gaps before writing; the judge runs
+    # in the background as a cross-check and recovery (oracle, web card,
+    # Layer C) is off.
+    if pipeline_v2_enabled and should_run_judge and regex_matched:
+        from rag.hedge_judge import judge_hedge
+        _spawn_background(
+            judge_hedge(
+                question=query, answer=cleaned_answer, chunks=chunks,
+                citations=[{"source": c.source, "section_number": c.section_number,
+                            "section_title": c.section_title} for c in verified_cited],
+                anthropic_client=anthropic_client, mode="regex_triggered",
+            ),
+            "hedge judge (phase 2, background)",
+        )
+        should_run_judge = False
+        web_fallback_enabled = False
 
     if should_run_judge and not regex_matched:
         # 2026-09-26 — a precautionary verdict drives no decision: web
@@ -3383,6 +3496,16 @@ async def chat_with_progress(
         "vessel_update": vessel_update,
         "regenerated": regenerated,
     }
+    if coverage is not None:
+        from rag.web_research import sources_payload
+        done_payload["coverage"] = {"status": coverage.status, "missing": [m.item for m in coverage.missing]}
+        done_payload["web_sources"] = sources_payload(web_findings)
+        if coverage.missing:
+            _spawn_background(
+                _log_gaps(pool, user_id=user_id, conversation_id=conversation_id, question=query,
+                          coverage=coverage, findings=web_findings),
+                "corpus gap log",
+            )
     if web_fallback_card is not None:
         done_payload["web_fallback"] = {
             "fallback_id": web_fallback_card.fallback_id,

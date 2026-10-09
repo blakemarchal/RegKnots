@@ -96,6 +96,21 @@ class ConversationMessage(BaseModel):
     image_attachments: list[dict] = []
     # 2026-10-05 — documents attached to a user message: [{id, title, pages}]
     documents: list[dict] = []
+    # 2026-10-08 — web sources an assistant answer cites (answer pipeline phase 2)
+    web_sources: list[dict] = []
+
+
+def _json_list(value) -> list[dict]:
+    """A JSONB array as a list (asyncpg returns JSONB as text)."""
+    if not value:
+        return []
+    if isinstance(value, str):
+        import json
+        try:
+            value = json.loads(value)
+        except ValueError:
+            return []
+    return value if isinstance(value, list) else []
 
 
 # ── Endpoints ──────────────────────────────────────────────────────────────────
@@ -379,7 +394,7 @@ async def get_conversation_messages(
         rows = await conn.fetch(
             """
             SELECT role, content, cited_regulation_ids, created_at,
-                   tier_metadata, cancelled, image_attachments, document_ids
+                   tier_metadata, cancelled, image_attachments, document_ids, web_sources
             FROM messages
             WHERE conversation_id = $1
             ORDER BY created_at ASC
@@ -461,6 +476,7 @@ async def get_conversation_messages(
                 tier_metadata=tier_md,
                 cancelled=bool(row["cancelled"]) if row["cancelled"] is not None else False,
                 image_attachments=image_attachments,
+                web_sources=_json_list(row["web_sources"]),
                 documents=[
                     {"id": str(d), **doc_titles.get(d, {"title": "Deleted document", "pages": None})}
                     for d in (row["document_ids"] or [])

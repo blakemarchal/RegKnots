@@ -16,13 +16,15 @@ import sys
 import asyncpg
 
 from ingest.config import settings
-from ingest.store import _jurisdictions_for_source
+from ingest.store import PER_DOCUMENT_JURISDICTIONS, _jurisdictions_for_source
 
 
 def drift(rows) -> list[tuple[str, list[str], list[str], int]]:
-    """(source, stored, expected, rows) for every group whose stored tags differ."""
+    """(source, stored, expected, rows) for every group whose stored tags differ.
+    Sources tagged per document (web_ingest) are skipped."""
     return [(r["source"], list(r["jurisdictions"] or []), _jurisdictions_for_source(r["source"]), r["n"])
-            for r in rows if list(r["jurisdictions"] or []) != _jurisdictions_for_source(r["source"])]
+            for r in rows if r["source"] not in PER_DOCUMENT_JURISDICTIONS
+            and list(r["jurisdictions"] or []) != _jurisdictions_for_source(r["source"])]
 
 
 async def main() -> int:

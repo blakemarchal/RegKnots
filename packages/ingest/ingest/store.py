@@ -247,9 +247,16 @@ _SOURCE_TO_JURISDICTIONS: dict[str, list[str]] = {
     "imdg":             ["intl"],
     "imdg_supplement":  ["intl"],
     "who_ihr":          ["intl"],
+    "web_ingest":       ["intl"],   # 2026-10-08 — per document; see PER_DOCUMENT_JURISDICTIONS
     # ERG — US DOT publication, internationally referenced; dual-tagged.
     "erg":              ["us", "intl"],
 }
+
+
+# 2026-10-08 — sources whose rows carry their own jurisdictions (set per
+# document at write time, e.g. web_ingest by the page's domain). The deploy
+# tag check (ingest/tag_check.py) skips them.
+PER_DOCUMENT_JURISDICTIONS: frozenset[str] = frozenset({"web_ingest"})
 
 
 def _jurisdictions_for_source(source: str) -> list[str]:

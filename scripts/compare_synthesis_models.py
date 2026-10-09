@@ -38,6 +38,11 @@ sources-and-gaps prompt; docs/specs/answer-pipeline-2026-10-08.md). Each questio
 twice through the real engine, once per configuration; both judges see the phase-1 context (a
 superset of today's). Adds `plumbing`: answers that describe the search ("didn't surface",
 "retrieved", "excerpts"). 16 questions incl. this week's real hedges, ~$7.
+
+2026-10-09 — `--pipeline-ab` compares phase 1 ("phase1", live since 2026-10-09) with phase 2
+("v2": coverage check, web research before writing). The phase-1 set plus GAPS, questions whose
+answer is known to be outside the corpus. Adds `web_used`, `web_sources_cited` and the time from
+the question to the synthesis call per variant. ~$10.
 """
 import asyncio
 import copy
@@ -72,9 +77,10 @@ import eval_rag_baseline as G  # noqa: E402
 
 PROMPT_AB = "--prompt-ab" in sys.argv
 PHASE1_AB = "--phase1-ab" in sys.argv
+PIPELINE_AB = "--pipeline-ab" in sys.argv
 OUT = REPO / "data" / "eval" / "model_compare" / (
     time.strftime("%Y%m%d-%H%M%S", time.gmtime())
-    + ("-prompt-ab" if PROMPT_AB else "-phase1-ab" if PHASE1_AB else ""))
+    + ("-prompt-ab" if PROMPT_AB else "-phase1-ab" if PHASE1_AB else "-pipeline-ab" if PIPELINE_AB else ""))
 OUT.mkdir(parents=True, exist_ok=True)
 
 HAIKU, SONNET, OPUS = SIDECAR_MODEL, "claude-sonnet-5-5", "claude-opus-5-5"
@@ -101,6 +107,10 @@ if PHASE1_AB:
         "phase1": {"model_led_grounding_enabled": True, "whole_sections_enabled": True,
                    "provenance_prompt_enabled": True},
     }
+if PIPELINE_AB:
+    _p1 = {"model_led_grounding_enabled": True, "whole_sections_enabled": True, "provenance_prompt_enabled": True}
+    VARIANTS = {"phase1": VARIANTS["opus_low"], "v2": VARIANTS["opus_low"]}
+    CAPTURE_FLAGS = {"phase1": _p1, "v2": {**_p1, "pipeline_v2_enabled": True}}
 ROUTER = {HAIKU: "haiku", SONNET: "sonnet_today", OPUS: "opus_low"}
 # Answers that describe the search instead of answering (the 2026-10 hedges).
 PLUMBING = re.compile(r"retriev|excerpt|surfac|in this query|knowledge base|didn'?t come up|not in what I", re.I)
@@ -132,6 +142,14 @@ WEEK: list[str] = [
     "Pilot ladder step thickness",                                           # 2026-10-08
     "Solas ch v reg 23 pilot ladder",                                        # 2026-10-09
     "SOLAS Chapter III, Part B, Section I, Regulation 20 life boat lowering",  # 2026-09-23
+]
+# --pipeline-ab: answers known to be outside the corpus (2026-10-09), asked for the Captain's vessel
+GAPS: list[str] = [
+    "Is Form CG-835 still the form for reporting a sailing short?",
+    "When do the EPA VIDA vessel discharge standards take effect, and has the Coast Guard issued its implementing rule?",
+    "Is the Mediterranean Sea emission control area for SOx in force, and from what date?",
+    "What does the 2025 Coast Guard cybersecurity final rule require on U.S.-flag vessels, and by when?",
+    "Has the IMO adopted mandatory reporting of containers lost at sea, and when does it apply?",
 ]
 LABELS = ["A", "B", "C", "D", "E", "F"]
 
@@ -288,6 +306,7 @@ async def post_checks(r: dict, q, vc, chunks, pool) -> None:
     r["ungrounded_un"] = E._verify_un_claims(ans, chunks or [])
     r["hedge"] = detect_hedge(ans)
     r["plumbing"] = bool(PLUMBING.search(ans))
+    r["web_cites"] = len(re.findall(r"\[Web:", ans))
     r["chars"] = len(ans)
     if q is not None:
         exp = G._expected_for_vessel(q, vc)
@@ -336,8 +355,10 @@ async def one_question(item, pool, client, oai, okey, conv_id, user_id, rng) -> 
     if CAPTURE_FLAGS:
         for name, flags in CAPTURE_FLAGS.items():
             boxes[name] = await capture(query, profile, pool, client, okey, conv_id, user_id, flags)
-        box = boxes[list(CAPTURE_FLAGS)[-1]]          # the judges see phase 1's (larger) context
+        box = boxes[list(CAPTURE_FLAGS)[-1]]          # the judges see the last configuration's context
         rec["context_chars"] = {n: len(user_text(b["kwargs"])) for n, b in boxes.items() if "kwargs" in b}
+        rec["pre_synthesis_by_variant"] = {n: b.get("pre_synthesis_s") for n, b in boxes.items()}
+        rec["web_block"] = {n: ("WEB FINDINGS" in user_text(b["kwargs"])) for n, b in boxes.items() if "kwargs" in b}
     else:
         box = await capture(query, profile, pool, client, okey, conv_id, user_id)
     rec.update({k: box.get(k) for k in ("route_model", "route_score", "off_topic", "pre_synthesis_s")})
@@ -414,7 +435,7 @@ def ranks(scores: dict[str, float]) -> dict[str, float]:
 def summarize(recs: list[dict]) -> dict:
     done = [r for r in recs if "runs" in r]
     rows = {}
-    for name in list(VARIANTS) + ([] if (PROMPT_AB or PHASE1_AB) else ["router_mix"]):
+    for name in list(VARIANTS) + ([] if (PROMPT_AB or PHASE1_AB or PIPELINE_AB) else ["router_mix"]):
         per = []
         for r in done:
             v = ROUTER.get(r.get("route_model"), "sonnet_today") if name == "router_mix" else name
@@ -457,6 +478,9 @@ def summarize(recs: list[dict]) -> dict:
             "wrong_sub_mentions": sum(len(x.get("wrong_sub") or []) for x in runs),
             "hedged": sum(1 for x in runs if x.get("hedge")),
             "plumbing": sum(1 for x in runs if x.get("plumbing")),
+            "web_used": sum(1 for p in per if (p["rec"].get("web_block") or {}).get(p["v"])),
+            "web_sources_cited": sum(x.get("web_cites", 0) for x in runs),
+            "pre_synthesis_median": med([(p["rec"].get("pre_synthesis_by_variant") or {}).get(p["v"]) for p in per]),
             "chars_median": med([x["chars"] for x in runs]),
             "judge_opus_overall": judged("opus", "overall"),
             "judge_gpt_overall": judged("gpt4o", "overall"),
@@ -480,7 +504,7 @@ async def main() -> None:
     okey = getattr(settings, "openai_api_key", "") or os.environ.get("OPENAI_API_KEY", "")
     oai = AsyncOpenAI(api_key=okey)
     Q = {q.qid: q for q in G.QUESTIONS}
-    gold = GOLD[:10] if PROMPT_AB else GOLD[:6] if PHASE1_AB else GOLD
+    gold = GOLD[:10] if PROMPT_AB else GOLD[:6] if (PHASE1_AB or PIPELINE_AB) else GOLD
     items = [(qid, Q[qid].query, gold_profile(vc), Q[qid], vc) for qid, vc in gold]
     row = await pool.fetchrow("SELECT * FROM vessels WHERE imo_mmsi = '9333022'")
     cap_profile = {k: v for k, v in {
@@ -489,12 +513,14 @@ async def main() -> None:
         "route_types": list(row["route_types"] or []), "cargo_types": list(row["cargo_types"] or []),
     }.items() if v not in (None, [], {})}
     items += [(f"REAL{i + 1}", qq, cap_profile, None, "captain") for i, qq in enumerate(REAL)]
-    if PROMPT_AB or PHASE1_AB:
-        hedged = HEDGED[:4] if PHASE1_AB else HEDGED
+    if PROMPT_AB or PHASE1_AB or PIPELINE_AB:
+        hedged = HEDGED[:4] if (PHASE1_AB or PIPELINE_AB) else HEDGED
         items += [(f"HEDGE{i + 1}", qq, gold_profile(vc) if vc != "V0" else None, None, vc)
                   for i, (qq, vc) in enumerate(hedged)]
-    if PHASE1_AB:
+    if PHASE1_AB or PIPELINE_AB:
         items += [(f"WEEK{i + 1}", qq, cap_profile, None, "captain") for i, qq in enumerate(WEEK)]
+    if PIPELINE_AB:
+        items += [(f"GAP{i + 1}", qq, cap_profile, None, "captain") for i, qq in enumerate(GAPS)]
 
     user_id = await pool.fetchval("SELECT id FROM users WHERE email = 'blakemarchal@gmail.com'")
     conv_id = uuid4()
@@ -554,7 +580,8 @@ async def main() -> None:
     print("\n=== META", json.dumps(meta))
     cols = ["n", "ttft_median", "ttft_p90", "total_median", "output_tokens_mean", "thinking_share", "truncated",
             "cost_cold_mean", "cost_warm_mean", "gold_specific_hit", "gold_any_hit", "answers_with_unverified",
-            "unverified_total", "ungrounded_un", "wrong_sub_mentions", "hedged", "plumbing", "chars_median",
+            "unverified_total", "ungrounded_un", "wrong_sub_mentions", "hedged", "plumbing", "web_used",
+            "web_sources_cited", "pre_synthesis_median", "chars_median",
             "judge_opus_overall", "judge_gpt_overall", "judge_opus_accuracy", "judge_gpt_accuracy",
             "mean_rank_opus", "mean_rank_gpt", "best_opus", "best_gpt", "errors_flagged_opus", "errors_flagged_gpt"]
     print("=== VARIANTS")

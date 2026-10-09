@@ -155,6 +155,9 @@ _SOURCE_TO_TIER: dict[str, int] = {
     # 42 CFR 71 (not in corpus — WHO IHR is the authoritative source
     # users should cite for ship sanitation certificates and port health).
     "who_ihr": 1,
+    # 2026-10-08 — official documents added from the phase-2 web research:
+    # guidance-level until a person reviews one into a named source.
+    "web_ingest": 2,
 }
 
 _TIER_LABEL: dict[int, str] = {

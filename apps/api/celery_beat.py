@@ -83,6 +83,12 @@ celery.conf.beat_schedule = {
         # re-synced from Stripe. Daily at 12:30 UTC.
         "schedule": crontab(hour=12, minute=30),
     },
+    "ingest-web-gaps": {
+        "task": "app.tasks.ingest_web_gaps",
+        # 2026-10-08 — official documents the phase-2 web research found join
+        # the library (app/web_ingest.py). A few per run; no-op without gaps.
+        "schedule": crontab(minute="*/15"),
+    },
     "purge-user-documents-daily": {
         "task": "app.tasks.purge_user_documents",
         # 2026-10-05 — chat-attached documents the internal check found not

@@ -158,6 +158,9 @@ SOURCE_TO_JURISDICTIONS: dict[str, list[str]] = {
     "imdg":             ["intl"],
     "imdg_supplement":  ["intl"],
     "who_ihr":          ["intl"],
+    # 2026-10-08 — set per document by domain (app/web_ingest.py); this is
+    # only the fallback for an unknown domain.
+    "web_ingest":       ["intl"],
     # Dual-tagged: ERG is a US DOT publication BUT is the de-facto
     # international first-responder reference for hazmat. Tagging dual
     # so UN-number queries surface it under any flag.

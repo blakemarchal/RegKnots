@@ -211,6 +211,9 @@ SOURCE_GROUPS: dict[str, tuple[str, ...]] = {
     "imo_ref": ("imo_iamsar", "nga_pubs"),
     # Port State Control regimes (Tokyo MOU + Paris MOU).
     "mou": ("mou_psc",),
+    # 2026-10-08 — official documents the phase-2 web research found and
+    # app.tasks.ingest_web_gaps added (jurisdictions per document, by domain).
+    "web": ("web_ingest",),
 }
 
 # Per-group candidate pool sizes. CFR is larger because it covers three
