@@ -5,7 +5,7 @@ import { useState, type ReactNode } from 'react'
 import type { Components } from 'react-markdown'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import type { Message, CitedRegulation } from '@/types/chat'
+import type { Message, CitedRegulation, WebSourceRef } from '@/types/chat'
 import { CitationChip } from './CitationChip'
 import { scanCitations, extractFooterCitations } from '@/lib/parseMessage'
 // 2026-07-19 Wk2 — per-answer export (copy-with-citations + print-to-PDF)
@@ -246,11 +246,39 @@ function AnswerExportButtons({ message, question, vesselName }: {
 // ── Inline citation injection ──────────────────────────────────────────────────
 // The patterns and the scanner live in lib/parseMessage.ts (tested there).
 
+// 2026-10-08 — a web source (answer pipeline phase 2) is a link to the page,
+// sky-blue so it never reads as a corpus-verified chip.
+function WebSourceChip({ label, source }: { label: string; source?: WebSourceRef }) {
+  const text = label.replace(/^Web:\s*/, '')
+  const cls = 'inline-flex items-center gap-1 px-1.5 py-0.5 mx-0.5 rounded-md text-[11px] font-mono align-baseline ' +
+    'bg-sky-950/50 text-sky-300 border border-sky-800/50'
+  const icon = (
+    <svg className="w-3 h-3 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+      <circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" />
+    </svg>
+  )
+  if (!source?.url) return <span className={cls} title="From an official website">{icon}{text}</span>
+  return (
+    <a href={source.url} target="_blank" rel="noopener noreferrer" className={cls + ' hover:bg-sky-900/50'}
+      title={`Opens ${source.domain}: not RegKnot's library${source.verified ? '' : ' (quote not matched on the page)'}`}>
+      {icon}{text}
+    </a>
+  )
+}
+
+function findWebSource(label: string, webSources: WebSourceRef[]): WebSourceRef | undefined {
+  const exact = webSources.find(w => w.label === label)
+  if (exact) return exact
+  const domain = label.replace(/^Web:\s*/, '').split(/\s+[—-]\s+/)[0]?.trim()
+  return webSources.find(w => w.domain === domain)
+}
+
 function injectChips(
   children: ReactNode,
   citationMap: Map<string, { source: string; title: string }>,
   onTap: (source: string, sectionNumber: string, sectionTitle: string) => void,
   prefix: string,
+  webSources: WebSourceRef[] = [],
 ): ReactNode {
   const processString = (text: string, pfx: string): ReactNode => {
     const hits = scanCitations(text)
@@ -259,6 +287,12 @@ function injectChips(
     let last = 0
     for (const hit of hits) {
       if (hit.index > last) nodes.push(text.slice(last, hit.index))
+      if (hit.sourceHint === 'web') {
+        nodes.push(<WebSourceChip key={`${pfx}-${hit.index}`} label={hit.sectionNumber}
+          source={findWebSource(hit.sectionNumber, webSources)} />)
+        last = hit.index + hit.length
+        continue
+      }
       const info = citationMap.get(hit.sectionNumber)
       nodes.push(
         <CitationChip
@@ -293,13 +327,14 @@ function injectChips(
 function makeComponents(
   citations: CitedRegulation[],
   onTap: (source: string, sectionNumber: string, sectionTitle: string) => void,
+  webSources: WebSourceRef[] = [],
 ): Components {
   const citationMap = new Map(
     citations.map(c => [c.section_number, { source: c.source, title: c.section_title }]),
   )
 
   function Inline({ children, prefix }: { children: ReactNode; prefix: string }) {
-    return <>{injectChips(children, citationMap, onTap, prefix)}</>
+    return <>{injectChips(children, citationMap, onTap, prefix, webSources)}</>
   }
 
   return {
@@ -507,7 +542,8 @@ export function ChatMessage({
     )
   }
 
-  const components = makeComponents(message.citations, onCitationTap)
+  const webSources = message.web_sources ?? []
+  const components = makeComponents(message.citations, onCitationTap, webSources)
 
   // Sprint D6.87 — footer chips are derived from the actual answer
   // text (post-render) so they mirror what's visually highlighted
@@ -519,7 +555,9 @@ export function ChatMessage({
   const citationMapForFooter = new Map(
     message.citations.map(c => [c.section_number, { source: c.source, title: c.section_title }]),
   )
-  const footerCitations = extractFooterCitations(message.content, citationMapForFooter)
+  // 2026-10-08 — web sources get their own footer below, never a corpus chip.
+  const footerCitations = extractFooterCitations(message.content, citationMapForFooter).filter(c => c.source !== 'web')
+  const citedWeb = webSources.filter(w => message.content.includes(w.label))
   // 2026-10-05 — the "Corpus-verified" count covers regulations only: a
   // citation of the user's own document ([Doc: …]) or the fleet's ([Company: …])
   // is not checked against the regulation corpus.
@@ -598,6 +636,24 @@ export function ChatMessage({
                 />
               ))}
             </div>
+          </div>
+        )}
+
+        {/* 2026-10-08 — answer pipeline phase 2: the official pages this answer
+            cites, apart from the corpus-verified chips. */}
+        {citedWeb.length > 0 && !isStreaming && (
+          <div className="mt-3 pt-3 border-t border-white/5">
+            <p className="font-mono text-[11px] text-sky-300/80 mb-1.5">From official websites (not RegKnot&apos;s library)</p>
+            <ul className="space-y-1">
+              {citedWeb.map(w => (
+                <li key={w.label} className="font-mono text-[11px] leading-snug">
+                  <a href={w.url} target="_blank" rel="noopener noreferrer" className="text-sky-300 hover:underline">
+                    {w.domain}: {w.title}
+                  </a>
+                  {!w.verified && <span className="text-[#6b7594]"> · quote not matched on the page</span>}
+                </li>
+              ))}
+            </ul>
           </div>
         )}
 

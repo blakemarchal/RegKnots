@@ -106,6 +106,20 @@ export interface Message {
   image_attachments?: ChatImageAttachment[]
   // 2026-10-05 — documents attached to this turn (user messages).
   documents?: ChatDocumentRef[]
+  // 2026-10-08 — official web pages the answer cites (answer pipeline phase 2)
+  web_sources?: WebSourceRef[]
+}
+
+// 2026-10-08 — a web page the phase-2 research found; the answer cites it as
+// [Web: domain — title] (label) and the chip opens url.
+export interface WebSourceRef {
+  label: string
+  url: string
+  title: string
+  publisher?: string
+  domain: string
+  verified: boolean
+  item?: string
 }
 
 export interface ApiResponse {
@@ -117,4 +131,5 @@ export interface ApiResponse {
   output_tokens: number
   web_fallback?: WebFallbackCard | null
   tier_metadata?: TierMetadata | null
+  web_sources?: WebSourceRef[]
 }

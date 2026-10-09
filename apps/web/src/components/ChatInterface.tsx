@@ -58,6 +58,8 @@ interface ConversationMessage {
   image_attachments?: ChatImageAttachment[]
   // 2026-10-05 — documents attached to a user message
   documents?: ChatDocumentRef[]
+  // 2026-10-08 — web sources an assistant answer cites (phase 2)
+  web_sources?: import('@/types/chat').WebSourceRef[]
 }
 
 interface Props {
@@ -387,6 +389,7 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
           // reload. Empty for assistant messages and pre-D6.97 history.
           image_attachments: r.image_attachments ?? [],
           documents: r.documents ?? [],
+          web_sources: r.web_sources ?? [],
         }))
         setMessages(restored)
         // Sync vessel selector if the conversation has one. Skip when
@@ -515,6 +518,7 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
                 // recovery hydration path too.
                 image_attachments: r.image_attachments ?? [],
                 documents: r.documents ?? [],
+                web_sources: r.web_sources ?? [],
               }))
               setMessages(restored)
               setConversationId(convId)
@@ -836,6 +840,7 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
                     citations: data.cited_regulations,
                     web_fallback: data.web_fallback ?? null,
                     tier_metadata: data.tier_metadata ?? null,
+                    web_sources: data.web_sources ?? [],
                   }
                 : m
             ))
@@ -848,6 +853,7 @@ function ChatInterfaceInner({ initialConversationId, initialQuery }: Props) {
               citations: data.cited_regulations,
               web_fallback: data.web_fallback ?? null,
               tier_metadata: data.tier_metadata ?? null,
+              web_sources: data.web_sources ?? [],
               created_at: new Date().toISOString(),
             }
             setMessages(prev => [...prev, assistantMsg])

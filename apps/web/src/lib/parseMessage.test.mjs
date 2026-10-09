@@ -162,3 +162,11 @@ test('2026-10-05: chips for the user own documents and the fleet company documen
     ['Company: TSMS Manual §4.2 Drills', 'company'],
   ])
 })
+
+test('2026-10-08: web sources are their own chip, and a CFR cite beside one still chips', () => {
+  const hits = text => scanCitations(text).map(h => [h.sectionNumber, h.sourceHint])
+  assert.deepEqual(hits('In force 1 January 2028 [Web: imo.org — MSC.576(110) Performance Standards], see 46 CFR 163.003-11.'), [
+    ['Web: imo.org — MSC.576(110) Performance Standards', 'web'],
+    ['46 CFR 163.003-11', 'cfr_46'],
+  ])
+})

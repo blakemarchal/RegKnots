@@ -36,6 +36,9 @@ export interface ChatStreamDone {
   // Sprint D6.84 — confidence tier router metadata. Surfaced ONLY when
   // CONFIDENCE_TIERS_MODE=live on the backend; null in shadow / off.
   tier_metadata?: import('@/types/chat').TierMetadata | null
+  // 2026-10-08 — official web pages the answer cites (answer pipeline phase 2)
+  web_sources?: import('@/types/chat').WebSourceRef[]
+  coverage?: { status: string; missing: string[] }
 }
 
 /**

@@ -57,6 +57,14 @@ const CFR_CHIP = {
 }
 
 const CITATION_PATTERNS: CitationPattern[] = [
+  // 2026-10-08 — official web pages (answer pipeline phase 2):
+  // [Web: uscg.mil — Title]. The chip opens the page; message.web_sources
+  // maps the label to its URL.
+  {
+    re: /\[(Web:\s*[^\]]+?)\s*\]/g,
+    sourceHint: 'web',
+    toSection: m => m[1].trim(),
+  },
   // 2026-09-27 — the fleet's own documents in workspace chats:
   // [Company: TSMS Manual §4.2 Emergency Drills]. The sheet resolves the
   // label inside the chat's workspace (GET /workspaces/{id}/documents/citation).
