@@ -44,6 +44,12 @@ superset of today's). Adds `plumbing`: answers that describe the search ("didn't
 answer is known to be outside the corpus. Adds `web_used`, `web_sources_cited` and the time from
 the question to the synthesis call per variant. ~$10.
 
+2026-10-13 — `--dates-ab` compares the production answer path ("today") with the IMO dates
+prompt ("dates": today's date in the user turn and the IMO resolutions / dates-and-amendments
+block, IMO_DATES_PROMPT_ENABLED; docs/specs/imo-harvester-2026-10-13.md), on the corpus after
+the IMO resolution backlog harvest. Questions: IMO, about adopted amendments and their dates
+(the Captain's vessel), plus 4 gold and the Captain's two for regressions. ~$5.
+
 2026-10-09 — `--session-judge` (Blake: use the Claude subscription for evaluation work): the
 answers still come from the production API (they are what is measured) and GPT-4o still judges,
 but the Opus judge call is replaced by a blind packet per question in OUT/judge_packets/
@@ -85,10 +91,12 @@ import eval_rag_baseline as G  # noqa: E402
 PROMPT_AB = "--prompt-ab" in sys.argv
 PHASE1_AB = "--phase1-ab" in sys.argv
 PIPELINE_AB = "--pipeline-ab" in sys.argv
+DATES_AB = "--dates-ab" in sys.argv
 SESSION_JUDGE = "--session-judge" in sys.argv
 OUT = REPO / "data" / "eval" / "model_compare" / (
     time.strftime("%Y%m%d-%H%M%S", time.gmtime())
-    + ("-prompt-ab" if PROMPT_AB else "-phase1-ab" if PHASE1_AB else "-pipeline-ab" if PIPELINE_AB else ""))
+    + ("-prompt-ab" if PROMPT_AB else "-phase1-ab" if PHASE1_AB else "-pipeline-ab" if PIPELINE_AB
+       else "-dates-ab" if DATES_AB else ""))
 OUT.mkdir(parents=True, exist_ok=True)
 
 HAIKU, SONNET, OPUS = SIDECAR_MODEL, "claude-sonnet-5-5", "claude-opus-5-5"
@@ -119,6 +127,11 @@ if PIPELINE_AB:
     _p1 = {"model_led_grounding_enabled": True, "whole_sections_enabled": True, "provenance_prompt_enabled": True}
     VARIANTS = {"phase1": VARIANTS["opus_low"], "v2": VARIANTS["opus_low"]}
     CAPTURE_FLAGS = {"phase1": _p1, "v2": {**_p1, "pipeline_v2_enabled": True}}
+if DATES_AB:
+    _v2 = {"model_led_grounding_enabled": True, "whole_sections_enabled": True,
+           "provenance_prompt_enabled": True, "pipeline_v2_enabled": True}
+    VARIANTS = {"today": VARIANTS["opus_low"], "dates": VARIANTS["opus_low"]}
+    CAPTURE_FLAGS = {"today": _v2, "dates": {**_v2, "imo_dates_prompt_enabled": True}}
 ROUTER = {HAIKU: "haiku", SONNET: "sonnet_today", OPUS: "opus_low"}
 # Answers that describe the search instead of answering (the 2026-10 hedges).
 PLUMBING = re.compile(r"retriev|excerpt|surfac|in this query|knowledge base|didn'?t come up|not in what I", re.I)
@@ -158,6 +171,19 @@ GAPS: list[str] = [
     "Is the Mediterranean Sea emission control area for SOx in force, and from what date?",
     "What does the 2025 Coast Guard cybersecurity final rule require on U.S.-flag vessels, and by when?",
     "Has the IMO adopted mandatory reporting of containers lost at sea, and when does it apply?",
+]
+# --dates-ab: adopted IMO amendments and their dates, asked for the Captain's vessel (2026-10-13)
+IMO: list[str] = [
+    "When can we use VDES instead of AIS?",
+    "Is the MASS Code mandatory yet?",
+    "What changed in the IMO enclosed space entry recommendations?",
+    "What are the new pilot ladder requirements and when do they apply?",
+    "What is the CII required reduction factor for 2027?",
+    "What does the latest amendment to the LSA Code change, and when does it apply?",
+    "Are there new IMDG Code amendments coming, and when do they become mandatory?",
+    "What are the current IMO procedures for port State control?",
+    "Do the 2024 SEEMP guidelines change what we need in SEEMP Part III?",
+    "Which IMO amendments enter into force on 1 January 2026 that affect a container ship?",
 ]
 LABELS = ["A", "B", "C", "D", "E", "F"]
 
@@ -451,7 +477,7 @@ def ranks(scores: dict[str, float]) -> dict[str, float]:
 def summarize(recs: list[dict]) -> dict:
     done = [r for r in recs if "runs" in r]
     rows = {}
-    for name in list(VARIANTS) + ([] if (PROMPT_AB or PHASE1_AB or PIPELINE_AB) else ["router_mix"]):
+    for name in list(VARIANTS) + ([] if (PROMPT_AB or PHASE1_AB or PIPELINE_AB or DATES_AB) else ["router_mix"]):
         per = []
         for r in done:
             v = ROUTER.get(r.get("route_model"), "sonnet_today") if name == "router_mix" else name
@@ -520,7 +546,8 @@ async def main() -> None:
     okey = getattr(settings, "openai_api_key", "") or os.environ.get("OPENAI_API_KEY", "")
     oai = AsyncOpenAI(api_key=okey)
     Q = {q.qid: q for q in G.QUESTIONS}
-    gold = GOLD[:10] if PROMPT_AB else GOLD[:6] if (PHASE1_AB or PIPELINE_AB) else GOLD
+    gold = (GOLD[:10] if PROMPT_AB else GOLD[:6] if (PHASE1_AB or PIPELINE_AB)
+            else GOLD[:4] if DATES_AB else GOLD)
     items = [(qid, Q[qid].query, gold_profile(vc), Q[qid], vc) for qid, vc in gold]
     row = await pool.fetchrow("SELECT * FROM vessels WHERE imo_mmsi = '9333022'")
     cap_profile = {k: v for k, v in {
@@ -537,6 +564,8 @@ async def main() -> None:
         items += [(f"WEEK{i + 1}", qq, cap_profile, None, "captain") for i, qq in enumerate(WEEK)]
     if PIPELINE_AB:
         items += [(f"GAP{i + 1}", qq, cap_profile, None, "captain") for i, qq in enumerate(GAPS)]
+    if DATES_AB:
+        items += [(f"IMO{i + 1}", qq, cap_profile, None, "captain") for i, qq in enumerate(IMO)]
 
     user_id = await pool.fetchval("SELECT id FROM users WHERE email = 'blakemarchal@gmail.com'")
     conv_id = uuid4()

@@ -26,9 +26,8 @@ _RUN_INGEST = Path(__file__).resolve().parents[3] / "scripts" / "run_ingest.sh"
 # dropped on the server and the admin runs
 #   `uv run python -m ingest.cli --source <name> --update`
 # the notify hook fires alerts to opted-in users if content actually
-# changed. The SOLAS/STCW supplement DETECTION is covered separately by
-# `check_solas_supplements`, which emails an alert when new MSC
-# references appear so a human can review + ingest manually.
+# changed. New IMO resolutions (amendments to SOLAS, MARPOL, STCW and the
+# codes) come in on their own: `harvest_imo_resolutions` (2026-10-13).
 _AUTOMATABLE_SOURCES: list[str] = [
     "cfr_33",
     "cfr_46",
@@ -247,115 +246,48 @@ async def _send_trial_reminders_async():
 # replaced the per-ingest reindex on 2026-07-19 for exactly that reason.
 
 
+# 2026-10-13 — IMO resolutions: ingest.imo_harvest reads the IMO's Index of
+# IMO Resolutions, adds new MSC / MEPC / Assembly resolutions (and the codes
+# they amend, when missing) to the corpus, and re-checks any whose certified
+# text was pending. It replaces the old scraper, which looked for "MSC.n(m)"
+# strings on three pages and had found nothing since the IMO site moved
+# (the Marshall Islands page failed its TLS check every run; IMO pages 301).
+# Spec: docs/specs/imo-harvester-2026-10-13.md.
+_HARVEST_REPORT = Path(__file__).resolve().parents[3] / "data" / "raw" / "imo_harvest" / "report-latest.json"
+
+
+@celery.task(name="app.tasks.harvest_imo_resolutions", bind=True, max_retries=1)
+def harvest_imo_resolutions(self):
+    """Weekly: new IMO resolutions into the corpus, then a digest email."""
+    import json
+
+    try:
+        result = subprocess.run(
+            [str(_RUN_INGEST), "--module", "ingest.imo_harvest"],
+            cwd=_INGEST_DIR, capture_output=True, text=True, timeout=3 * 3600,
+        )
+    except subprocess.TimeoutExpired:
+        logger.error("IMO harvest timed out after 3 hours")
+        raise self.retry(exc=RuntimeError("timeout"), countdown=6 * 3600)
+    tail = (result.stdout or "")[-500:] + (result.stderr or "")[-500:]
+    try:
+        report = json.loads(_HARVEST_REPORT.read_text(encoding="utf-8"))
+    except Exception:
+        report = None
+    if result.returncode != 0 or report is None:
+        logger.error("IMO harvest failed (rc=%d): %s", result.returncode, tail)
+        _send_harvest_email(report, failed_tail=tail)
+        raise self.retry(exc=RuntimeError(f"rc={result.returncode}"), countdown=6 * 3600)
+    logger.info("IMO harvest: %d harvested, %d failed", len(report.get("harvested", [])),
+                len(report.get("failed", [])))
+    if report.get("harvested") or report.get("failed") or report.get("superseded"):
+        _send_harvest_email(report)
+
+
 @celery.task(name="app.tasks.check_solas_supplements")
 def check_solas_supplements():
-    """Check for new IMO amendments (SOLAS and STCW) from public notice sources.
-
-    Task name retained for backward compatibility with celery beat schedule.
-    """
-    _run_async(_check_imo_amendments_async())
-
-
-# Sources scraped for new IMO amendment references.
-# Each entry lists the conventions whose references we expect on that page.
-_IMO_AMENDMENT_SOURCES = [
-    {
-        "name": "Marshall Islands Marine Notices",
-        "url": "https://www.register-iri.com/maritime/marine-notices/",
-        "keywords": ["SOLAS", "STCW"],
-    },
-    {
-        "name": "IMO Meeting Summaries",
-        "url": "https://www.imo.org/en/MediaCentre/MeetingSummaries",
-        "keywords": ["SOLAS", "STCW"],
-    },
-    {
-        "name": "IMO Maritime Safety Committee",
-        "url": "https://www.imo.org/en/MediaCentre/MeetingSummaries/Pages/MSC-default.aspx",
-        "keywords": ["SOLAS", "STCW"],
-    },
-]
-
-# Matches MSC resolution references like MSC.520(106), MSC.550(108)
-_MSC_RE = re.compile(r"MSC\.\d+\(\d+\)")
-
-
-def _classify_amendment(context_text: str) -> list[str]:
-    """Return a list of conventions the reference appears to relate to."""
-    upper = context_text.upper()
-    conventions: list[str] = []
-    if "SOLAS" in upper:
-        conventions.append("SOLAS")
-    if "STCW" in upper:
-        conventions.append("STCW")
-    return conventions
-
-
-async def _check_imo_amendments_async():
-    import asyncpg
-    from app.config import settings
-
-    dsn = settings.database_url.replace("postgresql+asyncpg://", "postgresql://")
-    conn = await asyncpg.connect(dsn)
-    try:
-        # Get existing supplement references from the DB for both conventions.
-        solas_rows = await conn.fetch(
-            "SELECT DISTINCT section_number FROM regulations WHERE source = 'solas_supplement'"
-        )
-        stcw_rows = await conn.fetch(
-            "SELECT DISTINCT section_number FROM regulations WHERE source = 'stcw_supplement'"
-        )
-        existing_refs: set[str] = set()
-        for r in solas_rows:
-            existing_refs |= set(_MSC_RE.findall(r["section_number"] or ""))
-        for r in stcw_rows:
-            existing_refs |= set(_MSC_RE.findall(r["section_number"] or ""))
-
-        new_findings: list[dict] = []
-
-        for source in _IMO_AMENDMENT_SOURCES:
-            try:
-                resp = requests.get(
-                    source["url"],
-                    timeout=30,
-                    headers={"User-Agent": "RegKnot IMO Monitor/1.0"},
-                )
-                resp.raise_for_status()
-                text = resp.text
-
-                keywords = source.get("keywords", ["SOLAS", "STCW"])
-                # Collect lines that mention any monitored convention.
-                relevant_chunks = [
-                    chunk for chunk in text.split("\n")
-                    if any(kw.upper() in chunk.upper() for kw in keywords)
-                ]
-                relevant_text = " ".join(relevant_chunks)
-                refs = set(_MSC_RE.findall(relevant_text))
-
-                for ref in refs:
-                    if ref in existing_refs:
-                        continue
-                    # Look at a wider window around each hit to classify it.
-                    idx = relevant_text.find(ref)
-                    window = relevant_text[max(0, idx - 200): idx + 200] if idx >= 0 else relevant_text
-                    conventions = _classify_amendment(window) or ["Unknown"]
-                    new_findings.append({
-                        "ref": ref,
-                        "source_name": source["name"],
-                        "source_url": source["url"],
-                        "conventions": conventions,
-                    })
-
-            except Exception as exc:
-                logger.warning("Failed to scrape %s: %s", source["name"], exc)
-
-        if new_findings:
-            _send_amendment_alert(new_findings)
-        else:
-            logger.info("IMO amendment check: no new references found")
-
-    finally:
-        await conn.close()
+    """Old name (a Beat entry or a queued message from before 2026-10-13)."""
+    harvest_imo_resolutions.delay()
 
 
 @celery.task(name="app.tasks.send_credential_expiry_reminders")
@@ -552,66 +484,46 @@ async def _send_regulation_digest_async():
         await conn.close()
 
 
-def _send_amendment_alert(findings: list[dict]):
-    """Send alert email about new SOLAS/STCW supplement references."""
+def _send_harvest_email(report: dict | None, failed_tail: str = "") -> None:
+    """The weekly IMO harvest digest, to hello@ (Blake)."""
+    import html as _html
     try:
-        import resend
         from app.email import send_email
-        from app.config import settings
-        resend.api_key = settings.resend_api_key
 
-        # Deduplicate by ref while merging sources + conventions.
-        merged: dict[str, dict] = {}
-        for f in findings:
-            ref = f["ref"]
-            if ref not in merged:
-                merged[ref] = {
-                    "ref": ref,
-                    "sources": [],
-                    "conventions": set(),
-                }
-            merged[ref]["sources"].append((f["source_name"], f["source_url"]))
-            merged[ref]["conventions"].update(f.get("conventions", []))
+        def esc(s) -> str:
+            return _html.escape(str(s or ""))
 
-        items_html = ""
-        for entry in merged.values():
-            conv_label = ", ".join(sorted(entry["conventions"])) or "Unknown"
-            source_links = " · ".join(
-                f'<a href="{url}">{name}</a>' for name, url in entry["sources"]
+        if report is None:
+            body = f"<p>The IMO harvest did not produce a report.</p><pre>{esc(failed_tail)}</pre>"
+            subject = "IMO harvest failed — RegKnot"
+        else:
+            items = "".join(
+                f"<li><strong>{esc(h['code'])}</strong> → {esc(h['source'])}: {esc(h['title'])}"
+                f"{' — ' + esc(h['status']) if h.get('status') else ''}"
+                f"{' (parent)' if h.get('reason') == 'parent' else ''}</li>"
+                for h in report.get("harvested", [])
             )
-            items_html += (
-                f"<li><strong>{entry['ref']}</strong> "
-                f"<em>[{conv_label}]</em> — {source_links}</li>"
+            failed = "".join(f"<li>{esc(f['code'])}: {esc(f['error'])}</li>" for f in report.get("failed", []))
+            superseded = "".join(
+                f"<li>{esc(s['code'])} revoked by {esc(s['by'])}: {esc(s['action'])}</li>"
+                for s in report.get("superseded", [])
             )
-
-        conv_summary = set()
-        for entry in merged.values():
-            conv_summary |= entry["conventions"]
-        scope = ", ".join(sorted(conv_summary)) if conv_summary else "IMO"
-
+            body = (
+                f"<h2>IMO resolutions added ({len(report.get('harvested', []))})</h2><ul>{items}</ul>"
+                + (f"<h3>Failed</h3><ul>{failed}</ul>" if failed else "")
+                + (f"<h3>Revoked by newer resolutions</h3><ul>{superseded}</ul>" if superseded else "")
+                + (f"<p><strong>Error:</strong> {esc(report.get('error'))}</p>" if report.get("error") else "")
+                + "<p>Full report: data/raw/imo_harvest/report-latest.json on the server.</p>"
+            )
+            subject = f"IMO harvest: {len(report.get('harvested', []))} resolutions added — RegKnot"
         send_email({
             "from": "RegKnot <hello@mail.regknots.com>",
             "to": ["hello@regknots.com"],
-            "subject": "New IMO amendments detected — RegKnot",
-            "html": (
-                f"<h2>New IMO Amendment References Detected ({scope})</h2>"
-                f"<p>The following MSC resolution references were found that are not yet "
-                f"in the RegKnot database. Each is tagged with the convention(s) it "
-                f"appears to relate to based on surrounding context:</p>"
-                f"<ul>{items_html}</ul>"
-                f"<p><strong>Action required:</strong> Download and review the source PDFs, "
-                f"then ingest manually into <code>solas_supplement</code> or "
-                f"<code>stcw_supplement</code> as appropriate.</p>"
-                f"<p>Do NOT auto-ingest — manual review is required to verify copyright "
-                f"compliance and correct convention attribution.</p>"
-            ),
+            "subject": subject,
+            "html": body,
         })
-        logger.info(
-            "Sent IMO amendment alert for %d unique references (%s)",
-            len(merged), scope,
-        )
     except Exception as exc:
-        logger.error("Failed to send IMO amendment alert email: %s", exc)
+        logger.error("Failed to send IMO harvest email: %s", exc)
 
 
 # ── Workspace (Wheelhouse) state-machine crons (Sprint D6.54) ────────────

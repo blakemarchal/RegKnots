@@ -161,6 +161,19 @@ const CITATION_PATTERNS: CitationPattern[] = [
     sourceHint: 'imo_supplement',
     toSection: m => `MSC.${m[1]}`,
   },
+  // 2026-10-13 — MEPC.400(83) / MEPC.1/Circ.778 and Assembly resolutions
+  // A.1206(34): the IMO harvester adds them weekly. A bare resolution number
+  // opens the resolution itself (regulations router, _resolution_rows).
+  {
+    re: /\bMEPC\.(\d+(?:\(\d+\)|\/Circ\.\d+)?)/g,
+    sourceHint: 'imo_supplement',
+    toSection: m => `MEPC.${m[1]}`,
+  },
+  {
+    re: /\bA\.(\d{3,4}\(\d+\))/g,
+    sourceHint: 'imo_supplement',
+    toSection: m => `A.${m[1]}`,
+  },
   // NVIC 10-97 / NVIC 10-97 §5 / NVIC 01-20
   // 2026-09-27 — enclosures and changes as the corpus names them:
   // NVIC 06-72 Encl.1 / NVIC 04-03 Encl.3 §12 / NVIC 04-08 Ch-2 §3, and

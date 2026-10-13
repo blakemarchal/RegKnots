@@ -3391,14 +3391,16 @@ async def _run_task_off_loop(task_coro_fn) -> None:
 async def trigger_imo_check(
     admin: Annotated[CurrentUser, Depends(require_write_admin)],
 ) -> JobRunResult:
-    """Run the weekly IMO amendment scraper on demand."""
-    from app.tasks import _check_imo_amendments_async
-    logger.info("Admin %s triggered IMO amendment check", admin.email)
+    """Queue the weekly IMO resolution harvest now (2026-10-13). It is an
+    ingest, so it runs on the worker inside run_ingest.sh's capped unit."""
+    from app.tasks import harvest_imo_resolutions
+    logger.info("Admin %s queued the IMO resolution harvest", admin.email)
+    await audit_log(await get_pool(), admin, "trigger_imo_harvest")
     try:
-        await _run_task_off_loop(_check_imo_amendments_async)
-        return JobRunResult(ok=True, details="IMO check complete. If new refs found, an alert email was sent to hello@regknots.com.")
+        harvest_imo_resolutions.delay()
+        return JobRunResult(ok=True, details="IMO harvest queued. A digest goes to hello@regknots.com when it adds anything.")
     except Exception as exc:
-        logger.exception("IMO amendment check failed")
+        logger.exception("IMO harvest could not be queued")
         return JobRunResult(ok=False, details=str(exc)[:200])
 
 

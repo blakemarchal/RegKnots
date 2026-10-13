@@ -264,6 +264,40 @@ async def _find_references(
     ]
 
 
+# 2026-10-13 — a bare IMO resolution number ("MSC.583(111)", "MEPC.400(83)",
+# "A.1206(34)"): the chip opens the resolution itself, which may sit in any IMO
+# source (ingest.imo_harvest files it under the instrument it amends).
+_RESOLUTION_CODE_RE = re.compile(r"(?:MSC|MEPC|A)\.\d{1,4}\(\d{1,3}\)")
+
+
+async def _resolution_rows(pool, code: str):
+    """(source, section_number, rows) of the resolution's opening section, or
+    of its first chapter when the opening was merged into it; None if absent."""
+    async with pool.acquire() as conn:
+        hit = await conn.fetchrow(
+            """
+            SELECT source, section_number FROM regulations
+            WHERE section_number LIKE '%' || $1
+               OR section_number LIKE '%' || $1 || ' Ch.%'
+            ORDER BY (section_number LIKE '%' || $1) DESC,
+                     length(section_number), section_number
+            LIMIT 1
+            """,
+            code,
+        )
+        if hit is None:
+            return None
+        rows = await conn.fetch(
+            """
+            SELECT section_title, full_text, effective_date, up_to_date_as_of
+            FROM regulations WHERE source = $1 AND section_number = $2
+            ORDER BY chunk_index
+            """,
+            hit["source"], hit["section_number"],
+        )
+    return hit["source"], hit["section_number"], rows
+
+
 # 2026-09-30 — sources a chip's section may live in when the guessed source
 # has no such row (_load_regulation).
 _SIBLING_SOURCES: dict[str, tuple[str, ...]] = {
@@ -320,6 +354,13 @@ async def _load_regulation(pool, source: str, section_number: str) -> Regulation
                 )
                 source = sibling
                 break
+
+    if not rows and _RESOLUTION_CODE_RE.fullmatch(section_number.strip()):
+        found_res = await _resolution_rows(pool, section_number.strip())
+        if found_res:
+            source, resolved_sn, rows = found_res
+            # the chip names the resolution; the row is its own opening section
+            section_number = resolved_sn
 
     # Phase 2 fallback: strip granular suffix(es) and retry once.
     # Apply up to two strip passes (e.g., "Reg.2, para.5.1" → "Reg.2,

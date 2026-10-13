@@ -33,9 +33,11 @@ celery.conf.beat_schedule = {
         # Daily at 14:00 UTC (morning in U.S.)
         "schedule": crontab(hour=14, minute=0),
     },
-    "check-solas-supplements-weekly": {
-        "task": "app.tasks.check_solas_supplements",
-        # Every Monday at 10:00 UTC
+    "harvest-imo-resolutions-weekly": {
+        # 2026-10-13 — new MSC / MEPC / Assembly resolutions into the corpus
+        # (ingest.imo_harvest), replacing the MSC-reference scraper. Monday
+        # 10:00 UTC: clear of Sunday's 02:00 run and the 5th-of-month one.
+        "task": "app.tasks.harvest_imo_resolutions",
         "schedule": crontab(hour=10, minute=0, day_of_week="monday"),
     },
     # "reindex-vector-embeddings-monthly" removed 2026-09-10 — non-

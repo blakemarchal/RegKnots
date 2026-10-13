@@ -155,6 +155,20 @@ test('2026-09-30: chips for the inland / Coast Guard sources', () => {
   ])
 })
 
+test('2026-10-13: MSC, MEPC and Assembly resolutions each get a chip', () => {
+  const hits = text => scanCitations(text).map(h => [h.sectionNumber, h.sourceHint])
+  assert.deepEqual(hits('VDES arrives with MSC.583(111); CII factors are in MEPC.400(83), PSC in A.1206(34) and MEPC.1/Circ.778.'), [
+    ['MSC.583(111)', 'imo_supplement'],
+    ['MEPC.400(83)', 'imo_supplement'],
+    ['A.1206(34)', 'imo_supplement'],
+    ['MEPC.1/Circ.778', 'imo_supplement'],
+  ])
+  // the MARPOL amendments form keeps its own chip; "Part A.1" is not a resolution
+  assert.deepEqual(sections('MARPOL Amendments MEPC.328(76) and STCW Code Part A.1'), [
+    'MARPOL Amendments MEPC.328(76)',
+  ])
+})
+
 test('2026-10-05: chips for the user own documents and the fleet company documents', () => {
   const hits = text => scanCitations(text).map(h => [h.sectionNumber, h.sourceHint])
   assert.deepEqual(hits('Your manual sets monthly drills [Doc: SMS Manual §8 Emergency Preparedness], stricter than [Company: TSMS Manual §4.2 Drills].'), [

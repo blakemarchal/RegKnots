@@ -85,8 +85,8 @@ export function JobsTab() {
           )}
         />
         <JobRow
-          label="IMO amendment check"
-          description="Scrapes IMO sources for new MSC refs"
+          label="IMO resolution harvest"
+          description="Adds new MSC / MEPC / Assembly resolutions to the library (runs Mondays)"
           previewPath={null}
           sendPath="/admin/jobs/imo-amendment-check"
           loadingKey={loadingKey}
