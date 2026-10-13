@@ -60,6 +60,8 @@ _BROWSER_HEADERS = {
     "Accept-Language": "en-US,en;q=0.9",
 }
 _REQUEST_DELAY = 1.5
+# text of harvested resolutions, OCR for scans (ingest.imo_harvest.pdf_text)
+_OCR_DIR = Path(__file__).resolve().parents[4] / "data" / "ocr" / "imo_harvest"
 _TIMEOUT       = 60.0
 
 
@@ -70,6 +72,11 @@ class CodeDocMeta:
     pdf_url:        str
     effective_date: date
     parent_label:   str    # "IMO CSS Code" / "IMO Load Lines" / etc.
+    # 2026-10-13 — resolutions added by ingest.imo_harvest (harvest.json):
+    # "adopted 22 May 2026; entry into force 1 January 2028", shown in every
+    # section title, and the harvest date as up_to_date_as_of.
+    status:         str = ""
+    as_of:          date | None = None
 
     @property
     def section_number(self) -> str:
@@ -593,6 +600,28 @@ _CODE_TO_SOURCE = {
 }
 
 
+# ── Harvested resolutions (2026-10-13) ───────────────────────────────────────
+#
+# ingest.imo_harvest records each resolution it adds to a source in
+# <raw_dir>/harvest.json. A curated run of the source reads them too, so its
+# parse still produces every stored row (and --prune keeps them).
+
+def meta_from_row(row: dict) -> CodeDocMeta:
+    return CodeDocMeta(
+        code=row["code"], title=row["title"], pdf_url=row["pdf_url"],
+        effective_date=date.fromisoformat(row["effective_date"]),
+        parent_label=row["parent_label"], status=row.get("status") or "",
+        as_of=date.fromisoformat(row["harvested"]) if row.get("harvested") else None,
+    )
+
+
+def harvested_docs(raw_dir: Path) -> list[CodeDocMeta]:
+    path = raw_dir / "harvest.json"
+    if not path.exists():
+        return []
+    return [meta_from_row(r) for r in json.loads(path.read_text(encoding="utf-8"))]
+
+
 # ── Public API ───────────────────────────────────────────────────────────────
 
 def discover_and_download(raw_dir: Path, failed_dir: Path, console, imo_code: str) -> tuple[int, int]:
@@ -600,7 +629,9 @@ def discover_and_download(raw_dir: Path, failed_dir: Path, console, imo_code: st
         raise ValueError(f"Unknown imo_code: {imo_code!r}")
     raw_dir.mkdir(parents=True, exist_ok=True)
     failed_dir.mkdir(parents=True, exist_ok=True)
-    docs = _CURATED_BY_CODE[imo_code]
+    curated = _CURATED_BY_CODE[imo_code]
+    known = {m.code for m in curated}
+    docs = curated + [m for m in harvested_docs(raw_dir) if m.code not in known]
     success, failures = 0, 0
     with httpx.Client(timeout=_TIMEOUT, follow_redirects=True) as client:
         for i, meta in enumerate(docs, 1):
@@ -633,7 +664,8 @@ def discover_and_download(raw_dir: Path, failed_dir: Path, console, imo_code: st
         json.dumps([
             {"code": m.code, "title": m.title, "pdf_url": m.pdf_url,
              "effective_date": m.effective_date.isoformat(),
-             "parent_label": m.parent_label}
+             "parent_label": m.parent_label, "status": m.status,
+             "harvested": m.as_of.isoformat() if m.as_of else None}
             for m in docs
         ], indent=2),
         encoding="utf-8",
@@ -649,79 +681,89 @@ def parse_source(raw_dir: Path, imo_code: str) -> list[Section]:
         raise FileNotFoundError(f"IMO index cache not found at {cache_path}")
     with open(cache_path, encoding="utf-8") as fh:
         entries = json.load(fh)
-    source_code = _CODE_TO_SOURCE[imo_code]
-    sections: list[Section] = []
-    for e in entries:
-        meta = CodeDocMeta(
-            code=e["code"], title=e["title"], pdf_url=e["pdf_url"],
-            effective_date=date.fromisoformat(e["effective_date"]),
-            parent_label=e["parent_label"],
-        )
-        # Choose pdf or html input based on whether we saved html
-        ext = "html" if meta.pdf_url.endswith(".html") else "pdf"
-        in_path = raw_dir / f"{meta.filename_stub}.{ext}"
-        if not in_path.exists():
-            logger.warning("IMO %s: input missing at %s, skipping", meta.section_number, in_path)
-            continue
-        try:
-            if ext == "pdf":
-                text = _extract_pdf_text(in_path)
-            else:
-                text = _extract_html_text(in_path)
-        except Exception as exc:
-            logger.warning("IMO %s: extraction failed — %s", meta.section_number, exc)
-            continue
-        if not text.strip() or len(text) < 200:
-            logger.warning("IMO %s: text too short (%d), skipping", meta.section_number, len(text))
-            continue
-
-        # Sprint post-D6.83 audit (2026-05-09) — chapter-aware splitting for
-        # codes that ARE structured into numbered chapters. The 2026-05-09
-        # corpus survey found imo_igc, imo_hsc, imo_ibc each had ~300 chunks
-        # but only ONE distinct section_number — entire code under the parent
-        # MSC resolution string. Citation verification couldn't differentiate
-        # "IGC Code Ch.17" from "IGC Code Ch.4". Splitting at chapter
-        # boundaries preserves the same total chunk count after re-chunking
-        # downstream but makes each chapter independently citable.
-        chapter_sections = _split_into_chapters(text, meta, source_code)
-        if chapter_sections:
-            sections.extend(chapter_sections)
-            logger.info(
-                "IMO %s: split %s into %d chapter sections",
-                imo_code, meta.section_number, len(chapter_sections),
-            )
-            continue
-
-        # Sprint D6.97 #47 (2026-05-25) — fall back to paragraph-aware
-        # splitting for amendment-form / older IMO docs whose body uses
-        # `N.N.N Title` numbered paragraphs instead of `CHAPTER N — TITLE`
-        # headings (IBC MEPC.318(74), CSS A.714(17), Load Lines 1966).
-        # These were landing as single-section megachunks (1 section /
-        # 50-274 chunks) — citation lookups for "IBC Ch.17" couldn't
-        # structured-match because there was no "Ch.17" section_number
-        # in the corpus.
-        paragraph_sections = _split_by_paragraph_chapter(text, meta, source_code)
-        if paragraph_sections:
-            sections.extend(paragraph_sections)
-            logger.info(
-                "IMO %s: split %s into %d paragraph-derived chapter sections",
-                imo_code, meta.section_number, len(paragraph_sections),
-            )
-            continue
-
-        # Fallback: no chapter or paragraph structure detected. Emit the
-        # document as a single Section.
-        sections.append(Section(
-            source=source_code, title_number=TITLE_NUMBER,
-            section_number=meta.section_number,
-            section_title=meta.title,
-            full_text=text,
-            up_to_date_as_of=SOURCE_DATE,
-            parent_section_number=meta.parent_section_number,
-            published_date=meta.effective_date,
-        ))
+    sections = parse_docs(raw_dir, [meta_from_row(e) for e in entries], _CODE_TO_SOURCE[imo_code])
     logger.info("IMO %s: parsed %d sections from %d doc(s)", imo_code, len(sections), len(entries))
     return sections
+
+
+def parse_docs(raw_dir: Path, metas: list[CodeDocMeta], source_code: str) -> list[Section]:
+    """Sections of the given documents (their files in raw_dir). 2026-10-13 —
+    split out of parse_source so ingest.imo_harvest can parse only the
+    resolutions it just added. A harvested resolution's status goes into every
+    section title, where the answer model reads it."""
+    sections: list[Section] = []
+    for meta in metas:
+        doc_sections = _parse_doc(raw_dir, meta, source_code)
+        if meta.status:
+            for s in doc_sections:
+                s.section_title = f"{s.section_title} [{meta.code}: {meta.status}]"
+        sections.extend(doc_sections)
+    return sections
+
+
+def _parse_doc(raw_dir: Path, meta: CodeDocMeta, source_code: str) -> list[Section]:
+    # Choose pdf or html input based on whether we saved html
+    ext = "html" if meta.pdf_url.endswith(".html") else "pdf"
+    in_path = raw_dir / f"{meta.filename_stub}.{ext}"
+    if not in_path.exists():
+        logger.warning("IMO %s: input missing at %s, skipping", meta.section_number, in_path)
+        return []
+    try:
+        # 2026-10-13 — a harvested resolution's text, as ingest.imo_harvest
+        # extracted it (OCR for a scan); kept while newer than the PDF.
+        cached = _OCR_DIR / f"{in_path.stem}.txt"
+        if ext == "pdf" and cached.exists() and cached.stat().st_mtime >= in_path.stat().st_mtime:
+            text = cached.read_text(encoding="utf-8")
+        elif ext == "pdf":
+            text = _extract_pdf_text(in_path)
+        else:
+            text = _extract_html_text(in_path)
+    except Exception as exc:
+        logger.warning("IMO %s: extraction failed — %s", meta.section_number, exc)
+        return []
+    if not text.strip() or len(text) < 200:
+        logger.warning("IMO %s: text too short (%d), skipping", meta.section_number, len(text))
+        return []
+
+    # Sprint post-D6.83 audit (2026-05-09) — chapter-aware splitting for
+    # codes that ARE structured into numbered chapters. The 2026-05-09
+    # corpus survey found imo_igc, imo_hsc, imo_ibc each had ~300 chunks
+    # but only ONE distinct section_number — entire code under the parent
+    # MSC resolution string. Citation verification couldn't differentiate
+    # "IGC Code Ch.17" from "IGC Code Ch.4". Splitting at chapter
+    # boundaries preserves the same total chunk count after re-chunking
+    # downstream but makes each chapter independently citable.
+    chapter_sections = _split_into_chapters(text, meta, source_code)
+    if chapter_sections:
+        logger.info("IMO %s: split into %d chapter sections",
+                    meta.section_number, len(chapter_sections))
+        return chapter_sections
+
+    # Sprint D6.97 #47 (2026-05-25) — fall back to paragraph-aware
+    # splitting for amendment-form / older IMO docs whose body uses
+    # `N.N.N Title` numbered paragraphs instead of `CHAPTER N — TITLE`
+    # headings (IBC MEPC.318(74), CSS A.714(17), Load Lines 1966).
+    # These were landing as single-section megachunks (1 section /
+    # 50-274 chunks) — citation lookups for "IBC Ch.17" couldn't
+    # structured-match because there was no "Ch.17" section_number
+    # in the corpus.
+    paragraph_sections = _split_by_paragraph_chapter(text, meta, source_code)
+    if paragraph_sections:
+        logger.info("IMO %s: split into %d paragraph-derived chapter sections",
+                    meta.section_number, len(paragraph_sections))
+        return paragraph_sections
+
+    # Fallback: no chapter or paragraph structure detected. Emit the
+    # document as a single Section.
+    return [Section(
+        source=source_code, title_number=TITLE_NUMBER,
+        section_number=meta.section_number,
+        section_title=meta.title,
+        full_text=text,
+        up_to_date_as_of=meta.as_of or SOURCE_DATE,
+        parent_section_number=meta.parent_section_number,
+        published_date=meta.effective_date,
+    )]
 
 
 # ── Keep every character (2026-10-08) ──────────────────────────────────────
@@ -761,7 +803,7 @@ def _assemble(text: str, first_start: int, bodies: list[tuple[str, str, str]], m
             section_number=meta.section_number,
             section_title=f"{meta.parent_label} {meta.code} — {meta.title}",
             full_text=preamble,
-            up_to_date_as_of=SOURCE_DATE,
+            up_to_date_as_of=meta.as_of or SOURCE_DATE,
             parent_section_number=meta.parent_section_number,
             published_date=meta.effective_date,
         ))
@@ -773,7 +815,7 @@ def _assemble(text: str, first_start: int, bodies: list[tuple[str, str, str]], m
             section_number=f"{meta.section_number} Ch.{ch_num}",
             section_title=title,
             full_text=body,
-            up_to_date_as_of=SOURCE_DATE,
+            up_to_date_as_of=meta.as_of or SOURCE_DATE,
             parent_section_number=meta.section_number,
             published_date=meta.effective_date,
         ))
@@ -970,8 +1012,11 @@ def _extract_pdf_text(pdf_path: Path) -> str:
     page_texts: list[str] = []
     with pdfplumber.open(pdf_path) as pdf:
         for page in pdf.pages:
-            t = page.extract_text() or ""
+            # 2026-10-13 — older IMO PDFs draw bold text twice, a hair apart;
+            # without dedupe_chars it reads "RREESSOOLLUUTTIIOONN" (MSC.220(82)).
+            t = page.dedupe_chars().extract_text() or ""
             t = _PAGE_NUMBER_LINE.sub("", t)
+            t = _PAGE_HEADER_LINE.sub("", t)
             t = re.sub(r"[ \t]+", " ", t)
             t = re.sub(r"\n{3,}", "\n\n", t)
             page_texts.append(t.strip())
@@ -1007,3 +1052,11 @@ def _write_failure(meta: CodeDocMeta, exc: Exception, failed_dir: Path) -> None:
 
 
 _PAGE_NUMBER_LINE = re.compile(r"(?m)^\s*\d{1,4}\s*$")
+# 2026-10-13 — running heads of IMO meeting documents: "MEPC 79/15/Add.1",
+# "Annex 9, page 1", "Page 2", and the file path in the footer
+# ("I:\MEPC\79\MEPC 79-15-Add.1.docx").
+_PAGE_HEADER_LINE = re.compile(
+    r"(?im)^\s*(?:(?:MSC|MEPC|A|LEG|FAL)\s+\d{1,3}/[\w./-]+"
+    r"|Annex\s+\d+,\s*page\s+\d+|Page\s+\d+(?:\s+of\s+\d+)?"
+    r"|[A-Z]:\\\S.*\.(?:docx?|pdf))\s*$"
+)
