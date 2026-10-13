@@ -179,7 +179,8 @@ def test_a_document_with_no_paragraphs_or_enclosures_is_one_section():
 
 class _FakePdf:
     def __init__(self, texts):
-        self.pages = [type("Page", (), {"extract_text": lambda self, t=t: t})() for t in texts]
+        self.pages = [type("Page", (), {"extract_text": lambda self, t=t: t, "close": lambda self: None})()
+                      for t in texts]
 
     def __enter__(self):
         return self

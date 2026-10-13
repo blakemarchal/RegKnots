@@ -93,7 +93,8 @@ def test_parse_source_only_refuses_an_unknown_number_or_missing_pdf(tmp_path, mo
 
 class _FakePdf:
     def __init__(self, texts):
-        self.pages = [type("Page", (), {"extract_text": lambda self, t=t: t})() for t in texts]
+        self.pages = [type("Page", (), {"extract_text": lambda self, t=t: t, "close": lambda self: None})()
+                      for t in texts]
 
     def __enter__(self):
         return self

@@ -93,8 +93,12 @@ class Question:
 
 
 def _pages(path: Path) -> list[list[str]]:
+    pages: list[list[str]] = []
     with pdfplumber.open(str(path)) as pdf:
-        return [[ln.strip() for ln in (p.extract_text() or "").splitlines() if ln.strip()] for p in pdf.pages]
+        for p in pdf.pages:
+            pages.append([ln.strip() for ln in (p.extract_text() or "").splitlines() if ln.strip()])
+            p.close()  # 2026-10-13: else pdfplumber keeps every page parsed until the file closes
+    return pages
 
 
 def _header(pages: list[list[str]]) -> tuple[str, str, str]:

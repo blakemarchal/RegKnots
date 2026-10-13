@@ -276,7 +276,11 @@ def pdf_text(path: Path) -> str:
     try:
         import pdfplumber
         with pdfplumber.open(str(path)) as pdf:
-            pages = [(page.extract_text() or "") for page in pdf.pages]
+            read: list[str] = []
+            for page in pdf.pages:
+                read.append(page.extract_text() or "")
+                page.close()  # 2026-10-13: else pdfplumber keeps every page parsed until the file closes
+            pages = read  # all or nothing: a failure part-way still falls back to pdftotext
     except Exception as exc:
         logger.warning("pdfplumber failed on %s: %s", path.name, exc)
     text = "\f".join(pages)

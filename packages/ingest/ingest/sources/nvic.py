@@ -552,6 +552,7 @@ def _parse_nvic_pdf(pdf_path: Path, meta: NvicMeta) -> list[Section]:
         with pdfplumber.open(str(pdf_path)) as pdf:
             for page in pdf.pages:
                 pages.append(_clean_lines((page.extract_text() or "").splitlines()))
+                page.close()  # 2026-10-13: else pdfplumber keeps every page parsed until the file closes
     except Exception as exc:
         logger.warning("NVIC %s: pdfplumber error — %s", meta.number, exc)
         return []

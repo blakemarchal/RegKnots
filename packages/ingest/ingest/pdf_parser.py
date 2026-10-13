@@ -145,6 +145,7 @@ def parse_colregs_pdf(pdf_path: Path) -> list[ParsedRule]:
                 break
 
             raw = pdf_page.extract_text() or ""
+            pdf_page.close()  # 2026-10-13: else pdfplumber keeps every page parsed until the file closes
             lines = [ln.strip() for ln in raw.splitlines() if ln.strip()]
 
             if not lines:

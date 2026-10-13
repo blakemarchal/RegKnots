@@ -229,6 +229,7 @@ def _extract_pages(pdf_path: Path) -> list[str]:
                 if errors <= 5:
                     logger.warning("ERG: page %d extraction error: %s", i, exc)
 
+            page.close()  # 2026-10-13: else pdfplumber keeps every page parsed until the file closes
             pages.append(text)
 
             if (i + 1) % 50 == 0:

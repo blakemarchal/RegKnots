@@ -100,6 +100,7 @@ def parse_source(pdf_path: Path) -> list[Section]:
     with pdfplumber.open(pdf_path) as pdf:
         for page in pdf.pages:
             text = page.extract_text() or ""
+            page.close()  # 2026-10-13: else pdfplumber keeps every page parsed until the file closes
             pages_text.append(text)
 
     full_text = "\n".join(pages_text)

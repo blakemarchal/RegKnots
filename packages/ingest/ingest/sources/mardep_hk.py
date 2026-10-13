@@ -239,6 +239,7 @@ def _extract_pdf_text(pdf_path: Path) -> str:
     with pdfplumber.open(pdf_path) as pdf:
         for page in pdf.pages:
             t = page.extract_text() or ""
+            page.close()  # 2026-10-13: else pdfplumber keeps every page parsed until the file closes
             t = _PAGE_NUMBER_LINE.sub("", t)
             t = re.sub(r"[ \t]+", " ", t)
             t = re.sub(r"\n{3,}", "\n\n", t)

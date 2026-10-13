@@ -112,6 +112,7 @@ def _extract_pdf_text(pdf_path: Path) -> str:
     with pdfplumber.open(pdf_path) as pdf:
         for page in pdf.pages:
             page_text = page.extract_text() or ""
+            page.close()  # 2026-10-13: else pdfplumber keeps every page parsed until the file closes
             if page_text.strip():
                 out_pages.append(page_text)
     return "\n\n".join(out_pages)

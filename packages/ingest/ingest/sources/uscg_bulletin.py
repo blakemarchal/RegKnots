@@ -799,6 +799,7 @@ async def _fetch_pdf_text(client: httpx.AsyncClient, pdf_url: str) -> str:
         with pdfplumber.open(io.BytesIO(resp.content)) as pdf:
             for page in pdf.pages:
                 t = page.extract_text() or ""
+                page.close()  # 2026-10-13: else pdfplumber keeps every page parsed until the file closes
                 if t.strip():
                     pages.append(t.strip())
         return "\n\n".join(pages)
