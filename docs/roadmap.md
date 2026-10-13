@@ -75,6 +75,8 @@ Findings and evidence: `docs/sprint-audits/question-audit-2026-09-25.md`.
 
 ## IMO corpus acquisition plan
 
+**2026-10-13 — the free route is automated.** `ingest/imo_harvest.py` (spec `docs/specs/imo-harvester-2026-10-13.md`) reads the IMO's resolution index every Monday and adds new MSC / MEPC / Assembly resolutions, every amendment chain of a code we hold no consolidated edition of, and the parent codes they amend. Backlog done: 248 resolutions + 19 parents (IMSBC, ESP, IS, 2008 SPS, 2009 MODU, 2010 FTP, Casualty Investigation, 1994 HSC, LSA / FSS / IGC / IBC / IGF / HSC amendments since 2005). That covers most of Tier A's LSA / FSS / IS rows and Tier B's HSC / IGC / IBC row below. Still open: ISPS (a conference resolution, not in the index), the Load Lines Convention text, IAMSAR, BMP, CSC, the 1991 Grain Code (MSC.23(59), older than the parent floor), MSC.1/Circ. and MEPC.1/Circ. circulars (IMODOCS account), and IMO meeting summaries (amendments approved for the next session).
+
 **The question:** many IMO instruments are missing or present only as the adopting resolution. Buy, or find free routes?
 
 **Two routes exist for almost every instrument.**
