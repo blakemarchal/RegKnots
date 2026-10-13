@@ -964,6 +964,40 @@ QUESTIONS: list[TestQuestion] = [
         vessels=["V5"],
         expected=[r"46 CFR 138\."],
     ),
+    # 2026-10-13 — IMO resolutions the harvester added (ingest.imo_harvest;
+    # docs/specs/imo-harvester-2026-10-13.md): the current PSC procedures, the
+    # 2025 enclosed-space recommendations, CII reduction factors, the MASS
+    # Code, the IMSBC Code (a parent fetched with its amendments).
+    TestQuestion(
+        qid="A28-1",
+        query="What are the IMO port State control procedures for detaining a ship?",
+        vessels=["V1"],
+        expected=[r"A\.1206\(34\)"],
+    ),
+    TestQuestion(
+        qid="A28-2",
+        query="What do the IMO recommendations for entering enclosed spaces require before entry?",
+        vessels=["V1"],
+        expected=[r"MSC\.581\(110\)", r"A\.1050\(27\)"],
+    ),
+    TestQuestion(
+        qid="A28-3",
+        query="What are the CII reduction factors for 2026 to 2030?",
+        vessels=["V1"],
+        expected=[r"MEPC\.400\(83\)", r"MEPC\.338\(76\)"],
+    ),
+    TestQuestion(
+        qid="A28-4",
+        query="What does the IMO MASS Code for autonomous ships cover?",
+        vessels=["V1"],
+        expected=[r"MSC\.595\(111\)"],
+    ),
+    TestQuestion(
+        qid="A28-5",
+        query="IMSBC Code requirements for Group A cargoes that may liquefy",
+        vessels=["V1"],
+        expected=[r"MSC\.268\(85\)", r"MSC\.(462\(101\)|500\(105\)|539\(107\)|575\(110\))", r"IMSBC"],
+    ),
 ]
 
 

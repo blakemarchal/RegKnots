@@ -60,7 +60,8 @@ SOURCE_GROUPS: dict[str, tuple[str, ...]] = {
     # LSA servicing, enclosed-space entry, safe manning) are peer
     # safety instruments to SOLAS; grouping them here gives them the
     # SOLAS query-affinity boost and shared diversified-fetch slots.
-    "solas": ("solas", "solas_supplement", "imo_msc"),
+    # 2026-10-13 — imo_msc moved to its own group, "imo_res" (below).
+    "solas": ("solas", "solas_supplement"),
     # 2026-09-30 — CG-CVC policy letters / work instructions / forms and the
     # TVNCOE Subchapter M FAQs are the same layer of Coast Guard guidance.
     # Sharing the group gives them its boosts: Subchapter M / TSMS queries
@@ -94,7 +95,7 @@ SOURCE_GROUPS: dict[str, tuple[str, ...]] = {
     # 2026-10-13 — marpol_amend (CII / EEXI, Annex IV, the 2023-24 amendments)
     # and imo_bwm (BWM Convention resolutions) joined: like stcw_amend they
     # were in no group and never reached by vector search.
-    "marpol": ("marpol", "marpol_supplement", "imo_mepc", "marpol_amend", "imo_bwm"),
+    "marpol": ("marpol", "marpol_supplement", "marpol_amend", "imo_bwm"),
     # IMDG Code (International Maritime Dangerous Goods Code) — Sprint
     # D6.12. Distinct group so dangerous-goods classification, packing,
     # consignment, segregation, and stowage queries reliably surface
@@ -219,6 +220,11 @@ SOURCE_GROUPS: dict[str, tuple[str, ...]] = {
     "imo_ref": ("imo_iamsar", "nga_pubs"),
     # Port State Control regimes (Tokyo MOU + Paris MOU).
     "mou": ("mou_psc",),
+    # 2026-10-13 — MSC, MEPC and Assembly resolutions (ingest.imo_harvest):
+    # 5,600 + 1,000 chunks after the backlog, in their own group. Inside the
+    # solas / marpol groups they took SOLAS's and MARPOL's candidate slots: the
+    # VDR performance standards pushed SOLAS V/20 out of a VDR question.
+    "imo_res": ("imo_msc", "imo_mepc"),
     # 2026-10-08 — official documents the phase-2 web research found and
     # app.tasks.ingest_web_gaps added (jurisdictions per document, by domain).
     "web": ("web_ingest",),
@@ -1585,6 +1591,22 @@ async def _identifier_search(
     return results
 
 
+# 2026-10-13 — the caps were tuned on a ~100k-chunk corpus. Counted in raw
+# chunks they tighten as the corpus grows: the IMO backlog (+8,900 chunks)
+# took "scba" from 199 to 201 matches and "breathing apparatus" from 599 to
+# 839, and the SCBA question lost its keyword lane. They scale with size.
+_KEYWORD_CAP_BASE_CHUNKS = 100_000
+
+
+async def _keyword_cap_scale(pool: asyncpg.Pool) -> float:
+    """From the source stats retrieve() already loaded (no query of its own);
+    1.0 before the first load."""
+    stats = _SOURCE_STATS
+    if not stats:
+        return 1.0
+    return max(1.0, sum(n for n, _tags in stats.values()) / _KEYWORD_CAP_BASE_CHUNKS)
+
+
 async def _broad_keyword_search(
     keywords: list[str],
     pool: asyncpg.Pool,
@@ -1617,11 +1639,12 @@ async def _broad_keyword_search(
     seen_ids: set = set()
     passed_keywords: list[str] = []
     synonym_set = synonym_keywords or set()
+    scale = await _keyword_cap_scale(pool)
     for kw in keywords:
         # Synonyms get a more permissive cap because they're curated
         # corpus-vocab terms — by design slightly broader than user input.
         is_syn = kw in synonym_set
-        cap = _MAX_SYNONYM_FREQ if is_syn else _MAX_KEYWORD_FREQ
+        cap = round((_MAX_SYNONYM_FREQ if is_syn else _MAX_KEYWORD_FREQ) * scale)
         # Fast specificity check: skip overly common terms.
         freq = await pool.fetchval(
             """
