@@ -1,7 +1,7 @@
 # IMO resolution harvester: new amendments into the library on their own (spec, 2026-10-13)
 
-**Status:** built 2026-10-13. Blake, 2026-10-13: "Greenlight all 4, auto-fetch parents, full
-backlog." Evidence and numbers: §6 (filled in after the backlog run).
+**Status:** live 2026-10-13 (`b2477f3` … `6a77bac`); backlog harvested. Blake, 2026-10-13: "Greenlight
+all 4, auto-fetch parents, full backlog." Evidence and numbers: §6.
 
 ## Why
 
@@ -92,6 +92,40 @@ See §6.
 - A code's amendments before 2005 (and a code's parent when the IMO's PDF is a scan the VPS
   can't OCR) are not fetched.
 
-## §6 Results
+## §6 Results (2026-10-13)
 
-(filled in after the backlog run)
+**Backlog run on prod** (`scripts/run_ingest.sh --module ingest.imo_harvest --backlog`, 20 min):
+
+| | |
+|---|---|
+| Index rows read | 1,710 (MSC 596, MEPC 408, Assembly 706) |
+| Selected | 276 (188 window, 88 chain) |
+| Skipped | 40 administrative, 30 already in the corpus, 15 in a consolidated edition, 1 revoked per the index |
+| Not yet published | 11 "AWAITING CERTIFICATION" placeholder PDFs: MSC.583–591(111) (SOLAS IV/V and VDES, ESP, HSC, IMDG 43-26, IP Code, LSA, MSC.402 amendments, Load Lines), MEPC.407–408(84) (Annex VI). Re-tried weekly. |
+| Superseded by a newer harvested edition | 17 not ingested (PSC procedures 2021 / 2023, HSSC 2021 / 2023, III lists, SEEMP 2022, EEDI survey, G4, plastic litter, LH2 carriage …) |
+| Harvested | **248 resolutions + 19 parent codes**: IMSBC MSC.268(85), ESP A.1049(27), IS MSC.267(85), 2008 SPS MSC.266(84), 2009 MODU A.1023(26), 2010 FTP MSC.307(88), Casualty Investigation MSC.255(84), 1994 HSC MSC.36(63), LSA testing MSC.81(70), CII reduction factors MEPC.338(76), shaft power limitation MEPC.335(76), VDR / S-VDR / BAM / radio performance standards, … |
+| Parents skipped | 8 too old (1983 IBC / IGC, 1983 / 1989 SPS / MODU, the 1991 Grain Code MSC.23(59)), 2 consolidated instruments (MEPC.176(58) Revised Annex VI 2008, MSC.416(97) STCW), 1 not on the CDN (MSC.88(66)) |
+| Written | **+8,910 chunks** (imo_msc 5,633, imo_ibc 1,190, imo_mepc 999, stcw_amend 225, marpol_amend 223, imo_lsa 211, imo_hsc 157, imo_bwm 127, …); corpus 102,890 → **111,800** |
+| Curated rows now revoked (Blake's call) | A.1050(27) enclosed spaces (by MSC.581(110)), A.1118(30) ISM implementation guidelines (A.1188(33)), MEPC.207(62) biofouling (MEPC.378(80)), MEPC.259(68) EGCS 2015 (MEPC.340(77)) |
+
+**Memory.** The first attempt held 1.0 GB + 0.9 GB swap after 170 PDFs and filled the box's 2 GB
+swap; the second hit 1.07 GB + 0.77 GB on one 600-page PDF. Both were stopped before writing.
+pdfplumber keeps every page's objects until the file closes: `page.close()` per page took
+MSC.461(101) from 1,922 MB to 71 MB peak. The third run stayed under 600 MB with no swap.
+
+**Retrieval** (dense harness, 80 pairs; deployed = 10-09 baseline 0.9500 / 0.9750 / 0.7874):
+
+| step | strong / weak / MRR | pairs |
+|---|---|---|
+| IMO sources grouped (pre-backlog corpus) | 0.9500 / 0.9750 / 0.7957 | none moved in or out |
+| backlog ingested, `imo_msc` in the solas group | 0.9125 / 0.9625 / 0.7793 | F1/V1, F1/V2, N-S1/V1 lost |
+| + `imo_res` group | 0.9250 / 0.9625 / 0.7741 | F1 ×2 lost (keyword lane) |
+| + keyword caps scale with corpus size (`6a77bac`) | **0.9500 / 0.9750 / 0.7874** | none lost; N-M2/V1 1 → 3 |
+
+Causes: the VDR performance standards took the solas group's six slots (N-S1, a VDR question,
+lost SOLAS V/20); "scba" went from 199 to 201 matching chunks and "breathing apparatus" from
+599 to 839, over the keyword lane's fixed 200 / 800 caps. With five new pairs on harvested
+resolutions (A28-*), the 85-pair baseline is **0.9529 / 0.9765 / 0.7839**; the new pairs hit at
+ranks 2, 1, 7 (weak 1), 1, 1.
+
+**Answers** (`compare_synthesis_models.py --dates-ab --session-judge`): **ON since 2026-10-13** after `compare_synthesis_models.py --dates-ab --session-judge` (16 questions: 10 on IMO amendments for the Captain's vessel, 4 gold, her 2; ~$5 API, grading on the subscription): session judge overall 7.81 → 7.94, accuracy 7.88 → 8.38, errors flagged 26 → 21, judged best 9 vs 7 (today ahead); GPT-4o overall 9.31 → 9.62, accuracy 9.81 → 9.94, errors 2 → 0, best 6 → 10. Date wins: IMO9 caught MEPC.413(84) reversing the 2025 SEEMP distance rule (6 → 9), IMO7 placed IMDG 43-26 against today, IMO3 got the 2025 enclosed-space changes without inventing any. Variance seen: the coverage check sent one capture to the web and not the other (IMO6). `IMO_DATES_PROMPT_ENABLED=false` reverts.

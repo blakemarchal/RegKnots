@@ -308,8 +308,11 @@ class Settings(BaseSettings):
     )
     # 2026-10-13 — today's date in the answer request and the IMO resolutions /
     # dates-and-amendments prompt block (docs/specs/imo-harvester-2026-10-13.md).
+    # On since 2026-10-13 after --dates-ab on prod (16 questions, 10 on IMO
+    # amendments): accuracy 7.88 -> 8.38 (session judge) and 9.81 -> 9.94
+    # (GPT-4o), errors flagged 26 -> 21 and 2 -> 0. Set false to revert.
     imo_dates_prompt_enabled: bool = Field(
-        default=False, validation_alias="IMO_DATES_PROMPT_ENABLED",
+        default=True, validation_alias="IMO_DATES_PROMPT_ENABLED",
     )
 
     # 2026-10-08 — answer pipeline phase 2 (rag.coverage + rag.web_research):
