@@ -861,12 +861,35 @@ def apply_prompt_edits(text: str, edits: tuple[tuple[str, str], ...]) -> str:
     return text
 
 
+# 2026-10-13 — IMO amendments carry their dates (ingest.imo_harvest puts them
+# in each excerpt's title) and the user turn gives today's date
+# (engine.today_line). Every mode, Precision included. Behind
+# IMO_DATES_PROMPT_ENABLED (assemble_system_prompt(dates=...)).
+DATES_AND_AMENDMENTS_BLOCK = """\
+IMO RESOLUTIONS, DATES AND AMENDMENTS:
+- The library holds the IMO's MSC, MEPC and Assembly resolutions, added each week as the IMO \
+publishes them: amendments to SOLAS, MARPOL, STCW and the IMO codes (LSA, FSS, IGC, IBC, IGF, HSC, \
+IMSBC, IMDG, ESP, IS, MODU, SPS, IP, Polar, Load Lines, BWM, the NOx Technical Code), new codes \
+(e.g. the MASS Code), performance standards and guidelines (CII, SEEMP, EEDI, enclosed-space \
+entry, port State control procedures). Where there is no consolidated edition of a code, its \
+adopting resolution and its amendments are in the library. Cite as: (MSC.583(111)), \
+(MEPC.400(83)) or (A.1206(34)).
+- The message gives today's date. An IMO amendment's excerpt title states when it was adopted and \
+when it enters into force. When a requirement comes from an amendment, say whether it is in force \
+today or from what date, and what applies until then. Never present an amendment that is not yet \
+in force as current law, and never leave out an adopted amendment the question concerns: a mariner \
+asking about a rule needs to know it is changing.
+- "Certified text pending" means the IMO has adopted the text and not yet published its certified \
+copy; treat the text as adopted."""
+
+
 def assemble_system_prompt(
     *,
     lead_with_answer: bool = True,
     precision_mode: bool = False,
     model_led: bool = False,
     provenance: bool = False,
+    dates: bool = False,
 ) -> str:
     """Return the system prompt with optional D6.86 lead-with-answer
     block + D6.97 AUTHORITY HIERARCHY DECISION block (always) +
@@ -889,6 +912,8 @@ def assemble_system_prompt(
     elif model_led and not precision_mode:
         prompt = apply_prompt_edits(prompt, MODEL_LED_GROUNDING)
     prompt = prompt + "\n\n" + AUTHORITY_HIERARCHY_BLOCK
+    if dates:
+        prompt = prompt + "\n\n" + DATES_AND_AMENDMENTS_BLOCK
     if precision_mode:
         prompt = prompt + "\n\n" + PRECISION_MODE_OVERLAY
     if lead_with_answer:

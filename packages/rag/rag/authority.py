@@ -112,6 +112,23 @@ _SOURCE_TO_TIER: dict[str, int] = {
     "imo_igc": 1,
     "imo_ibc": 1,
     "imo_hsc": 1,
+    # 2026-10-13 — these had no entry, so every MARPOL, IMDG, MLC, LSA / FSS /
+    # IGF / Polar Code and BWM excerpt reached the answer model labelled
+    # "Tier 2 — federal interpretive guidance". They are treaties and the codes
+    # SOLAS and MARPOL make mandatory. imo_msc / imo_mepc stay Tier 2: they mix
+    # amendments (each titled with its entry-into-force date) and guidelines.
+    "marpol": 1,
+    "marpol_supplement": 1,
+    "marpol_amend": 1,
+    "imdg": 1,
+    "imdg_supplement": 1,
+    "mlc": 1,
+    "stcw_amend": 1,
+    "imo_lsa": 1,
+    "imo_fss": 1,
+    "imo_igf": 1,
+    "imo_polar": 1,
+    "imo_bwm": 1,
     # IAMSAR Vol III — reference manual for shipboard SAR. Tier 4.
     "imo_iamsar": 4,
     # MOU PSC reports + deficiency codes — Tier 3 time-sensitive

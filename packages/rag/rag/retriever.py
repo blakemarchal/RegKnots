@@ -66,7 +66,10 @@ SOURCE_GROUPS: dict[str, tuple[str, ...]] = {
     # Sharing the group gives them its boosts: Subchapter M / TSMS queries
     # lift it by 0.20, "Coast Guard policy / guidance" and NVIC mentions too.
     "nvic": ("nvic", "uscg_cvc", "uscg_towing"),
-    "stcw": ("stcw", "stcw_supplement"),
+    # 2026-10-13 — stcw_amend (the STCW amendment resolutions) was in no
+    # group, so the diversified fetch never searched it: it surfaced only when
+    # a question named a resolution number or a rare keyword.
+    "stcw": ("stcw", "stcw_supplement", "stcw_amend"),
     "ism": ("ism", "ism_supplement"),
     # ILO Maritime Labour Convention 2006 — Sprint D6.97 audit (2026-06).
     # The labour "fourth pillar" (seafarer employment, wages, hours of
@@ -88,7 +91,10 @@ SOURCE_GROUPS: dict[str, tuple[str, ...]] = {
     # affinity boost. Nirmal Chopra's (Maersk) 15ppm-OCM UTC question
     # 2026-06-03 motivated this — we referenced MEPC.107(49) but had
     # no chunk of the resolution text to cite.
-    "marpol": ("marpol", "marpol_supplement", "imo_mepc"),
+    # 2026-10-13 — marpol_amend (CII / EEXI, Annex IV, the 2023-24 amendments)
+    # and imo_bwm (BWM Convention resolutions) joined: like stcw_amend they
+    # were in no group and never reached by vector search.
+    "marpol": ("marpol", "marpol_supplement", "imo_mepc", "marpol_amend", "imo_bwm"),
     # IMDG Code (International Maritime Dangerous Goods Code) — Sprint
     # D6.12. Distinct group so dangerous-goods classification, packing,
     # consignment, segregation, and stowage queries reliably surface
@@ -190,9 +196,11 @@ SOURCE_GROUPS: dict[str, tuple[str, ...]] = {
     # the other IMO codes gives them per-group diversified-fetch slots
     # so they don't get crowded out by SOLAS chunks that score higher
     # on cosine for the topic-defining query.
+    # 2026-10-13 — the IGF and Polar Codes and the IMO symbol resolutions
+    # joined (in no group until now; see "stcw" above).
     "imo_codes": (
         "imo_css", "imo_loadlines", "imo_igc", "imo_ibc", "imo_hsc",
-        "imo_lsa", "imo_fss",
+        "imo_lsa", "imo_fss", "imo_igf", "imo_polar", "imo_symbols",
     ),
     # OCIMF — SIRE 2.0 vetting question library + procedural suite,
     # OVIQ/BIQ questionnaires, Information Papers. Sprint D6.97 #58

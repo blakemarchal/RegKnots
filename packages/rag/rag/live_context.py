@@ -50,6 +50,10 @@ _REG_CHANGE_RE = re.compile(
       | \bchange\s?log\b
       | \b(?:last|past|this)\s+(?:week|month|quarter)'?s?\s+(?:reg(?:ulation)?|rule)\w*\s+(?:change|update)s?\b
       | \bany\s+(?:new|recent)\s+(?:reg(?:ulation)?s?|amendments?|updates?)\b
+      # 2026-10-13 — what is coming (IMO entry-into-force dates)
+      | \b(?:coming|come|comes|entering|enters?)\s+into\s+(?:force|effect)\b
+      | \bupcoming\s+(?:reg(?:ulation)?s?|rules?|amendments?|changes?|requirements?)\b
+      | \bwhat(?:'s|\s+is|\s+are)?\s+(?:changing|coming)\b
     )
     """,
 )
@@ -94,15 +98,52 @@ def window_days_for_query(query: str, default: int = 30) -> int:
 
 # ── Injector 1: recent corpus changes ───────────────────────────────────
 
+# 2026-10-13 — IMO resolutions in the library that enter into force in the
+# next 18 months (ingest.imo_harvest sets published_date = entry into force).
+_UPCOMING_SQL = """
+    SELECT DISTINCT ON (code) code, section_title, published_date
+    FROM (
+        SELECT substring(section_number from '((?:MSC|MEPC|A)[.][0-9]+[(][0-9]+[)])') AS code,
+               section_title, published_date
+        FROM regulations
+        WHERE published_date > CURRENT_DATE
+          AND published_date <= CURRENT_DATE + 548
+          AND section_number ~ '(MSC|MEPC|A)[.][0-9]+[(]'
+          AND chunk_index = 0
+    ) s
+    WHERE code IS NOT NULL
+    ORDER BY code, length(section_title)
+"""
+
+
+async def _upcoming_imo_lines(pool: asyncpg.Pool, limit: int = 20) -> list[str]:
+    rows = await pool.fetch(_UPCOMING_SQL)
+    rows = sorted(rows, key=lambda r: (r["published_date"], r["code"]))[:limit]
+    return [
+        f"  • {r['code']} — {(r['section_title'] or '')[:110]} — in force {r['published_date'].isoformat()}"
+        for r in rows
+    ]
+
+
 async def build_reg_changes_block(
     pool: asyncpg.Pool, query: str, *, max_sections: int = 12,
 ) -> str | None:
-    """Compact summary of recent corpus ingests, grouped by source.
+    """Compact summary of recent corpus ingests, grouped by source, and the
+    IMO amendments in the library that enter into force in the next 18 months.
 
     Returns None on empty window or any error (injection is always
     optional — a failure must never break the chat turn).
     """
     days = window_days_for_query(query)
+    try:
+        upcoming = await _upcoming_imo_lines(pool)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("upcoming IMO amendments query failed: %s", exc)
+        upcoming = []
+    upcoming_block = (
+        "IMO AMENDMENTS ENTERING INTO FORCE IN THE NEXT 18 MONTHS "
+        "(in the library; the date is the entry into force):\n" + "\n".join(upcoming) + "\n\n"
+    ) if upcoming else ""
     try:
         group_rows = await pool.fetch(
             """
@@ -111,6 +152,10 @@ async def build_reg_changes_block(
                    MAX(created_at)::date AS last_seen
             FROM regulations
             WHERE created_at > NOW() - ($1 || ' days')::INTERVAL
+              -- 2026-10-13: a row dated before the window (the IMO backlog's
+              -- 2006 amendments) is history, not a recent change
+              AND (published_date IS NULL
+                   OR published_date >= (NOW() - ($1 || ' days')::INTERVAL)::date)
             GROUP BY source
             ORDER BY n DESC
             LIMIT 15
@@ -118,7 +163,7 @@ async def build_reg_changes_block(
             str(days),
         )
         if not group_rows:
-            return (
+            return upcoming_block + (
                 f"LIVE CORPUS UPDATE DATA (as of {date.today().isoformat()}, "
                 f"window: last {days} days):\n"
                 f"No sections were added or updated in the RegKnots corpus in "
@@ -135,6 +180,8 @@ async def build_reg_changes_block(
                    source, section_number, section_title, created_at::date AS ingested
             FROM regulations
             WHERE created_at > NOW() - ($1 || ' days')::INTERVAL
+              AND (published_date IS NULL
+                   OR published_date >= (NOW() - ($1 || ' days')::INTERVAL)::date)
             ORDER BY section_number, created_at DESC
             LIMIT $2
             """,
@@ -168,7 +215,7 @@ async def build_reg_changes_block(
             "normally, and be clear that effective dates come from the "
             "regulation text itself. Do not invent changes not listed here."
         )
-        return "\n".join(lines) + "\n"
+        return upcoming_block + "\n".join(lines) + "\n"
     except Exception as exc:  # noqa: BLE001 — injection must never break chat
         logger.warning("reg-changes live-context build failed: %s", exc)
         return None

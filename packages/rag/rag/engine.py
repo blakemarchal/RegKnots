@@ -17,6 +17,7 @@ import logging
 import re
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
+from datetime import datetime, timezone
 from typing import NamedTuple
 from uuid import UUID
 
@@ -233,6 +234,10 @@ _SOLAS_ANNEX_RE = re.compile(r"SOLAS\s+Annex\s+([IVX]+|\d+)", re.IGNORECASE)
 # MSC resolution — applies to both SOLAS and STCW supplements.
 # Format: "MSC.520(106)" — captured wherever it appears (inside parens or bare).
 _MSC_RE = re.compile(r"MSC\.(\d+)\((\d+)\)")
+# 2026-10-13 — MEPC and Assembly resolutions ("MEPC.400(83)", "A.1206(34)"),
+# which the IMO harvester adds every week; they were never checked.
+_MEPC_RE = re.compile(r"MEPC\.(\d+)\((\d+)\)")
+_ASSEMBLY_RE = re.compile(r"(?<![\w.])A\.(\d{3,4})\((\d+)\)")
 
 # COLREGs rule — only match inside parens or with an explicit "COLREG(S)"
 # prefix to avoid false positives on generic "Rule N" prose elsewhere.
@@ -360,6 +365,15 @@ _UNVERIFIED_DISCLAIMER = (
     "\n\n*Note: Some referenced sections could not be verified in our current database "
     "and have been removed from this response. Please verify requirements directly on eCFR.*"
 )
+
+
+def today_line() -> str:
+    """2026-10-13 — the answer model never knew the date, so it could not say
+    whether an IMO amendment ("entry into force 1 January 2028", in the
+    excerpt's title) is in force yet. In the user turn, not the cached
+    system prompt."""
+    d = datetime.now(timezone.utc).date()
+    return f"Today's date: {d.day} {d.strftime('%B')} {d.year}."
 
 
 async def verify_citations(
@@ -541,18 +555,27 @@ def _extract_all_text_citations(answer: str) -> list[_TextCitation]:
         "imo_igf",
         "imo_polar",
         "imo_loadlines",
+        # 2026-10-13 — ingest.imo_harvest files MSC, MEPC and Assembly
+        # resolutions under the source of the instrument they amend.
+        "imo_mepc",
+        "imo_css",
+        "imo_bwm",
+        "imo_symbols",
+        "stcw_amend",
+        "marpol_amend",
     )
-    for m in _MSC_RE.finditer(answer):
-        msc_key = f"MSC.{m.group(1)}({m.group(2)})"
-        if msc_key not in found:
-            # Substring match (`%key%`) not end-anchored (`%key`). The
-            # 2026-05-09 chapter-granularity work for IMO IGC/HSC made
-            # section_numbers like "IMO IGC Code MSC.370(93) Ch.4", so
-            # an end-anchored pattern stops matching after re-ingest.
-            found[msc_key] = _TextCitation(
-                display=msc_key,
-                candidates=[(src, f"%{msc_key}%") for src in _MSC_SOURCE_FAMILY],
-            )
+    for rx, prefix in ((_MSC_RE, "MSC"), (_MEPC_RE, "MEPC"), (_ASSEMBLY_RE, "A")):
+        for m in rx.finditer(answer):
+            msc_key = f"{prefix}.{m.group(1)}({m.group(2)})"
+            if msc_key not in found:
+                # Substring match (`%key%`) not end-anchored (`%key`). The
+                # 2026-05-09 chapter-granularity work for IMO IGC/HSC made
+                # section_numbers like "IMO IGC Code MSC.370(93) Ch.4", so
+                # an end-anchored pattern stops matching after re-ingest.
+                found[msc_key] = _TextCitation(
+                    display=msc_key,
+                    candidates=[(src, f"%{msc_key}%") for src in _MSC_SOURCE_FAMILY],
+                )
 
     # ── COLREGs (rules + merged-range verification) ────────────────────────
     for m in _COLREGS_RE.finditer(answer):
@@ -1023,6 +1046,7 @@ def _build_chat_messages(
     user_jurisdiction_focus: str | None = None,
     user_verbosity: str | None = None,
     images: list | None = None,
+    today: bool = False,
 ) -> list[dict]:
     """Construct the Claude API message list for a chat turn.
 
@@ -1194,6 +1218,7 @@ def _build_chat_messages(
 
     user_content = (
         f"{NAVIGATION_AID_REMINDER}\n\n"
+        f"{today_line() + chr(10) + chr(10) if today else ''}"
         f"{vessel_block}"
         f"{credential_block}"
         f"{soft_context_block}"
@@ -1295,6 +1320,8 @@ async def _regenerate_answer(
         "Do not reference any regulations or UN-number identities that are not explicitly "
         "present in the provided context. If you cannot fully answer the question with the "
         "verified context alone, say so honestly.\n\n"
+        # the date goes with the dates rule (IMO_DATES_PROMPT_ENABLED)
+        f"{today_line() + chr(10) + chr(10) if 'DATES AND AMENDMENTS:' in effective_system_prompt else ''}"
         f"Verified regulation context:\n{context_str}\n\n"
         f"Original question: {query}"
     )
@@ -1768,6 +1795,9 @@ async def chat(
     # and the sources-and-gaps prompt (rag.prompts.PROVENANCE_GROUNDING).
     whole_sections_enabled: bool = False,
     provenance_prompt_enabled: bool = False,
+    # 2026-10-13 — today's date in the user turn and the IMO resolutions /
+    # dates block (rag.prompts.DATES_AND_AMENDMENTS_BLOCK)
+    imo_dates_prompt_enabled: bool = False,
     # Sprint D6.97 Phase 2 — image attachments for this turn. Empty list
     # = today's behavior (text-only). When non-empty, the engine forces
     # a vision-capable model (Sonnet/Opus, not Haiku) and builds a
@@ -1854,6 +1884,7 @@ async def chat(
         model_led_grounding_enabled=model_led_grounding_enabled,
         whole_sections_enabled=whole_sections_enabled,
         provenance_prompt_enabled=provenance_prompt_enabled,
+        imo_dates_prompt_enabled=imo_dates_prompt_enabled,
         images=images,
         precision_mode=precision_mode,
         live_context_block=live_context_block,
@@ -2796,6 +2827,9 @@ async def chat_with_progress(
     # and the sources-and-gaps prompt (rag.prompts.PROVENANCE_GROUNDING).
     whole_sections_enabled: bool = False,
     provenance_prompt_enabled: bool = False,
+    # 2026-10-13 — today's date in the user turn and the IMO resolutions /
+    # dates block (rag.prompts.DATES_AND_AMENDMENTS_BLOCK)
+    imo_dates_prompt_enabled: bool = False,
     # Sprint D6.97 Phase 2 — see chat() for full contract. Streaming
     # path consumes images identically; the only difference is the
     # synthesis call uses messages.stream() instead of messages.create().
@@ -2969,6 +3003,7 @@ async def chat_with_progress(
         precision_mode=precision_mode,
         model_led=model_led_grounding_enabled,
         provenance=provenance_prompt_enabled,
+        dates=imo_dates_prompt_enabled,
     )
 
     # D6.58 — off-topic short-circuit (streaming path). Same gate as
@@ -3085,6 +3120,7 @@ async def chat_with_progress(
         # D6.97 Phase 2 — pass through image attachments. When non-empty
         # the final user message becomes a multimodal block list.
         images=images,
+        today=imo_dates_prompt_enabled,
     )
 
     yield {"event": "status", "data": "Consulting compliance engine…"}
