@@ -1012,9 +1012,13 @@ def _extract_pdf_text(pdf_path: Path) -> str:
     page_texts: list[str] = []
     with pdfplumber.open(pdf_path) as pdf:
         for page in pdf.pages:
-            # 2026-10-13 — older IMO PDFs draw bold text twice, a hair apart;
-            # without dedupe_chars it reads "RREESSOOLLUUTTIIOONN" (MSC.220(82)).
-            t = page.dedupe_chars().extract_text() or ""
+            # 2026-10-13 — older IMO PDFs draw bold text twice, a hair apart, and
+            # it reads "RREESSOOLLUUTTIIOONN" (MSC.220(82)). dedupe_chars fixes it
+            # but doubles the time, so only for a page that shows the doubling;
+            # extra_attrs=() because the second copy can be in another font.
+            t = page.extract_text() or ""
+            if _DOUBLED_RE.search(t):
+                t = page.dedupe_chars(extra_attrs=()).extract_text() or ""
             t = _PAGE_NUMBER_LINE.sub("", t)
             t = _PAGE_HEADER_LINE.sub("", t)
             t = re.sub(r"[ \t]+", " ", t)
@@ -1052,6 +1056,8 @@ def _write_failure(meta: CodeDocMeta, exc: Exception, failed_dir: Path) -> None:
 
 
 _PAGE_NUMBER_LINE = re.compile(r"(?m)^\s*\d{1,4}\s*$")
+# four doubled letters in a row ("RREESSOO"): no English word has them
+_DOUBLED_RE = re.compile(r"(?:([A-Za-z])\1){4,}")
 # 2026-10-13 — running heads of IMO meeting documents: "MEPC 79/15/Add.1",
 # "Annex 9, page 1", "Page 2", and the file path in the footer
 # ("I:\MEPC\79\MEPC 79-15-Add.1.docx").
