@@ -267,3 +267,8 @@ def test_consolidated_instruments_are_never_parents():
     assert h.is_consolidated_instrument("ADOPTION OF THE INTERNATIONAL MARITIME DANGEROUS GOODS (IMDG) CODE")
     assert not h.is_consolidated_instrument("TECHNICAL CODE ON CONTROL OF EMISSION OF NITROGEN OXIDES FROM MARINE DIESEL ENGINES")
     assert not h.is_consolidated_instrument("INTERNATIONAL MARITIME SOLID BULK CARGOES (IMSBC) CODE")
+
+
+def test_awaiting_certification_placeholder():
+    assert h.is_placeholder("Index of IMO Resolutions\nRESOLUTION AWAITING CERTIFICATION")
+    assert not h.is_placeholder("RESOLUTION MSC.583(111) " + "text " * 200)

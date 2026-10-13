@@ -542,12 +542,11 @@ def pdf_text(path: Path) -> str:
     data/ocr/imo_harvest/<stem>.txt (newer than the PDF), where the imo_codes
     adapter reads it too, so a document is extracted once. '' when there is no
     text layer and no OCR on this machine."""
-    from ingest.sources.imo_codes import _extract_pdf_text
     cache = OCR_DIR / f"{path.stem}.txt"
     if cache.exists() and cache.stat().st_mtime >= path.stat().st_mtime:
         return cache.read_text(encoding="utf-8")
-    text = _extract_pdf_text(path)
-    if len(text.strip()) < 400:
+    text = _extract_isolated(path)
+    if len(text.strip()) < 400 and not is_placeholder(text):
         if not shutil.which("tesseract") or not shutil.which("pdftoppm"):
             return text
         from ingest.ocr import ocr_pdf
@@ -555,6 +554,33 @@ def pdf_text(path: Path) -> str:
     OCR_DIR.mkdir(parents=True, exist_ok=True)
     cache.write_text(text, encoding="utf-8")
     return text
+
+
+_EXTRACTOR = None
+
+
+def _extract_worker(path: str) -> str:
+    from ingest.sources.imo_codes import _extract_pdf_text
+    return _extract_pdf_text(Path(path))
+
+
+def _extract_isolated(path: Path) -> str:
+    """pdfplumber in a fresh child process per document. 2026-10-13: in one
+    process the backlog run held 1.0 GB plus 0.9 GB of swap after 170 PDFs
+    (pdfminer does not hand memory back) and filled the box's swap."""
+    global _EXTRACTOR
+    import multiprocessing as mp
+    from concurrent.futures import ProcessPoolExecutor
+    if _EXTRACTOR is None:
+        _EXTRACTOR = ProcessPoolExecutor(max_workers=1, mp_context=mp.get_context("spawn"),
+                                         max_tasks_per_child=1)
+    return _EXTRACTOR.submit(_extract_worker, str(path)).result(timeout=1800)
+
+
+def is_placeholder(text: str) -> bool:
+    """IMO posts a one-page "RESOLUTION AWAITING CERTIFICATION" PDF until the
+    certified text is ready: nothing to ingest yet."""
+    return len(text.strip()) < 400 and "AWAITING CERTIFICATION" in text.upper()
 
 
 # ── Plan ──────────────────────────────────────────────────────────────────────
@@ -700,6 +726,11 @@ def _download(client: httpx.Client, item: Item, raw_dir: Path) -> Path:
     meta = CodeDocMeta(code=item.code, title=item.title, pdf_url=item.pdf_url,
                        effective_date=date.today(), parent_label=item.label)
     out = raw_dir / f"{meta.filename_stub}.pdf"
+    if item.reason != "recertified" and out.exists() and out.stat().st_size > 1024:
+        # already downloaded (an interrupted run): keep it, and its cached text
+        item.sha256 = hashlib.sha256(out.read_bytes()).hexdigest()
+        item.path = str(out)
+        return out
     resp = _get(client, item.pdf_url)
     body = resp.content
     if not body.startswith(b"%PDF"):
@@ -713,8 +744,14 @@ def _download(client: httpx.Client, item: Item, raw_dir: Path) -> Path:
     return out
 
 
+class AwaitingText(Exception):
+    """The PDF is IMO's "awaiting certification" placeholder."""
+
+
 def _read(item: Item, path: Path) -> str:
     text = pdf_text(path)
+    if is_placeholder(text):
+        raise AwaitingText("IMO has not published the text yet (awaiting certification)")
     if len(text.strip()) < 400:
         raise ValueError(f"no usable text ({len(text.strip())} chars; scan without OCR here)")
     adopted, eif = parse_dates(text)
@@ -807,6 +844,10 @@ async def run(*, backlog: bool, plan_only: bool, limit: int | None, notify: bool
                     _read(item, path)
                     done[item.code] = item
                     taken.add(item.code)
+                except AwaitingText:
+                    # tried again every week until IMO posts the certified text
+                    report.skipped.setdefault("awaiting certification (no text yet)", []).append(item.code)
+                    Path(item.path).unlink(missing_ok=True)
                 except Exception as exc:  # one bad document never stops the run
                     item.error = f"{type(exc).__name__}: {exc}"[:300]
                     report.failed.append(asdict(item))
