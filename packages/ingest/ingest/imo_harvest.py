@@ -308,6 +308,13 @@ def consolidated(entry: IndexEntry) -> bool:
     return False
 
 
+def is_consolidated_instrument(title: str) -> bool:
+    """A text of SOLAS, MARPOL, IMDG, STCW or the ISM Code itself (any date):
+    we hold those as consolidated editions, so an older resolution text of
+    them is never fetched as a parent."""
+    return any(pat.search(title or "") for pat, _b, _l in _CONSOLIDATED)
+
+
 def selection_reason(entry: IndexEntry) -> str | None:
     """'window' / 'chain', or None when the resolution is out of scope."""
     if entry.session >= WINDOW_FLOOR[entry.body]:
@@ -843,6 +850,11 @@ async def run(*, backlog: bool, plan_only: bool, limit: int | None, notify: bool
                         report.skipped.setdefault("parent too old", []).append(code)
                         continue
                     title = e.title if e else ""
+                    if is_consolidated_instrument(title):
+                        # e.g. MEPC.176(58), the 2008 Revised MARPOL Annex VI: an old
+                        # text of an instrument we hold consolidated
+                        report.skipped.setdefault("parent in a consolidated edition", []).append(code)
+                        continue
                     key = route(body, title) if title else ("mepc_res" if body == "MEPC" else "msc_res")
                     item = Item(code=code, body=body, session=session, title=title or code,
                                 pdf_url=(e.pdf_url if e and e.pdf_url else cdn_url(code)),
@@ -854,6 +866,10 @@ async def run(*, backlog: bool, plan_only: bool, limit: int | None, notify: bool
                         # not on the pages read: title from the PDF, then route again
                         txt = pdf_text(Path(item.path))
                         item.title = _title_from_text(txt, code)
+                        if is_consolidated_instrument(item.title):
+                            Path(done.pop(code).path).unlink(missing_ok=True)
+                            report.skipped.setdefault("parent in a consolidated edition", []).append(code)
+                            continue
                         new_key = route(body, item.title)
                         if new_key != item.key:
                             Path(item.path).replace(raw_dir_for(_CODE_TO_SOURCE[new_key]) / Path(item.path).name)

@@ -42,11 +42,11 @@ backlog." Evidence and numbers: §6 (filled in after the backlog run).
 | Discover | Read the index: the two newest period pages per body weekly, every page with `--backlog` (cached in `data/raw/imo_harvest/index-full.json`). A page that parses to 0 rows is an error, not silence. |
 | Select | Harvest a resolution when it is (a) **window**: adopted at MSC 104 / MEPC 77 / A 32 (late 2021) or later, or (b) **chain**: an amendment to an IMO code, from MSC 80 / MEPC 52 / A 24 (2005). Skip it when it is administrative (budget, arrears, rules of procedure, appreciation, …), already in the corpus (its number in any `section_number`), revoked per the index notes, or already merged into one of our consolidated editions (SOLAS 2024 to MSC 105, IMDG 42-24 to MSC 108, MARPOL 2022 to MEPC 76, STCW 2017 to MSC 97, ISM 2018 to MSC 98). |
 | Route | By title to the source of its instrument: LSA → `imo_lsa`, FSS → `imo_fss`, IGC / IBC / IGF / HSC / Polar / Load Lines / CSS → their sources, BWM and biofouling → `imo_bwm`, STCW → `stcw_amend`, MARPOL and NOx Technical Code amendments → `marpol_amend`, anything else MSC / Assembly → `imo_msc`, MEPC → `imo_mepc`. **No new source, no migration.** |
-| Read | pdfplumber text (IMO running heads stripped); a scan goes through tesseract and is cached in `data/ocr/imo_harvest/`. Adoption and entry-into-force dates from the text (operative wording only: "shall enter into force on", not a recital's "entered into force"); a report annex with no adoption line takes its session's date. |
+| Read | pdfplumber text (IMO running heads stripped; a page whose text shows doubled glyphs, "RREESSOOLLUUTTIIOONN" in older fake-bold PDFs, is re-read with `dedupe_chars(extra_attrs=())`); a scan goes through tesseract. The text is cached in `data/ocr/imo_harvest/<stem>.txt` and the pipeline reads it, so a document is extracted once. Adoption and entry-into-force dates from the text (operative wording only: "shall enter into force on", not a recital's "entered into force"); a report annex with no adoption line takes its session's date. |
 | Status | Every section title of the document ends `[MSC.583(111): adopted 22 May 2026; entry into force 1 January 2028]` (plus "certified text pending" while the IMO says so). `published_date` = entry into force, else adoption. |
-| Parent | For an amendment to a code or guideline: the resolution its title names ("(RESOLUTION MSC.81(70))") or its preamble says adopted the instrument. If the corpus lacks it, fetch it too, one level (this is how the IMSBC, ESP, SPS, MODU, IS and IP Codes come in). Never a resolution the text revokes; never for a convention amendment. |
+| Parent | For an amendment to a code or guideline: the resolution its title names ("(RESOLUTION MSC.81(70))"), the index note ("Amends MSC.98(73)"), or the preamble recital that says it adopted the instrument, scored against the title's words (a preamble recalls the 1998 FTP Code before the 2010 one; "2010" and "FTP" pick MSC.307(88)). If the corpus lacks it, fetch it too, one level (this is how the IMSBC, ESP, SPS, MODU, IS and IP Codes come in). Never a resolution the text revokes, one skipped on purpose, one before MSC 60 / MEPC 40 / A 18 (the 1983 IBC / IGC originals), or for a convention amendment. |
 | Revoked | A newer edition revokes the older ("REVOKES resolution A.1185(33)"): PSC Procedures 2021 / 2023 / 2025, HSSC survey guidelines, the III Code obligations lists. Only the current one is ingested; a harvested one a later resolution revokes is removed; a curated row it revokes is listed for review. |
-| Ingest | Each document is recorded in `<raw_dir>/harvest.json` of its source; `sources/imo_codes.py` reads that file, so a curated run of the source (`ingest.cli --source imo_lsa`) still produces every harvested row and `--prune` keeps them. Only the new documents go through `run_pdf_pipeline`, fresh mode, with a prune scoped to them. |
+| Ingest | Only the new documents go through `run_pdf_pipeline`, fresh mode, 20 at a time, with a prune scoped to them. A document is recorded in `<raw_dir>/harvest.json` of its source once its sections are written (one that parsed to nothing is reported and tried again next run); `sources/imo_codes.py` reads that file, so a curated run of the source (`ingest.cli --source imo_lsa`) still produces every harvested row and `--prune` keeps them. |
 | Re-check | A document harvested while "AWAITING CERTIFICATION" is downloaded again when the flag clears, re-ingested if the PDF changed. |
 | Report | `data/raw/imo_harvest/report-latest.json`; `app.tasks.harvest_imo_resolutions` (Mondays 10:00 UTC, replacing `check_solas_supplements`) emails a digest to hello@ when anything was added, failed or revoked. Admin › Jobs › "IMO resolution harvest" queues it. No Anthropic calls; OpenAI embeddings only. |
 
@@ -73,6 +73,10 @@ notification for a source that changed.
 - **Citations:** the verifier checks MEPC and Assembly numbers as well as MSC, across every IMO
   source; bare `MEPC.400(83)` and `A.1206(34)` get chips; a bare resolution number opens the
   resolution's own opening section (`regulations._resolution_rows`).
+- **What's coming** (`rag/live_context.py`): "what changed this month" no longer counts rows
+  dated before its window (the backlog's 2006 amendments are not news); questions like "what
+  comes into force next year" / "upcoming amendments" get a list of the IMO amendments in the
+  library that enter into force in the next 18 months, soonest first.
 
 ## Measured
 
@@ -82,7 +86,7 @@ See §6.
 
 - MSC.1/Circ. / MEPC.1/Circ. circulars (IMODOCS account needed; Blake would create it).
 - IMO meeting summaries (what the committees *approved* for adoption at the next session, the
-  earliest signal of a coming rule) and a "what comes into force next year" calendar.
+  earliest signal of a coming rule, six months before a resolution exists).
 - Amendments are deltas, not a consolidated text: "Regulation 7 is replaced by the following"
   sits next to the base text it replaces. The status line and the dates rule carry the order.
 - A code's amendments before 2005 (and a code's parent when the IMO's PDF is a scan the VPS

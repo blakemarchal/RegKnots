@@ -258,3 +258,12 @@ def test_parse_docs_puts_status_in_every_title(monkeypatch, tmp_path):
         "IMO LSA Code Chapter 1 [MSC.589(111): adopted 22 May 2026; entry into force 1 January 2028]",
         "IMO LSA Code Chapter 2 [MSC.589(111): adopted 22 May 2026; entry into force 1 January 2028]",
     ]
+
+
+def test_consolidated_instruments_are_never_parents():
+    assert h.is_consolidated_instrument("REVISED MARPOL ANNEX VI")
+    assert h.is_consolidated_instrument("AMENDMENTS TO THE ANNEX OF THE PROTOCOL OF 1997 TO AMEND THE INTERNATIONAL "
+                                        "CONVENTION FOR THE PREVENTION OF POLLUTION FROM SHIPS")
+    assert h.is_consolidated_instrument("ADOPTION OF THE INTERNATIONAL MARITIME DANGEROUS GOODS (IMDG) CODE")
+    assert not h.is_consolidated_instrument("TECHNICAL CODE ON CONTROL OF EMISSION OF NITROGEN OXIDES FROM MARINE DIESEL ENGINES")
+    assert not h.is_consolidated_instrument("INTERNATIONAL MARITIME SOLID BULK CARGOES (IMSBC) CODE")
