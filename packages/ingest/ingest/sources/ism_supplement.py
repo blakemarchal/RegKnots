@@ -77,6 +77,12 @@ _SUPPLEMENT_DOCS: list[tuple[str, re.Pattern, str]] = [
     ),
 ]
 
+# 2026-10-13 — revoked by a resolution the IMO harvester added: A.1118(30)
+# by A.1188(33) (2023 Guidelines on implementation of the ISM Code by
+# Administrations). The boundary stays above, so its text does not run into
+# the next document; no section is emitted for it.
+_RETIRED: set[str] = {"A.1118(30)"}
+
 # ── Code end detection (reuses logic from ism.py) ───────────────────────────
 
 _PART_A_RE = re.compile(r"^PART\s+A\b", re.MULTILINE)
@@ -170,7 +176,7 @@ def parse_source(raw_dir: Path) -> list[Section]:
         )
         doc_text = supp_text[pos:end_pos].strip()
 
-        if not doc_text:
+        if not doc_text or suffix in _RETIRED:
             continue
 
         section_number = f"ISM Supplement {suffix}"

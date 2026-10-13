@@ -344,13 +344,7 @@ _CURATED_BY_CODE: dict[str, list[CodeDocMeta]] = {
             parent_label="IMO MEPC Resolution",
         ),
         # Exhaust Gas Cleaning Systems (scrubbers) — Maersk-relevant.
-        CodeDocMeta(
-            code="MEPC.259(68)",
-            title="2015 Guidelines for Exhaust Gas Cleaning Systems (EGCS / scrubbers)",
-            pdf_url=f"{_IMO_CDN}/MEPCDocuments/MEPC.259(68).pdf",
-            effective_date=date(2015, 5, 15),
-            parent_label="IMO MEPC Resolution",
-        ),
+        # MEPC.259(68) (2015 EGCS guidelines) retired 2026-10-13: revoked by MEPC.340(77), harvested.
         CodeDocMeta(
             code="MEPC.184(59)",
             title="2009 Guidelines for Exhaust Gas Cleaning Systems (predecessor to MEPC.259(68))",
@@ -391,13 +385,7 @@ _CURATED_BY_CODE: dict[str, list[CodeDocMeta]] = {
             parent_label="IMO MSC Resolution",
         ),
         # Assembly safety/operational resolutions (high SIRE/PSC value).
-        CodeDocMeta(
-            code="A.1050(27)",
-            title="Revised Recommendations for Entering Enclosed Spaces Aboard Ships",
-            pdf_url=f"{_IMO_CDN}/AssemblyDocuments/A.1050(27).pdf",
-            effective_date=date(2011, 11, 30),
-            parent_label="IMO Assembly Resolution",
-        ),
+        # A.1050(27) (enclosed spaces, 2011) retired 2026-10-13: revoked by MSC.581(110), harvested.
         CodeDocMeta(
             code="A.1047(27)",
             title="Principles of Minimum Safe Manning",
@@ -513,13 +501,7 @@ _CURATED_BY_CODE: dict[str, list[CodeDocMeta]] = {
             effective_date=date(2008, 10, 10),
             parent_label="IMO BWM Convention",
         ),
-        CodeDocMeta(
-            code="MEPC.207(62)",
-            title="Guidelines for Control and Management of Ships' Biofouling",
-            pdf_url=f"{_IMO_CDN}/MEPCDocuments/MEPC.207(62).pdf",
-            effective_date=date(2011, 7, 15),
-            parent_label="IMO BWM Convention",
-        ),
+        # MEPC.207(62) (2011 biofouling guidelines) retired 2026-10-13: revoked by MEPC.378(80), harvested.
         CodeDocMeta(
             code="MEPC.252(67)",
             title="Guidelines for Port State Control under the BWM Convention",

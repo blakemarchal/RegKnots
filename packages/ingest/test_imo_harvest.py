@@ -272,3 +272,21 @@ def test_consolidated_instruments_are_never_parents():
 def test_awaiting_certification_placeholder():
     assert h.is_placeholder("Index of IMO Resolutions\nRESOLUTION AWAITING CERTIFICATION")
     assert not h.is_placeholder("RESOLUTION MSC.583(111) " + "text " * 200)
+
+
+def test_plan_skips_what_a_harvested_resolution_revokes():
+    index = {"A.1050(27)": _e("A.1050(27)", "REVISED RECOMMENDATIONS FOR ENTERING ENCLOSED SPACES ABOARD SHIPS"),
+             "MSC.594(111)": _e("MSC.594(111)", "AMENDMENTS TO THE REVISED RECOMMENDATION ON TESTING OF LIFE-SAVING "
+                                                "APPLIANCES (RESOLUTION MSC.81(70))")}
+    index["A.1050(27)"].session = 33          # pretend it is in the window
+    manifest = {"MSC.581(110)": {"code": "MSC.581(110)", "key": "msc_res", "revokes": ["A.1050(27)"]}}
+    items, skipped = h.plan(index, set(), manifest)
+    assert [i.code for i in items] == ["MSC.594(111)"]
+    assert skipped["revoked by a harvested resolution"] == ["A.1050(27)"]
+
+
+def test_retired_curated_resolutions_are_gone():
+    from ingest.sources import ism_supplement
+    codes = {m.code for docs in imo_codes._CURATED_BY_CODE.values() for m in docs}
+    assert not codes & {"A.1050(27)", "MEPC.259(68)", "MEPC.207(62)"}
+    assert "A.1118(30)" in ism_supplement._RETIRED

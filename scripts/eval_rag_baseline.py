@@ -978,7 +978,7 @@ QUESTIONS: list[TestQuestion] = [
         qid="A28-2",
         query="What do the IMO recommendations for entering enclosed spaces require before entry?",
         vessels=["V1"],
-        expected=[r"MSC\.581\(110\)", r"A\.1050\(27\)"],
+        expected=[r"MSC\.581\(110\)"],   # A.1050(27) retired 2026-10-13
     ),
     TestQuestion(
         qid="A28-3",

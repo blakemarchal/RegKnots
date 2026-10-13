@@ -617,6 +617,8 @@ def plan(index: dict[str, IndexEntry], in_corpus: set[str], manifest: dict[str, 
     def skip(why: str, code: str) -> None:
         skipped.setdefault(why, []).append(code)
 
+    # revoked by a resolution already harvested (MSC.581(110) revokes A.1050(27))
+    revoked = {c for row in manifest.values() for c in row.get("revokes") or []}
     for e in sorted(index.values(), key=lambda e: (e.body, e.session, e.number)):
         prev = manifest.get(e.code)
         if prev:
@@ -632,6 +634,8 @@ def plan(index: dict[str, IndexEntry], in_corpus: set[str], manifest: dict[str, 
             continue
         if e.code in in_corpus:
             skip("in corpus", e.code)
+        elif e.code in revoked:
+            skip("revoked by a harvested resolution", e.code)
         elif _REVOKED_RE.search(e.notes):
             skip("revoked or superseded", e.code)
         elif is_administrative(e.title):
@@ -835,7 +839,8 @@ async def run(*, backlog: bool, plan_only: bool, limit: int | None, notify: bool
 
             done: dict[str, Item] = {}
             # never fetched as a parent: held, harvested, or skipped on purpose
-            taken = set(in_corpus) | set(manifest) | {c for codes in report.skipped.values() for c in codes}
+            taken = (set(in_corpus) | set(manifest) | {c for codes in report.skipped.values() for c in codes}
+                     | {c for row in manifest.values() for c in row.get("revokes") or []})
 
             def fetch(item: Item) -> None:
                 raw_dir = raw_dir_for(item.source)
