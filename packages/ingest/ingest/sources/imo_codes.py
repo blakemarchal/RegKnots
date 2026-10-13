@@ -1024,6 +1024,11 @@ def _extract_pdf_text(pdf_path: Path) -> str:
             t = re.sub(r"[ \t]+", " ", t)
             t = re.sub(r"\n{3,}", "\n\n", t)
             page_texts.append(t.strip())
+            # 2026-10-13 — pdfplumber keeps every page's parsed objects until
+            # the file closes: MSC.461(101), 600 pages, peaked at 1,922 MB
+            # without this and 71 MB with it (the backlog run filled the
+            # VPS's swap).
+            page.close()
     return "\n\n".join(p for p in page_texts if p)
 
 
