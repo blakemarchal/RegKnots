@@ -28,6 +28,7 @@ const NAV: { group: string; items: NavItem[] }[] = [
       { href: '/admin/users', label: 'Users' },
       { href: '/admin/traffic', label: 'Traffic & signups' },
       { href: '/admin/partners', label: 'Partners' },
+      { href: '/admin/pilots', label: 'Pilots' },
     ],
   },
   {

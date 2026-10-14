@@ -650,8 +650,9 @@ def workspace_state_transitions():
     """Daily cron: drive the workspace billing state machine forward.
 
     Two transitions:
-      1. trialing → card_pending  (after 30 days from creation, no
-         Stripe subscription)
+      1. trialing → card_pending  (when the trial ends, no Stripe
+         subscription; 2026-10-14: COALESCE(trial_ends_at, created_at +
+         30 days), app/pilots.py, so a pilot's longer trial is honoured)
       2. card_pending → archived  (after 30 days from card_pending_started_at)
 
     Idempotent — safe to run multiple times per day; the WHERE
@@ -689,8 +690,8 @@ async def _workspace_state_transitions_async():
             FROM workspaces w
             JOIN users u ON u.id = w.owner_user_id
             WHERE w.status = 'trialing'
-              AND w.created_at < now() - INTERVAL '25 days'
-              AND w.created_at > now() - INTERVAL '30 days'
+              AND COALESCE(w.trial_ends_at, w.created_at + INTERVAL '30 days') < now() + INTERVAL '5 days'
+              AND COALESCE(w.trial_ends_at, w.created_at + INTERVAL '30 days') > now()
               AND NOT EXISTS (
                 SELECT 1 FROM workspace_billing_events
                 WHERE workspace_id = w.id
@@ -727,7 +728,7 @@ async def _workspace_state_transitions_async():
               card_pending_started_at = now(),
               updated_at = now()
             WHERE status = 'trialing'
-              AND created_at < now() - INTERVAL '30 days'
+              AND COALESCE(trial_ends_at, created_at + INTERVAL '30 days') < now()
               AND stripe_subscription_id IS NULL
             RETURNING id, name, owner_user_id
             """

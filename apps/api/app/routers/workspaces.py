@@ -86,6 +86,9 @@ class WorkspaceDTO(BaseModel):
     my_role: Literal["owner", "admin", "member"]
     created_at: str
     card_pending_started_at: str | None = None
+    # 2026-10-14 — when the trial ends (app/pilots.py): created_at + 30 days
+    # unless a pilot or an admin set workspaces.trial_ends_at.
+    trial_ends_at: str | None = None
 
 
 class HandoffNoteDTO(BaseModel):
@@ -362,9 +365,15 @@ async def create_workspace(
                 """,
                 user_uuid, row["id"], body.name.strip(),
             )
+            # 2026-10-14 — an owner who signed up from a pilot link gets that
+            # pilot's trial length (app/pilots.py).
+            from app import pilots
+            pilot = await pilots.apply_signup_pilot(conn, row["id"], user_uuid)
+            trial_end = await conn.fetchval(
+                f"SELECT {pilots.TRIAL_END_SQL} FROM workspaces w WHERE w.id = $1", row["id"])
     await _log_billing_event(
         pool, row["id"], "created", user_uuid,
-        {"name": body.name},
+        {"name": body.name, **({"pilot": pilot} if pilot else {})},
     )
 
     return WorkspaceDTO(
@@ -376,6 +385,7 @@ async def create_workspace(
         member_count=1,
         my_role="owner",
         created_at=row["created_at"].isoformat(),
+        trial_ends_at=trial_end.isoformat() if trial_end else None,
         card_pending_started_at=(
             row["card_pending_started_at"].isoformat()
             if row["card_pending_started_at"] else None
@@ -396,6 +406,7 @@ async def list_my_workspaces(
         SELECT
           w.id, w.name, w.owner_user_id, w.status, w.seat_cap,
           w.created_at, w.card_pending_started_at,
+          COALESCE(w.trial_ends_at, w.created_at + interval '30 days') AS trial_end,
           wm.role AS my_role,
           (SELECT COUNT(*) FROM workspace_members WHERE workspace_id = w.id)
             AS member_count
@@ -414,6 +425,7 @@ async def list_my_workspaces(
             member_count=int(r["member_count"]),
             my_role=r["my_role"],
             created_at=r["created_at"].isoformat(),
+            trial_ends_at=r["trial_end"].isoformat(),
             card_pending_started_at=(
                 r["card_pending_started_at"].isoformat()
                 if r["card_pending_started_at"] else None
@@ -438,6 +450,7 @@ async def get_workspace(
     ws = await pool.fetchrow(
         "SELECT w.id, w.name, w.owner_user_id, w.status, w.seat_cap, w.created_at, "
         "       w.card_pending_started_at, "
+        "       COALESCE(w.trial_ends_at, w.created_at + interval '30 days') AS trial_end, "
         "       w.handoff_note, w.handoff_note_updated_at, "
         "       u.email AS handoff_editor_email, "
         "       u.full_name AS handoff_editor_name "
@@ -487,6 +500,7 @@ async def get_workspace(
         status=ws["status"], seat_cap=ws["seat_cap"],
         member_count=len(members), my_role=role,
         created_at=ws["created_at"].isoformat(),
+        trial_ends_at=ws["trial_end"].isoformat(),
         card_pending_started_at=(
             ws["card_pending_started_at"].isoformat()
             if ws["card_pending_started_at"] else None

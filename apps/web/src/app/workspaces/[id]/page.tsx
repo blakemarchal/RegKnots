@@ -52,6 +52,7 @@ interface WorkspaceDetail {
   my_role: 'owner' | 'admin' | 'member'
   created_at: string
   card_pending_started_at: string | null
+  trial_ends_at?: string | null   // 2026-10-14 — pilots can run longer than 30 days
   members: Member[]
   pending_invites: PendingInvite[]
   handoff_note: HandoffNote
@@ -178,9 +179,12 @@ function DetailContent() {
   const canTransfer = ws.my_role === 'owner'
   const adminCount = ws.members.filter(m => m.role === 'admin').length
   // D6.54 — trial-end countdown for the banner. Workspaces are created
-  // in `trialing` status; trial is 30 days from created_at.
+  // in `trialing` status; the trial ends at trial_ends_at (2026-10-14: a
+  // pilot runs longer), else 30 days from created_at.
   const trialDaysLeft = ws.status === 'trialing'
-    ? Math.max(0, 30 - daysSince(ws.created_at))
+    ? (ws.trial_ends_at
+        ? Math.max(0, Math.ceil((new Date(ws.trial_ends_at).getTime() - Date.now()) / 86_400_000))
+        : Math.max(0, 30 - daysSince(ws.created_at)))
     : null
   // D6.53 — pending invites count against seat_cap on the server, so
   // mirror that here when deciding whether to show the Invite button.
