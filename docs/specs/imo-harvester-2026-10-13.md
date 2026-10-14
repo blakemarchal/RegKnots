@@ -84,6 +84,8 @@ See §6.
 
 ## Not done
 
+- **Licensing (checked 2026-10-13, Blake's IMODOCS public account works):** IMODOCS says each regulatory text is in the public domain but "the online IMODOCS collection is proprietary and cannot be reproduced, translated, distributed, sold or otherwise used without a prior written permission"; the imo.org website terms (which cover wwwcdn.imo.org, where the harvester and the curated IMO adapter download from) say "Reuse of the Materials for commercial purposes is expressly prohibited." No circular scraper without IMO's written permission (imo.org/en/publications/Pages/PermissionRequests.aspx); the resolution harvester's standing with IMO is Blake's call.
+
 - MSC.1/Circ. / MEPC.1/Circ. circulars (IMODOCS account needed; Blake would create it).
 - IMO meeting summaries (what the committees *approved* for adoption at the next session, the
   earliest signal of a coming rule, six months before a resolution exists).
