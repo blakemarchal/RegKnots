@@ -90,9 +90,194 @@ The privacy page names PostHog under data sharing and in the cookie section.
 - `noindex` on sign-in, reset and verify pages, the whitelisting form, and the partner promo pages (`/ass`, `/captainkarynn`, `/womenoffshore`), so promo pricing doesn't surface in search.
 - Search-console verification tags are emitted only when `NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION` / `NEXT_PUBLIC_BING_SITE_VERIFICATION` are set. A DNS TXT record at Namecheap works too, and covers the whole domain.
 
-### Blake's steps
+### Found while checking: public pages served a spinner
 
-1. **PostHog:** create a project on PostHog Cloud (US). Add `NEXT_PUBLIC_POSTHOG_KEY=phc_…` to `/opt/RegKnots/.env`, and `NEXT_PUBLIC_POSTHOG_HOST` if the project is in the EU region. Then run `scripts/deploy.sh`: the web build reads the key, and the API reads the same line.
-2. **Google Search Console:** add a Domain property for regknots.com and verify it with the DNS TXT record (or the URL-prefix property and the meta tag env var). Submit `https://regknots.com/sitemap.xml`.
-3. **Bing Webmaster Tools:** import from Search Console.
-4. **Stripe dashboard:** add `customer.subscription.created` and `customer.subscription.deleted` to the webhook endpoint. The handler already processes both.
+`HydrationGate` showed the loading compass on every route outside its public list, and the list left out `/practice`, `/coverage`, `/education` and `/whale-zones`. Their server HTML had no content, so a crawler that doesn't run JavaScript saw an empty page.
+
+- They now render at once, as do the new `/regs` pages.
+- `/education` and `/whale-zones` still refresh the session in the background.
+
+## Step 3: regulation pages (shipped 2026-10-14)
+
+### Where it lives
+
+- **Generator:** `app/seo_pages.py`. The pages are stored in `seo_pages` (migration 0124).
+- **Read API:** `routers/public_regs.py`, read-only.
+- **Web:** `/regs` (hub), `/regs/c/<collection>` (lists grouped by CFR part) and `/regs/<slug>`.
+  - Each page shows a plain-English summary, then each requirement with its verbatim quote, common questions, the full regulation text, related sections (our page or eCFR) and previous / next links.
+  - Structured data: JSON-LD BreadcrumbList, a WebPage about a Legislation, and FAQPage.
+  - Pages render on first request and are cached for an hour (ISR). The sitemap lists every published page.
+
+### Sources
+
+- **Included:** U.S. government works only:
+  - 46 / 33 / 49 CFR;
+  - the Coast Guard's Navigation Rules handbook, which carries COLREGs and the Inland Rules side by side;
+  - NVIC main bodies. Enclosures are listed but not explained.
+- **Excluded:** IMO text. imo.org's terms bar commercial reuse.
+
+### Selection: 1,194 pages
+
+| Collection | Pages |
+|---|---|
+| Subchapter M (46 CFR 136–144) | 196 |
+| Credentials (46 CFR 10–16) | 316 |
+| 33 CFR 151 / 155 | 178 |
+| 33 CFR 164 | 26 |
+| Navigation Rules | 39 |
+| NVICs | 247 |
+| Frequently cited | 192 |
+
+"Frequently cited" means 46 / 33 / 49 CFR sections cited at least twice in answers.
+
+Reserved sections, and sections under 250 characters, get no page. 33 CFR 83 has no separate pages: it would duplicate the Navigation Rules pages.
+
+### Writing and checks
+
+Sonnet 5.5 writes each page through the Batch API, with structured output and effort `low`. The prompt says:
+
+- Every requirement and every FAQ answer carries a quote copied exactly from the text.
+- Numbers appear exactly as the text gives them.
+- Every limiting qualifier is kept.
+- NVICs are described as guidance.
+
+A page is published only if every check passes:
+
+1. **Quotes:** each quote is found in the section text, after normalising whitespace, typography and case.
+2. **Numbers:** every number in the plain English appears in the text. Citations and paragraph designators are skipped, and number words are counted ("twelve" = 12).
+3. **Citations:** every section named exists in the corpus, or the text itself names it.
+4. **Support:** a second model (Sonnet 5.5) confirms that each statement adds nothing and drops no qualifier.
+
+A page that fails is held, never served, and gets one rewrite with its failures fed back.
+
+### Pilot findings (42 pages)
+
+- **Haiku as the support checker missed a broadening:** a 33 CFR 155.1070 statement dropped "identified in paragraph (c)". The checker is now Sonnet.
+- **The first citation check was too strict:** it rejected references the text itself makes, such as 46 U.S.C. 3708 and "Part 151".
+- **Yield:** 67% passed on the first draft and 95% after one rewrite.
+
+### Results
+
+- **Full run:** 1,152 drafts.
+  - The batch ended in 15 minutes with all 1,152 succeeded.
+  - 787 passed on the first draft; 253 more passed after one rewrite.
+- **Published:** 1,082 pages:
+
+  | Collection | Published |
+  |---|---|
+  | Subchapter M | 184 |
+  | Credentials | 283 |
+  | Pollution | 151 |
+  | Navigation safety | 23 |
+  | Navigation rules | 35 |
+  | NVICs | 234 |
+  | Frequently cited | 172 |
+
+- **Held:** 112. A third pass was running at the time of writing.
+- **Spend:** about $35–45 of the $200 promotional credit. That covers half-price batch writing, plus the Sonnet checks and rewrites.
+
+### Upkeep
+
+The weekly Celery task `refresh_seo_pages` runs Monday 12:00 UTC.
+
+- It rebuilds the selection.
+- It holds every page whose regulation text changed, and adds new sections as drafts.
+- It writes those pages again, at most 50 a week.
+
+CLI on the VPS, from apps/api: `uv run python -m app.seo_pages status | select | pilot N | batch | retry [--again] | recheck [held|published] | refresh`.
+
+## Step 2: one free answer before signup (built 2026-10-14, off until keyed)
+
+### How it works
+
+- **Endpoint:** `POST /public/ask/stream` (`routers/guest_chat.py`, `app/guest.py`, migration 0125 `guest_questions`). The visitor's question goes through the normal chat stream as an internal guest account (`guest@guest.regknots.invalid`).
+  - The account is verified, on the Captain tier and `is_internal`, so no cap applies and admin numbers leave it out.
+  - The stream opens with a `guest` event carrying a claim secret.
+- **Claim:** the browser keeps that secret, and registration sends it as `guest_claim`. Then:
+  - the conversation and the vessel type the visitor picked move to the new account;
+  - onboarding is marked done;
+  - the web opens `/?conversation_id=…`.
+- **Limits:**
+  - one question per device per 30 days (a random id in localStorage, stored HMAC-hashed);
+  - 6 per IP per day (crews share IPs);
+  - 30 a day and 300 a month across all visitors, at most about $60 a month.
+- **Bot check:** Cloudflare Turnstile.
+- **Retention:** unclaimed guest conversations are deleted after 30 days, by the daily purge task.
+- **Widget:** `GuestAsk` runs on `/regs` pages, where the sign-up box is the fallback, and on `/landing`, where it shows nothing while the feature is off.
+  - Optional vessel-type chips.
+  - The answer streams in.
+  - A "Save this answer and keep asking" button follows.
+- **Funnel events:** `guest_question` and `guest_claimed`.
+
+### Verified on prod (2026-10-14)
+
+The test ran in a separate process with Cloudflare's always-pass test secret; prod config was unchanged.
+
+- **Stream:** the claim event came first, then 259 text chunks.
+- **Answer:** an Opus 5.5 answer citing 46 CFR 138.220 / 138.310 / 137.130, in 33 s.
+- **Device limit:** a second question from the same device got `429 guest_used`.
+- **Cleanup:** the test rows were deleted.
+- **Claim on registration:** unit-tested only, because no account was registered on prod.
+
+### Turning it on
+
+Set these in the prod `.env`, then run `scripts/deploy.sh` (the web build reads the site key):
+
+- `TURNSTILE_SECRET_KEY`
+- `NEXT_PUBLIC_TURNSTILE_SITE_KEY`
+- `REGKNOTS_ANON_CHAT_ENABLED=true`
+
+The caps are `REGKNOTS_ANON_DAILY_CAP`, `_MONTHLY_CAP` and `_IP_DAILY_CAP`.
+
+## Step 4: Wheelhouse pilots and the demo fleet (shipped 2026-10-14)
+
+### Trial ends
+
+Migration 0126 adds `workspaces.trial_ends_at` (NULL = 30 days from creation, as before).
+
+- The daily state machine reads `COALESCE(trial_ends_at, created_at + 30 days)`.
+- It sends the reminder 5 days before the end and moves the workspace to `card_pending` at the end.
+- The workspace banner counts down to the real end.
+
+### Pilot codes (`pilot_codes`, `app/pilots.py`)
+
+- **Link:** `/register?next=/workspaces&src=pilot-<code>`.
+- **New owners:** an owner who signs up from the link gets the code's trial (90 days by default) on the workspace they create.
+- **Admin › Customers › Pilots:**
+  - create, pause and copy codes;
+  - see signups and workspaces per code;
+  - see every workspace with its trial end;
+  - "Set trial" for an existing customer. It reopens a card-pending workspace when the new end is still ahead, and it is audit-logged.
+
+### Demo fleet
+
+`scripts/demo/seed_demo_workspace.py [--reset]`, run on the VPS from apps/api.
+
+- **The fleet:** "Gulf Coast Marine Towing (Demo)", with:
+  - the M/V Bay Pioneer;
+  - four fictional crew on `@demo.regknots.invalid`. They are internal and can't sign in.
+- **Crew records:** credentials, including an expired TWIC and a medical due in 40 days, and sea time.
+- **Also seeded:** a watch handoff note, and a fictional TSMS excerpt as a company document (`scripts/demo/demo_tsms.txt`, 10 chunks).
+- **Access:** Blake owns it and Karynn is an admin.
+- **Fleet Audit Readiness on it:**
+  - score 45;
+  - critical: no COI on file, Rosa's TWIC expired;
+  - warnings: Dale's medical, missing TWIC and drug-test records.
+- **Fix found in the process:** the first run listed Blake's and Karynn's own credentials among the findings. Admin accounts in an internal-only workspace are now left out of the assessment.
+- **`--reset`** clears the demo's conversations and recreates everything with fresh dates.
+
+## Blake's steps
+
+1. **PostHog:**
+   - Create a project on PostHog Cloud (US).
+   - Add `NEXT_PUBLIC_POSTHOG_KEY=phc_…` to `/opt/RegKnots/.env`, plus `NEXT_PUBLIC_POSTHOG_HOST` if the project is in the EU region.
+   - Run `scripts/deploy.sh`. The web build reads the key, and the API reads the same line.
+2. **Cloudflare Turnstile:**
+   - Add a widget for regknots.com (managed mode).
+   - Put `TURNSTILE_SECRET_KEY` and `NEXT_PUBLIC_TURNSTILE_SITE_KEY` in the prod `.env`, with `REGKNOTS_ANON_CHAT_ENABLED=true`.
+   - Run `scripts/deploy.sh`.
+3. **Google Search Console:**
+   - Add a Domain property for regknots.com and verify it with the DNS TXT record at Namecheap.
+   - Submit `https://regknots.com/sitemap.xml`.
+4. **Bing Webmaster Tools:** import from Search Console.
+5. **Stripe dashboard:** add `customer.subscription.created` and `customer.subscription.deleted` to the webhook endpoint. The handler already processes both.

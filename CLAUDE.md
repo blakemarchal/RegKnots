@@ -20,7 +20,7 @@ RegKnots — maritime-compliance copilot for U.S. commercial vessel operators. L
 - **Propose spec, wait for greenlight** before coding non-trivial work. The user will say "go" or push back.
 - **`packages/ingest/ingest/cli.py`:** DO NOT regenerate from codegen. Patch in place. Preserve the line `dsn = settings.database_url.replace("postgresql+asyncpg://", "postgresql://")` near `create_pool` — it adapts the asyncpg URL for the sync ingest path. If you regenerate this file, dispatch breaks.
 - **Deploy procedure:** production runs from `origin/main` via `scripts/deploy.sh`. Never edit on the VPS. After every push to main, run `scripts/deploy.sh` from your laptop to roll the change.
-- **Two schedulers exist.** systemd timers (`deploy/systemd`; the four corpus-refresh timers were **disabled 2026-08-10**, backup + db-maintenance stay on) AND Celery Beat (`apps/api/celery_beat.py`: weekly `update_regulations` for cfr_33/46/49/40/47/50/29 + nvic, daily `update_uscg_bulletins`, monthly `update_uscg_guidance` for safety alerts / CG-CVC / TVNCOE / waterways / NMC checklists, daily `purge_user_documents` (chat uploads past their 7 days), digests, reminders; the monthly REINDEX task was removed 2026-09-10). Disabling one does not disable the other. Check both before assuming a job is off.
+- **Two schedulers exist.** systemd timers (`deploy/systemd`; the four corpus-refresh timers were **disabled 2026-08-10**, backup + db-maintenance stay on) AND Celery Beat (`apps/api/celery_beat.py`: weekly `update_regulations` for cfr_33/46/49/40/47/50/29 + nvic, daily `update_uscg_bulletins`, monthly `update_uscg_guidance` for safety alerts / CG-CVC / TVNCOE / waterways / NMC checklists, daily `purge_user_documents` (chat uploads past their 7 days, and unclaimed guest conversations after 30), weekly `refresh_seo_pages` (Mon 12:00 UTC: /regs pages whose CFR text changed, rewritten, cap 50), digests, reminders; the monthly REINDEX task was removed 2026-09-10). Disabling one does not disable the other. Check both before assuming a job is off.
 - **Ad-hoc ingest jobs MUST use `scripts/run_ingest.sh`**, not `uv run python -m ingest.cli` directly. The wrapper isolates the job inside a transient systemd unit with a 1.5 GB memory cap so a runaway can't take the box. Plain interactive ingests caused 12 of 13 OOM events / 14 days per the 2026-05-08 audit. There is no good reason to bypass the wrapper.
 - **Grep for "Cassandra" before every commit.** It's a recurring slip.
 
@@ -405,6 +405,47 @@ If a doc says "alembic head is 0045" but `alembic current` says `0092`, the doc 
   - **Also:** MARPOL, IMDG, MLC, LSA / FSS / IGF / Polar, BWM and the amendment sources had **no authority tier** (read as "Tier 2 — federal interpretive guidance"), now Tier 1; the verifier checks MEPC / Assembly numbers; chips for bare `MEPC.n(m)` / `A.n(m)` open the resolution; pdfplumber doubled-glyph text ("RREESSOOLLUUTTIIOONN") fixed for IMO PDFs; live context: "what changed" ignores rows dated before its window, and "what comes into force" lists IMO amendments due in 18 months.
   - **Licensing (checked 2026-10-13, Blake's IMODOCS public account works):** IMODOCS says each regulatory text is in the public domain but "the online IMODOCS collection is proprietary and cannot be reproduced, translated, distributed, sold or otherwise used without a prior written permission"; the imo.org website terms (which cover wwwcdn.imo.org, where the harvester and the curated IMO adapter download from) say "Reuse of the Materials for commercial purposes is expressly prohibited." No circular scraper without IMO's written permission (imo.org/en/publications/Pages/PermissionRequests.aspx); the resolution harvester's standing with IMO is Blake's call.
   - **`IMO_DATES_PROMPT_ENABLED`** (today's date in the user turn + IMO resolutions / dates-and-amendments prompt block): **ON since 2026-10-13** after `compare_synthesis_models.py --dates-ab --session-judge` (16 questions: 10 on IMO amendments for the Captain's vessel, 4 gold, her 2; ~$5 API, grading on the subscription): session judge overall 7.81 → 7.94, accuracy 7.88 → 8.38, errors flagged 26 → 21, judged best 9 vs 7 (today ahead); GPT-4o overall 9.31 → 9.62, accuracy 9.81 → 9.94, errors 2 → 0, best 6 → 10. Date wins: IMO9 caught MEPC.413(84) reversing the 2025 SEEMP distance rule (6 → 9), IMO7 placed IMDG 43-26 against today, IMO3 got the 2025 enclosed-space changes without inventing any. Variance seen: the coverage check sent one capture to the web and not the other (IMO6). `IMO_DATES_PROMPT_ENABLED=false` reverts.
+- **2026-10-14 growth plan, steps 5 → 1 → 3 → 2 → 4** (Blake: "Greenlight what all that you can build without me in the loop"). Migrations **0123–0126**; alembic head is **0126**.
+  - **Spec:** `docs/specs/growth-plan-2026-10-14.md` (the why, the decisions, the results and Blake's account steps).
+  - **Funnel on 2026-10-13:**
+    - 65 external signups; 41 asked a question; 2 active in the last 30 days; 2 paying.
+    - Signups per month: Apr 36, May 22, then 0–4 a month since.
+    - Getting people to a first answer is the bottleneck.
+  - **Karynn is assumed unavailable:** nothing in the plan waits on her.
+  - **Step 5, customer research:** 7 drafts in blake@regknots.com (note mode), one to each engaged user and each payer. Each asks for a 15-minute call or three questions by reply. Blake sends them.
+  - **Step 1, measurement:**
+    - **Funnel table:** `product_events` + `app/events.py`. Events: `signup`, `first_question`, `paywall_hit` (with a reason), `checkout_started` / `_completed`, `guest_question` / `guest_claimed`. The admin dashboard has a "Funnel events · 30 days" card.
+    - **PostHog** (posthog-js 1.434.18, lazy-loaded):
+      - no cookies (localStorage), respects DNT;
+      - no autocapture or recording;
+      - URLs scrubbed to campaign parameters, private path segments masked;
+      - identified by user id; admins opt out.
+      - **Off until `NEXT_PUBLIC_POSTHOG_KEY` is set.**
+  - **Step 1, search basics:**
+    - `robots.txt`, `sitemap.xml`, a share image, canonical / Open Graph metadata on every public page.
+    - noindex on sign-in and partner promo pages.
+    - Verification tags from env.
+    - Pricing copy now says the Wheelhouse trial is archived 30 days after read-only, matching the code.
+  - **Found and fixed: public pages served a spinner as their HTML.** `/practice`, `/coverage`, `/education`, `/whale-zones` were missing from `HydrationGate`'s public list. They now render on the server.
+  - **Step 3, regulation pages:**
+    - `/regs`, `/regs/c/<collection>`, `/regs/<slug>`, built by `app/seo_pages.py` into `seo_pages`.
+    - **1,082 published** of 1,194 selected: Subchapter M, credentials, 33 CFR 151/155/164, Navigation Rules, NVIC main bodies, frequently cited CFR.
+    - No IMO text.
+    - Sonnet 5.5 writes each page through the Batch API.
+    - **Publishing gate:** quotes found verbatim, numbers from the text, named sections exist or are named by the text, and a Sonnet support check. Otherwise the page is held and rewritten once with its failures. The Haiku checker had passed a dropped "identified in paragraph (c)".
+    - Weekly `refresh_seo_pages` (Mon 12:00 UTC) rewrites pages whose CFR text changed, cap 50.
+    - About $40 of promotional credit.
+  - **Step 2, one free answer before signup** (`app/guest.py`, `/public/ask/stream`, `GuestAsk` on /regs and /landing):
+    - **Guest account:** an internal guest account owns the conversation. Registration claims it: the conversation and the picked vessel move to the new account, onboarding is skipped, and chat opens on it.
+    - **Limits:** 1 per device per 30 days, 6 per IP per day, 30 a day and 300 a month in total. Turnstile check.
+    - **Retention:** unclaimed conversations are purged after 30 days.
+    - **Verified on prod in-process** with Cloudflare's test secret (Opus answer, then the device limit refused a second question).
+    - **Off until `TURNSTILE_SECRET_KEY`, `NEXT_PUBLIC_TURNSTILE_SITE_KEY` and `REGKNOTS_ANON_CHAT_ENABLED=true` are set.**
+  - **Step 4, Wheelhouse pilots:**
+    - `workspaces.trial_ends_at`: NULL = 30 days. The state machine reads `COALESCE(trial_ends_at, created_at + 30 days)`.
+    - **Pilot codes:** the link is `/register?next=/workspaces&src=pilot-<code>`, giving 90 days by default. Admin › Pilots has codes, workspaces and Set trial.
+    - **Demo fleet:** `scripts/demo/seed_demo_workspace.py [--reset]`: Gulf Coast Marine Towing (Demo), M/V Bay Pioneer, 4 fictional crew, a TSMS excerpt. Blake owns it; Karynn is an admin.
+    - **Audit readiness fix:** it now leaves admin accounts out of an internal-only workspace. It had listed Blake's and Karynn's own expired medicals.
 See `docs/PROJECT_STATE.md` for a fuller operational snapshot and `docs/roadmap.md` for the prioritized backlog.
 
 
@@ -440,4 +481,4 @@ Full audit report (models, retrieval, UX, product packaging): see the 2026-07-18
 
 ---
 
-*Last updated 2026-10-13 (IMO resolution harvester: backlog of 248 resolutions + 19 parent codes, weekly harvest, retrieval groups / tiers / keyword caps, dates prompt; towboat Sub M fix deployed; 2026-10-09: answer pipeline phase 1 live: whole sections, sources-and-gaps prompt; IMO splitter fix + pilot transfer resolutions; 2026-10-06 mail routing: inbound Google only, ImprovMX unused, app email on Resend with a default reply-to; 2026-10-05: PDF and Word uploads in chat, migration 0121; reply-to on admin emails; off-topic check sees the conversation, attachment wording; 2026-10-03 security: only our hostnames get a TLS certificate or credentialed CORS, junk certificates cleared; earlier: free /practice page, capped free plan, MVUS / school / TPO outreach with a call list, NGA manuals `nga_pubs`, migration 0120; earlier: inland / Coast Guard corpus: ten new sources, NVIC discovery fix, Medical Manual, uscg_bulletin pruned + daily feed, keyword floor, migration 0119; earlier: corpus gap audit; self-serve account deletion + migration 0118; admin redesign + customer UX pass; CFR paragraph chips; video ads first cut). When this drifts from reality, fix it — that's the rule.*
+*Last updated 2026-10-14 (growth plan: funnel events + cookieless PostHog, search basics, 1,082 regulation pages at /regs, one free answer before signup (off until keyed), Wheelhouse pilot codes + demo fleet, migrations 0123–0126; 2026-10-13: IMO resolution harvester: backlog of 248 resolutions + 19 parent codes, weekly harvest, retrieval groups / tiers / keyword caps, dates prompt; towboat Sub M fix deployed; 2026-10-09: answer pipeline phase 1 live: whole sections, sources-and-gaps prompt; IMO splitter fix + pilot transfer resolutions; 2026-10-06 mail routing: inbound Google only, ImprovMX unused, app email on Resend with a default reply-to; 2026-10-05: PDF and Word uploads in chat, migration 0121; reply-to on admin emails; off-topic check sees the conversation, attachment wording; 2026-10-03 security: only our hostnames get a TLS certificate or credentialed CORS, junk certificates cleared; earlier: free /practice page, capped free plan, MVUS / school / TPO outreach with a call list, NGA manuals `nga_pubs`, migration 0120; earlier: inland / Coast Guard corpus: ten new sources, NVIC discovery fix, Medical Manual, uscg_bulletin pruned + daily feed, keyword floor, migration 0119; earlier: corpus gap audit; self-serve account deletion + migration 0118; admin redesign + customer UX pass; CFR paragraph chips; video ads first cut). When this drifts from reality, fix it — that's the rule.*

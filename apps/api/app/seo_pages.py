@@ -24,6 +24,7 @@ CLI, on the VPS from apps/api (reads the prod .env):
   uv run python -m app.seo_pages retry           # one rewrite of held pages, failures fed back
   uv run python -m app.seo_pages recheck         # re-run checks on held pages
   uv run python -m app.seo_pages check-stale     # hold pages whose text changed
+  uv run python -m app.seo_pages refresh         # weekly: hold changed pages, rewrite them (cap 50)
   uv run python -m app.seo_pages status
 """
 from __future__ import annotations
@@ -782,6 +783,32 @@ async def cmd_batch(limit: int | None = None) -> None:
         await conn.close()
 
 
+REFRESH_WEEKLY_CAP = 50     # changed pages rewritten per weekly run (~$0.05 each)
+
+
+async def refresh(conn, client) -> dict:
+    """Weekly (Celery refresh_seo_pages, after Sunday's regulation update):
+    rebuild the selection, which holds every page whose regulation text
+    changed and adds new sections as drafts; then write those pages again
+    from the new text, at most REFRESH_WEEKLY_CAP."""
+    saved = await save_selection(conn, await select_pages(conn))
+    rows = [dict(r) for r in await conn.fetch(
+        f"""SELECT {_PAGE_COLS} FROM seo_pages
+            WHERE status = 'draft'
+               OR (status = 'held' AND checks->'failures' ? 'the regulation text changed')
+            ORDER BY priority DESC, id LIMIT {REFRESH_WEEKLY_CAP}""")]
+    written = await write_pages(conn, client, rows, use_batch=False) if rows else {}
+    return {**saved, "rewritten": written}
+
+
+async def cmd_refresh() -> None:
+    conn, client = await _connect(), _client()
+    try:
+        print(json.dumps(await refresh(conn, client)), flush=True)
+    finally:
+        await conn.close()
+
+
 async def cmd_retry() -> None:
     """Held pages that haven't used their rewrite (e.g. held before the rewrite
     existed, or after a check changed): one more rewrite with feedback."""
@@ -848,6 +875,8 @@ def main(argv: list[str]) -> None:
         asyncio.run(cmd_batch(int(argv[1]) if len(argv) > 1 else None))
     elif cmd == "retry":
         asyncio.run(cmd_retry())
+    elif cmd == "refresh":
+        asyncio.run(cmd_refresh())
     elif cmd == "recheck":
         asyncio.run(cmd_recheck(argv[1] if len(argv) > 1 else "held"))
     else:

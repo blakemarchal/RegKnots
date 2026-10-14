@@ -1306,6 +1306,25 @@ async def _process_user_document_async(document_id: str):
         await pool.close()
 
 
+@celery.task(name="app.tasks.refresh_seo_pages", soft_time_limit=1800, time_limit=1900)
+def refresh_seo_pages():
+    """2026-10-14 — keep the public regulation pages (/regs) current: hold the
+    pages whose regulation text changed in the weekly update and write them
+    again from the new text (app/seo_pages.py refresh, at most 50 a week)."""
+    return _run_async(_refresh_seo_pages_async())
+
+
+async def _refresh_seo_pages_async():
+    from app import seo_pages
+    conn, client = await seo_pages._connect(), seo_pages._client()
+    try:
+        result = await seo_pages.refresh(conn, client)
+        logger.info("refresh_seo_pages: %s", result)
+        return result
+    finally:
+        await conn.close()
+
+
 @celery.task(name="app.tasks.purge_user_documents")
 def purge_user_documents():
     """2026-10-05 — delete chat-attached documents past their delete_after (the

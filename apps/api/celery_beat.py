@@ -40,6 +40,12 @@ celery.conf.beat_schedule = {
         "task": "app.tasks.harvest_imo_resolutions",
         "schedule": crontab(hour=10, minute=0, day_of_week="monday"),
     },
+    "refresh-seo-pages-weekly": {
+        # 2026-10-14 — public regulation pages (/regs): pages whose CFR text
+        # changed in Sunday's update are held and written again (cap 50).
+        "task": "app.tasks.refresh_seo_pages",
+        "schedule": crontab(hour=12, minute=0, day_of_week="monday"),
+    },
     # "reindex-vector-embeddings-monthly" removed 2026-09-10 — non-
     # concurrent REINDEX duplicating regknots-db-maintenance.timer.
     "send-credential-expiry-reminders-daily": {
