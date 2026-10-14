@@ -21,6 +21,7 @@ CLI, on the VPS from apps/api (reads the prod .env):
   uv run python -m app.seo_pages select          # (re)build the draft list
   uv run python -m app.seo_pages pilot 20        # write + check 20 drafts now
   uv run python -m app.seo_pages batch           # all drafts through one Message Batch
+  uv run python -m app.seo_pages retry           # one rewrite of held pages, failures fed back
   uv run python -m app.seo_pages recheck         # re-run checks on held pages
   uv run python -m app.seo_pages check-stale     # hold pages whose text changed
   uv run python -m app.seo_pages status
@@ -175,6 +176,8 @@ Rules:
 6. If the text is reserved, removed or only a heading, return empty lists and say so in the summary.
 7. Navigation Rules: the text gives the International rule and the Inland rule, marked [INTERNATIONAL] and [INLAND]. Say where they differ. Start a statement with "International:" or "Inland:" when it applies to only one of them.
 8. NVICs are Coast Guard guidance, not regulations. Describe them as guidance ("the Coast Guard will", "should") exactly as the text puts it.
+9. Name parts, subchapters and statutes only as the text names them ("this part", "this subchapter") or as the collection given with the section names them; never from memory.
+10. Every statement and answer is a complete sentence that stands on its own.
 
 Fields:
 - topic: what the section covers, 3 to 8 words, sentence case, no section number. Example: "Portable fire extinguishers on towing vessels".
@@ -200,28 +203,39 @@ def page_schema() -> dict:
     })
 
 
-def user_prompt(page: dict) -> str:
+def user_prompt(page: dict, feedback: dict | None = None) -> str:
+    """The section for the writer. `feedback` ({"content", "failures"}) asks for
+    a corrected page after a draft failed its checks."""
     collection = COLLECTION_BY_SLUG[page["collection"]]
     text = page["source_text"]
     if len(text) > PROMPT_TEXT_CHARS:
         text = text[:PROMPT_TEXT_CHARS] + "\n\n[The text continues; explain only the part above.]"
     as_of = f" (current as of {page['up_to_date_as_of']})" if page.get("up_to_date_as_of") else ""
-    return (
+    prompt = (
         f"Section: {page['display_number']}\n"
         f"Heading: {page.get('section_title') or ''}\n"
         f"Collection: {collection.title}\n\n"
         f"Text{as_of}:\n<<<\n{text}\n>>>"
     )
+    if feedback:
+        failures = "\n".join(f"- {f}" for f in feedback.get("failures", []))
+        previous = json.dumps(feedback["content"], ensure_ascii=False) if feedback.get("content") else "(none)"
+        prompt += (
+            f"\n\nA previous draft of this page failed these automated checks:\n{failures}\n\n"
+            f"Previous draft:\n{previous}\n\n"
+            "Write the page again. Fix or drop every item that failed and keep the rest."
+        )
+    return prompt
 
 
-def request_params(page: dict) -> dict:
+def request_params(page: dict, feedback: dict | None = None) -> dict:
     from rag.llm import cached_system, json_output_config
     return {
         "model": GEN_MODEL,
         "max_tokens": GEN_MAX_TOKENS,
         "output_config": json_output_config(page_schema(), effort="low"),
         "system": cached_system(SYSTEM_PROMPT),
-        "messages": [{"role": "user", "content": user_prompt(page)}],
+        "messages": [{"role": "user", "content": user_prompt(page, feedback)}],
     }
 
 
@@ -355,14 +369,30 @@ def static_checks(page: dict, content: dict, corpus_sections: set[str]) -> dict:
     named = cited_sections(" ".join(page_texts(content)), title)
     for ref in content.get("related_sections", []):
         named |= cited_sections(ref, title) or {ref.strip()}
-    missing = sorted(n for n in named if n not in corpus_sections and n != page["section_number"])
+    missing = sorted(n for n in named if n not in corpus_sections and n != page["section_number"]
+                     and not named_in_text(n, source_norm))
     if missing:
-        failures.append(f"sections not in the corpus: {', '.join(missing)}")
+        failures.append(f"sections neither in the corpus nor named in the text: {', '.join(missing)}")
     return {"ok": not failures, "failures": failures}
 
 
+def named_in_text(ref: str, source_norm: str) -> bool:
+    """A reference the section text makes itself ("46 U.S.C. 3708", "Part 151",
+    "NVIC 2-65"): its last number appears in the text as a whole number."""
+    nums = re.findall(r"\d+(?:[.\-]\d+)*", ref)
+    if not nums:
+        return True
+    return re.search(rf"(?<![\d.]){re.escape(nums[-1])}(?![\d])", source_norm) is not None
+
+
 SUPPORT_PROMPT = """\
-You check a plain-English explanation of a regulation against the regulation text. For each numbered item, decide whether the statement is supported: everything it says must be stated or directly implied by its quote, or by the section text when no quote is given. Paraphrase, simplification and leaving details out are fine. A statement is NOT supported if it adds a requirement, number, deadline, condition, exception or vessel type, changes who must do something, makes a permission into a requirement (or the reverse), or reverses the meaning. Give a short reason for each unsupported item."""
+You check a plain-English explanation of a regulation against the regulation text. For each numbered item, decide whether the statement is supported: everything it says must be stated in, or directly implied by, the section text. Its quote should be the passage (or one of the passages) the statement comes from; flag a quote only when it has nothing to do with the statement.
+
+A statement is NOT supported if it adds a requirement, number, deadline, condition, exception or vessel type, changes who must do something, makes a permission into a requirement (or the reverse), narrows or broadens who or what is covered, or reverses the meaning.
+
+These are fine and must not be flagged: paraphrase, simplification, leaving details out, wording or style; naming this section's own number, its part or subchapter, or the collection it belongs to (given with the section); calling an NVIC Coast Guard guidance.
+
+Give a short reason for each unsupported item."""
 
 
 def support_items(content: dict) -> list[dict]:
@@ -386,12 +416,15 @@ async def support_check(client, page: dict, content: dict) -> dict:
         for i, it in enumerate(items)
     )
     text = page["source_text"][:PROMPT_TEXT_CHARS]
+    collection = COLLECTION_BY_SLUG[page["collection"]]
+    context = f"Section: {page['display_number']}, in the collection {collection.title} ({collection.blurb})"
     schema = obj({"items": arr(obj({"index": INT, "supported": BOOL, "reason": STR}))})
     kwargs = small_call_kwargs(SIDECAR_MODEL, 3000)
     result = await create_json(
         client, schema=schema, label="seo support check", model=SIDECAR_MODEL,
         system=SUPPORT_PROMPT,
-        messages=[{"role": "user", "content": f"Section text:\n<<<\n{text}\n>>>\n\nItems:\n{listing}"}],
+        messages=[{"role": "user",
+                   "content": f"{context}\n\nSection text:\n<<<\n{text}\n>>>\n\nItems:\n{listing}"}],
         **kwargs,
     )
     if result.data is None:
@@ -570,19 +603,27 @@ async def store_result(conn, page: dict, content: dict | None, checks: dict) -> 
     return status
 
 
-async def check_and_store(conn, client, page: dict, content: dict | None,
-                          corpus_sections: set[str]) -> str:
+async def run_checks(client, page: dict, content: dict | None, corpus_sections: set[str],
+                     attempt: int = 1) -> dict:
     if content is None:
-        return await store_result(conn, page, None, {"ok": False, "failures": ["the writer returned nothing"]})
-    checks = static_checks(page, content, corpus_sections)
+        return {"ok": False, "failures": ["the writer returned nothing"], "attempt": attempt}
+    static = static_checks(page, content, corpus_sections)
     support = await support_check(client, page, content)
-    checks = {"ok": checks["ok"] and support["ok"],
-              "failures": checks["failures"] + support["failures"],
-              "static_ok": checks["ok"], "support_ok": support["ok"]}
-    return await store_result(conn, page, content, checks)
+    return {"ok": static["ok"] and support["ok"], "failures": static["failures"] + support["failures"],
+            "static_ok": static["ok"], "support_ok": support["ok"], "attempt": attempt}
+
+
+async def check_and_store(conn, client, page: dict, content: dict | None,
+                          corpus_sections: set[str], attempt: int = 1) -> tuple[str, dict]:
+    checks = await run_checks(client, page, content, corpus_sections, attempt)
+    return await store_result(conn, page, content, checks), checks
 
 
 # ── Runs ─────────────────────────────────────────────────────────────────────
+
+MAX_ATTEMPTS = 2        # the first draft, then one rewrite with the failures fed back
+BATCH_MIN = 25          # fewer pages than this are written with online calls
+
 
 class _Locked:
     """One asyncpg connection shared by concurrent tasks, one statement at a time."""
@@ -596,7 +637,7 @@ class _Locked:
 
 
 _PAGE_COLS = ("id, slug, collection, source, section_number, section_title, display_number, "
-              "source_text, up_to_date_as_of, content")
+              "source_text, up_to_date_as_of, content, checks")
 
 
 async def _connect():
@@ -609,6 +650,86 @@ def _client():
     from anthropic import AsyncAnthropic
     from app.config import settings
     return AsyncAnthropic(api_key=settings.anthropic_api_key, max_retries=4)
+
+
+def _load_json(value):
+    return json.loads(value) if isinstance(value, str) else value
+
+
+async def _write_online(client, requests: dict[str, dict]) -> dict[str, dict | None]:
+    from rag.llm import create_json
+    sem = asyncio.Semaphore(4)
+    out: dict[str, dict | None] = {}
+
+    async def one(cid: str, params: dict) -> None:
+        async with sem:
+            try:
+                result = await create_json(
+                    client, schema=page_schema(), label=f"seo page {cid}", output_config={"effort": "low"},
+                    **{k: v for k, v in params.items() if k != "output_config"})
+                out[cid] = result.data
+            except Exception as exc:  # noqa: BLE001 — one page's failure doesn't stop the run
+                logger.warning("seo page %s: %s", cid, exc)
+                out[cid] = None
+
+    await asyncio.gather(*(one(cid, params) for cid, params in requests.items()))
+    return out
+
+
+async def _write_batch(client, requests: dict[str, dict]) -> dict[str, dict | None]:
+    """One Message Batch (half price); waits for it to end."""
+    from rag.llm import parse_json_text, text_of
+    batch = await client.messages.batches.create(
+        requests=[{"custom_id": cid, "params": params} for cid, params in requests.items()])
+    print(f"batch {batch.id}: {len(requests)} pages", flush=True)
+    while batch.processing_status != "ended":
+        await asyncio.sleep(60)
+        try:
+            batch = await client.messages.batches.retrieve(batch.id)
+        except Exception as exc:  # noqa: BLE001 — transient; keep polling
+            print(f"poll failed: {exc}", flush=True)
+            continue
+        print(f"{datetime.now(timezone.utc):%H:%M} {batch.processing_status} {batch.request_counts}", flush=True)
+    out: dict[str, dict | None] = {}
+    async for entry in await client.messages.batches.results(batch.id):
+        out[entry.custom_id] = (parse_json_text(text_of(entry.result.message))
+                                if entry.result.type == "succeeded" else None)
+    return out
+
+
+async def write_pages(conn, client, pages: list[dict], *, use_batch: bool | None = None) -> dict[str, int]:
+    """Write, check and store pages; a page that fails its checks gets one
+    rewrite with its failures fed back (MAX_ATTEMPTS)."""
+    corpus = await corpus_section_set(conn)
+    locked = _Locked(conn)
+    counts: dict[str, int] = {}
+    todo = [(p, None, 1) for p in pages]          # (page, feedback, attempt)
+    while todo:
+        batch = use_batch if use_batch is not None else len(todo) >= BATCH_MIN
+        by_cid = {f"p{p['id']}": (p, fb, attempt) for p, fb, attempt in todo}
+        requests = {cid: request_params(p, fb) for cid, (p, fb, _) in by_cid.items()}
+        written = await (_write_batch if batch else _write_online)(client, requests)
+        sem = asyncio.Semaphore(8)
+        retry: list[tuple[dict, dict, int]] = []
+
+        async def one(cid: str) -> None:
+            page, _, attempt = by_cid[cid]
+            content = written.get(cid)
+            async with sem:
+                try:
+                    status, checks = await check_and_store(locked, client, page, content, corpus, attempt)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("seo page %s: checks failed to run: %s", page["slug"], exc)
+                    return
+            if status == "held" and attempt < MAX_ATTEMPTS:
+                retry.append((page, {"content": content, "failures": checks["failures"]}, attempt + 1))
+            else:
+                counts[status] = counts.get(status, 0) + 1
+            print(f"{status:9s} attempt {attempt} {page['slug']}", flush=True)
+
+        await asyncio.gather(*(one(cid) for cid in by_cid))
+        todo = retry
+    return counts
 
 
 async def cmd_select() -> None:
@@ -625,8 +746,7 @@ async def cmd_select() -> None:
 
 
 async def cmd_pilot(n: int, collection: str | None = None) -> None:
-    """Write and check n drafts now (online calls), spread over the collections."""
-    from rag.llm import create_json
+    """Write and check n drafts now, spread over the collections."""
     conn, client = await _connect(), _client()
     try:
         drafts = [dict(r) for r in await conn.fetch(
@@ -641,77 +761,39 @@ async def cmd_pilot(n: int, collection: str | None = None) -> None:
             for col in list(by_col):
                 if by_col[col] and len(picked) < n:
                     picked.append(by_col[col].pop(random.randrange(len(by_col[col]))))
-        corpus = await corpus_section_set(conn)
-        sem, locked = asyncio.Semaphore(4), _Locked(conn)
-
-        async def one(page: dict) -> tuple[str, str]:
-            async with sem:
-                params = request_params(page)
-                result = await create_json(client, schema=page_schema(), label=f"seo page {page['slug']}",
-                                           output_config={"effort": "low"},
-                                           **{k: v for k, v in params.items() if k != "output_config"})
-                return page["slug"], await check_and_store(locked, client, page, result.data, corpus)
-
-        for slug, status in await asyncio.gather(*(one(p) for p in picked)):
-            print(f"{status:9s} {slug}")
+        print(json.dumps(await write_pages(conn, client, picked, use_batch=False)))
     finally:
         await conn.close()
 
 
 async def cmd_batch(limit: int | None = None) -> None:
-    """Every draft through one Message Batch (half price), then the checks."""
+    """Every draft: one Message Batch, the checks, and one batch of rewrites."""
     conn, client = await _connect(), _client()
     try:
         drafts = [dict(r) for r in await conn.fetch(
             f"SELECT {_PAGE_COLS} FROM seo_pages WHERE status = 'draft' ORDER BY priority DESC, id"
             + (f" LIMIT {int(limit)}" if limit else ""))]
-        if not drafts:
-            print("no drafts")
-            return
-        by_id = {f"p{d['id']}": d for d in drafts}
-        batch = await client.messages.batches.create(
-            requests=[{"custom_id": cid, "params": request_params(d)} for cid, d in by_id.items()])
-        print(f"batch {batch.id}: {len(by_id)} pages", flush=True)
-        while batch.processing_status != "ended":
-            await asyncio.sleep(60)
-            try:
-                batch = await client.messages.batches.retrieve(batch.id)
-            except Exception as exc:  # noqa: BLE001 — transient; keep polling
-                print(f"poll failed: {exc}", flush=True)
-                continue
-            print(f"{datetime.now(timezone.utc):%H:%M} {batch.processing_status} {batch.request_counts}", flush=True)
-        await collect(conn, client, batch.id, by_id)
+        print(json.dumps(await write_pages(conn, client, drafts)) if drafts else "no drafts", flush=True)
     finally:
         await conn.close()
 
 
-async def collect(conn, client, batch_id: str, by_id: dict[str, dict]) -> None:
-    from rag.llm import parse_json_text, text_of
-    corpus = await corpus_section_set(conn)
-    results: list[tuple[dict, dict | None]] = []
-    decoder = await client.messages.batches.results(batch_id)
-    async for entry in decoder:
-        page = by_id.get(entry.custom_id)
-        if page is None:
-            continue
-        content = None
-        if entry.result.type == "succeeded":
-            content = parse_json_text(text_of(entry.result.message))
-        results.append((page, content))
-    sem, locked = asyncio.Semaphore(8), _Locked(conn)
-    counts: dict[str, int] = {}
-
-    async def one(page, content):
-        async with sem:
-            try:
-                status = await check_and_store(locked, client, page, content, corpus)
-            except Exception as exc:  # noqa: BLE001 — one page's failure doesn't stop the run
-                logger.warning("seo page %s: %s", page["slug"], exc)
-                status = "error"
-            counts[status] = counts.get(status, 0) + 1
-
-    await asyncio.gather(*(one(p, c) for p, c in results))
-    print("collected:", json.dumps(counts), flush=True)
+async def cmd_retry() -> None:
+    """Held pages that haven't used their rewrite (e.g. held before the rewrite
+    existed, or after a check changed): one more rewrite with feedback."""
+    conn, client = await _connect(), _client()
+    try:
+        rows = [dict(r) for r in await conn.fetch(
+            f"SELECT {_PAGE_COLS} FROM seo_pages WHERE status = 'held' AND content IS NOT NULL")]
+        pages = []
+        for r in rows:
+            checks = _load_json(r["checks"]) or {}
+            if "the regulation text changed" in checks.get("failures", []):
+                continue
+            pages.append(r)
+        print(json.dumps(await write_pages(conn, client, pages)) if pages else "nothing to retry", flush=True)
+    finally:
+        await conn.close()
 
 
 async def cmd_recheck() -> None:
@@ -723,8 +805,8 @@ async def cmd_recheck() -> None:
         corpus = await corpus_section_set(conn)
         counts: dict[str, int] = {}
         for page in rows:
-            content = json.loads(page["content"]) if isinstance(page["content"], str) else page["content"]
-            status = await check_and_store(conn, client, page, content, corpus)
+            attempt = (_load_json(page["checks"]) or {}).get("attempt", 1)
+            status, _ = await check_and_store(conn, client, page, _load_json(page["content"]), corpus, attempt)
             counts[status] = counts.get(status, 0) + 1
         print(json.dumps(counts))
     finally:
@@ -748,13 +830,16 @@ async def cmd_status() -> None:
 
 def main(argv: list[str]) -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    logging.getLogger("httpx").setLevel(logging.WARNING)
     cmd = argv[0] if argv else "status"
-    if cmd == "select" or cmd == "check-stale":
+    if cmd in ("select", "check-stale"):
         asyncio.run(cmd_select())
     elif cmd == "pilot":
         asyncio.run(cmd_pilot(int(argv[1]) if len(argv) > 1 else 10, argv[2] if len(argv) > 2 else None))
     elif cmd == "batch":
         asyncio.run(cmd_batch(int(argv[1]) if len(argv) > 1 else None))
+    elif cmd == "retry":
+        asyncio.run(cmd_retry())
     elif cmd == "recheck":
         asyncio.run(cmd_recheck())
     else:

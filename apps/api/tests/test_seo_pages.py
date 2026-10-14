@@ -95,7 +95,12 @@ def test_static_checks_catch_each_kind_of_error():
     assert len(failures) == 1 and failures[0].startswith("numbers not in the text: 75")
 
     bad_cite = good_content(related_sections=["46 CFR 142.999"])
-    assert S.static_checks(PAGE, bad_cite, CORPUS)["failures"] == ["sections not in the corpus: 46 CFR 142.999"]
+    assert S.static_checks(PAGE, bad_cite, CORPUS)["failures"] == [
+        "sections neither in the corpus nor named in the text: 46 CFR 142.999"]
+    # A reference the text itself makes passes even when the corpus lacks it.
+    text_ref = {**PAGE, "source_text": TEXT + " (d) See 46 U.S.C. 3306 and 46 CFR part 67."}
+    named = good_content(related_sections=["46 U.S.C. 3306", "46 CFR Part 67"])
+    assert S.static_checks(text_ref, named, CORPUS)["ok"]
 
     assert "no requirements" in S.static_checks(PAGE, good_content(requirements=[]), CORPUS)["failures"]
 
