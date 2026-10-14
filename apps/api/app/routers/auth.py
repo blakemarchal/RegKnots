@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from app import attribution as signup_attribution
+from app import events
 from app.auth.deps import get_current_user
 from app.auth.schemas import CurrentUser, LoginRequest, RegisterRequest, TokenResponse
 from app.auth.service import (
@@ -155,6 +156,12 @@ async def register(data: RegisterRequest, response: Response) -> TokenResponse:
             "UPDATE users SET signup_source = $1, signup_attribution = $2::jsonb WHERE id = $3",
             signup_attribution.source_label(first_touch), json.dumps(first_touch), user["id"],
         )
+
+    # 2026-10-14 — funnel event (app/events.py).
+    await events.track(pool, "signup", user_id=user["id"], props={
+        "source": signup_attribution.source_label(first_touch) if first_touch else None,
+        "role": data.role, "invite": bool(has_pending_invite),
+    })
 
     # Generate and store email verification token
     verification_token = secrets.token_urlsafe(32)

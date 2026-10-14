@@ -511,7 +511,7 @@ async def _on_checkout_completed(session, pool) -> None:
             billing_interval = COALESCE($4, billing_interval),
             current_period_end = COALESCE($5, current_period_end)
         WHERE stripe_customer_id = $3
-        RETURNING email, full_name
+        RETURNING id, email, full_name
         """,
         tier,
         subscription_id,
@@ -526,6 +526,11 @@ async def _on_checkout_completed(session, pool) -> None:
         )
     else:
         logger.warning("Checkout UPDATE matched no user for customer %s", customer_id)
+    if row:
+        from app import events
+        await events.track(pool, "checkout_completed", user_id=row["id"], props={
+            "tier": tier, "interval": billing_interval, "first": not was_already_paid,
+        })
 
     # Send subscription confirmed email only on first activation.
     # Sprint D6.92 — pass `tier` so the email can render the right
@@ -1073,6 +1078,15 @@ async def _on_workspace_checkout_completed(session, pool) -> None:
         )
     except Exception as exc:
         logger.warning("workspace_billing_events insert failed: %s", exc)
+
+    try:
+        from app import events
+        owner_id = await pool.fetchval("SELECT owner_user_id FROM workspaces WHERE id = $1", workspace_id)
+        await events.track(pool, "checkout_completed", user_id=owner_id, props={
+            "tier": "wheelhouse", "workspace_id": str(workspace_id),
+        })
+    except Exception as exc:
+        logger.warning("workspace checkout_completed event failed: %s", exc)
 
     # Owner email — first activation only.
     try:

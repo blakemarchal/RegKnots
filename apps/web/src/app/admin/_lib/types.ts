@@ -87,6 +87,12 @@ export interface DashboardData {
     free_plan_answers_month: number   // free-plan answers this calendar month (UTC)
     free_plan_cap_month: number       // the plan pauses for everyone at this many
   }
+  // 2026-10-14 — funnel events (app/events.py), last 30 days
+  events?: {
+    counts_30d: Record<string, number>
+    users_30d: Record<string, number>
+    paywall_reasons_30d: Record<string, number>
+  }
   recent_signups: {
     id: string
     email: string

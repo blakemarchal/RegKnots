@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect } from 'react'
+import { Analytics } from './Analytics'
 import { HydrationGate } from './HydrationGate'
 import { NavigationProgress } from './NavigationProgress'
 import { apiRequest } from '@/lib/api'
@@ -90,6 +91,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
   return (
     <HydrationGate>
       <NavigationProgress />
+      <Analytics />
       {children}
     </HydrationGate>
   )

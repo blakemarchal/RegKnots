@@ -63,12 +63,16 @@ def test_price_and_interval_reads_objects_and_dicts():
 
 def test_checkout_records_interval_and_period(monkeypatch):
     monkeypatch.setattr(S.stripe.Subscription, "retrieve", staticmethod(lambda sub_id: _sub(sub_id)))
-    pool = _Pool(fetchrow_results=[None, {"email": "c@x", "full_name": "C"}])
+    uid = "4f8c1d2e-0000-4000-8000-000000000001"
+    pool = _Pool(fetchrow_results=[None, {"id": uid, "email": "c@x", "full_name": "C"}])
     asyncio.run(S._on_checkout_completed(SimpleNamespace(customer="cus_1", subscription="sub_1"), pool))
     kind, sql, args = pool.calls[1]
     assert kind == "fetchrow" and "billing_interval = COALESCE($4, billing_interval)" in sql
     assert "current_period_end = COALESCE($5, current_period_end)" in sql
     assert args[1:4] == ("sub_1", "cus_1", "month") and args[4].timestamp() == PERIOD_END
+    event = [c for c in pool.calls if c[0] == "execute" and "INSERT INTO product_events" in c[1]]
+    assert event and event[0][2][0] == "checkout_completed" and str(event[0][2][1]) == uid
+    assert '"tier": "captain"' in event[0][2][3] and '"first": true' in event[0][2][3]
 
 
 def test_invoice_paid_records_interval_through_the_customer_fallback(monkeypatch):

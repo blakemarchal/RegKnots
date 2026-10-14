@@ -45,6 +45,7 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Request, status
 from pydantic import BaseModel, Field
 from rag.llm import SIDECAR_MODEL, STR, arr, create_json, enum, obj, small_call_kwargs
 
+from app import events
 from app.auth.deps import get_current_user
 from app.auth.schemas import CurrentUser
 from app.db import get_pool
@@ -276,6 +277,8 @@ async def _check_cap(pool, user_uuid: _uuid.UUID) -> tuple[int, Optional[int]]:
     # student/cadet-targeted tier so Study Tools are core, not optional.
     # The only differentiator vs Mate is the chat-message cap (25 vs 100).
     if tier not in ("cadet", "mate", "captain"):
+        await events.track(pool, "paywall_hit", user_id=user_uuid,
+                           props={"reason": "study_paid_only", "tier": tier, "surface": "study"})
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
             detail=(
@@ -298,6 +301,8 @@ async def _check_cap(pool, user_uuid: _uuid.UUID) -> tuple[int, Optional[int]]:
     ) or 0)
 
     if cap is not None and used >= cap:
+        await events.track(pool, "paywall_hit", user_id=user_uuid,
+                           props={"reason": "study_cap", "tier": tier, "surface": "study"})
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
             detail=(

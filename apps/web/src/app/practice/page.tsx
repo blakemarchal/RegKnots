@@ -14,6 +14,7 @@
 import type { Metadata } from 'next'
 import Link from 'next/link'
 import { CompassRose } from '@/components/CompassRose'
+import { OG_IMAGE } from '@/lib/seo'
 import { LandingFooter } from '@/components/marketing/LandingFooter'
 import { PracticeQuiz } from './PracticeQuiz'
 import { signupHref } from './links'
@@ -25,7 +26,7 @@ const DESCRIPTION =
   'with instant answers. No sign-up.'
 
 export const metadata: Metadata = {
-  title: TITLE,
+  title: { absolute: TITLE },
   description: DESCRIPTION,
   alternates: { canonical: 'https://regknots.com/practice' },
   openGraph: {
@@ -34,8 +35,9 @@ export const metadata: Metadata = {
     url: 'https://regknots.com/practice',
     siteName: 'RegKnot',
     type: 'website',
+    images: [OG_IMAGE],
   },
-  twitter: { card: 'summary', title: TITLE, description: DESCRIPTION },
+  twitter: { card: 'summary_large_image', title: TITLE, description: DESCRIPTION, images: [OG_IMAGE.url] },
 }
 
 const ABOUT = [

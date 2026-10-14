@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Resolves to the monorepo root regardless of working directory
@@ -400,6 +400,18 @@ class Settings(BaseSettings):
     #   systemctl restart regknots-api. ~5 seconds. No deploy needed.
     current_events_tier: str = Field(
         default="off", validation_alias="CURRENT_EVENTS_TIER",
+    )
+
+    # 2026-10-14 — product analytics (app/events.py). product_events rows are
+    # always written; with a key, each event also goes to PostHog. The key is
+    # the project's public key, the one the web client uses, so either name
+    # works in .env: POSTHOG_KEY or NEXT_PUBLIC_POSTHOG_KEY (same for host).
+    posthog_key: str = Field(
+        default="", validation_alias=AliasChoices("POSTHOG_KEY", "NEXT_PUBLIC_POSTHOG_KEY"),
+    )
+    posthog_host: str = Field(
+        default="https://us.i.posthog.com",
+        validation_alias=AliasChoices("POSTHOG_HOST", "NEXT_PUBLIC_POSTHOG_HOST"),
     )
 
     # Monitoring

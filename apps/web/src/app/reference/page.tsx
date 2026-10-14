@@ -3,7 +3,8 @@ import { AppHeader } from '@/components/AppHeader'
 import { ReferenceAccordion } from './ReferenceAccordion'
 
 export const metadata: Metadata = {
-  title: 'Quick Reference — RegKnot',
+  title: 'COLREGs and CFR Quick Reference',
+  alternates: { canonical: '/reference' },
   description:
     'Paraphrased summaries of COLREGs rules and key CFR maritime definitions.',
 }

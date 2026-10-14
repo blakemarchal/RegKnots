@@ -1,7 +1,8 @@
 import Link from 'next/link'
 
 export const metadata = {
-  title: 'Terms of Service — RegKnot',
+  title: 'Terms of Service',
+  alternates: { canonical: '/terms' },
 }
 
 export default function TermsPage() {

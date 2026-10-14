@@ -1,7 +1,8 @@
 import Link from 'next/link'
 
 export const metadata = {
-  title: 'Privacy Policy — RegKnot',
+  title: 'Privacy Policy',
+  alternates: { canonical: '/privacy' },
 }
 
 export default function PrivacyPage() {
@@ -22,7 +23,7 @@ export default function PrivacyPage() {
         <h1 className="font-display text-3xl font-bold text-[#f0ece4] tracking-wide mb-2">
           Privacy Policy
         </h1>
-        <p className="font-mono text-xs text-[#6b7594] mb-8">Effective: April 3, 2026 · Updated: October 5, 2026</p>
+        <p className="font-mono text-xs text-[#6b7594] mb-8">Effective: April 3, 2026 · Updated: October 14, 2026</p>
 
         <div className="prose-custom space-y-6 font-mono text-sm leading-relaxed text-[#f0ece4]/75">
           <section>
@@ -63,6 +64,9 @@ export default function PrivacyPage() {
               <li><strong>Anthropic:</strong> your chat messages, and passages of documents you attach, are sent to Anthropic&apos;s API to generate responses</li>
               <li><strong>OpenAI:</strong> text from your questions and documents is sent to OpenAI&apos;s API to index it for search</li>
               <li><strong>Resend:</strong> for transactional email delivery</li>
+              <li><strong>PostHog:</strong> for product analytics: which pages are visited, and steps such as
+                signing up, asking a first question or starting checkout, linked to your account ID (never
+                your email address or the text of your questions)</li>
             </ul>
             <p className="mt-2">
               We may also disclose data if required by law or to protect our rights.
@@ -102,7 +106,10 @@ export default function PrivacyPage() {
             <h2 className="font-display text-lg font-bold text-[#2dd4bf] mb-2">6. Cookies</h2>
             <p>
               We use httpOnly cookies for authentication (JWT refresh tokens). We do not use
-              third-party tracking cookies or analytics cookies at this time.
+              third-party tracking or advertising cookies. Our product analytics (PostHog) set no
+              cookies: they keep a random identifier in your browser&apos;s local storage, honor your
+              browser&apos;s Do Not Track setting, and remove personal tokens from page addresses before
+              they are sent.
             </p>
           </section>
 

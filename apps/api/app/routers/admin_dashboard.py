@@ -74,6 +74,13 @@ class Growth(BaseModel):
     free_plan_cap_month: int        # settings.free_plan_global_monthly_cap
 
 
+class ProductEvents(BaseModel):
+    """2026-10-14 — app/events.py funnel events in the last 30 days."""
+    counts_30d: dict[str, int] = {}            # event -> rows
+    users_30d: dict[str, int] = {}             # event -> distinct users
+    paywall_reasons_30d: dict[str, int] = {}   # paywall_hit by props.reason
+
+
 class RecentSignup(BaseModel):
     id: str
     email: str
@@ -108,6 +115,7 @@ class Dashboard(BaseModel):
     quality: Quality
     attention: Attention
     growth: Growth
+    events: ProductEvents = ProductEvents()
     recent_signups: list[RecentSignup]
     recent_questions: list[RecentQuestion]
     recent_payments: list[RecentPayment]
@@ -273,6 +281,22 @@ async def dashboard(
                    OR u.signup_attribution->>'landing_path' LIKE '/practice%'){uf}
             """
         )
+        event_rows = await conn.fetch(
+            f"""
+            SELECT e.event, count(*) AS n, count(DISTINCT e.user_id) AS users
+            FROM product_events e LEFT JOIN users u ON u.id = e.user_id
+            WHERE e.created_at > now() - interval '30 days'{uf}
+            GROUP BY 1
+            """
+        )
+        reason_rows = await conn.fetch(
+            f"""
+            SELECT e.props->>'reason' AS reason, count(*) AS n
+            FROM product_events e LEFT JOIN users u ON u.id = e.user_id
+            WHERE e.event = 'paywall_hit' AND e.created_at > now() - interval '30 days'{uf}
+            GROUP BY 1
+            """
+        )
         free_answers = await conn.fetchval(
             "SELECT answers FROM free_plan_usage WHERE month = date_trunc('month', now())::date"
         )
@@ -312,6 +336,11 @@ async def dashboard(
             practice_signups_30d=practice_signups or 0,
             free_plan_answers_month=free_answers or 0,
             free_plan_cap_month=settings.free_plan_global_monthly_cap,
+        ),
+        events=ProductEvents(
+            counts_30d=_counts(event_rows, "event"),
+            users_30d={r["event"]: r["users"] for r in event_rows},
+            paywall_reasons_30d=_counts(reason_rows, "reason", empty="other"),
         ),
         recent_signups=[
             RecentSignup(id=str(r["id"]), email=r["email"], full_name=r["full_name"], role=r["role"],

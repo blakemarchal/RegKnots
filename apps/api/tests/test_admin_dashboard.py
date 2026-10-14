@@ -37,6 +37,10 @@ class _Conn:
         if "regexp_replace" in sql:
             return [{"conversation_id": uuid.uuid4(), "email": "b@example.com", "full_name": "B",
                      "created_at": NOW, "preview": "Does a new deckhand need an orientation?"}]
+        if "e.props->>'reason'" in sql:
+            return [{"reason": "free_plan_cycle", "n": 3}, {"reason": None, "n": 1}]
+        if "FROM product_events" in sql:
+            return [{"event": "signup", "n": 4, "users": 4}, {"event": "paywall_hit", "n": 4, "users": 2}]
         if "be.amount_paid_cents, be.subscription_tier" in sql:
             # The second payment's account was deleted: LEFT JOIN, email NULL (migration 0118).
             return [{"email": "c@example.com", "amount_paid_cents": 3900, "subscription_tier": "captain",
@@ -116,6 +120,10 @@ def test_dashboard_shapes_trends_funnel_money_and_quality(conn):
     # Answers by model; the GPT-4o fallback shows up as its own bucket.
     assert d.quality.answers_7d == 3
     assert d.quality.models_7d == {"opus": 2, "fallback_gpt4o": 1}
+    # 2026-10-14 — funnel events (app/events.py)
+    assert d.events.counts_30d == {"signup": 4, "paywall_hit": 4}
+    assert d.events.users_30d["paywall_hit"] == 2
+    assert d.events.paywall_reasons_30d == {"free_plan_cycle": 3, "other": 1}
 
 
 def test_dashboard_filters_internal_accounts_only_when_asked(conn):

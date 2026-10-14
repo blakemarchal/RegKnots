@@ -9,7 +9,7 @@ from pydantic import BaseModel
 
 from app.auth.deps import get_current_user
 from app.auth.schemas import CurrentUser
-from app import free_plan
+from app import events, free_plan
 from app.db import get_pool
 from app.plans import MATE_MESSAGE_CAP, message_cap_for_tier
 from app.stripe_service import create_billing_portal_session, create_checkout_session, handle_webhook_event
@@ -56,6 +56,8 @@ async def create_checkout(
             status_code=status.HTTP_409_CONFLICT,
             detail=str(exc),
         )
+    await events.track(pool, "checkout_started", user_id=user.user_id,
+                       props={"plan": plan, "referral_source": referral_source})
     return CheckoutResponse(checkout_url=url)
 
 

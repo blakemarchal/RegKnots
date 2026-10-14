@@ -552,8 +552,8 @@ export default function PricingPage() {
 
           <p className="font-mono text-xs text-[#6b7594] text-center mt-6 max-w-xl mx-auto leading-relaxed">
             Trial gives your crew full access for 30 days. Add a payment method
-            anytime; otherwise the workspace becomes read-only on day 31 (90-day
-            recovery window before archival).
+            anytime; otherwise the workspace becomes read-only on day 31 and is
+            archived 30 days later if no card is added.
           </p>
         </div>
 

@@ -58,6 +58,14 @@ const MODEL_LABELS: Record<string, string> = {
   unknown: 'unrecorded',
 }
 
+// 2026-10-14 — app/events.py, in funnel order
+const FUNNEL_EVENTS: Array<[string, string]> = [
+  ['signup', 'Signed up'],
+  ['first_question', 'First question'],
+  ['paywall_hit', 'Hit a paywall'],
+  ['checkout_started', 'Started checkout'],
+  ['checkout_completed', 'Completed checkout'],
+]
 const TIER_LABELS: Record<string, string> = { cadet: 'Cadet', mate: 'Mate', captain: 'Captain', pro: 'Captain (legacy)' }
 
 function useLegacyTabRedirect() {
@@ -487,6 +495,31 @@ export default function AdminDashboard() {
                       color={dash.growth.free_plan_answers_month >= dash.growth.free_plan_cap_month ? '#f87171' : '#2dd4bf'} />
                   </div>
                 </>
+              )}
+            </Card>
+          )}
+
+          {/* 2026-10-14 — funnel events recorded by the API (app/events.py) */}
+          {dash?.events && (
+            <Card title="Funnel events · 30 days">
+              <ul className="flex flex-col gap-1.5 font-mono text-[11px]">
+                {FUNNEL_EVENTS.map(([key, label]) => (
+                  <li key={key} className="flex items-baseline justify-between gap-2">
+                    <span className="text-[#f0ece4]/80">{label}</span>
+                    <span className="tabular-nums text-[#f0ece4]/70">
+                      {(dash.events?.counts_30d[key] ?? 0).toLocaleString()}
+                      <span className={TEXT_MUTED}> · {(dash.events?.users_30d[key] ?? 0).toLocaleString()} users</span>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              {Object.keys(dash.events.paywall_reasons_30d).length > 0 && (
+                <p className={`mt-3 pt-3 border-t border-white/5 font-mono text-[11px] ${TEXT_MUTED}`}>
+                  Paywalls: {Object.entries(dash.events.paywall_reasons_30d)
+                    .sort((a, b) => b[1] - a[1])
+                    .map(([reason, n]) => `${reason.replace(/_/g, ' ')} ${n}`)
+                    .join(' · ')}
+                </p>
               )}
             </Card>
           )}

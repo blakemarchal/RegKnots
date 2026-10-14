@@ -244,6 +244,26 @@ async def _run_chat_preflight(
     current_user: CurrentUser,
     pool: asyncpg.Pool,
 ) -> tuple[dict | None, uuid.UUID, list, bool]:
+    """_run_chat_preflight_checks, recording a paywall_hit event (app/events.py)
+    when it refuses with a paywall: the verify gate, the free plan, a tier cap,
+    a paid-only feature or a workspace awaiting its card."""
+    try:
+        return await _run_chat_preflight_checks(body, current_user, pool)
+    except HTTPException as exc:
+        from app import events
+        reason = events.paywall_reason(exc.status_code, exc.detail)
+        if reason:
+            await events.track(pool, "paywall_hit", user_id=current_user.user_id, props={
+                "reason": reason, "tier": current_user.tier, "surface": "chat",
+            })
+        raise
+
+
+async def _run_chat_preflight_checks(
+    body: "ChatRequestBody",
+    current_user: CurrentUser,
+    pool: asyncpg.Pool,
+) -> tuple[dict | None, uuid.UUID, list, bool]:
     """Run all auth/billing/rate-limit checks and load vessel + conversation state.
 
     Raises HTTPException for any failure (400/401/402/403/404/429), so
@@ -887,7 +907,7 @@ async def _persist_chat_outcome(
     # message) when the current cycle is ≥30 days old.
     # Logic runs in a single atomic UPDATE so concurrent messages can't
     # double-count or race across the reset boundary.
-    await pool.execute(
+    message_count = await pool.fetchval(
         """
         UPDATE users
         SET message_count = message_count + 1,
@@ -900,9 +920,14 @@ async def _persist_chat_outcome(
                 ELSE message_cycle_started_at
             END
         WHERE id = $1
+        RETURNING message_count
         """,
         user_id,
     )
+    if message_count == 1:
+        from app import events
+        await events.track(pool, "first_question", user_id=user_id,
+                           props={"vessel": bool(vessel_id)})
 
     # 2026-10-02 — count a free-plan answer toward the month's global cap
     # (app/free_plan.py); a counting failure never fails the persist.

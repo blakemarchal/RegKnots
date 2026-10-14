@@ -945,6 +945,9 @@ async def create_workspace_checkout(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),
         )
+    from app import events
+    await events.track(pool, "checkout_started", user_id=current_user.user_id,
+                       props={"plan": body.plan, "workspace_id": str(workspace_id)})
     return CheckoutResponse(checkout_url=url)
 
 

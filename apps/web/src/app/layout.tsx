@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from 'next'
 import { Barlow_Condensed, IBM_Plex_Mono } from 'next/font/google'
 import { Providers } from '@/components/Providers'
+import { DEFAULT_DESCRIPTION, DEFAULT_TITLE, OG_IMAGE, SITE_NAME, SITE_URL } from '@/lib/seo'
 import './globals.css'
 
 const barlow = Barlow_Condensed({
@@ -17,9 +18,34 @@ const ibm = IBM_Plex_Mono({
   display: 'swap',
 })
 
+// 2026-10-14 — search basics: metadataBase + a title template, so a page's
+// title reads "<page> | RegKnot"; Open Graph defaults and the share image
+// (opengraph-image.tsx); search-console verification tags when their env vars
+// are set at build time. Per-page metadata uses pageMetadata() in lib/seo.ts.
+const googleVerification = process.env.NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION
+const bingVerification = process.env.NEXT_PUBLIC_BING_SITE_VERIFICATION
+
 export const metadata: Metadata = {
-  title: 'RegKnot',
-  description: 'AI-powered maritime compliance assistant. Cited answers from CFR, SOLAS, STCW, ISM Code, COLREGs, ERG, and USCG guidance.',
+  metadataBase: new URL(SITE_URL),
+  title: { default: DEFAULT_TITLE, template: `%s | ${SITE_NAME}` },
+  description: DEFAULT_DESCRIPTION,
+  applicationName: SITE_NAME,
+  openGraph: {
+    siteName: SITE_NAME,
+    type: 'website',
+    title: DEFAULT_TITLE,
+    description: DEFAULT_DESCRIPTION,
+    images: [OG_IMAGE],
+  },
+  twitter: { card: 'summary_large_image', title: DEFAULT_TITLE, description: DEFAULT_DESCRIPTION },
+  ...(googleVerification || bingVerification
+    ? {
+        verification: {
+          ...(googleVerification ? { google: googleVerification } : {}),
+          ...(bingVerification ? { other: { 'msvalidate.01': bingVerification } } : {}),
+        },
+      }
+    : {}),
   manifest: '/manifest.json',
   icons: {
     icon: [
