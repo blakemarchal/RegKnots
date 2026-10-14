@@ -1375,12 +1375,17 @@ async def get_audit_readiness(
         # Every member's credential/sea-time record. Capped to bound the
         # prompt: seat_cap is small (crew workspaces), but belt-and-
         # suspenders at 12 members / the LLM context stays sane.
+        # 2026-10-14 — in an internal-only workspace (the demo fleet,
+        # scripts/demo/seed_demo_workspace.py) staff accounts are visitors,
+        # not crew: their own credentials stay out of the assessment.
         member_rows = await pool.fetch(
             """
             SELECT wm.user_id, wm.role, u.full_name, u.email
             FROM workspace_members wm
             JOIN users u ON u.id = wm.user_id
+            JOIN workspaces w ON w.id = wm.workspace_id
             WHERE wm.workspace_id = $1
+              AND NOT (w.internal_only AND u.is_admin IS TRUE)
             ORDER BY (wm.role = 'owner') DESC, u.full_name
             LIMIT 12
             """,
