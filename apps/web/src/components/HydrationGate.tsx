@@ -23,10 +23,24 @@ const PUBLIC_ROUTES = [
   '/whitelisting',
   '/brand',
   '/reference',
+  // 2026-10-14 — public search pages: their content must be in the server
+  // HTML, not behind the spinner.
+  '/practice',
+  '/coverage',
+  '/regs',
 ]
 
+// 2026-10-14 — public pages that render for everyone at once but also read the
+// session when there is one (a signed-in CTA, the menu): rendered immediately,
+// with the auth refresh in the background.
+const PUBLIC_AUTH_AWARE_ROUTES = ['/education', '/whale-zones']
+
+function matches(routes: string[], pathname: string): boolean {
+  return routes.some(p => pathname === p || pathname.startsWith(p + '/'))
+}
+
 function isPublicRoute(pathname: string): boolean {
-  return PUBLIC_ROUTES.some(p => pathname === p || pathname.startsWith(p + '/'))
+  return matches(PUBLIC_ROUTES, pathname)
 }
 
 export function HydrationGate({ children }: { children: React.ReactNode }) {
@@ -34,6 +48,7 @@ export function HydrationGate({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
 
   const isPublic = isPublicRoute(pathname)
+  const authAware = matches(PUBLIC_AUTH_AWARE_ROUTES, pathname)
 
   useEffect(() => {
     if (hydrated) return
@@ -41,7 +56,7 @@ export function HydrationGate({ children }: { children: React.ReactNode }) {
     hydrateAuth()
   }, [hydrated, isPublic, hydrateAuth])
 
-  if (isPublic) {
+  if (isPublic || authAware) {
     return <>{children}</>
   }
 
