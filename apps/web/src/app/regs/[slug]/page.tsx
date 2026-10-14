@@ -6,6 +6,7 @@
 import type { Metadata } from 'next'
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
+import { GuestAsk } from '@/components/GuestAsk'
 import { getPage, regsSignupHref, type RegPage } from '@/lib/regs'
 import { OG_IMAGE, SITE_URL } from '@/lib/seo'
 import { Breadcrumbs, JsonLd, RegsShell } from '../_components/RegsShell'
@@ -137,29 +138,39 @@ export default async function RegPageView({ params }: Params) {
           </section>
         )}
 
-        <aside className="rounded-2xl border border-[#2dd4bf]/30 bg-[#2dd4bf]/[0.06] p-5 md:p-6 mb-10">
-          <h2 className="font-display text-xl font-bold text-[#f0ece4] mb-2">
-            Have a question about {page.display_number}?
-          </h2>
-          <p className="font-mono text-sm text-[#f0ece4]/75 leading-relaxed mb-4">
-            RegKnot answers compliance questions for your vessel from the full text of the CFR, Coast Guard
-            NVICs and policy, and the international conventions, with a citation for every requirement.
-          </p>
-          <div className="flex flex-wrap gap-3">
-            <Link href={signup}
-              className="font-mono text-sm font-bold bg-[#2dd4bf] text-[#0a0e1a] rounded-xl px-5 py-2.5
-                hover:brightness-110 transition-[filter] duration-150">
-              Ask RegKnot free
-            </Link>
-            {page.collection === 'mariner-credentials' && (
-              <Link href="/practice"
-                className="font-mono text-sm font-bold border border-[#2dd4bf]/50 text-[#2dd4bf] rounded-xl px-5 py-2.5
-                  hover:bg-[#2dd4bf]/10 transition-colors duration-150">
-                Free exam practice
+        <div className="mb-10">
+          {/* 2026-10-14 — one free question before signup (components/GuestAsk.tsx);
+              the plain sign-up box is the fallback while that is off. */}
+          <GuestAsk
+            page={`regs/${page.slug}`}
+            heading={`Have a question about ${page.display_number}?`}
+            placeholder={content.faqs[0] ? `For example: ${content.faqs[0].question}` : undefined}
+          >
+          <aside className="rounded-2xl border border-[#2dd4bf]/30 bg-[#2dd4bf]/[0.06] p-5 md:p-6">
+            <h2 className="font-display text-xl font-bold text-[#f0ece4] mb-2">
+              Have a question about {page.display_number}?
+            </h2>
+            <p className="font-mono text-sm text-[#f0ece4]/75 leading-relaxed mb-4">
+              RegKnot answers compliance questions for your vessel from the full text of the CFR, Coast Guard
+              NVICs and policy, and the international conventions, with a citation for every requirement.
+            </p>
+            <div className="flex flex-wrap gap-3">
+              <Link href={signup}
+                className="font-mono text-sm font-bold bg-[#2dd4bf] text-[#0a0e1a] rounded-xl px-5 py-2.5
+                  hover:brightness-110 transition-[filter] duration-150">
+                Ask RegKnot free
               </Link>
-            )}
-          </div>
-        </aside>
+              {page.collection === 'mariner-credentials' && (
+                <Link href="/practice"
+                  className="font-mono text-sm font-bold border border-[#2dd4bf]/50 text-[#2dd4bf] rounded-xl px-5 py-2.5
+                    hover:bg-[#2dd4bf]/10 transition-colors duration-150">
+                  Free exam practice
+                </Link>
+              )}
+            </div>
+          </aside>
+          </GuestAsk>
+        </div>
 
         {content.faqs.length > 0 && (
           <section className="mb-10">

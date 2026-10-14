@@ -60,7 +60,9 @@ const MODEL_LABELS: Record<string, string> = {
 
 // 2026-10-14 — app/events.py, in funnel order
 const FUNNEL_EVENTS: Array<[string, string]> = [
+  ['guest_question', 'Asked as a guest'],
   ['signup', 'Signed up'],
+  ['guest_claimed', 'Saved a guest answer'],
   ['first_question', 'First question'],
   ['paywall_hit', 'Hit a paywall'],
   ['checkout_started', 'Started checkout'],

@@ -6,6 +6,7 @@ import { CompassRose } from '@/components/CompassRose'
 import { ContactModal } from '@/components/ContactModal'
 import { CorpusBadges } from '@/components/CorpusBadges'
 import { EmailComposeButton } from '@/components/EmailComposeButton'
+import { GuestAsk } from '@/components/GuestAsk'
 import {
   SeeItInActionSection,
   BuiltByMarinersSection,
@@ -241,6 +242,15 @@ export default function LandingPage() {
           </svg>
         </button>
       </section>
+
+      {/* 2026-10-14 — one free question before signup (components/GuestAsk.tsx).
+          Renders nothing until Turnstile keys and the API flag are on. */}
+      <div id="ask" className="px-5 md:px-10 -mt-4 mb-16 scroll-mt-24">
+        <div className="max-w-2xl mx-auto">
+          <GuestAsk page="landing" heading="Try it now: ask your first question"
+            placeholder="For example: Does my towing vessel need a TSMS, and what goes in it?" />
+        </div>
+      </div>
 
             <BuiltByMarinersSection />
 

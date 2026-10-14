@@ -157,10 +157,22 @@ async def register(data: RegisterRequest, response: Response) -> TokenResponse:
             signup_attribution.source_label(first_touch), json.dumps(first_touch), user["id"],
         )
 
+    # 2026-10-14 — a question asked before signup moves to this account (app/guest.py).
+    claimed_conversation = None
+    if data.guest_claim:
+        try:
+            from app import guest
+            claimed_conversation = await guest.claim(pool, user["id"], data.guest_claim)
+        except Exception:
+            logger.exception("guest claim failed for a new account")
+        if claimed_conversation:
+            await events.track(pool, "guest_claimed", user_id=user["id"],
+                               props={"conversation_id": str(claimed_conversation)})
+
     # 2026-10-14 — funnel event (app/events.py).
     await events.track(pool, "signup", user_id=user["id"], props={
         "source": signup_attribution.source_label(first_touch) if first_touch else None,
-        "role": data.role, "invite": bool(has_pending_invite),
+        "role": data.role, "invite": bool(has_pending_invite), "guest": bool(claimed_conversation),
     })
 
     # Generate and store email verification token
@@ -217,7 +229,10 @@ async def register(data: RegisterRequest, response: Response) -> TokenResponse:
     except Exception:
         pass
 
-    return TokenResponse(access_token=access_token)
+    return TokenResponse(
+        access_token=access_token,
+        claimed_conversation_id=str(claimed_conversation) if claimed_conversation else None,
+    )
 
 
 @router.post("/login", response_model=TokenResponse)

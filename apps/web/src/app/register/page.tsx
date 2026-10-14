@@ -78,7 +78,7 @@ function RegisterForm() {
     }
     setLoading(true)
     try {
-      await register(email, password, fullName, role)
+      const claimedConversation = await register(email, password, fullName, role)
       // Sprint D6.3c — if the user came in via /pricing or /womenoffshore
       // and clicked Subscribe before authenticating, we saved the chosen
       // plan as `pending_checkout_plan` in localStorage. Resume that
@@ -145,6 +145,12 @@ function RegisterForm() {
       // resolved by /me/view-mode on next page load.
       if (inviteToken) {
         router.replace('/workspaces')
+        return
+      }
+      // 2026-10-14 — a question asked before signup is now this account's
+      // conversation: open it (the claim also marks onboarding done).
+      if (claimedConversation && !next) {
+        router.replace(`/?conversation_id=${encodeURIComponent(claimedConversation)}`)
         return
       }
       // Vessel onboarding is optional — shore-side users can skip it and

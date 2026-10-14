@@ -67,6 +67,8 @@ export default function PrivacyPage() {
               <li><strong>PostHog:</strong> for product analytics: which pages are visited, and steps such as
                 signing up, asking a first question or starting checkout, linked to your account ID (never
                 your email address or the text of your questions)</li>
+              <li><strong>Cloudflare:</strong> Turnstile checks that a question asked without an account comes
+                from a person, not an automated script</li>
             </ul>
             <p className="mt-2">
               We may also disclose data if required by law or to protect our rights.
@@ -82,6 +84,12 @@ export default function PrivacyPage() {
               document that isn&apos;t about maritime work is deleted 7 days after you upload it. We
               retain your data for as long as your account is active. When you delete your account,
               its data is deleted with it; records of payments are kept for accounting.
+            </p>
+            <p className="mt-2">
+              If you ask a question without an account, we keep the question and its answer for 30 days so
+              you can save them to an account you create; otherwise they are deleted. To limit free questions
+              we keep a one-way hash of your browser&apos;s random ID and of your IP address, never the
+              address itself.
             </p>
           </section>
 

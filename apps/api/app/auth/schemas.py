@@ -22,6 +22,9 @@ class RegisterRequest(BaseModel):
     full_name: str
     role: str = "other"
     attribution: SignupAttribution | None = None
+    # 2026-10-14 — the secret a visitor's browser kept after a question asked
+    # before signup (app/guest.py); the conversation moves to the new account.
+    guest_claim: str | None = None
 
 
 class LoginRequest(BaseModel):
@@ -32,6 +35,8 @@ class LoginRequest(BaseModel):
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
+    # 2026-10-14 — set on registration when a guest question was claimed
+    claimed_conversation_id: str | None = None
 
 
 class CurrentUser(BaseModel):

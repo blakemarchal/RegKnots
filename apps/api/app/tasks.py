@@ -1323,7 +1323,12 @@ async def _purge_user_documents_async():
     try:
         removed = await user_docs.purge(pool)
         logger.info("purge_user_documents: %d removed", removed)
-        return {"removed": removed}
+        # 2026-10-14 — guest questions nobody claimed (app/guest.py), same daily run
+        from app import guest
+        guest_removed = await guest.purge_unclaimed(pool)
+        if guest_removed:
+            logger.info("purge_user_documents: %d unclaimed guest conversations removed", guest_removed)
+        return {"removed": removed, "guest_conversations": guest_removed}
     finally:
         await pool.close()
 

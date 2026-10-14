@@ -414,6 +414,17 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("POSTHOG_HOST", "NEXT_PUBLIC_POSTHOG_HOST"),
     )
 
+    # 2026-10-14 — one free answer before signup (app/guest.py). Off unless
+    # REGKNOTS_ANON_CHAT_ENABLED=true AND a Cloudflare Turnstile secret is set
+    # (TURNSTILE_SECRET_KEY; the web needs NEXT_PUBLIC_TURNSTILE_SITE_KEY).
+    # Budget: ~$0.13-0.20 per answer, so 300 a month is at most ~$60.
+    anon_chat_enabled: bool = False
+    anon_daily_cap: int = 30
+    anon_monthly_cap: int = 300
+    anon_ip_daily_cap: int = 6
+    anon_device_window_days: int = 30
+    turnstile_secret_key: str = Field(default="", validation_alias="TURNSTILE_SECRET_KEY")
+
     # Monitoring
     sentry_dsn: str = Field(default="", validation_alias="SENTRY_DSN")
     sentry_auth_token: str = Field(default="", validation_alias="SENTRY_AUTH_TOKEN")

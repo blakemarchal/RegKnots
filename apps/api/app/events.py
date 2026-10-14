@@ -1,9 +1,9 @@
 """Product events (2026-10-14).
 
 One row per funnel step in product_events, so the funnel can be read from
-our own database: signup, first_question, paywall_hit, checkout_started,
-checkout_completed. When settings.posthog_key is set, each event is also
-sent to PostHog in the background (distinct_id = the user's id, the same id
+our own database: guest_question and guest_claimed (app/guest.py), signup,
+first_question, paywall_hit, checkout_started, checkout_completed. When
+settings.posthog_key is set, each event is also sent to PostHog in the background (distinct_id = the user's id, the same id
 the web client identifies with after login), so server and browser events
 meet in one person.
 
@@ -24,7 +24,8 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-EVENTS = ("signup", "first_question", "paywall_hit", "checkout_started", "checkout_completed")
+EVENTS = ("guest_question", "signup", "guest_claimed", "first_question", "paywall_hit",
+          "checkout_started", "checkout_completed")
 
 _INSERT = """
     INSERT INTO product_events (event, user_id, anon_id, props)

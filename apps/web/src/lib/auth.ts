@@ -14,6 +14,16 @@ export interface AuthUser {
   email_verified: boolean
 }
 
+/** The claim secret GuestAsk stored after a question asked before signup (2026-10-14). */
+function readGuestClaim(): string | null {
+  try {
+    const raw = localStorage.getItem('rk_guest_claim')
+    return raw ? ((JSON.parse(raw) as { claim?: string }).claim ?? null) : null
+  } catch {
+    return null
+  }
+}
+
 function decodeJwtUser(token: string): AuthUser | null {
   try {
     const payload = JSON.parse(atob(token.split('.')[1]))
@@ -77,7 +87,8 @@ interface AuthState {
   activeVesselId: string | null
   billing: BillingStatus | null
   login: (email: string, password: string) => Promise<void>
-  register: (email: string, password: string, fullName: string, role: string) => Promise<void>
+  /** Resolves to the id of a guest conversation the new account claimed, if any (2026-10-14). */
+  register: (email: string, password: string, fullName: string, role: string) => Promise<string | null>
   logout: () => Promise<void>
   refreshAuth: () => Promise<boolean>
   hydrateAuth: () => Promise<void>
@@ -159,8 +170,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
-      // 2026-09-26 — first campaign touch (lib/attribution.ts)
-      body: JSON.stringify({ email, password, full_name: fullName, role, attribution: readAttribution() ?? undefined }),
+      // 2026-09-26 — first campaign touch (lib/attribution.ts); 2026-10-14 — the
+      // claim for a question asked before signup (components/GuestAsk.tsx)
+      body: JSON.stringify({
+        email, password, full_name: fullName, role,
+        attribution: readAttribution() ?? undefined,
+        guest_claim: readGuestClaim() ?? undefined,
+      }),
     })
 
     if (!res.ok) {
@@ -175,6 +191,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       user,
       isAuthenticated: true,
     })
+    try { localStorage.removeItem('rk_guest_claim') } catch { /* private mode */ }
+    return (data.claimed_conversation_id as string | null | undefined) ?? null
   },
 
   logout: async () => {
