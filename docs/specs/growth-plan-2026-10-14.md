@@ -161,20 +161,20 @@ A page that fails is held, never served, and gets one rewrite with its failures 
 - **Full run:** 1,152 drafts.
   - The batch ended in 15 minutes with all 1,152 succeeded.
   - 787 passed on the first draft; 253 more passed after one rewrite.
-- **Published:** 1,082 pages:
+- **Published:** 1,147 pages after a third pass, which recovered 65 of the 112 held:
 
   | Collection | Published |
   |---|---|
-  | Subchapter M | 184 |
-  | Credentials | 283 |
-  | Pollution | 151 |
-  | Navigation safety | 23 |
-  | Navigation rules | 35 |
-  | NVICs | 234 |
-  | Frequently cited | 172 |
+  | Subchapter M | 189 |
+  | Credentials | 303 |
+  | Pollution | 166 |
+  | Navigation safety | 25 |
+  | Navigation rules | 37 |
+  | NVICs | 242 |
+  | Frequently cited | 185 |
 
-- **Held:** 112. A third pass was running at the time of writing.
-- **Spend:** about $35–45 of the $200 promotional credit. That covers half-price batch writing, plus the Sonnet checks and rewrites.
+- **Held:** 47. They are not served. The failures are real (dropped qualifiers, broadened exceptions); review them with `status`.
+- **Spend:** about $40–50 of the $200 promotional credit. That covers half-price batch writing, plus the Sonnet checks and rewrites.
 
 ### Upkeep
 
