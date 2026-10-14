@@ -34,6 +34,8 @@ interface Props {
   page: string
   heading: string
   placeholder?: string
+  /** Classes for a wrapper drawn only while the widget is on (layout spacing). */
+  outerClassName?: string
   children?: React.ReactNode
 }
 
@@ -75,7 +77,7 @@ function loadTurnstile(): Promise<void> {
   return turnstileScript
 }
 
-export function GuestAsk({ page, heading, placeholder, children }: Props) {
+export function GuestAsk({ page, heading, placeholder, outerClassName, children }: Props) {
   const [phase, setPhase] = useState<Phase>(SITE_KEY ? 'checking' : 'off')
   const [vesselTypes, setVesselTypes] = useState<string[]>([])
   const [vesselType, setVesselType] = useState<string | null>(null)
@@ -206,7 +208,7 @@ export function GuestAsk({ page, heading, placeholder, children }: Props) {
     </div>
   )
 
-  return (
+  const widget = (
     <section className="rounded-2xl border border-[#2dd4bf]/30 bg-[#2dd4bf]/[0.06] p-5 md:p-6">
       <h2 className="font-display text-xl font-bold text-[#f0ece4] mb-1">{heading}</h2>
       {phase === 'used' && !answer ? (
@@ -278,4 +280,5 @@ export function GuestAsk({ page, heading, placeholder, children }: Props) {
       )}
     </section>
   )
+  return outerClassName ? <div className={outerClassName}>{widget}</div> : widget
 }
