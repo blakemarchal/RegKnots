@@ -13,8 +13,8 @@ failures and never served:
              section text (whitespace, case and typographic marks normalised)
   numbers    every number in the plain-English text appears in the section text
   citations  every section the page names exists in the corpus
-  support    Haiku confirms each statement says what its quote and the
-             section text say, adding nothing
+  support    a second model (Sonnet 5.5) confirms each statement says what the
+             section text says, adding nothing and dropping no qualifier
 
 CLI, on the VPS from apps/api (reads the prod .env):
 
@@ -43,6 +43,9 @@ logger = logging.getLogger(__name__)
 
 GEN_MODEL = "claude-sonnet-5-5"
 GEN_MAX_TOKENS = 8000
+# 2026-10-14 pilot: Haiku passed a statement that dropped "identified in paragraph (c)"
+# (33 CFR 155.1070), so the support check runs on Sonnet too.
+CHECK_MODEL = "claude-sonnet-5-5"
 PROMPT_TEXT_CHARS = 40_000       # section text sent to the writer (the checks read all of it)
 NVIC_BODY_CHARS = 60_000         # an NVIC page shows its main body up to this length
 MIN_BODY_CHARS = 250             # shorter sections (reserved, headings) get no page
@@ -171,7 +174,7 @@ Rules:
 1. Use only the text you are given. Do not add requirements, exceptions, numbers, dates, vessel types or other sections from memory, even when you know them. When the text sends the reader to another section for a detail, say so and name that section as the text does.
 2. Every requirement and every FAQ answer carries a quote: one passage copied exactly from the text, character for character, 6 to 50 words long. No ellipses, no brackets, no added, dropped or changed words, and never two passages joined together.
 3. Write every number exactly as the text gives it, with its unit. Never compute, convert, round or total numbers, and never introduce a number the text doesn't contain.
-4. Plain English: short sentences and active voice. Keep the text's strength: "must" where it requires, "may" where it permits, "should" where it recommends. Keep defined terms as the text uses them.
+4. Plain English: short sentences and active voice. Keep the text's strength: "must" where it requires, "may" where it permits, "should" where it recommends. Keep defined terms as the text uses them. Keep every qualifier that limits a requirement: who it applies to, which items ("identified in paragraph (c)"), when, and any "except" or "unless". Dropping one makes the statement wrong.
 5. No legal advice, and nothing about what the reader should do beyond what the text says. Don't tell the reader to consult anyone.
 6. If the text is reserved, removed or only a heading, return empty lists and say so in the summary.
 7. Navigation Rules: the text gives the International rule and the Inland rule, marked [INTERNATIONAL] and [INLAND]. Say where they differ. Start a statement with "International:" or "Inland:" when it applies to only one of them.
@@ -388,7 +391,7 @@ def named_in_text(ref: str, source_norm: str) -> bool:
 SUPPORT_PROMPT = """\
 You check a plain-English explanation of a regulation against the regulation text. For each numbered item, decide whether the statement is supported: everything it says must be stated in, or directly implied by, the section text. Its quote should be the passage (or one of the passages) the statement comes from; flag a quote only when it has nothing to do with the statement.
 
-A statement is NOT supported if it adds a requirement, number, deadline, condition, exception or vessel type, changes who must do something, makes a permission into a requirement (or the reverse), narrows or broadens who or what is covered, or reverses the meaning.
+A statement is NOT supported if it adds a requirement, number, deadline, condition, exception or vessel type, changes who must do something, makes a permission into a requirement (or the reverse), narrows or broadens who or what is covered, or reverses the meaning. Dropping a qualifier that limits a requirement (which items, "identified in paragraph (c)", "operated by", "except", "unless", "when") broadens it: flag it.
 
 These are fine and must not be flagged: paraphrase, simplification, leaving details out, wording or style; naming this section's own number, its part or subchapter, or the collection it belongs to (given with the section); calling an NVIC Coast Guard guidance.
 
@@ -408,8 +411,8 @@ def support_items(content: dict) -> list[dict]:
 
 
 async def support_check(client, page: dict, content: dict) -> dict:
-    """Haiku's verdict on every statement. Returns {"ok", "failures"}."""
-    from rag.llm import BOOL, INT, SIDECAR_MODEL, STR, arr, create_json, obj, small_call_kwargs
+    """The checker's verdict on every statement. Returns {"ok", "failures"}."""
+    from rag.llm import BOOL, INT, STR, arr, create_json, obj
     items = support_items(content)
     listing = "\n".join(
         f"{i + 1}. Statement: {it['statement']}\n   Quote: {it['quote'] or '(none: check against the section text)'}"
@@ -419,9 +422,9 @@ async def support_check(client, page: dict, content: dict) -> dict:
     collection = COLLECTION_BY_SLUG[page["collection"]]
     context = f"Section: {page['display_number']}, in the collection {collection.title} ({collection.blurb})"
     schema = obj({"items": arr(obj({"index": INT, "supported": BOOL, "reason": STR}))})
-    kwargs = small_call_kwargs(SIDECAR_MODEL, 3000)
+    kwargs = {"max_tokens": 6000, "output_config": {"effort": "low"}}
     result = await create_json(
-        client, schema=schema, label="seo support check", model=SIDECAR_MODEL,
+        client, schema=schema, label="seo support check", model=CHECK_MODEL,
         system=SUPPORT_PROMPT,
         messages=[{"role": "user",
                    "content": f"{context}\n\nSection text:\n<<<\n{text}\n>>>\n\nItems:\n{listing}"}],
@@ -703,7 +706,8 @@ async def write_pages(conn, client, pages: list[dict], *, use_batch: bool | None
     corpus = await corpus_section_set(conn)
     locked = _Locked(conn)
     counts: dict[str, int] = {}
-    todo = [(p, None, 1) for p in pages]          # (page, feedback, attempt)
+    # (page, feedback, attempt); a page may carry _feedback / _attempt (cmd_retry)
+    todo = [(p, p.pop("_feedback", None), p.pop("_attempt", 1)) for p in pages]
     while todo:
         batch = use_batch if use_batch is not None else len(todo) >= BATCH_MIN
         by_cid = {f"p{p['id']}": (p, fb, attempt) for p, fb, attempt in todo}
@@ -790,18 +794,22 @@ async def cmd_retry() -> None:
             checks = _load_json(r["checks"]) or {}
             if "the regulation text changed" in checks.get("failures", []):
                 continue
+            if checks.get("attempt", 1) >= MAX_ATTEMPTS and "--again" not in sys.argv:
+                continue
+            r["_feedback"] = {"content": _load_json(r["content"]), "failures": checks.get("failures", [])}
+            r["_attempt"] = checks.get("attempt", 1) + 1
             pages.append(r)
         print(json.dumps(await write_pages(conn, client, pages)) if pages else "nothing to retry", flush=True)
     finally:
         await conn.close()
 
 
-async def cmd_recheck() -> None:
-    """Re-run the checks on held pages (after a check is fixed); no rewriting."""
+async def cmd_recheck(status: str = "held") -> None:
+    """Re-run the checks on held (or published) pages after a check changes; no rewriting."""
     conn, client = await _connect(), _client()
     try:
         rows = [dict(r) for r in await conn.fetch(
-            f"SELECT {_PAGE_COLS} FROM seo_pages WHERE status = 'held' AND content IS NOT NULL")]
+            f"SELECT {_PAGE_COLS} FROM seo_pages WHERE status = $1 AND content IS NOT NULL", status)]
         corpus = await corpus_section_set(conn)
         counts: dict[str, int] = {}
         for page in rows:
@@ -841,7 +849,7 @@ def main(argv: list[str]) -> None:
     elif cmd == "retry":
         asyncio.run(cmd_retry())
     elif cmd == "recheck":
-        asyncio.run(cmd_recheck())
+        asyncio.run(cmd_recheck(argv[1] if len(argv) > 1 else "held"))
     else:
         asyncio.run(cmd_status())
 
