@@ -16,6 +16,7 @@ export const OG_IMAGE = { url: '/opengraph-image', width: 1200, height: 630, alt
 export const PUBLIC_PAGES: Array<[string, 'weekly' | 'monthly' | 'yearly', number]> = [
   ['/landing', 'weekly', 1.0],
   ['/practice', 'weekly', 0.9],
+  ['/regs', 'weekly', 0.9],
   ['/pricing', 'monthly', 0.8],
   ['/education', 'monthly', 0.7],
   ['/coverage', 'monthly', 0.7],

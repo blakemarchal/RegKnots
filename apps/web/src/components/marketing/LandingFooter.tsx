@@ -129,6 +129,9 @@ export function LandingFooter({ extraLinks = [], onContactClick, homeHref }: Pro
           <Link href="/practice" className="font-mono text-xs text-[#6b7594] hover:text-[#f0ece4]/80 transition-colors">
             USCG Exam Practice
           </Link>
+          <Link href="/regs" className="font-mono text-xs text-[#6b7594] hover:text-[#f0ece4]/80 transition-colors">
+            Regulations
+          </Link>
           <Link href="/terms" className="font-mono text-xs text-[#6b7594] hover:text-[#f0ece4]/80 transition-colors">
             Terms
           </Link>
