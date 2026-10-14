@@ -118,3 +118,13 @@ def test_writer_request_shape():
     assert params["output_config"]["format"]["type"] == "json_schema"
     assert "current as of 2026-03-31" in params["messages"][0]["content"]
     assert S.compose_title(page, good_content()) == f"{SEC}: Fixed and semi-portable fire extinguishing systems"
+
+
+def test_public_list_sorts_mixed_sources():
+    from app.routers.public_regs import _sort_key
+    rows = [{"section_number": s} for s in (
+        "COLREGS Annex II", "46 CFR 142.315", "NVIC 03-16", "COLREGS Rule 19", "46 CFR 10.9",
+        "COLREGS Rule 2", "46 CFR 10.10", "33 CFR 164.72")]
+    assert [r["section_number"] for r in sorted(rows, key=_sort_key)] == [
+        "33 CFR 164.72", "46 CFR 10.9", "46 CFR 10.10", "46 CFR 142.315",
+        "COLREGS Rule 2", "COLREGS Rule 19", "COLREGS Annex II", "NVIC 03-16"]

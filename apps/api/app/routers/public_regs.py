@@ -63,21 +63,22 @@ class PageOut(BaseModel):
     next: PageSummary | None = None
 
 
-def _natural_key(section_number: str) -> list:
-    return [int(t) if t.isdigit() else t for t in re.split(r"(\d+)", section_number)]
+def _natural_key(section_number: str) -> list[tuple]:
+    """"46 CFR 10.9" before "46 CFR 10.10". Each part is (0, int) or (1, str),
+    so keys from different sources still compare (2026-10-14: the all-pages
+    list mixed COLREGs and CFR keys and raised TypeError)."""
+    return [(0, int(t)) if t.isdigit() else (1, t) for t in re.split(r"(\d+)", section_number)]
 
 
-def _roman_key(section_number: str) -> list:
+def _sort_key(row) -> list[tuple]:
+    """Natural order; COLREGs Rules before Annexes, Annexes by Roman numeral."""
     roman = {"I": 1, "II": 2, "III": 3, "IV": 4, "V": 5}
-    m = re.match(r"^COLREGS (Rule|Annex) (\w+)$", section_number)
+    number = row["section_number"]
+    m = re.match(r"^COLREGS (Rule|Annex) (\w+)$", number)
     if m:
         n = int(m.group(2)) if m.group(2).isdigit() else roman.get(m.group(2), 99)
-        return [0 if m.group(1) == "Rule" else 1, n]
-    return _natural_key(section_number)
-
-
-def _sort_key(row) -> list:
-    return _roman_key(row["section_number"])
+        return [(1, "COLREGS"), (0, 0 if m.group(1) == "Rule" else 1), (0, n)]
+    return _natural_key(number)
 
 
 def _source_label(source: str, section_number: str, as_of: date | None) -> str:
