@@ -490,9 +490,38 @@ If a doc says "alembic head is 0045" but `alembic current` says `0092`, the doc 
     - Karynn's voice only with her explicit consent.
   - **Blake's open steps:**
     - Offsite backups: Spaces bucket and keys, `apt-get install -y rclone age`, an age key pair on his laptop (header of `scripts/backup_offsite.sh`).
-    - Submit `sitemap.xml` in Search Console: 1,165 URLs, 1,154 of them /regs pages.
+    - Submit the sitemap in Search Console. It is a Domain property (DNS-verified), so the box needs the full URL `https://regknots.com/sitemap.xml`; plain `sitemap.xml` is refused as invalid. 1,165 URLs, 1,154 of them /regs pages.
     - The two Stripe webhook events.
-    - Try the free question from his phone; nobody has asked one yet.
+  - **First free question** (Blake's, 19:08 UTC from his phone): Opus answer, 7 citations; no Turnstile box was shown to him.
+- **2026-10-16 (later) UI pass** (Blake: "Greenlight the full pass and videos"; `f002a35` api, `a5f17cb` web; deployed, smoke OK).
+  - **Why:** the landing hero ran past a laptop screen, so its tagline and scroll arrow overlapped the free-question card. The free answer rendered as bare markdown, unlike chat. Several marketing claims weren't true.
+  - **`components/marketing/SiteNav.tsx`** on every public page (landing, pricing, /regs, /practice, /education, /coverage, /giving, /whitelisting, /terms, /privacy):
+    - Links: Regulations, Exam practice, Pricing, Sign in.
+    - One "Start free" button (`START_FREE_LABEL`); campaign pages pass their own `signupHref`.
+    - A phone menu (Escape closes it).
+    - "Open RegKnot" when signed in. /pricing used to show "Back to app" to everyone.
+    - The partner pages (/captainkarynn, /womenoffshore, /ass) keep their own bars.
+  - **Landing:**
+    - The headline renders at once (it faded in over 1.5 s).
+    - The demo answer sits beside it as the product visual; the free question has its own row below.
+    - A strip of checkable facts (Master Unlimited, 77 sources, 14 flag states, 1,100+ /regs pages) and a closing call to action.
+    - "How it works" and the second demo section are gone from this page.
+  - **`components/AnswerBody.tsx`:** chat's answer renderer (markdown components, chips, verified badge, web-source footer), moved verbatim out of `ChatMessage.tsx`. `GuestAsk` uses it:
+    - The free answer looks like chat.
+    - A chip opens our /regs page, else eCFR, else a note that the full text opens in an account. This uses the new `GET /public/regs/links?s=…`.
+    - The prompt's "I've noted these details about your vessel…" line is hidden for visitors.
+    - The hint asks for the Turnstile tick when Cloudflare wants one (`before-interactive-callback`).
+  - **Claims removed or corrected** (`MarketingSections.tsx`, landing, pricing, coverage):
+    - "AES-256 at rest": DigitalOcean documents at-rest encryption for Volumes and Spaces, not the Droplet disk the database is on. Now "Encrypted in transit · Argon2-hashed passwords".
+    - "licensed editions" / "purchased source texts".
+    - "9 flag-state regulators": the corpus is tagged for 14.
+    - Karynn "audits daily / every few days".
+    - "free" Career Path: it's a Mate feature.
+    - "no guessing, no hallucination".
+    - The "we hedge" card now describes the 10-09 provenance prompt.
+  - **Demos:** chips are teal like the real ones, with the verified badge. The first demo (a passenger vessel citing 46 CFR 133.45, an OSV section) is replaced by the towboat answer from the first free question, checked against 46 CFR 141.305 / .360 / .370 / .375.
+  - `scripts/smoke.sh`: the landing canary is now this version's text ("Ask a question free").
+  - Checked locally against a stub API that replays a real answer, with Cloudflare's test keys (always-pass, and forced-challenge for the hint), at 1280 and 375 px. `next build` clean; api 184 and web tests pass.
 See `docs/PROJECT_STATE.md` for a fuller operational snapshot and `docs/roadmap.md` for the prioritized backlog.
 
 
@@ -528,4 +557,4 @@ Full audit report (models, retrieval, UX, product packaging): see the 2026-07-18
 
 ---
 
-*Last updated 2026-10-16 (free question before signup ON with Turnstile, Search Console verified, ElevenLabs key for the videos; OpenAI fallback → gpt-6-luna, voice → gpt-transcribe, PostHog live, security review shipped: preview-attach fix, rate limits, session revocation, startup guard, upload sniffing, Sentry scrubbing, audit / deletion / backup hardening, migrations 0127–0128; 2026-10-14 growth plan: funnel events + cookieless PostHog, search basics, 1,147 regulation pages at /regs, one free answer before signup (off until keyed), Wheelhouse pilot codes + demo fleet, migrations 0123–0126; 2026-10-13: IMO resolution harvester: backlog of 248 resolutions + 19 parent codes, weekly harvest, retrieval groups / tiers / keyword caps, dates prompt; towboat Sub M fix deployed; 2026-10-09: answer pipeline phase 1 live: whole sections, sources-and-gaps prompt; IMO splitter fix + pilot transfer resolutions; 2026-10-06 mail routing: inbound Google only, ImprovMX unused, app email on Resend with a default reply-to; 2026-10-05: PDF and Word uploads in chat, migration 0121; reply-to on admin emails; off-topic check sees the conversation, attachment wording; 2026-10-03 security: only our hostnames get a TLS certificate or credentialed CORS, junk certificates cleared; earlier: free /practice page, capped free plan, MVUS / school / TPO outreach with a call list, NGA manuals `nga_pubs`, migration 0120; earlier: inland / Coast Guard corpus: ten new sources, NVIC discovery fix, Medical Manual, uscg_bulletin pruned + daily feed, keyword floor, migration 0119; earlier: corpus gap audit; self-serve account deletion + migration 0118; admin redesign + customer UX pass; CFR paragraph chips; video ads first cut). When this drifts from reality, fix it — that's the rule.*
+*Last updated 2026-10-16 (UI pass: shared site nav, landing hero rebuilt, free answer renders like chat, marketing claims corrected, /public/regs/links; free question before signup ON with Turnstile, Search Console verified, ElevenLabs key for the videos; OpenAI fallback → gpt-6-luna, voice → gpt-transcribe, PostHog live, security review shipped: preview-attach fix, rate limits, session revocation, startup guard, upload sniffing, Sentry scrubbing, audit / deletion / backup hardening, migrations 0127–0128; 2026-10-14 growth plan: funnel events + cookieless PostHog, search basics, 1,147 regulation pages at /regs, one free answer before signup (off until keyed), Wheelhouse pilot codes + demo fleet, migrations 0123–0126; 2026-10-13: IMO resolution harvester: backlog of 248 resolutions + 19 parent codes, weekly harvest, retrieval groups / tiers / keyword caps, dates prompt; towboat Sub M fix deployed; 2026-10-09: answer pipeline phase 1 live: whole sections, sources-and-gaps prompt; IMO splitter fix + pilot transfer resolutions; 2026-10-06 mail routing: inbound Google only, ImprovMX unused, app email on Resend with a default reply-to; 2026-10-05: PDF and Word uploads in chat, migration 0121; reply-to on admin emails; off-topic check sees the conversation, attachment wording; 2026-10-03 security: only our hostnames get a TLS certificate or credentialed CORS, junk certificates cleared; earlier: free /practice page, capped free plan, MVUS / school / TPO outreach with a call list, NGA manuals `nga_pubs`, migration 0120; earlier: inland / Coast Guard corpus: ten new sources, NVIC discovery fix, Medical Manual, uscg_bulletin pruned + daily feed, keyword floor, migration 0119; earlier: corpus gap audit; self-serve account deletion + migration 0118; admin redesign + customer UX pass; CFR paragraph chips; video ads first cut). When this drifts from reality, fix it — that's the rule.*
