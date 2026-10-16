@@ -260,7 +260,7 @@ export default function PricingPage() {
             by side. Captain stays the "Most popular" anchor since that's the
             unlimited-tier target; Cadet gets a "New" badge to draw eyes to
             the entry-level option. */}
-        <div className="grid w-full max-w-6xl gap-5 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid w-full max-w-6xl gap-x-5 gap-y-8 pt-3 sm:grid-cols-2 xl:grid-cols-4">
           {/* ── Free Trial (de-emphasized) ────────────────────────────── */}
           <div className="flex flex-col rounded-2xl p-6 border border-white/8 bg-[#0b1020]">
             <div className="mb-4">
@@ -333,12 +333,28 @@ export default function PricingPage() {
               ? `vs $${display.monthly.toFixed(2)} standard`
               : null
             return (
-              <div key={tier} className={`flex flex-col rounded-2xl p-6 border transition-shadow
+              <div key={tier} className={`relative flex flex-col rounded-2xl p-6 border transition-shadow
                 ${featured
                   ? 'bg-[#111827] border-[#2dd4bf]/50 shadow-[0_0_40px_rgba(45,212,191,0.08)]'
                   : 'bg-[#0d1225] border-white/10'
                 }`}>
-                <div className="flex items-start justify-between gap-3 mb-4">
+                {/* 2026-10-16 UI pass — badges sit on the card's top border, so they
+                    can't overflow a narrow card (they shared a row with the price). */}
+                {featured && (
+                  <span className="absolute -top-3 left-1/2 -translate-x-1/2 font-mono text-[10px] font-bold
+                    text-[#2dd4bf] bg-[#0a0e1a] border border-[#2dd4bf]/50 rounded-full px-3 py-1
+                    uppercase tracking-wider whitespace-nowrap">
+                    Most popular
+                  </span>
+                )}
+                {isNewBadge && (
+                  <span className="absolute -top-3 left-1/2 -translate-x-1/2 font-mono text-[10px] font-bold
+                    text-amber-300 bg-[#0a0e1a] border border-amber-300/50 rounded-full px-3 py-1
+                    uppercase tracking-wider whitespace-nowrap">
+                    New
+                  </span>
+                )}
+                <div className="mb-4">
                   <div>
                     <p className="font-display text-2xl font-bold text-[#f0ece4] tracking-wide">
                       {display.name}
@@ -353,18 +369,6 @@ export default function PricingPage() {
                       </p>
                     )}
                   </div>
-                  {featured && (
-                    <span className="font-mono text-[10px] font-bold text-[#2dd4bf] bg-[#2dd4bf]/10
-                      border border-[#2dd4bf]/30 rounded px-2 py-1 uppercase tracking-wider whitespace-nowrap">
-                      Most popular
-                    </span>
-                  )}
-                  {isNewBadge && (
-                    <span className="font-mono text-[10px] font-bold text-amber-300 bg-amber-300/10
-                      border border-amber-300/30 rounded px-2 py-1 uppercase tracking-wider whitespace-nowrap">
-                      New
-                    </span>
-                  )}
                 </div>
                 <p className="font-mono text-xs text-[#6b7594] mb-4 leading-relaxed">
                   {features.headline}
@@ -427,7 +431,7 @@ export default function PricingPage() {
               <span className="text-white/15">·</span>
               <span>AES-256 at rest</span>
               <span className="text-white/15">·</span>
-              <span>Zero third-party tracking</span>
+              <span>No tracking cookies</span>
               <span className="text-white/15">·</span>
               <span>Your data, your delete button</span>
             </div>

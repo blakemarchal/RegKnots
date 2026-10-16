@@ -43,12 +43,21 @@ function PricingCard({
   featured?: boolean
 }) {
   return (
-    <div className={`flex flex-col rounded-2xl p-6 border transition-shadow
+    <div className={`relative flex flex-col rounded-2xl p-6 border transition-shadow
       ${featured
         ? 'bg-[#111827] border-[#2dd4bf]/50 shadow-[0_0_40px_rgba(45,212,191,0.08)]'
         : 'bg-[#0d1225] border-white/8'
       }`}>
-      <div className="flex items-start justify-between gap-3 mb-4">
+      {/* 2026-10-16 UI pass — the badge sits on the card's top border, so it can't
+          overflow a narrow card (it used to share a row with the price). */}
+      {badge && (
+        <span className="absolute -top-3 left-1/2 -translate-x-1/2 font-mono text-[10px] font-bold
+          text-[#2dd4bf] bg-[#0a0e1a] border border-[#2dd4bf]/50 rounded-full px-3 py-1
+          uppercase tracking-wider whitespace-nowrap">
+          {badge}
+        </span>
+      )}
+      <div className="mb-4">
         <div>
           <p className="font-display text-2xl font-bold text-[#f0ece4] tracking-wide">{name}</p>
           <p className="font-mono text-3xl font-bold text-[#f0ece4] mt-1">{price}</p>
@@ -57,12 +66,6 @@ function PricingCard({
             <p className="font-mono text-xs text-[#2dd4bf]/80 mt-1 leading-snug">{subNote}</p>
           )}
         </div>
-        {badge && (
-          <span className="font-mono text-[10px] font-bold text-[#2dd4bf] bg-[#2dd4bf]/10
-            border border-[#2dd4bf]/30 rounded px-2 py-1 uppercase tracking-wider whitespace-nowrap">
-            {badge}
-          </span>
-        )}
       </div>
 
       <ul className="flex flex-col gap-2 mb-6 flex-1">
@@ -275,7 +278,9 @@ export default function LandingPage() {
           SECTION 6 — PRICING
       ══════════════════════════════════════════════════════════════════════ */}
       <section className="px-5 md:px-10 py-20 md:py-28">
-        <div className="max-w-3xl mx-auto">
+        {/* 2026-10-16 UI pass — max-w-6xl (was 3xl): four cards in 768 px left
+            ~180 px each, so every line wrapped and the badges overflowed. */}
+        <div className="max-w-6xl mx-auto">
           <div className="text-center mb-12">
             <h2 className="font-display font-black text-[#f0ece4] leading-tight tracking-tight
               text-[clamp(28px,5vw,48px)]">
@@ -320,7 +325,7 @@ export default function LandingPage() {
               entry-level paid option. Grid bumped from 3 to 4 columns on
               lg+ screens; 2-up on md; stacked on mobile so each card
               keeps breathing room. */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-x-5 gap-y-8 pt-3">
             <PricingCard
               name="Free"
               price="$0"
@@ -394,7 +399,7 @@ export default function LandingPage() {
                 <span className="text-white/15">·</span>
                 <span>AES-256 at rest</span>
                 <span className="text-white/15">·</span>
-                <span>Zero third-party tracking</span>
+                <span>No tracking cookies</span>
                 <span className="text-white/15">·</span>
                 <span>Your data, your delete button</span>
               </div>
@@ -408,7 +413,7 @@ export default function LandingPage() {
               multi-seat, 30-day no-card trial) so it lives below the personal
               tiers as a "for crews" upsell rather than crammed into the
               same row. Links to /pricing for the detailed Wheelhouse cards. */}
-          <div className="mt-8 rounded-2xl border border-[#2dd4bf]/30 bg-[#0d1225] p-6 md:p-7">
+          <div className="mt-8 max-w-3xl mx-auto rounded-2xl border border-[#2dd4bf]/30 bg-[#0d1225] p-6 md:p-7">
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-5">
               <div className="flex-1">
                 <p className="font-mono text-[10px] text-[#2dd4bf] uppercase tracking-[0.25em] mb-2">
