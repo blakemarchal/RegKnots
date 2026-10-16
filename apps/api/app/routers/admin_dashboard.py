@@ -51,8 +51,9 @@ class Revenue(BaseModel):
 
 class Quality(BaseModel):
     answers_7d: int
-    # Answers by messages.model_used ("opus", "sonnet", "haiku", "fallback_gpt4o", ...).
-    # A fallback_gpt4o count means Claude was unavailable (e.g. credits ran out).
+    # Answers by messages.model_used ("opus", "sonnet", "haiku", "fallback_openai", ...).
+    # A fallback_openai (before 2026-10-16: fallback_gpt4o) count means Claude
+    # was unavailable (e.g. credits ran out) or refused.
     models_7d: dict[str, int] = {}
     hedged_7d: int                       # answers the hedge detector flagged (retrieval_misses)
     judge_7d: dict[str, int]             # the hedge judge's verdicts on those, "unjudged" when empty

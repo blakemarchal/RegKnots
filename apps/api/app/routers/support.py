@@ -106,7 +106,7 @@ async def support_chat(
             text = text_of(resp) or "I'm sorry, I couldn't generate a response."
         except _CLAUDE_FAILURE_EXCEPTIONS as exc:
             logger.warning(
-                "Support chat: Claude API failed (%s: %s), falling back to OpenAI GPT-4o",
+                "Support chat: Claude API failed (%s: %s), falling back to OpenAI",
                 type(exc).__name__,
                 str(exc)[:200],
             )

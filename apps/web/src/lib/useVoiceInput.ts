@@ -4,10 +4,10 @@ import { useState, useCallback, useRef } from 'react'
 import { apiUpload } from './api'
 
 /**
- * Voice input hook using Web Speech API with Whisper fallback.
+ * Voice input hook using Web Speech API with a server transcription fallback.
  *
  * Primary: browser-native SpeechRecognition (zero latency, no network).
- * Fallback: MediaRecorder → upload to /transcribe (Whisper API).
+ * Fallback: MediaRecorder → upload to /transcribe (OpenAI gpt-transcribe since 2026-10-16).
  */
 
 interface UseVoiceInputOptions {
@@ -203,7 +203,7 @@ export function useVoiceInput({ onTranscript, onError }: UseVoiceInputOptions): 
           } else if (event.error === 'no-speech') {
             // Silently ignore — user just didn't speak
           } else {
-            // Web Speech API failed — fall back to Whisper
+            // Web Speech API failed — fall back to server transcription
             recognition.stop()
             recognitionRef.current = null
             startFallbackRecording()
@@ -228,7 +228,7 @@ export function useVoiceInput({ onTranscript, onError }: UseVoiceInputOptions): 
       }
     }
 
-    // Fallback: MediaRecorder + Whisper
+    // Fallback: MediaRecorder + server transcription
     startFallbackRecording()
   }, [listening, SpeechRecognitionClass, onTranscript, onError, startFallbackRecording])
 

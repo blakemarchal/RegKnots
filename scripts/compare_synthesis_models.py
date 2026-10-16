@@ -20,9 +20,10 @@ thinking setting:
 to (SYNTHESIS_MODEL_FLOOR empty). Per answer: time to first text token, total time, output
 tokens, stop reason, cost at a cold and a warm prompt cache, and the engine's own post-checks
 (section numbers in the text that are not in the corpus, ungrounded UN-number claims, hedge
-phrases) plus gold-set citation hits. Two blind judges (Opus 5.5 at effort medium, GPT-4o)
-score all six answers per question, each in its own shuffled label order; Opus judging
-Opus answers is a known self-preference risk, which is why GPT-4o judges too.
+phrases) plus gold-set citation hits. Blind judges (Opus 5.5 at effort medium; until
+2026-10-16 also GPT-4o, now opt-in as --gpt-judge=<model>) score all six answers per question,
+each in its own shuffled label order; Opus judging Opus answers is a known self-preference
+risk, which is what the cross-family judge was for.
 
 Run on the VPS (~35 min, ~$6 for 16 questions); results land in data/eval/model_compare/:
     cd /opt/RegKnots/apps/api && /root/.local/bin/uv run python /opt/RegKnots/scripts/compare_synthesis_models.py
@@ -51,7 +52,7 @@ the IMO resolution backlog harvest. Questions: IMO, about adopted amendments and
 (the Captain's vessel), plus 4 gold and the Captain's two for regressions. ~$5.
 
 2026-10-09 — `--session-judge` (Blake: use the Claude subscription for evaluation work): the
-answers still come from the production API (they are what is measured) and GPT-4o still judges,
+answers still come from the production API (they are what is measured) and the GPT judge, if on, still judges,
 but the Opus judge call is replaced by a blind packet per question in OUT/judge_packets/
 (labels shuffled; the label map stays in results.json). Grade the packets in a Claude Code
 session (subagents, same JUDGE_SYSTEM rubric), save each as OUT/session_grades/<qid>.json, then
@@ -93,6 +94,10 @@ PHASE1_AB = "--phase1-ab" in sys.argv
 PIPELINE_AB = "--pipeline-ab" in sys.argv
 DATES_AB = "--dates-ab" in sys.argv
 SESSION_JUDGE = "--session-judge" in sys.argv
+# 2026-10-16 — GPT-4o leaves the OpenAI API on 2027-01-14; the second, cross-family judge is now
+# opt-in: --gpt-judge=<model> (e.g. gpt-6.1-sol). Off by default (the session judge grades).
+GPT_JUDGE = next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--gpt-judge=")), "")
+GPT_PRICES = {"gpt-6.1-sol": (2.00, 10.00), "gpt-6-sol": (2.00, 10.00), "gpt-6-luna": (0.10, 0.50)}
 OUT = REPO / "data" / "eval" / "model_compare" / (
     time.strftime("%Y%m%d-%H%M%S", time.gmtime())
     + ("-prompt-ab" if PROMPT_AB else "-phase1-ab" if PHASE1_AB else "-pipeline-ab" if PIPELINE_AB
@@ -368,7 +373,7 @@ async def judge_opus(client, content: str) -> tuple[dict | None, dict]:
 
 async def judge_gpt(oai, content: str) -> tuple[dict | None, dict]:
     r = await oai.chat.completions.create(
-        model="gpt-4o", temperature=0,
+        model=GPT_JUDGE, reasoning_effort="low", max_completion_tokens=16000,
         response_format={"type": "json_schema",
                          "json_schema": {"name": "grades", "strict": True, "schema": JUDGE_SCHEMA}},
         messages=[{"role": "system", "content": JUDGE_SYSTEM}, {"role": "user", "content": content}],
@@ -415,7 +420,7 @@ async def one_question(item, pool, client, oai, okey, conv_id, user_id, rng) -> 
               f"stop={r.get('stop')} unverified={r.get('unverified')} {r.get('error', '')}", flush=True)
     ok = [n for n in VARIANTS if "error" not in rec["runs"][n] and rec["runs"][n]["answer"].strip()]
     rec["judges"] = {}
-    for jname in ("opus", "gpt4o"):
+    for jname in (("opus", "gpt") if GPT_JUDGE else ("opus",)):
         order = ok[:]
         rng.shuffle(order)
         lab2var = dict(zip(LABELS, order))
@@ -485,9 +490,9 @@ def summarize(recs: list[dict]) -> dict:
             run = r["runs"].get(v, {})
             if "error" in run or not run:
                 continue
-            jr = {j: (r["judges"].get(j, {}).get("scores") or {}).get(v, {}) for j in ("opus", "gpt4o")}
+            jr = {j: (r["judges"].get(j, {}).get("scores") or {}).get(v, {}) for j in ("opus", "gpt")}
             rk = {}
-            for j in ("opus", "gpt4o"):
+            for j in ("opus", "gpt"):
                 sc = {k: s.get("overall") for k, s in (r["judges"].get(j, {}).get("scores") or {}).items()
                       if isinstance(s.get("overall"), (int, float))}
                 if v in sc:
@@ -526,15 +531,15 @@ def summarize(recs: list[dict]) -> dict:
             "pre_synthesis_median": med([(p["rec"].get("pre_synthesis_by_variant") or {}).get(p["v"]) for p in per]),
             "chars_median": med([x["chars"] for x in runs]),
             "judge_opus_overall": judged("opus", "overall"),
-            "judge_gpt_overall": judged("gpt4o", "overall"),
+            "judge_gpt_overall": judged("gpt", "overall"),
             "judge_opus_accuracy": judged("opus", "accuracy"),
-            "judge_gpt_accuracy": judged("gpt4o", "accuracy"),
+            "judge_gpt_accuracy": judged("gpt", "accuracy"),
             "mean_rank_opus": mean([p["rk"].get("opus") for p in per]),
-            "mean_rank_gpt": mean([p["rk"].get("gpt4o") for p in per]),
+            "mean_rank_gpt": mean([p["rk"].get("gpt") for p in per]),
             "best_opus": best("opus"),
-            "best_gpt": best("gpt4o"),
+            "best_gpt": best("gpt"),
             "errors_flagged_opus": sum(len(p["jr"]["opus"].get("errors") or []) for p in per),
-            "errors_flagged_gpt": sum(len(p["jr"]["gpt4o"].get("errors") or []) for p in per),
+            "errors_flagged_gpt": sum(len(p["jr"]["gpt"].get("errors") or []) for p in per),
         }
     return rows
 
@@ -616,9 +621,10 @@ async def main() -> None:
         ju = (r.get("judges") or {}).get("opus", {}).get("usage")
         if ju:
             spend += (ju["input"] * 4.0 + ju["output"] * 20.0) / 1e6
-        gu = (r.get("judges") or {}).get("gpt4o", {}).get("usage")
+        gu = (r.get("judges") or {}).get("gpt", {}).get("usage")
         if gu:
-            spend += (gu["input"] * 2.5 + gu["output"] * 10.0) / 1e6
+            g_in, g_out = GPT_PRICES.get(GPT_JUDGE, (2.00, 10.00))
+            spend += (gu["input"] * g_in + gu["output"] * g_out) / 1e6
     meta = {"questions": len(recs), "synthesized": sum(1 for r in recs if "runs" in r),
             "wall_minutes": round((time.perf_counter() - t_all) / 60, 1), "approx_spend_usd": round(spend, 2),
             "route_models": {r["qid"]: r.get("route_model") for r in recs}}
@@ -642,7 +648,7 @@ async def main() -> None:
         cells = []
         for v in VARIANTS:
             so = ((r["judges"].get("opus", {}).get("scores") or {}).get(v) or {}).get("overall")
-            sg = ((r["judges"].get("gpt4o", {}).get("scores") or {}).get(v) or {}).get("overall")
+            sg = ((r["judges"].get("gpt", {}).get("scores") or {}).get(v) or {}).get("overall")
             cells.append(f"{v}={so}/{sg}")
         print(f"{r['qid']:6} route={str(r.get('route_model'))[:14]:14} " + " ".join(cells))
 

@@ -11,6 +11,9 @@ def test_explicit_keys():
     assert _model_alias("claude-sonnet-5") == "sonnet"
     assert _model_alias("claude-opus-5-5") == "opus"
     assert _model_alias("fallback:gpt-4o") == "fallback_gpt4o"
+    # 2026-10-16 — the OpenAI fallback after GPT-4o (migration 0128)
+    assert _model_alias("fallback:gpt-6-luna") == "fallback_openai"
+    assert _model_alias("fallback:anything-next") == "fallback_openai"
 
 
 def test_unlisted_versions_fall_back_to_their_family():

@@ -83,7 +83,7 @@ _MAX_TOKENS = 8192
 # no-thinking route cuts replies off — the D6.75 truncation, now
 # structural. Opus calls get the larger cap and an explicit effort (the
 # API default is `medium`, one level below Opus 5's `high`); Sonnet,
-# Haiku and the GPT-4o fallback keep _MAX_TOKENS. `effort` is rejected
+# Haiku and the OpenAI fallback keep _MAX_TOKENS. `effort` is rejected
 # by Haiku 4.5 (and pointless on Sonnet 5 here), so it is only sent for
 # claude-opus-* models. (Structured outputs via output_config.format ARE
 # supported on Haiku 4.5 — see rag/llm.py.)
@@ -1280,11 +1280,11 @@ async def _regenerate_answer(
     effective_system_prompt: str,
     ungrounded_un_numbers: list[str] | None = None,
 ) -> tuple[str, int, int] | None:
-    """Call Claude (or the GPT-4o fallback) again with a corrective instruction.
+    """Call Claude (or the OpenAI fallback) again with a corrective instruction.
 
     Returns (answer, input_tokens, output_tokens) or None if regeneration fails.
     Routes to whichever backend produced the original answer — if the first
-    response came from the GPT-4o fallback, the regeneration goes there too.
+    response came from the OpenAI fallback, the regeneration goes there too.
 
     `effective_system_prompt` is the SAME prompt the original call used (with
     vessel profile, jurisdictional context, etc. baked in) — without it the
@@ -1327,8 +1327,8 @@ async def _regenerate_answer(
     )
     messages = [{"role": "user", "content": corrective_instruction}]
 
-    # If the original call used the GPT-4o fallback, regenerate via the same path.
-    if model_used == FALLBACK_MODEL_ID:
+    # If the original call used the OpenAI fallback, regenerate via the same path.
+    if (model_used or "").startswith("fallback:"):
         try:
             result = await fallback_chat(
                 system_prompt=effective_system_prompt,
@@ -1338,7 +1338,7 @@ async def _regenerate_answer(
             )
             return result["answer"], result["input_tokens"], result["output_tokens"]
         except Exception as exc:  # noqa: BLE001 — surface as regen failure
-            logger.warning("Regeneration via GPT-4o failed: %s", exc)
+            logger.warning("Regeneration via the OpenAI fallback failed: %s", exc)
             return None
 
     # Sprint D4 — regeneration pass always uses REGENERATION_MODEL (Opus) regardless of the
@@ -3163,7 +3163,7 @@ async def chat_with_progress(
         # run safety classifiers (cyber, bio, reasoning_extraction) that
         # return HTTP 200 with stop_reason="refusal" and no usable text;
         # "max_tokens" means the reply was cut off. Neither raises, so log
-        # both, and route a refusal through the existing GPT-4o fallback
+        # both, and route a refusal through the existing OpenAI fallback
         # exactly as a Claude outage would be.
         stop_reason = getattr(final_msg, "stop_reason", None)
         if stop_reason not in (None, "end_turn"):
@@ -3176,9 +3176,10 @@ async def chat_with_progress(
             streaming_failed_for_fallback = True
     except _CLAUDE_FAILURE_EXCEPTIONS as exc:
         logger.warning(
-            "Claude streaming failed (%s: %s), falling back to OpenAI GPT-4o",
+            "Claude streaming failed (%s: %s), falling back to OpenAI (%s)",
             type(exc).__name__,
             str(exc)[:200],
+            FALLBACK_MODEL_ID,
         )
         streaming_failed_for_fallback = True
 

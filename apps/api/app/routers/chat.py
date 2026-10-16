@@ -38,9 +38,10 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/chat", tags=["chat"])
 
 # Maps full Anthropic model IDs to the short aliases stored in the DB.
-# The "fallback:gpt-4o" entry shows up as a distinct bucket in the admin
-# dashboard's model-usage view when Claude is unavailable and the engine
-# swaps over to OpenAI GPT-4o.
+# OpenAI fallback answers ("fallback:<model>", rag/fallback.py; Claude
+# unavailable or refusing) show up as a distinct bucket in the admin
+# dashboard: "fallback_openai" since 2026-10-16 (gpt-6-luna; GPT-4o leaves the
+# API on 2027-01-14), "fallback_gpt4o" before.
 _MODEL_ALIAS: dict[str, str] = {
     "claude-haiku-4-5-20251001": "haiku",
     # 2026-10-07 — Haiku 5.5 is SIDECAR_MODEL (4.5 kept, D6.73 rule).
@@ -77,6 +78,9 @@ def _model_alias(model_used: str | None) -> str | None:
     alias = _MODEL_ALIAS.get(model_used)
     if alias:
         return alias
+    # 2026-10-16 — any other OpenAI fallback model: one alias (migration 0128).
+    if model_used.startswith("fallback:"):
+        return "fallback_openai"
     for family in ("haiku", "sonnet", "opus"):
         if model_used.startswith(f"claude-{family}-"):
             return family
@@ -95,7 +99,8 @@ def _model_alias(model_used: str | None) -> str | None:
 # the D6.97 prompt rule prohibits, hardcoded where the prompt can't stop
 # it. Keep this list SHORT and audit it whenever a new source ships.
 _MISSING_SOURCES: dict[str, str] = {
-    "imsbc": "IMSBC Code (Solid Bulk Cargoes)",
+    # 2026-10-16 — "imsbc" removed: the IMO harvest (2026-10-13) ingested the
+    # IMSBC Code, MSC.268(85) with amendments to MSC.575(110), in imo_msc.
     "grain": "International Grain Code",
     "llmc": "LLMC (Limitation of Liability)",
     # BNWAS carriage is SOLAS V/19 (in corpus); the standalone

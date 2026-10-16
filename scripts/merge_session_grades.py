@@ -11,7 +11,8 @@ OUT/session_grades/<qid>.json as:
      "best": "A", "worst": "B"}
 
 Then:  python scripts/merge_session_grades.py data/eval/model_compare/<run>
-Writes results_merged.json and prints the judge table for the session judge and GPT-4o.
+Writes results_merged.json and prints the judge table for the session judge and the GPT judge
+("gpt"; "gpt4o" in runs before 2026-10-16).
 """
 import json
 import statistics
@@ -63,9 +64,14 @@ def main(out_dir: str) -> None:
     if missing:
         print("no session grades for:", ", ".join(missing))
 
+    # 2026-10-16 — runs before then stored the second judge as "gpt4o"
+    for r in recs:
+        judges = r.get("judges") or {}
+        if "gpt4o" in judges and "gpt" not in judges:
+            judges["gpt"] = judges.pop("gpt4o")
     variants = sorted({v for r in recs for v in (r.get("runs") or {})})
     print(f"\n{'judge metric':30}" + "".join(f"{v:>12}" for v in variants))
-    for judge in ("session", "gpt4o"):
+    for judge in ("session", "gpt"):
         for key in ("overall", "accuracy"):
             row = [mean([((r.get("judges") or {}).get(judge, {}).get("scores") or {}).get(v, {}).get(key)
                          for r in recs]) for v in variants]
@@ -85,12 +91,12 @@ def main(out_dir: str) -> None:
         print(f"{judge + ' errors flagged':30}" + "".join(f"{x:>12}" for x in errs))
         print(f"{judge + ' judged best':30}" + "".join(f"{x:>12}" for x in best))
         print(f"{judge + ' mean rank':30}" + "".join(f"{str(x):>12}" for x in rk))
-    print("\nper question (session / gpt4o overall):")
+    print("\nper question (session / gpt overall):")
     for r in recs:
         cells = []
         for v in variants:
             so = (((r.get("judges") or {}).get("session", {}).get("scores") or {}).get(v) or {}).get("overall")
-            go = (((r.get("judges") or {}).get("gpt4o", {}).get("scores") or {}).get(v) or {}).get("overall")
+            go = (((r.get("judges") or {}).get("gpt", {}).get("scores") or {}).get(v) or {}).get("overall")
             cells.append(f"{v}={so}/{go}")
         print(f"  {r['qid']:7} " + " ".join(cells))
 

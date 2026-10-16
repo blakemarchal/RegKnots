@@ -73,7 +73,7 @@ export interface DashboardData {
     answers_7d: number
     hedged_7d: number
     judge_7d: Record<string, number>
-    models_7d?: Record<string, number>  // answers by model; fallback_gpt4o = Claude unavailable
+    models_7d?: Record<string, number>  // answers by model; fallback_openai (earlier fallback_gpt4o) = Claude unavailable
     hedge_audits_new_7d: number
     hedge_audits_open: number
     open_audit_causes: Record<string, number>

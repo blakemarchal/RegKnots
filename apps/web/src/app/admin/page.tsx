@@ -55,6 +55,7 @@ const MODEL_LABELS: Record<string, string> = {
   sonnet: 'Sonnet',
   haiku: 'Haiku',
   fallback_gpt4o: 'GPT-4o fallback',
+  fallback_openai: 'OpenAI fallback',
   unknown: 'unrecorded',
 }
 
@@ -132,10 +133,10 @@ export default function AdminDashboard() {
       })
     }
     // 2026-09-29 — Claude unavailable (credits ran out on 08-09 and 09-26): the
-    // engine answers with GPT-4o instead, which only shows up in model_used.
-    const fallback = dash?.quality.models_7d?.fallback_gpt4o ?? 0
+    // engine answers with the OpenAI fallback instead, which only shows up in model_used.
+    const fallback = (dash?.quality.models_7d?.fallback_openai ?? 0) + (dash?.quality.models_7d?.fallback_gpt4o ?? 0)
     if (fallback) {
-      items.push({ key: 'fallback', text: `${plural(fallback, 'answer')} came from the GPT-4o fallback this week (Claude unavailable)`, href: '/admin/system', tone: 'red' })
+      items.push({ key: 'fallback', text: `${plural(fallback, 'answer')} came from the OpenAI fallback this week (Claude unavailable)`, href: '/admin/system', tone: 'red' })
     }
     const pastDue = stats.subs_past_due + stats.subs_paused
     if (pastDue) items.push({ key: 'pastdue', text: `${plural(pastDue, 'subscription')} past due or paused`, href: '/admin/users?filter=paused', tone: 'red' })
@@ -350,7 +351,7 @@ export default function AdminDashboard() {
                       <span className={TEXT_MUTED}>no answers yet</span>
                     ) : (
                       Object.entries(dash.quality.models_7d ?? {}).map(([m, n], i) => (
-                        <span key={m} className={m === 'fallback_gpt4o' ? 'text-red-400' : undefined}>
+                        <span key={m} className={m.startsWith('fallback_') ? 'text-red-400' : undefined}>
                           {i > 0 && ' · '}{MODEL_LABELS[m] ?? m} {n}
                         </span>
                       ))
