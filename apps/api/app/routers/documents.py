@@ -161,7 +161,10 @@ class PreviewOut(BaseModel):
 
 
 class AttachPreviewBody(BaseModel):
-    preview_id: str
+    # 2026-10-16 security fix — a UUID, never a free string: the old str went
+    # into preview_dir.glob(f"{preview_id}.*"), so "*" took another user's
+    # preview and "../" reached any file the API (root) could move.
+    preview_id: _uuid.UUID
     document_type: str = "coi"
     extracted_data: dict = {}
     apply_to_vessel: bool = True
@@ -295,6 +298,42 @@ def _save_upload(content: bytes, mime_type: str, subdir: str) -> tuple[_uuid.UUI
 
 # ── Preview endpoint (no vessel_id needed) ──────────────────────────────────
 
+# 2026-10-16 — previews are kept per user (_previews/<user_id>/<file_id>.<ext>)
+# and attached only from the caller's own folder, by exact name. Stale ones
+# (and the old flat _previews/<file_id>.<ext> files) are removed by
+# purge_stale_previews() in the daily purge task.
+_PREVIEW_EXTS = (".jpg", ".png", ".webp", ".pdf", ".bin")
+PREVIEW_MAX_AGE_HOURS = 48
+
+
+def _preview_dir(user_id) -> Path:
+    return Path(settings.upload_dir) / "_previews" / str(user_id)
+
+
+def find_preview(user_id, preview_id: _uuid.UUID) -> Path | None:
+    """The caller's own preview file for this id, or None."""
+    base = _preview_dir(user_id).resolve()
+    for ext in _PREVIEW_EXTS:
+        candidate = (base / f"{preview_id}{ext}").resolve()
+        if candidate.parent == base and candidate.is_file():
+            return candidate
+    return None
+
+
+def purge_stale_previews(max_age_hours: int = PREVIEW_MAX_AGE_HOURS) -> int:
+    """Delete preview files older than max_age_hours. Returns the count."""
+    import time
+    root = Path(settings.upload_dir) / "_previews"
+    if not root.is_dir():
+        return 0
+    cutoff = time.time() - max_age_hours * 3600
+    removed = 0
+    for path in root.rglob("*"):
+        if path.is_file() and path.stat().st_mtime < cutoff:
+            path.unlink(missing_ok=True)
+            removed += 1
+    return removed
+
 
 @preview_router.post("/extract-preview", status_code=status.HTTP_200_OK)
 async def extract_preview(
@@ -321,7 +360,7 @@ async def extract_preview(
             detail="File too large. Maximum size is 10 MB.",
         )
 
-    file_id, fp = _save_upload(content, file.content_type, "_previews")
+    file_id, fp = _save_upload(content, file.content_type, f"_previews/{current_user.user_id}")
     logger.info("Saved preview upload: user=%s size=%d path=%s", current_user.user_id, len(content), fp)
 
     try:
@@ -423,12 +462,10 @@ async def attach_preview(
     user_id = _uuid.UUID(current_user.user_id)
     await _verify_vessel_ownership(vessel_id, user_id, pool)
 
-    # Find the preview file
-    preview_dir = Path(settings.upload_dir) / "_previews"
-    matches = list(preview_dir.glob(f"{body.preview_id}.*"))
-    if not matches:
+    # Find the caller's own preview file (exact name, never a pattern)
+    src = find_preview(user_id, body.preview_id)
+    if src is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Preview file not found")
-    src = matches[0]
 
     # Move to vessel directory
     dest_dir = Path(settings.upload_dir) / str(vessel_id)
