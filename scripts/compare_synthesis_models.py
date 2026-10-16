@@ -97,7 +97,8 @@ OUT = REPO / "data" / "eval" / "model_compare" / (
     time.strftime("%Y%m%d-%H%M%S", time.gmtime())
     + ("-prompt-ab" if PROMPT_AB else "-phase1-ab" if PHASE1_AB else "-pipeline-ab" if PIPELINE_AB
        else "-dates-ab" if DATES_AB else ""))
-OUT.mkdir(parents=True, exist_ok=True)
+if __name__ == "__main__":
+    OUT.mkdir(parents=True, exist_ok=True)
 
 HAIKU, SONNET, OPUS = SIDECAR_MODEL, "claude-sonnet-5-5", "claude-opus-5-5"
 VARIANTS: dict[str, dict] = {
@@ -646,4 +647,7 @@ async def main() -> None:
         print(f"{r['qid']:6} route={str(r.get('route_model'))[:14]:14} " + " ".join(cells))
 
 
-asyncio.run(main())
+# 2026-10-16 — guarded: compare_fallback_models imports this module for capture(),
+# and the unguarded call ran the whole paid comparison on import (~$7).
+if __name__ == "__main__":
+    asyncio.run(main())
