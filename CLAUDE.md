@@ -537,6 +537,12 @@ If a doc says "alembic head is 0045" but `alembic current` says `0092`, the doc 
   - **Transcript check** (gpt-transcribe on the prod key, about $0.01): every line comes back word for word.
     - The voice says "Karynn Marchal" as "Karen Marshall". Blake checks with Karynn; a respelling in `vo.py` fixes it.
     - The transcriber heard Sarah's "TVR" in the audit cut as "TBR"; Bill's reads clean.
+  - **Blake's picks after samples (later that day):** narrators **Chris** (male) and **River** (neutral, the female part) replace Bill and Sarah (`EL_VOICES`, `VOICE_TAG` AI-voice-Chris / AI-voice-River). Karynn is "Kah-rin Marshal" territory; the exact respelling is pending his pick from three samples. The wall counter now reads 111,687 passages / "+ 72 more sources" (was 93,702 / 60). Re-render pending the name.
+- **2026-10-16 Stripe prices fixed** (Blake's go; prod `.env` only, no deploy; backup `/root/env-backup-20261016-205239`).
+  - **Found by a read-only check:** `STRIPE_PRICE_MATE_MONTHLY` and `_ANNUAL` were swapped (monthly pointed at the $179.88/year price). Nobody had bought Mate. Swapped back.
+  - **Captain now charges what the site says:** Blake created $39.99/month (`price_1URI3VB6F2sQMkiGKxqt7kBx`) and $359.88/year (`price_1URI41B6F2sQMkiGsePpClWw`) on the existing Captain products; the `.env` points `STRIPE_PRICE_CAPTAIN_MONTHLY/_ANNUAL` at them. The old $39.00 and $348.00 ids stay as `STRIPE_PRICE_ID` / `STRIPE_ANNUAL_PRICE_ID`, so the Captain's and Karynn's existing subscriptions still map to Captain (`plans.plan_info_from_price_id` verified for all six ids). Stripe keeps existing subscriptions on their old price; Blake may archive the old prices.
+  - **Webhook:** Blake added `customer.subscription.created` and `.deleted`; the endpoint now has all 10 events the handler knows.
+  - API and worker restarted; health 200. Paying customers today: the Captain ($39/mo) and one Cadet ($9.99/mo).
 See `docs/PROJECT_STATE.md` for a fuller operational snapshot and `docs/roadmap.md` for the prioritized backlog.
 
 
