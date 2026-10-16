@@ -7,7 +7,10 @@ timeline. Pipeline and VO steps: `scripts/video/README.md`. The shared copy for 
 Claude Doc "RegKnot video script".
 
 **2026-10-16: rebuilt.**
-- Narration is now ElevenLabs stock voices ("Sarah", "Bill"), still labelled "Narration: AI voice".
+- Narration is now ElevenLabs stock voices, "Chris" (male) and "River" (female part), Blake's picks after
+  auditioning seven; still labelled "Narration: AI voice". The voice says Karynn's name right from the
+  spelling "Corinne Marshal" (captions keep the real spelling).
+- The "wall of regulations" counter reads today's corpus (111,687 passages, 77 sources).
 - The answer footage was retaken without the old chip bug.
 - The end cards say "First question free · No sign-up", the new offer on regknots.com.
 - Karynn's lines remain on screen as captions; her own recording still drops in the same way.
