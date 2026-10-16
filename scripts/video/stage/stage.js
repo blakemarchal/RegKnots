@@ -429,7 +429,9 @@ function radarScene({ t0, t1, top = 470, heroAt = null, heroLines = null, dimAt 
 // ══════════════════════════════════════════════════════════════════════════
 // SCENE: wall of real regulation titles + counter
 // ══════════════════════════════════════════════════════════════════════════
-function wallScene({ t0, t1, revealDur = 0.6, count = 93702, countFrom, countTo }) {
+// 2026-10-16 — count and source tally from prod (SELECT count(*), count(DISTINCT source) FROM regulations):
+// 111,687 chunks across 77 sources; 5 are named on the chips.
+function wallScene({ t0, t1, revealDur = 0.6, count = 111687, countFrom, countTo }) {
   const root = h('div', { id: 'wall' });
   const plane = h('div', { id: 'wallPlane' });
   const regs = window.REGS;
@@ -450,7 +452,7 @@ function wallScene({ t0, t1, revealDur = 0.6, count = 93702, countFrom, countTo 
   const lab = h('div', { id: 'counterLabel' }, 'passages of regulation');
   const chips = h('div', { id: 'srcChips' });
   const chipEls = ['46 CFR', '33 CFR', 'SOLAS', 'MARPOL', 'STCW'].map(s => { const c = h('div', { class: 'schip' }, s); chips.append(c); return c; });
-  const more = h('div', { id: 'srcMore' }, '+ 60 more sources');
+  const more = h('div', { id: 'srcMore' }, '+ 72 more sources');
   root.append(scrimEl, num, lab, chips, more);
 
   addScene(t0, t1, root, t => {
