@@ -34,7 +34,10 @@ MODEL = "gpt-4o-mini-tts"
 # 2026-10-16 — ElevenLabs stock voices (Blake's Creator plan includes commercial
 # use): premade voices only, never a clone. vo_elevenlabs.py generates them and
 # takes the word times from ElevenLabs' character alignment instead of Whisper.
-EL_VOICES = {"sarah": "EXAVITQu4vr4xnSDxMaL", "bill": "pqHfZKP75CvOlQylNhV4"}
+# Blake picked Chris and River on 2026-10-16 after hearing samples; Sarah and
+# Bill stay available.
+EL_VOICES = {"sarah": "EXAVITQu4vr4xnSDxMaL", "bill": "pqHfZKP75CvOlQylNhV4",
+             "chris": "iP95p4xoKVk53GoZ742B", "river": "SAz9YHcvj6GT2YYXdXww"}
 EL_MODEL = "eleven_v4"
 EL_SETTINGS = {"stability": 0.5, "similarity_boost": 0.75, "style": 0.1, "use_speaker_boost": True}
 # Spoken respellings. Each keeps the word count, because the splitter matches the
