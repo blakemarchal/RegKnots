@@ -1,6 +1,6 @@
 'use client'
 
-import { useRef, useEffect, type KeyboardEvent, type ChangeEvent } from 'react'
+import { useRef, useEffect, useState, type KeyboardEvent, type ChangeEvent } from 'react'
 import { useVoiceInput } from '@/lib/useVoiceInput'
 import type { ResizedImage } from '@/utils/image_resize'
 import type { PendingDocument } from '@/types/chat'
@@ -68,13 +68,25 @@ export function InputBar({
     },
   })
 
+  // 2026-10-16 UI pass — phones get the short prompt. At 16px (the iOS zoom
+  // rule in globals.css) "Ask a regulation question…" wrapped to two lines on a
+  // 390px phone and the auto-resize below doubled the composer's height.
+  const [narrow, setNarrow] = useState(false)
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 479px)')
+    const update = () => setNarrow(mq.matches)
+    update()
+    mq.addEventListener('change', update)
+    return () => mq.removeEventListener('change', update)
+  }, [])
+
   // Auto-resize textarea
   useEffect(() => {
     const el = ref.current
     if (!el) return
     el.style.height = 'auto'
     el.style.height = Math.min(el.scrollHeight, 160) + 'px'
-  }, [value])
+  }, [value, narrow])
 
   function onKey(e: KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -233,7 +245,7 @@ export function InputBar({
           onKeyDown={onKey}
           disabled={loading}
           rows={1}
-          placeholder={listening ? 'Listening...' : 'Ask a regulation question…'}
+          placeholder={listening ? 'Listening...' : narrow ? 'Ask a question…' : 'Ask a regulation question…'}
           className="flex-1 bg-transparent text-sm text-[#f0ece4] placeholder:text-[#6b7594]/60
             resize-none outline-none leading-relaxed py-1
             disabled:opacity-50"
