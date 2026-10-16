@@ -128,3 +128,24 @@ def test_public_list_sorts_mixed_sources():
     assert [r["section_number"] for r in sorted(rows, key=_sort_key)] == [
         "33 CFR 164.72", "46 CFR 10.9", "46 CFR 10.10", "46 CFR 142.315",
         "COLREGS Rule 2", "COLREGS Rule 19", "COLREGS Annex II", "NVIC 03-16"]
+
+
+def test_citation_links_prefer_our_page_then_ecfr():
+    """2026-10-16 — the free answer's chips: our page, else eCFR, else nothing."""
+    import asyncio
+    from app.routers.public_regs import links
+
+    class Pool:
+        async def fetch(self, sql, wanted):
+            assert "status = 'published'" in sql
+            return [{"section_number": "46 CFR 141.360", "slug": "46-cfr-141-360"},
+                    {"section_number": "COLREGS Rule 19", "slug": "colregs-rule-19"}]
+
+    out = asyncio.run(links(Pool(), s=["46 CFR 141.360", "46 CFR 141.305", "COLREGs Rule 19", "46 USC 4102", " "]))
+    assert [(o.section_number, o.slug, o.url) for o in out] == [
+        ("46 CFR 141.360", "46-cfr-141-360", None),
+        ("46 CFR 141.305", None, "https://www.ecfr.gov/current/title-46/section-141.305"),
+        ("COLREGs Rule 19", "colregs-rule-19", None),
+        ("46 USC 4102", None, None),
+    ]
+    assert asyncio.run(links(Pool(), s=[])) == []

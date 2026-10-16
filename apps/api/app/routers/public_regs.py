@@ -124,6 +124,23 @@ async def list_pages(
     return [_summary(r) for r in sorted(rows, key=_sort_key)]
 
 
+@router.get("/links", response_model=list[RelatedLink])
+async def links(
+    pool: Annotated[asyncpg.Pool, Depends(get_pool)],
+    s: list[str] = Query(default=[]),
+) -> list[RelatedLink]:
+    """2026-10-16 — where each cited section can be read without an account, for
+    the chips in the free answer (web GuestAsk): our page when it is published,
+    else eCFR for a CFR section, else neither. Answers in the order asked."""
+    wanted = [x.strip() for x in s if x and x.strip() and len(x) <= 80][:20]
+    corpus_form = [re.sub(r"^COLREGs\b", "COLREGS", x) for x in wanted]
+    ours = {r["section_number"]: r["slug"] for r in await pool.fetch(
+        "SELECT section_number, slug FROM seo_pages WHERE status = 'published' AND section_number = ANY($1::text[])",
+        corpus_form)} if corpus_form else {}
+    return [RelatedLink(section_number=asked, slug=ours.get(c), url=None if c in ours else seo_pages.ecfr_url(c))
+            for asked, c in zip(wanted, corpus_form)]
+
+
 @router.get("/page/{slug}", response_model=PageOut)
 async def get_page(slug: str, pool: Annotated[asyncpg.Pool, Depends(get_pool)]) -> PageOut:
     if not re.fullmatch(r"[a-z0-9-]{1,80}", slug):
