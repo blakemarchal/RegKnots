@@ -6,12 +6,12 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Annotated, Optional
 
-from fastapi import APIRouter, Cookie, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from app import attribution as signup_attribution
-from app import events
+from app import events, ratelimit
 from app.auth.deps import get_current_user
 from app.auth.schemas import CurrentUser, LoginRequest, RegisterRequest, TokenResponse
 from app.auth.service import (
@@ -75,8 +75,18 @@ def _clear_refresh_cookie(response: Response) -> None:
     response.delete_cookie(key=_COOKIE_NAME, path=_COOKIE_PATH)
 
 
+# 2026-10-16 security review: the same minimum as change / reset password.
+MIN_PASSWORD_LENGTH = 8
+
+
 @router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
-async def register(data: RegisterRequest, response: Response) -> TokenResponse:
+async def register(data: RegisterRequest, request: Request, response: Response) -> TokenResponse:
+    if len(data.password) < MIN_PASSWORD_LENGTH:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Password must be at least {MIN_PASSWORD_LENGTH} characters",
+        )
+    await ratelimit.register(request)
     pool = await get_pool()
 
     existing = await pool.fetchval("SELECT id FROM users WHERE email = $1", data.email)
@@ -236,7 +246,8 @@ async def register(data: RegisterRequest, response: Response) -> TokenResponse:
 
 
 @router.post("/login", response_model=TokenResponse)
-async def login(data: LoginRequest, response: Response) -> TokenResponse:
+async def login(data: LoginRequest, request: Request, response: Response) -> TokenResponse:
+    await ratelimit.login(request, data.email)
     pool = await get_pool()
 
     user = await pool.fetchrow(
@@ -424,8 +435,10 @@ class PasswordChange(BaseModel):
 async def change_password(
     body: PasswordChange,
     user: Annotated[CurrentUser, Depends(get_current_user)],
+    response: Response,
 ) -> None:
-    if len(body.new_password) < 8:
+    await ratelimit.change_password(user.user_id)
+    if len(body.new_password) < MIN_PASSWORD_LENGTH:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="New password must be at least 8 characters",
@@ -442,12 +455,24 @@ async def change_password(
             detail="Current password is incorrect",
         )
 
+    # 2026-10-16 security review: a changed password ends every other session.
+    # The user's refresh tokens are deleted and this device gets a fresh one,
+    # so it stays signed in while a stolen session does not survive.
     new_hash = hash_password(body.new_password)
-    await pool.execute(
-        "UPDATE users SET hashed_password = $1 WHERE id = $2",
-        new_hash,
-        uuid.UUID(user.user_id),
-    )
+    user_uuid = uuid.UUID(user.user_id)
+    raw_refresh, token_hash = create_refresh_token()
+    expires_at = datetime.now(timezone.utc) + timedelta(days=settings.refresh_token_expire_days)
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute("UPDATE users SET hashed_password = $1 WHERE id = $2", new_hash, user_uuid)
+            # Deleted, not marked revoked: /auth/refresh treats a revoked token
+            # as a replay and would revoke this device's fresh token too.
+            await conn.execute("DELETE FROM refresh_tokens WHERE user_id = $1", user_uuid)
+            await conn.execute(
+                "INSERT INTO refresh_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, $3)",
+                user_uuid, token_hash, expires_at,
+            )
+    _set_refresh_cookie(response, raw_refresh)
 
     try:
         await send_password_changed_email(user.email, user.full_name or user.email)
@@ -529,7 +554,8 @@ class ForgotPasswordRequest(BaseModel):
 
 
 @router.post("/forgot-password", status_code=status.HTTP_200_OK)
-async def forgot_password(body: ForgotPasswordRequest) -> dict:
+async def forgot_password(body: ForgotPasswordRequest, request: Request) -> dict:
+    await ratelimit.forgot_password(request, body.email)
     pool = await get_pool()
     user = await pool.fetchrow(
         "SELECT id, email, full_name FROM users WHERE email = $1",
@@ -566,8 +592,9 @@ class ResetPasswordRequest(BaseModel):
 
 
 @router.post("/reset-password", status_code=status.HTTP_200_OK)
-async def reset_password(body: ResetPasswordRequest) -> dict:
-    if len(body.new_password) < 8:
+async def reset_password(body: ResetPasswordRequest, request: Request) -> dict:
+    await ratelimit.reset_password(request)
+    if len(body.new_password) < MIN_PASSWORD_LENGTH:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Password must be at least 8 characters",
@@ -603,6 +630,8 @@ async def reset_password(body: ResetPasswordRequest) -> dict:
                 "UPDATE password_reset_tokens SET used = TRUE WHERE id = $1",
                 row["id"],
             )
+            # 2026-10-16 security review: a reset ends every session.
+            await conn.execute("DELETE FROM refresh_tokens WHERE user_id = $1", row["user_id"])
 
     # Fetch user for notification email — non-fatal if it fails
     reset_user = await pool.fetchrow(

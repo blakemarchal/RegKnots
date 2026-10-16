@@ -14,6 +14,10 @@
 #   3. Verifies gzip integrity + sanity-checks the dump contains the
 #      expected schema (a known table name) before declaring success.
 #   4. Prunes backups older than ${RETENTION_DAYS:-14} days.
+#   5. 2026-10-16 (security review) — also archives the uploaded files
+#      (vessel documents, credentials, company and chat documents) to
+#      regknots-uploads-YYYYMMDD-HHMMSS.tar.gz, checked and pruned the same way.
+#      Before this, a lost disk lost every upload even with a good DB dump.
 #
 # Exits non-zero on any failure so systemd marks the unit failed (and a
 # journalctl tail or external alerter sees it).
@@ -24,6 +28,7 @@
 #   PG_CONTAINER      default regknots-postgres
 #   PG_USER           default regknots
 #   PG_DB             default regknots
+#   UPLOADS_DIR       default /opt/RegKnots/data/uploads
 
 set -euo pipefail
 
@@ -32,6 +37,7 @@ readonly RETENTION_DAYS="${RETENTION_DAYS:-14}"
 readonly PG_CONTAINER="${PG_CONTAINER:-regknots-postgres}"
 readonly PG_USER="${PG_USER:-regknots}"
 readonly PG_DB="${PG_DB:-regknots}"
+readonly UPLOADS_DIR="${UPLOADS_DIR:-/opt/RegKnots/data/uploads}"
 
 readonly TS="$(date -u +%Y%m%d-%H%M%S)"
 readonly OUT_FILE="${BACKUP_DIR}/regknots-${TS}.sql.gz"
@@ -96,6 +102,23 @@ echo "[$(date -u +%FT%TZ)] backup OK · size=${size_human} · path=${OUT_FILE}"
 pruned="$(find "$BACKUP_DIR" -maxdepth 1 -name 'regknots-*.sql.gz' -mtime "+${RETENTION_DAYS}" -print -delete | wc -l || true)"
 if [[ "$pruned" -gt 0 ]]; then
     echo "[$(date -u +%FT%TZ)] pruned ${pruned} backup(s) older than ${RETENTION_DAYS} days"
+fi
+
+# 2026-10-16 — the uploaded files, next to the dump.
+if [[ -d "$UPLOADS_DIR" ]]; then
+    UPLOADS_FILE="${BACKUP_DIR}/regknots-uploads-${TS}.tar.gz"
+    tar -czf "$UPLOADS_FILE" -C "$(dirname "$UPLOADS_DIR")" "$(basename "$UPLOADS_DIR")"
+    chmod 600 "$UPLOADS_FILE"
+    if ! tar -tzf "$UPLOADS_FILE" >/dev/null; then
+        echo "ERROR: uploads archive failed its integrity check: $UPLOADS_FILE" >&2
+        rm -f "$UPLOADS_FILE"
+        exit 4
+    fi
+    uploads_human="$(numfmt --to=iec --suffix=B "$(stat -c '%s' "$UPLOADS_FILE")" 2>/dev/null || echo "?")"
+    echo "[$(date -u +%FT%TZ)] uploads OK · size=${uploads_human} · path=${UPLOADS_FILE}"
+    find "$BACKUP_DIR" -maxdepth 1 -name 'regknots-uploads-*.tar.gz' -mtime "+${RETENTION_DAYS}" -delete || true
+else
+    echo "[$(date -u +%FT%TZ)] WARNING: uploads dir ${UPLOADS_DIR} not found; no uploads archive" >&2
 fi
 
 # Summary footer for the journal.

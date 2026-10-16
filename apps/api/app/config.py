@@ -7,14 +7,21 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
+DEV_JWT_SECRET = "dev-secret-key-change-in-production-use-REGKNOTS_JWT_SECRET_KEY"
+
+
 class Settings(BaseSettings):
     database_url: str = "postgresql://regknots:regknots_dev@localhost:5432/regknots"
     redis_url: str = "redis://localhost:6379/0"
     cors_origins: list[str] = ["http://localhost:3000"]
-    environment: str = "development"
+    # 2026-10-16 security review: the default is production, so a missing
+    # REGKNOTS_ENVIRONMENT can't turn off Secure cookies or let localhost
+    # origins through CORS. Local development sets it in the repo .env.
+    environment: str = "production"
 
-    # JWT
-    jwt_secret_key: str = "dev-secret-key-change-in-production-use-REGKNOTS_JWT_SECRET_KEY"
+    # JWT — the API refuses to start outside development with this default
+    # or a short secret (production_problems(), checked in main.lifespan).
+    jwt_secret_key: str = DEV_JWT_SECRET
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 15
     refresh_token_expire_days: int = 7
@@ -446,6 +453,16 @@ class Settings(BaseSettings):
         env_ignore_empty=True,
         extra="ignore",
     )
+
+
+def production_problems(s: "Settings") -> list[str]:
+    """Settings the API must not start with outside development."""
+    if s.is_dev:
+        return []
+    problems = []
+    if s.jwt_secret_key == DEV_JWT_SECRET or len(s.jwt_secret_key) < 32:
+        problems.append("REGKNOTS_JWT_SECRET_KEY is the development default or shorter than 32 characters")
+    return problems
 
 
 settings = Settings()

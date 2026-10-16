@@ -20,6 +20,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from rag.llm import STR, create_json, nullable, obj, pdf_document_block
 
+from app import ratelimit, uploads
 from app.auth.deps import get_current_user
 from app.auth.schemas import CurrentUser
 from app.db import get_pool
@@ -628,7 +629,6 @@ If the document is clearly NOT a credential (e.g., a random photo,
 a vessel COI, a chart), return null for ALL fields."""
 
 _MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
-_ALLOWED_TYPES = {"image/jpeg", "image/png", "image/webp", "application/pdf"}
 
 
 _CREDENTIAL_SCHEMA = obj({
@@ -657,19 +657,11 @@ async def extract_credential_from_photo(
     file: UploadFile = File(...),
 ) -> CredentialExtraction:
     """Extract credential data from a photo using Claude Vision."""
-    content_type = file.content_type or ""
-    if content_type not in _ALLOWED_TYPES:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Unsupported file type: {content_type}. Allowed: JPEG, PNG, WebP, PDF.",
-        )
-
-    content = await file.read()
-    if len(content) > _MAX_FILE_SIZE:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="File too large. Maximum size is 10 MB.",
-        )
+    # 2026-10-16 security review — capped read, type from the file's bytes,
+    # and a daily cap on vision scans (app/uploads.py, app/ratelimit.py).
+    content = await uploads.read_capped(file, _MAX_FILE_SIZE, "File too large. Maximum size is 10 MB.")
+    content_type = uploads.require_image_or_pdf(content)
+    await ratelimit.document_scan(current_user.user_id)
 
     # Build vision content blocks
     if content_type == "application/pdf":

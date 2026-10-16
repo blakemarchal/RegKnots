@@ -3243,6 +3243,18 @@ async def list_browsable_tables(
     return [TableInfo(name=name, columns=meta["columns"]) for name, meta in _BROWSABLE_TABLES.items()]
 
 
+# 2026-10-16 security review: credential numbers (MMC, passport, TWIC) show
+# only their last four characters in the table browser, and aren't searchable.
+_MASKED_COLUMNS = {"credential_number"}
+
+
+def _mask_secret(value) -> str | None:
+    if value is None:
+        return None
+    text = str(value)
+    return "•" * max(len(text) - 4, 0) + text[-4:] if len(text) > 4 else "•" * len(text)
+
+
 @router.get("/data/table/{name}", response_model=TableRows)
 async def browse_table(
     name: str,
@@ -3294,7 +3306,7 @@ async def browse_table(
             if c in (
                 "email", "full_name", "title", "name", "subject", "filename",
                 "entry", "item", "body", "user_email", "user_name",
-                "unverified_citation", "credential_number", "issuing_authority",
+                "unverified_citation", "issuing_authority",
             )
         ]
         if text_candidates:
@@ -3332,7 +3344,7 @@ async def browse_table(
             return str(v)
 
     rows = [
-        {c: _to_jsonable(r[c]) for c in columns}
+        {c: (_mask_secret(r[c]) if c in _MASKED_COLUMNS else _to_jsonable(r[c])) for c in columns}
         for r in rows_raw
     ]
 
@@ -4304,7 +4316,7 @@ class ChatDetail(BaseModel):
 @router.get("/chats/{conversation_id}", response_model=ChatDetail)
 async def get_chat(
     conversation_id: str,
-    _admin: Annotated[CurrentUser, Depends(require_admin)],
+    admin: Annotated[CurrentUser, Depends(require_admin)],
 ) -> ChatDetail:
     """Full conversation thread + per-message forensic metadata.
 
@@ -4318,6 +4330,8 @@ async def get_chat(
         conv_uuid = uuid.UUID(conversation_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=f"invalid uuid: {exc}")
+    # 2026-10-16 security review: reading a user's conversation is audited.
+    await audit_log(pool, admin, "view_conversation", conversation_id)
 
     head = await pool.fetchrow(
         """

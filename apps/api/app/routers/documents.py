@@ -24,6 +24,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File
 from pydantic import BaseModel
 from rag.llm import NUM, STR, arr, create_json, enum, nullable, obj, pdf_document_block
 
+from app import ratelimit, uploads
 from app.auth.deps import get_current_user
 from app.auth.schemas import CurrentUser
 from app.config import settings
@@ -35,7 +36,6 @@ router = APIRouter(prefix="/vessels", tags=["documents"])
 preview_router = APIRouter(prefix="/documents", tags=["documents"])
 
 _MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
-_ALLOWED_TYPES = {"image/jpeg", "image/png", "image/webp", "application/pdf"}
 
 _EXTRACTION_PROMPT = """\
 You are analyzing a U.S. maritime vessel document. Extract all structured data from this image.
@@ -347,25 +347,19 @@ async def extract_preview(
     The file is saved to a temp preview dir so it can be attached later via
     ``POST /vessels/{vessel_id}/documents/from-preview``.
     """
-    if file.content_type not in _ALLOWED_TYPES:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Unsupported file type: {file.content_type}. Allowed: JPEG, PNG, WebP, PDF.",
-        )
 
-    content = await file.read()
-    if len(content) > _MAX_FILE_SIZE:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="File too large. Maximum size is 10 MB.",
-        )
+    # 2026-10-16 security review — capped read, type from the file's bytes,
+    # and a daily cap on vision scans (app/uploads.py, app/ratelimit.py).
+    content = await uploads.read_capped(file, _MAX_FILE_SIZE, "File too large. Maximum size is 10 MB.")
+    mime_type = uploads.require_image_or_pdf(content)
+    await ratelimit.document_scan(current_user.user_id)
 
-    file_id, fp = _save_upload(content, file.content_type, f"_previews/{current_user.user_id}")
+    file_id, fp = _save_upload(content, mime_type, f"_previews/{current_user.user_id}")
     logger.info("Saved preview upload: user=%s size=%d path=%s", current_user.user_id, len(content), fp)
 
     try:
         anthropic_client: AsyncAnthropic = request.app.state.anthropic
-        extracted = await _extract_with_vision(str(fp), file.content_type, anthropic_client)
+        extracted = await _extract_with_vision(str(fp), mime_type, anthropic_client)
     except Exception:
         logger.exception("Preview extraction failed for %s", fp)
         raise HTTPException(
@@ -377,7 +371,7 @@ async def extract_preview(
         extracted_data=extracted,
         preview_id=str(file_id),
         filename=file.filename or "upload",
-        mime_type=file.content_type,
+        mime_type=mime_type,
     )
 
 
@@ -396,11 +390,6 @@ async def upload_document(
     user_id = _uuid.UUID(current_user.user_id)
     await _verify_vessel_ownership(vessel_id, user_id, pool)
 
-    if file.content_type not in _ALLOWED_TYPES:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Unsupported file type: {file.content_type}. Allowed: JPEG, PNG, WebP, PDF.",
-        )
 
     valid_doc_types = {"coi", "safety_equipment", "safety_construction", "safety_radio", "isps", "ism", "other"}
     if document_type not in valid_doc_types:
@@ -409,14 +398,13 @@ async def upload_document(
             detail=f"Invalid document_type: {document_type}",
         )
 
-    content = await file.read()
-    if len(content) > _MAX_FILE_SIZE:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="File too large. Maximum size is 10 MB.",
-        )
+    # 2026-10-16 security review — capped read, type from the file's bytes,
+    # and a daily cap on vision scans (app/uploads.py, app/ratelimit.py).
+    content = await uploads.read_capped(file, _MAX_FILE_SIZE, "File too large. Maximum size is 10 MB.")
+    mime_type = uploads.require_image_or_pdf(content)
+    await ratelimit.document_scan(current_user.user_id)
 
-    _, file_path = _save_upload(content, file.content_type, str(vessel_id))
+    _, file_path = _save_upload(content, mime_type, str(vessel_id))
     logger.info("Saved document upload: vessel=%s type=%s size=%d", vessel_id, document_type, len(content))
 
     row = await pool.fetchrow(
@@ -427,7 +415,7 @@ async def upload_document(
         RETURNING *
         """,
         vessel_id, user_id, document_type,
-        file.filename or "upload", str(file_path), len(content), file.content_type,
+        file.filename or "upload", str(file_path), len(content), mime_type,
     )
     doc_id = row["id"]
 
@@ -435,7 +423,7 @@ async def upload_document(
     extracted: dict = {}
     try:
         anthropic_client: AsyncAnthropic = request.app.state.anthropic
-        extracted = await _extract_with_vision(str(file_path), file.content_type, anthropic_client)
+        extracted = await _extract_with_vision(str(file_path), mime_type, anthropic_client)
         extraction_status = "extracted"
         logger.info("Extraction complete: doc=%s fields=%s", doc_id, list(extracted.keys()))
     except Exception:
@@ -549,6 +537,7 @@ async def retry_extraction(
     """Re-run extraction on a previously uploaded document."""
     user_id = _uuid.UUID(current_user.user_id)
     await _verify_vessel_ownership(vessel_id, user_id, pool)
+    await ratelimit.document_scan(current_user.user_id)
 
     row = await pool.fetchrow(
         "SELECT * FROM vessel_documents WHERE id = $1 AND vessel_id = $2",

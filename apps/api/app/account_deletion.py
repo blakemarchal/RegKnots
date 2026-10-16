@@ -16,6 +16,13 @@ Order matters:
      (migration 0118), so revenue and partner accruals stand.
   4. Remove the files. Only paths inside settings.upload_dir are touched, and a
      file that can't be removed is logged, not fatal.
+
+2026-10-16 security review: the logs that keep their row when the user goes
+(user_id ON DELETE SET NULL, so the counts survive) first lose the user's own
+words: questions, answers, reasoning that may quote them, the vessel profile
+(SCRUB_SQL, in the same transaction). Verdicts, sections, statuses and the
+corpus-gap item (the missing fact) stay. The privacy page promises the
+account's data goes with it.
 """
 from __future__ import annotations
 
@@ -30,6 +37,18 @@ import stripe
 from app.config import settings
 
 logger = logging.getLogger(__name__)
+
+SCRUB_SQL: tuple[str, ...] = (
+    "UPDATE retrieval_misses SET query = '[deleted]', answer_preview = NULL, judge_reasoning = NULL, "
+    "vessel_profile = NULL WHERE user_id = $1",
+    "UPDATE hedge_audits SET query = '[deleted]', classifier_reasoning = NULL WHERE user_id = $1",
+    "UPDATE corpus_gaps SET question = '[deleted]', search_query = NULL WHERE user_id = $1",
+    "UPDATE off_topic_queries SET query = '[deleted]', classifier_reasoning = NULL WHERE user_id = $1",
+    "UPDATE current_events_responses SET query = '[deleted]', answer_text = NULL, user_flag_note = NULL "
+    "WHERE user_id = $1",
+    "UPDATE tier_router_shadow_log SET query = '[deleted]', current_answer = '', shadow_answer = NULL, "
+    "current_judge_reasoning = NULL, shadow_classifier_reasoning = NULL WHERE user_id = $1",
+)
 
 
 @dataclass
@@ -132,6 +151,8 @@ async def delete_account(pool, uid: uuid.UUID) -> DeletionSummary:
         async with conn.transaction():
             if owned_ids:
                 await conn.execute("DELETE FROM workspaces WHERE id = ANY($1::uuid[])", owned_ids)
+            for sql in SCRUB_SQL:
+                await conn.execute(sql, uid)
             await conn.execute("DELETE FROM users WHERE id = $1", uid)
     summary.workspaces_deleted = [
         {"id": str(w["id"]), "name": w["name"], "prior_status": w["status"]} for w in owned

@@ -96,7 +96,10 @@ def test_cancels_every_subscription_then_deletes_workspaces_before_the_user(canc
     assert canceled == ["sub_user", "sub_ws"]
     assert summary.subscriptions_canceled == 2
     assert db.executed[0].startswith("DELETE FROM workspaces")  # owner_user_id is ON DELETE RESTRICT
-    assert db.executed[1].startswith("DELETE FROM users")
+    # 2026-10-16 — the logs that outlive the account lose the user's words first
+    scrubs = db.executed[1:-1]
+    assert len(scrubs) == len(DEL.SCRUB_SQL) and all(q.startswith("UPDATE") and "[deleted]" in q for q in scrubs)
+    assert db.executed[-1].startswith("DELETE FROM users")
     assert summary.workspaces_deleted[0]["name"] == "Bay Pioneer"
 
 

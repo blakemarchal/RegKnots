@@ -13,11 +13,33 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.hosts import cors_origins
 
+def _scrub_sentry_event(event, hint):
+    """2026-10-16 security review: no request bodies (questions, documents),
+    query strings (verification / reset tokens), cookies, auth headers or
+    user emails in Sentry. The SDK's own scrubber still runs on what's left."""
+    request = event.get("request") or {}
+    for key in ("data", "cookies", "query_string"):
+        request.pop(key, None)
+    if request.get("url"):
+        request["url"] = request["url"].split("?")[0]
+    headers = request.get("headers") or {}
+    for key in list(headers):
+        if key.lower() in ("cookie", "authorization", "x-forwarded-for", "referer"):
+            headers.pop(key, None)
+    user = event.get("user")
+    if user:
+        event["user"] = {"id": user["id"]} if user.get("id") else {}
+    return event
+
+
 if settings.sentry_dsn:
     sentry_sdk.init(
         dsn=settings.sentry_dsn,
         traces_sample_rate=0.1,
         environment=settings.environment,
+        send_default_pii=False,
+        max_request_body_size="never",
+        before_send=_scrub_sentry_event,
     )
 from app.db import init_pool, close_pool, close_redis
 from app.routers import admin, admin_dashboard, admin_documents, admin_gaps, admin_pilots, auth, billing, checklists, coming_up, company_documents, contact, credentials, documents, dossier, export, health, chat, logs, me, onboarding, guest_chat, practice, preferences, public_regs, sea_service, sea_time, study, transcribe, user_documents, vessels, regulations, conversations, notifications, support, survey, waitlist, web_fallback, whale_zones, workspaces
@@ -42,6 +64,11 @@ async def _run_migrations() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # 2026-10-16 security review: never serve with development secrets.
+    from app.config import production_problems
+    problems = production_problems(settings)
+    if problems:
+        raise RuntimeError("Refusing to start: " + "; ".join(problems))
     if settings.is_dev:
         logger.info("Running database migrations...")
         await _run_migrations()

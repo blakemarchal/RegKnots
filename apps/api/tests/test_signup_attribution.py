@@ -69,13 +69,14 @@ def pool(monkeypatch):
     monkeypatch.setattr(AUTH, "auto_claim_invites_for_user", nothing)
     monkeypatch.setattr(AUTH, "send_welcome_email", nothing)
     monkeypatch.setattr(AUTH, "send_verification_email", nothing)
+    monkeypatch.setattr(AUTH.ratelimit, "register", nothing)   # 2026-10-16 rate limit
     return p
 
 
 def _register(pool, attribution):
     body = RegisterRequest(email="new@example.com", password="pw-123456", full_name="New Mariner",
                            role="other", attribution=attribution)
-    asyncio.run(AUTH.register(body, Response()))
+    asyncio.run(AUTH.register(body, None, Response()))
     return [c for c in pool.calls if c[0] == "execute" and "signup_source" in c[1]]
 
 

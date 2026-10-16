@@ -38,3 +38,25 @@ test('scrubs an event in place', () => {
     other: 'kept',
   })
 })
+
+test('Sentry events lose tokens, bodies and emails', async () => {
+  const { scrubSentryEvent } = await import('./sentryScrub.ts')
+  const event = {
+    request: {
+      url: 'https://regknots.com/reset-password?token=SECRET', query_string: 'token=SECRET',
+      data: '{"password":"x"}', cookies: { refresh_token: 'r' },
+      headers: { Cookie: 'refresh_token=r', Authorization: 'Bearer t', 'User-Agent': 'UA' },
+    },
+    user: { id: 'u1', email: 'a@b.c' },
+    breadcrumbs: [{ category: 'navigation', data: { from: '/invite/TOKEN', to: 'https://regknots.com/shared/ABC?x=1' } }],
+  }
+  scrubSentryEvent(event)
+  assert.equal(event.request.url, 'https://regknots.com/reset-password')
+  assert.equal(event.request.query_string, undefined)
+  assert.equal(event.request.data, undefined)
+  assert.equal(event.request.cookies, undefined)
+  assert.deepEqual(event.request.headers, { 'User-Agent': 'UA' })
+  assert.deepEqual(event.user, { id: 'u1' })
+  assert.equal(event.breadcrumbs[0].data.from, '/invite/:id')   // relative paths are masked too
+  assert.equal(event.breadcrumbs[0].data.to, 'https://regknots.com/shared/:id')
+})
