@@ -8,16 +8,27 @@
 //
 // Shows its children (the plain sign-up CTA) instead when the feature is off:
 // no NEXT_PUBLIC_TURNSTILE_SITE_KEY at build time, or the API says disabled.
+//
+// 2026-10-16 UI pass — the answer renders through AnswerBody, the same
+// renderer as chat (headings, chips, the verified badge). A chip opens our
+// public page for that section, else eCFR, else says the full text opens in
+// an account (GET /public/regs/links). The Turnstile hint asks for the tick
+// when Cloudflare wants one.
 
 import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
+import { AnswerBody } from '@/components/AnswerBody'
+import { extractFooterCitations } from '@/lib/parseMessage'
+import type { CitedRegulation, WebSourceRef } from '@/types/chat'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'
 const SITE_KEY = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY ?? ''
 const DEVICE_KEY = 'rk_device'
 export const GUEST_CLAIM_KEY = 'rk_guest_claim'
+
+// The answer prompt adds this when it saves vessel details; for a visitor the
+// details only stay if they create an account, which the CTA below offers.
+const VESSEL_NOTE = /\s*I[’']ve noted these details about your vessel and will remember them for future questions\.?/g
 
 interface TurnstileApi {
   render: (el: HTMLElement, opts: Record<string, unknown>) => string
@@ -29,6 +40,7 @@ declare global {
 }
 
 type Phase = 'checking' | 'off' | 'ready' | 'asking' | 'answered' | 'used' | 'error'
+type ReadLink = { slug: string | null; url: string | null }
 
 interface Props {
   page: string
@@ -82,10 +94,16 @@ export function GuestAsk({ page, heading, placeholder, outerClassName, children 
   const [vesselTypes, setVesselTypes] = useState<string[]>([])
   const [vesselType, setVesselType] = useState<string | null>(null)
   const [query, setQuery] = useState('')
+  const [asked, setAsked] = useState('')
   const [statusText, setStatusText] = useState('')
   const [answer, setAnswer] = useState('')
+  const [citations, setCitations] = useState<CitedRegulation[]>([])
+  const [webSources, setWebSources] = useState<WebSourceRef[]>([])
+  const [links, setLinks] = useState<Record<string, ReadLink>>({})
+  const [chipNote, setChipNote] = useState('')
   const [message, setMessage] = useState('')
   const [token, setToken] = useState('')
+  const [needsTick, setNeedsTick] = useState(false)
   const widgetRef = useRef<HTMLDivElement>(null)
   const widgetId = useRef<string | null>(null)
   const signupHref = `/register?src=guest&utm_content=${encodeURIComponent(page)}`
@@ -114,22 +132,56 @@ export function GuestAsk({ page, heading, placeholder, outerClassName, children 
         widgetId.current = window.turnstile.render(widgetRef.current, {
           sitekey: SITE_KEY,
           appearance: 'interaction-only',
-          callback: (t: string) => setToken(t),
+          callback: (t: string) => { setToken(t); setNeedsTick(false) },
           'expired-callback': () => setToken(''),
           'error-callback': () => setToken(''),
+          'before-interactive-callback': () => setNeedsTick(true),
+          'after-interactive-callback': () => setNeedsTick(false),
         })
       })
       .catch(() => setPhase('off'))
   }, [phase])
+
+  // Where each cited section can be read without an account.
+  async function loadLinks(text: string, cited: CitedRegulation[]) {
+    const map = new Map(cited.map((c) => [c.section_number, { source: c.source, title: c.section_title }]))
+    const sections = extractFooterCitations(text, map)
+      .filter((c) => c.source !== 'web')
+      .map((c) => c.sectionNumber)
+      .slice(0, 20)
+    if (sections.length === 0) return
+    try {
+      const qs = sections.map((s) => `s=${encodeURIComponent(s)}`).join('&')
+      const res = await fetch(`${API_URL}/public/regs/links?${qs}`)
+      if (!res.ok) return
+      const rows: Array<{ section_number: string } & ReadLink> = await res.json()
+      setLinks(Object.fromEntries(rows.map((r) => [r.section_number, { slug: r.slug, url: r.url }])))
+    } catch { /* chips fall back to the note */ }
+  }
+
+  function openCitation(_source: string, sectionNumber: string) {
+    const link = links[sectionNumber]
+    const href = link?.slug ? `/regs/${link.slug}` : link?.url
+    if (href) {
+      window.open(href, '_blank', 'noopener,noreferrer')
+      setChipNote('')
+    } else {
+      setChipNote(sectionNumber)
+    }
+  }
 
   async function ask(e: React.FormEvent) {
     e.preventDefault()
     const q = query.trim()
     if (q.length < 3 || phase !== 'ready') return
     setPhase('asking')
+    setAsked(q)
     setStatusText('Reading the regulations…')
     setAnswer('')
+    setCitations([])
+    setWebSources([])
     setMessage('')
+    setChipNote('')
     try {
       const res = await fetch(`${API_URL}/public/ask/stream`, {
         method: 'POST',
@@ -140,6 +192,7 @@ export function GuestAsk({ page, heading, placeholder, outerClassName, children 
         const err = await res.json().catch(() => null)
         const detail = err?.detail
         setMessage(typeof detail === 'object' && detail?.message ? detail.message : 'Something went wrong. Please try again.')
+        setAsked('')
         if (detail?.code === 'guest_used' || detail?.code === 'guest_ip' || detail?.code === 'guest_paused') {
           setPhase('used')
         } else {
@@ -180,9 +233,16 @@ export function GuestAsk({ page, heading, placeholder, outerClassName, children 
             text = ''
             setAnswer('')
           } else if (type === 'done') {
-            const final = (parsed as { answer?: string })?.answer
-            if (final) setAnswer(final)
+            const final = parsed as { answer?: string; cited_regulations?: CitedRegulation[]; web_sources?: WebSourceRef[] }
+            if (final?.answer) {
+              text = final.answer
+              setAnswer(final.answer)
+            }
+            const cited = final?.cited_regulations ?? []
+            setCitations(cited)
+            setWebSources(final?.web_sources ?? [])
             setPhase('answered')
+            void loadLinks(text.replace(VESSEL_NOTE, ''), cited)
           } else if (type === 'error') {
             setMessage('The answer could not be finished. Create a free account and ask again in chat.')
             setPhase('error')
@@ -198,19 +258,23 @@ export function GuestAsk({ page, heading, placeholder, outerClassName, children 
 
   if (phase === 'off' || phase === 'checking') return <>{children}</>
 
+  const shown = answer.replace(VESSEL_NOTE, '')
+  const streaming = phase === 'asking'
+
   const cta = (
-    <div className="mt-4 flex flex-wrap items-center gap-3">
+    <div className="mt-5 flex flex-wrap items-center gap-x-4 gap-y-2">
       <Link href={signupHref}
         className="font-mono text-sm font-bold bg-[#2dd4bf] text-[#0a0e1a] rounded-xl px-5 py-2.5 hover:brightness-110 transition-[filter] duration-150">
         {phase === 'answered' ? 'Save this answer and keep asking' : 'Create a free account'}
       </Link>
-      <span className="font-mono text-xs text-[#6b7594]">Free trial, no card. Your question moves to your account.</span>
+      <span className="font-mono text-xs text-[#6b7594]">Free to start, no card. Your question moves to your account.</span>
     </div>
   )
 
   const widget = (
-    <section className="rounded-2xl border border-[#2dd4bf]/30 bg-[#2dd4bf]/[0.06] p-5 md:p-6">
-      <h2 className="font-display text-xl font-bold text-[#f0ece4] mb-1">{heading}</h2>
+    <section className="rounded-2xl border border-[#2dd4bf]/30 bg-[#0d1225] p-5 md:p-7 shadow-[0_0_60px_rgba(45,212,191,0.06)]">
+      <p className="font-mono text-[10px] text-[#2dd4bf] uppercase tracking-[0.25em] mb-2">Free · no sign-up</p>
+      <h2 className="font-display text-2xl md:text-3xl font-bold text-[#f0ece4] leading-tight mb-2">{heading}</h2>
       {phase === 'used' && !answer ? (
         <>
           <p className="font-mono text-sm text-[#f0ece4]/75 leading-relaxed">
@@ -220,10 +284,13 @@ export function GuestAsk({ page, heading, placeholder, outerClassName, children 
         </>
       ) : (
         <>
-          <p className="font-mono text-sm text-[#f0ece4]/70 leading-relaxed mb-3">
-            Ask one question free, no sign-up. RegKnot answers from the regulation text, with citations.
-          </p>
-          {(phase === 'ready' || (phase === 'asking' && !answer)) && (
+          {!asked && (
+            <p className="font-mono text-sm text-[#f0ece4]/70 leading-relaxed mb-4">
+              Pick your vessel type and ask in plain English. RegKnot answers from the regulation text and cites
+              every requirement.
+            </p>
+          )}
+          {(phase === 'ready' || (phase === 'asking' && !answer)) && !asked && (
             <form onSubmit={ask}>
               {vesselTypes.length > 0 && (
                 <div className="flex flex-wrap gap-1.5 mb-3" role="group" aria-label="Your vessel type (optional)">
@@ -240,39 +307,57 @@ export function GuestAsk({ page, heading, placeholder, outerClassName, children 
                 </div>
               )}
               <textarea value={query} onChange={(e) => setQuery(e.target.value)} maxLength={1500} rows={3}
+                aria-label="Your question"
                 placeholder={placeholder ?? 'Ask a compliance question for your vessel'}
-                disabled={phase === 'asking'}
                 className="w-full rounded-xl bg-[#0a0e1a] border border-white/15 focus:border-[#2dd4bf]/60 outline-none
                   px-3 py-2.5 font-mono text-base md:text-sm text-[#f0ece4] placeholder:text-[#6b7594] resize-y" />
-              <div ref={widgetRef} className="mt-2" />
-              <div className="mt-3 flex items-center gap-3">
-                <button type="submit" disabled={phase === 'asking' || query.trim().length < 3 || !token}
-                  className="font-mono text-sm font-bold bg-[#2dd4bf] text-[#0a0e1a] rounded-xl px-5 py-2.5
+              <div ref={widgetRef} className="mt-2 empty:mt-0" />
+              <div className="mt-3 flex flex-wrap items-center gap-3">
+                <button type="submit" disabled={query.trim().length < 3 || !token}
+                  className="font-mono text-sm font-bold bg-[#2dd4bf] text-[#0a0e1a] rounded-xl px-6 py-2.5
                     disabled:opacity-50 hover:brightness-110 transition-[filter] duration-150">
-                  {phase === 'asking' ? 'Answering…' : 'Ask'}
+                  Ask
                 </button>
-                {phase === 'asking' && <span className="font-mono text-xs text-[#6b7594]" aria-live="polite">{statusText}</span>}
-                {phase === 'ready' && !token && <span className="font-mono text-xs text-[#6b7594]">Checking your browser…</span>}
+                {!token && query.trim().length >= 3 && (
+                  <span className="font-mono text-xs text-[#6b7594]" aria-live="polite">
+                    {needsTick ? 'Tick “Verify you are human” above to ask.' : 'Checking your browser…'}
+                  </span>
+                )}
               </div>
               {message && <p className="mt-2 font-mono text-xs text-amber-300">{message}</p>}
             </form>
           )}
-          {answer && (
-            <div className="mt-2 rounded-xl border border-white/8 bg-[#0a0e1a] p-4" aria-live="polite">
-              <div className="font-mono text-[14px] leading-relaxed text-[#f0ece4]/90 break-words
-                [&_p]:mb-3 [&_ul]:list-disc [&_ul]:pl-5 [&_ul]:mb-3 [&_ol]:list-decimal [&_ol]:pl-5 [&_ol]:mb-3
-                [&_li]:mb-1 [&_strong]:text-[#f0ece4] [&_a]:text-[#2dd4bf] [&_h1]:font-bold [&_h2]:font-bold
-                [&_h3]:font-bold [&_h1]:mb-2 [&_h2]:mb-2 [&_h3]:mb-2 [&_table]:text-xs [&_table]:block
-                [&_table]:overflow-x-auto [&_td]:border [&_td]:border-white/10 [&_td]:px-2 [&_th]:border
-                [&_th]:border-white/10 [&_th]:px-2">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>{answer}</ReactMarkdown>
+
+          {asked && (
+            <div className="mt-2" aria-live="polite" aria-busy={streaming || undefined}>
+              <div className="flex justify-end mb-3">
+                <div className="max-w-[88%] px-4 py-3 rounded-2xl rounded-tr-sm bg-[#1a3254] text-[#f0ece4] text-sm leading-relaxed">
+                  {asked}
+                </div>
               </div>
-              {phase === 'asking' && <p className="mt-2 font-mono text-xs text-[#6b7594]">{statusText}</p>}
+              <div className="flex items-start gap-3">
+                <div className="w-0.5 self-stretch bg-[#2dd4bf]/40 rounded-full flex-shrink-0 mt-0.5" />
+                <div className="flex-1 min-w-0 text-sm text-[#f0ece4] leading-relaxed">
+                  {shown ? (
+                    <AnswerBody content={shown} citations={citations} webSources={webSources}
+                      onCitationTap={openCitation} isStreaming={streaming} />
+                  ) : (
+                    <p className="font-mono text-xs text-[#6b7594]">{statusText || 'Reading the regulations…'}</p>
+                  )}
+                  {streaming && shown && <p className="mt-2 font-mono text-xs text-[#6b7594]">{statusText}</p>}
+                </div>
+              </div>
             </div>
+          )}
+
+          {chipNote && (
+            <p className="mt-4 rounded-lg border border-white/10 bg-[#0a0e1a] px-3 py-2 font-mono text-xs text-[#f0ece4]/75">
+              The full text of {chipNote} opens in RegKnot once you create a free account.
+            </p>
           )}
           {(phase === 'answered' || phase === 'error') && (
             <>
-              {message && <p className="mt-2 font-mono text-xs text-amber-300">{message}</p>}
+              {message && <p className="mt-3 font-mono text-xs text-amber-300">{message}</p>}
               {cta}
             </>
           )}

@@ -13,11 +13,11 @@
 
 import type { Metadata } from 'next'
 import Link from 'next/link'
-import { CompassRose } from '@/components/CompassRose'
 import { OG_IMAGE } from '@/lib/seo'
 import { LandingFooter } from '@/components/marketing/LandingFooter'
 import { PracticeQuiz } from './PracticeQuiz'
 import { signupHref } from './links'
+import { SiteNav } from '@/components/marketing/SiteNav'
 
 const TITLE = 'Free USCG License Exam Practice Questions | RegKnot'
 const DESCRIPTION =
@@ -66,27 +66,8 @@ const ABOUT = [
 export default function PracticePage() {
   return (
     <div className="min-h-screen bg-[#0a0e1a] overflow-x-hidden">
-      <nav className="fixed top-0 inset-x-0 z-40 flex items-center justify-between
-        px-5 md:px-10 py-4 bg-[#0a0e1a]/80 backdrop-blur-md border-b border-white/5">
-        <Link href="/landing" className="flex items-center gap-2">
-          <CompassRose className="w-5 h-5 text-[#2dd4bf]" />
-          <span className="font-display text-xl font-bold text-[#f0ece4] tracking-widest uppercase">
-            RegKnot
-          </span>
-        </Link>
-        <div className="flex items-center gap-4">
-          <Link href="/login"
-            className="font-mono text-sm text-[#6b7594] hover:text-[#f0ece4] transition-colors duration-150">
-            Sign In
-          </Link>
-          <Link href={signupHref('nav')}
-            className="hidden sm:inline-block font-mono text-xs font-bold uppercase tracking-wider
-              border border-[#2dd4bf]/40 text-[#2dd4bf] hover:bg-[#2dd4bf]/10
-              rounded-lg py-2 px-3 transition-colors duration-150">
-            Try RegKnot free
-          </Link>
-        </div>
-      </nav>
+      {/* 2026-10-16 UI pass — the shared site bar (components/marketing/SiteNav). */}
+      <SiteNav signupHref={signupHref('nav')} />
 
       <main>
         <section className="relative px-5 text-center pt-28 pb-8 md:pt-32 md:pb-10">

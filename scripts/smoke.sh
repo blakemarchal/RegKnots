@@ -36,7 +36,7 @@ PROBES=(
   "/education|app/education/page-|Pass your USCG"
   "/study|app/study/page-|Generate quiz|Generate guide|Quizzes"
   "/account|app/account/page-|study_tools_enabled|Quizzes"
-  "/landing|app/landing/page-|RegKnot"
+  "/landing|app/landing/page-|Ask a question free"
   "/login|app/login/page-|Sign In|password"
 )
 

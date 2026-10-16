@@ -8,14 +8,14 @@ import { CorpusBadges } from '@/components/CorpusBadges'
 import { EmailComposeButton } from '@/components/EmailComposeButton'
 import { GuestAsk } from '@/components/GuestAsk'
 import {
-  SeeItInActionSection,
+  DemoCarousel,
   BuiltByMarinersSection,
   WhyNotChatGPTSection,
   HallucinationProofSection,
-  HowItWorksSection,
   MarinerVaultSection,
 } from '@/components/marketing/MarketingSections'
 import { LandingFooter } from '@/components/marketing/LandingFooter'
+import { SiteNav, START_FREE_LABEL } from '@/components/marketing/SiteNav'
 
 // Sprint D6.76 — DemoCarousel + DEMOS data + the four wow-factor section
 // components (BuiltByMariners, WhyNotChatGPT, HallucinationProof,
@@ -99,6 +99,20 @@ function PricingCard({
 }
 
 // ── Page ──────────────────────────────────────────────────────────────────────
+// 2026-10-16 UI pass — hero rebuilt: the headline renders at once (it faded in
+// over 1.5 s), the demo answer sits beside it as the product visual (it was the
+// fourth section down), and the free question follows in its own row. The old
+// hero ran past the screen on laptops, so its tagline and scroll arrow
+// overlapped the free-question card. A strip of checkable facts follows;
+// "How it works" and the second demo section are gone from this page.
+
+const PROOF: { big: string; small: string; href?: string }[] = [
+  { big: 'Master Unlimited', small: 'Co-founded by a USCG-licensed containership captain' },
+  { big: '77 sources', small: 'CFR, NVICs, Coast Guard policy, IMO conventions and resolutions' },
+  { big: '14 flag states', small: 'UK, Liberia, Marshall Islands, Singapore, Norway and more' },
+  { big: '1,100+ pages', small: 'Free plain-English guides to the most-asked regulations', href: '/regs' },
+]
+
 export default function LandingPage() {
   const [plan, setPlan] = useState<'monthly' | 'annual'>('monthly')
   const [contactOpen, setContactOpen] = useState(false)
@@ -106,38 +120,12 @@ export default function LandingPage() {
   return (
     <div className="min-h-screen bg-[#0a0e1a] overflow-x-hidden">
 
-      {/* ── Nav ─────────────────────────────────────────────────────────────── */}
-      <nav className="fixed top-0 inset-x-0 z-40 flex items-center justify-between
-        px-5 md:px-10 py-4 bg-[#0a0e1a]/80 backdrop-blur-md border-b border-white/5">
-        <div className="flex items-center gap-2">
-          <CompassRose className="w-5 h-5 text-[#2dd4bf]" />
-          <span className="font-display text-xl font-bold text-[#f0ece4] tracking-widest uppercase">
-            RegKnot
-          </span>
-        </div>
-        <div className="flex items-center gap-3">
-          <Link href="/giving"
-            className="hidden md:inline font-mono text-sm text-[#6b7594] hover:text-[#f0ece4] transition-colors duration-150">
-            Giving Back
-          </Link>
-          <Link href="/login"
-            className="font-mono text-sm text-[#6b7594] hover:text-[#f0ece4] transition-colors duration-150">
-            Sign In
-          </Link>
-          <Link href="/register"
-            className="font-mono text-sm font-bold text-[#0a0e1a] bg-[#2dd4bf]
-              hover:brightness-110 transition-[filter] duration-150
-              rounded-lg px-4 py-1.5">
-            Get Access
-          </Link>
-        </div>
-      </nav>
+      <SiteNav />
 
       {/* ══════════════════════════════════════════════════════════════════════
-          SECTION 1 — HERO
+          SECTION 1 — HERO: promise + demo answer, then the free question
       ══════════════════════════════════════════════════════════════════════ */}
-      <section className="relative flex flex-col items-center justify-center min-h-screen
-        px-5 text-center overflow-hidden pt-16">
+      <section className="relative px-5 md:px-10 pt-24 md:pt-28 pb-16 md:pb-24 overflow-hidden">
 
         {/* Chart grid background */}
         <div className="absolute inset-0 pointer-events-none"
@@ -148,119 +136,87 @@ export default function LandingPage() {
             `,
           }}
         />
-
-        {/* Radial glow behind compass */}
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2
-          w-[480px] h-[480px] rounded-full pointer-events-none"
-          style={{ background: 'radial-gradient(circle, rgba(45,212,191,0.06) 0%, transparent 70%)' }}
+        <div className="absolute -top-24 -left-24 w-[520px] h-[520px] rounded-full pointer-events-none"
+          style={{ background: 'radial-gradient(circle, rgba(45,212,191,0.07) 0%, transparent 70%)' }}
         />
 
-        {/* Spinning compass rose */}
-        <div className="relative mb-10 animate-[heroFadeUp_0.8s_ease-out]"
-          style={{ animationFillMode: 'both' }}>
-          <CompassRose className="w-40 h-40 text-[#2dd4bf]/30 animate-[compassSpin_60s_linear_infinite]" />
+        <div className="relative max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-x-14 gap-y-12 items-center">
+          <div className="order-1 text-center lg:text-left">
+            <p className="inline-flex items-center gap-2 font-mono text-[11px] text-[#2dd4bf] uppercase tracking-[0.25em] mb-5">
+              <CompassRose className="w-4 h-4 animate-[compassSpin_60s_linear_infinite]" />
+              Built by a USCG Master Unlimited
+            </p>
+            <h1 className="font-display font-black text-[#f0ece4] leading-[0.95] tracking-tight
+              text-[clamp(46px,6.4vw,80px)]">
+              {/* nowrap: phones split "Co-" / "Pilot." */}
+              Your Compliance <span className="whitespace-nowrap">Co-Pilot.</span><br />Always On Watch.
+            </h1>
+            <p className="font-mono text-[#8a94ad] mt-6 max-w-xl mx-auto lg:mx-0 leading-relaxed text-base md:text-lg">
+              Answers from the regulation text itself: the CFR and Coast Guard guidance, the IMO conventions
+              and 14 flag states. Scoped to your vessel, with every requirement cited.
+            </p>
+            <div className="flex flex-col sm:flex-row items-center justify-center lg:justify-start gap-3 mt-8">
+              <Link href="/register"
+                className="w-full max-w-xs sm:w-auto text-center font-mono font-bold text-sm uppercase tracking-wider
+                  bg-[#2dd4bf] text-[#0a0e1a] rounded-xl px-6 py-3 hover:brightness-110 transition-[filter] duration-150">
+                {START_FREE_LABEL}
+              </Link>
+              <a href="#ask"
+                className="w-full max-w-xs sm:w-auto text-center font-mono font-bold text-sm uppercase tracking-wider
+                  border border-[#2dd4bf]/50 text-[#2dd4bf] rounded-xl px-6 py-3
+                  hover:border-[#2dd4bf] hover:bg-[#2dd4bf]/5 transition-colors duration-150">
+                Ask a question free
+              </a>
+            </div>
+            <p className="font-mono text-[11px] text-[#6b7594] mt-4 tracking-wide">
+              7-day trial, then 10 free questions every 30 days · No credit card
+            </p>
+          </div>
+
+          <div className="order-3 lg:order-2 animate-[heroFadeUp_0.6s_ease-out_0.1s]" style={{ animationFillMode: 'both' }}>
+            <DemoCarousel />
+          </div>
+
+          {/* 2026-10-14 — one free question before signup (components/GuestAsk.tsx).
+              Renders nothing until Turnstile keys and the API flag are on. */}
+          <div id="ask" className="order-2 lg:order-3 lg:col-span-2 scroll-mt-20">
+            <GuestAsk page="landing" heading="Ask your first question"
+              placeholder="For example: Does my towing vessel need a TSMS, and what goes in it?"
+              outerClassName="max-w-3xl mx-auto w-full" />
+          </div>
         </div>
-
-        {/* Headline */}
-        <h1
-          className="font-display font-black text-[#f0ece4] leading-[0.95] tracking-tight
-            text-[clamp(52px,12vw,96px)] max-w-4xl
-            animate-[heroFadeUp_0.8s_ease-out_0.15s]"
-          style={{ animationFillMode: 'both' }}
-        >
-          Your Compliance Co-Pilot.<br />Always On Watch.
-        </h1>
-
-        {/* Subheadline */}
-        <p
-          className="font-mono text-[#6b7594] mt-6 max-w-xl leading-relaxed
-            text-base md:text-lg
-            animate-[heroFadeUp_0.8s_ease-out_0.3s]"
-          style={{ animationFillMode: 'both' }}
-        >
-          Cited answers from the actual regulation texts — not AI guesswork.
-          The IMO conventions, U.S. CFR &amp; USCG guidance, plus flag-state regs from
-          the UK, Australia, Singapore, Hong Kong, Norway, Liberia, Marshall Islands, and Bahamas —
-          current, vessel-specific, and plain English.
-        </p>
-
-        {/* CTAs */}
-        <div
-          className="flex items-center gap-4 mt-10
-            animate-[heroFadeUp_0.8s_ease-out_0.45s]"
-          style={{ animationFillMode: 'both' }}
-        >
-          <Link
-            href="/register"
-            className="font-mono font-bold text-sm uppercase tracking-wider
-              bg-[#2dd4bf] text-[#0a0e1a] rounded-xl px-6 py-3
-              hover:brightness-110 transition-[filter] duration-150"
-          >
-            Start Free Trial
-          </Link>
-          <button
-            onClick={() => document.getElementById('in-action')?.scrollIntoView({ behavior: 'smooth' })}
-            className="font-mono font-bold text-sm uppercase tracking-wider
-              border border-[#2dd4bf]/50 text-[#2dd4bf] rounded-xl px-6 py-3
-              hover:border-[#2dd4bf] hover:bg-[#2dd4bf]/5 transition-colors duration-150"
-          >
-            See It In Action
-          </button>
-        </div>
-        <p
-          className="font-mono text-[11px] text-[#6b7594] mt-4 tracking-wide
-            animate-[heroFadeUp_0.8s_ease-out_0.55s]"
-          style={{ animationFillMode: 'both' }}
-        >
-          7-day free trial · then 10 free questions every 30 days · No credit card required
-        </p>
-
-        {/* D6.61 — competitive wedge tagline. Single mariner-vault apps
-            (MarinerDocs etc.) sell the bookkeeping; we sell that AND
-            the regulatory reasoning behind it. */}
-        <p
-          className="font-mono text-[11px] text-[#f0ece4]/60 mt-3 tracking-wide max-w-md
-            animate-[heroFadeUp_0.8s_ease-out_0.7s]"
-          style={{ animationFillMode: 'both' }}
-        >
-          Track your credentials. Generate your USCG paperwork.{' '}
-          <span className="text-[#2dd4bf]/80">And actually understand the regulations behind them.</span>
-        </p>
-
-        {/* Sprint D6.26 — flag strip moved out of hero into CorpusBadges
-            "What we know" section so the hero stays uncluttered and
-            jurisdictional signal lives right next to the actual sources. */}
-
-        {/* Scroll indicator */}
-        <button
-          className="absolute bottom-8 flex flex-col items-center gap-1 cursor-pointer"
-          aria-label="Scroll to demo"
-          onClick={() => document.getElementById('why-regknots')?.scrollIntoView({ behavior: 'smooth' })}
-        >
-          <svg
-            className="w-5 h-5 text-[#6b7594] animate-[chevronBounce_2s_ease-in-out_infinite]"
-            viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
-          >
-            <path d="M6 9l6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </button>
       </section>
 
-      {/* 2026-10-14 — one free question before signup (components/GuestAsk.tsx).
-          Renders nothing until Turnstile keys and the API flag are on. */}
-      <GuestAsk page="landing" heading="Try it now: ask your first question"
-        placeholder="For example: Does my towing vessel need a TSMS, and what goes in it?"
-        outerClassName="px-5 md:px-10 -mt-4 mb-16 max-w-2xl mx-auto w-full" />
-
-            <BuiltByMarinersSection />
+      {/* ══════════════════════════════════════════════════════════════════════
+          SECTION 2 — PROOF: facts a visitor can check
+      ══════════════════════════════════════════════════════════════════════ */}
+      <section className="border-y border-white/5 bg-[#0d1225]/60 px-5 md:px-10 py-10 md:py-12">
+        <dl className="max-w-6xl mx-auto grid grid-cols-2 lg:grid-cols-4 gap-x-6 gap-y-8 text-center lg:text-left">
+          {PROOF.map((p) => {
+            const body = (
+              <>
+                <dt className="font-display text-2xl md:text-3xl font-bold text-[#f0ece4] tracking-wide">{p.big}</dt>
+                <dd className="font-mono text-xs text-[#6b7594] mt-1.5 leading-relaxed">
+                  {p.small}{p.href && <span className="text-[#2dd4bf]"> →</span>}
+                </dd>
+              </>
+            )
+            return p.href ? (
+              <Link key={p.big} href={p.href} className="block rounded-lg hover:bg-white/[0.02] transition-colors">{body}</Link>
+            ) : (
+              <div key={p.big}>{body}</div>
+            )
+          })}
+        </dl>
+      </section>
 
       <WhyNotChatGPTSection />
 
       <HallucinationProofSection />
 
-      <SeeItInActionSection />
+      <BuiltByMarinersSection />
 
-      <HowItWorksSection />
+      <MarinerVaultSection />
 
 {/* ══════════════════════════════════════════════════════════════════════
           SECTION 5 — CORPUS BADGES — what's in the index
@@ -272,12 +228,10 @@ export default function LandingPage() {
         />
       </section>
 
-            <MarinerVaultSection />
-
 {/* ══════════════════════════════════════════════════════════════════════
           SECTION 6 — PRICING
       ══════════════════════════════════════════════════════════════════════ */}
-      <section className="px-5 md:px-10 py-20 md:py-28">
+      <section id="pricing" className="px-5 md:px-10 py-20 md:py-28 scroll-mt-16">
         {/* 2026-10-16 UI pass — max-w-6xl (was 3xl): four cards in 768 px left
             ~180 px each, so every line wrapped and the badges overflowed. */}
         <div className="max-w-6xl mx-auto">
@@ -337,7 +291,7 @@ export default function LandingPage() {
                 'Upgrade or cancel anytime',
               ]}
               smallPrint="No credit card required to start."
-              cta="Start Free Trial"
+              cta={START_FREE_LABEL}
             />
             <PricingCard
               name="Cadet"
@@ -386,18 +340,19 @@ export default function LandingPage() {
             />
           </div>
 
-          {/* D6.61 — trust strip. Security is table stakes; competitors who
-              market AES-256 as a feature are flagging that they don't have
-              anything else to sell. We mention the controls so the buyer
-              who scans for them is satisfied, then immediately frame
-              security as the floor, not the brochure. */}
+          {/* D6.61 — trust strip. Security is table stakes; we mention the
+              controls so the buyer who scans for them is satisfied, then frame
+              security as the floor, not the brochure.
+              2026-10-16 UI pass — "AES-256 at rest" came out: DigitalOcean
+              documents at-rest encryption for Volumes and Spaces, not for the
+              Droplet disk the database lives on. Every item here is true. */}
           <div className="mt-10 max-w-3xl mx-auto">
             <div className="rounded-xl border border-white/8 bg-[#0a0e1a]/60 px-5 py-4">
               <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2
                 font-mono text-[10px] text-[#6b7594] uppercase tracking-[0.15em]">
-                <span>TLS 1.3 in transit</span>
+                <span>Encrypted in transit</span>
                 <span className="text-white/15">·</span>
-                <span>AES-256 at rest</span>
+                <span>Argon2-hashed passwords</span>
                 <span className="text-white/15">·</span>
                 <span>No tracking cookies</span>
                 <span className="text-white/15">·</span>
@@ -479,6 +434,31 @@ export default function LandingPage() {
           >
             Learn more about our giving &rarr;
           </Link>
+        </div>
+      </section>
+
+      {/* 2026-10-16 UI pass — closing call to action, so the long page ends
+          on the two things a visitor can do. */}
+      <section className="px-5 md:px-10 py-16 md:py-20 border-t border-white/5">
+        <div className="max-w-3xl mx-auto text-center">
+          <h2 className="font-display font-black text-[#f0ece4] leading-tight tracking-tight text-[clamp(28px,5vw,44px)]">
+            Your first cited answer is a minute away.
+          </h2>
+          <p className="font-mono text-sm md:text-base text-[#6b7594] mt-3">
+            Free to start, no card. Your vessel, your regulations, every requirement cited.
+          </p>
+          <div className="flex flex-wrap items-center justify-center gap-3 mt-7">
+            <Link href="/register"
+              className="font-mono font-bold text-sm uppercase tracking-wider bg-[#2dd4bf] text-[#0a0e1a]
+                rounded-xl px-6 py-3 hover:brightness-110 transition-[filter] duration-150">
+              {START_FREE_LABEL}
+            </Link>
+            <a href="#ask"
+              className="font-mono font-bold text-sm uppercase tracking-wider border border-[#2dd4bf]/50 text-[#2dd4bf]
+                rounded-xl px-6 py-3 hover:border-[#2dd4bf] hover:bg-[#2dd4bf]/5 transition-colors duration-150">
+              Ask a question free
+            </a>
+          </div>
         </div>
       </section>
 

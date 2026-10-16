@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
-import { CompassRose } from '@/components/CompassRose'
+import { SiteNav, START_FREE_LABEL } from '@/components/marketing/SiteNav'
 import { CorpusBadges } from '@/components/CorpusBadges'
 import { LandingFooter } from '@/components/marketing/LandingFooter'
 import { apiRequest } from '@/lib/api'
@@ -190,17 +190,10 @@ export default function PricingPage() {
 
   return (
     <div className="min-h-screen bg-[#0a0e1a] flex flex-col">
-      <nav className="flex items-center justify-between px-5 md:px-10 py-4 border-b border-white/5">
-        <Link href="/" className="flex items-center gap-2">
-          <CompassRose className="w-5 h-5 text-[#2dd4bf]" />
-          <span className="font-display text-xl font-bold text-[#f0ece4] tracking-widest uppercase">
-            RegKnot
-          </span>
-        </Link>
-        <Link href="/" className="font-mono text-sm text-[#6b7594] hover:text-[#f0ece4] transition-colors">
-          Back to app
-        </Link>
-      </nav>
+      {/* 2026-10-16 UI pass — the shared site bar. This page used to show
+          "Back to app" to everyone, including visitors who had never signed in;
+          SiteNav shows "Open RegKnot" only to someone who is. */}
+      <SiteNav spacer />
 
       <main className="flex-1 flex flex-col items-center px-5 py-14 md:py-20">
         <h1 className="font-display font-black text-[#f0ece4] text-center leading-tight
@@ -311,7 +304,7 @@ export default function PricingPage() {
                   border border-white/15 text-[#f0ece4]/70 rounded-lg py-3
                   hover:text-[#f0ece4] hover:border-white/30 transition-colors duration-150"
               >
-                Start Free Trial
+                {START_FREE_LABEL}
               </button>
             )}
           </div>
@@ -422,14 +415,16 @@ export default function PricingPage() {
 
         {/* D6.61 — trust strip, mirroring landing. Security mentioned
             so the buyer scanning for it is satisfied; framing makes
-            clear we don't think it deserves a billboard. */}
+            clear we don't think it deserves a billboard.
+            2026-10-16 UI pass — "AES-256 at rest" came out (not documented
+            for the Droplet disk); see the landing page. */}
         <div className="mt-8 max-w-3xl w-full">
           <div className="rounded-xl border border-white/8 bg-[#0a0e1a]/60 px-5 py-4">
             <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2
               font-mono text-[10px] text-[#6b7594] uppercase tracking-[0.15em]">
-              <span>TLS 1.3 in transit</span>
+              <span>Encrypted in transit</span>
               <span className="text-white/15">·</span>
-              <span>AES-256 at rest</span>
+              <span>Argon2-hashed passwords</span>
               <span className="text-white/15">·</span>
               <span>No tracking cookies</span>
               <span className="text-white/15">·</span>
@@ -497,7 +492,7 @@ export default function PricingPage() {
                            bg-[#1a2238] text-[#f0ece4] hover:bg-[#232d47]
                            border border-white/10 rounded-lg py-3 transition-colors duration-150"
               >
-                Start Free Trial
+                Start fleet trial
               </a>
             </div>
 
@@ -549,7 +544,7 @@ export default function PricingPage() {
                            bg-[#2dd4bf] text-[#0a0e1a] hover:brightness-110
                            rounded-lg py-3 transition-[filter] duration-150"
               >
-                Start Free Trial
+                Start fleet trial
               </a>
             </div>
           </div>

@@ -1,8 +1,8 @@
 'use client'
 
 import Link from 'next/link'
-import { CompassRose } from '@/components/CompassRose'
 import { CorpusBadges } from '@/components/CorpusBadges'
+import { SiteNav } from '@/components/marketing/SiteNav'
 
 // Sprint D6.23 — public Coverage page. Honest framing of what's IN
 // the corpus, what's PARTIAL, and what's NOT yet — counter to the
@@ -16,12 +16,8 @@ export default function CoveragePage() {
   return (
     <main className="min-h-screen bg-[#0a0e1a] text-[#f0ece4]">
       {/* ── Header ─────────────────────────────────────────────────────── */}
-      <header className="border-b border-white/8 px-5 md:px-10 py-4">
-        <Link href="/" className="inline-flex items-center gap-2 text-[#f0ece4] hover:text-[#2dd4bf] transition-colors">
-          <CompassRose className="w-5 h-5 text-[#2dd4bf]" />
-          <span className="font-display text-lg font-bold tracking-wide">RegKnot</span>
-        </Link>
-      </header>
+      {/* 2026-10-16 UI pass — the shared site bar (components/marketing/SiteNav). */}
+      <SiteNav spacer />
 
       {/* ── Hero ───────────────────────────────────────────────────────── */}
       <section className="px-5 md:px-10 py-16 md:py-20 max-w-4xl mx-auto">
@@ -151,7 +147,7 @@ export default function CoveragePage() {
         </h2>
         <p className="font-mono text-sm text-[#6b7594] mb-8 max-w-xl mx-auto">
           Try it on your real compliance question. Citations land on whichever source above
-          actually answers — no guessing, no hallucination.
+          actually answers, and each one is checked against the text.
         </p>
         <Link
           href="/register"
@@ -159,7 +155,7 @@ export default function CoveragePage() {
             bg-[#2dd4bf] text-[#0a0e1a] rounded-xl px-6 py-3
             hover:brightness-110 transition-[filter] duration-150"
         >
-          Start Free Trial
+          Start free
         </Link>
       </section>
     </main>

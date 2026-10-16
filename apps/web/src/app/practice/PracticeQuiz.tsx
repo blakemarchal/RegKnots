@@ -370,7 +370,7 @@ function SignupCard() {
         className="inline-block font-mono font-bold text-sm uppercase tracking-wider
           bg-[#2dd4bf] text-[#0a0e1a] hover:brightness-110 rounded-lg py-3 px-6
           transition-[filter] duration-150">
-        Try RegKnot free &rarr;
+        Start free &rarr;
       </Link>
     </div>
   )

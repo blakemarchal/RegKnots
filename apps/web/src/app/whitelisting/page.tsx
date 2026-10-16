@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { CompassRose } from '@/components/CompassRose'
+import { SiteNav } from '@/components/marketing/SiteNav'
 
 const PLAIN_TEXT = `Ship Network Whitelisting Request — RegKnot Maritime Compliance Tool
 
@@ -104,26 +105,8 @@ export default function WhitelistingPage() {
 
       <div className="min-h-screen bg-[#0a0e1a] print-white">
         {/* Nav */}
-        <nav className="no-print flex items-center justify-between px-5 md:px-10 py-4
-          bg-[#0a0e1a]/80 backdrop-blur-md border-b border-white/5">
-          <Link href="/landing" className="flex items-center gap-2">
-            <CompassRose className="w-5 h-5 text-[#2dd4bf]" />
-            <span className="font-display text-xl font-bold text-[#f0ece4] tracking-widest uppercase">
-              RegKnot
-            </span>
-          </Link>
-          <div className="flex items-center gap-3">
-            <Link href="/login"
-              className="font-mono text-sm text-[#6b7594] hover:text-[#f0ece4] transition-colors">
-              Sign In
-            </Link>
-            <Link href="/register"
-              className="font-mono text-sm font-bold text-[#0a0e1a] bg-[#2dd4bf]
-                hover:brightness-110 transition-[filter] rounded-lg px-4 py-1.5">
-              Get Access
-            </Link>
-          </div>
-        </nav>
+        {/* 2026-10-16 UI pass — the shared site bar (components/marketing/SiteNav). */}
+        <SiteNav spacer />
 
         {/* Content */}
         <main className="max-w-2xl mx-auto px-5 py-12 md:py-16">

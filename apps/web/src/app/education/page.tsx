@@ -29,11 +29,11 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { CompassRose } from '@/components/CompassRose'
 import { CorpusBadges } from '@/components/CorpusBadges'
 import { LandingFooter } from '@/components/marketing/LandingFooter'
 import { apiRequest } from '@/lib/api'
 import { useAuthStore } from '@/lib/auth'
+import { SiteNav } from '@/components/marketing/SiteNav'
 
 type EduPersona = 'cadet_student' | 'teacher_instructor'
 type EduPlan = 'mate_promo' | 'mate_annual'
@@ -158,21 +158,8 @@ export default function EducationLanding() {
   return (
     <div className="min-h-screen bg-[#0a0e1a] overflow-x-hidden">
       {/* ── Nav ───────────────────────────────────────────────────────────── */}
-      <nav className="fixed top-0 inset-x-0 z-40 flex items-center justify-between
-        px-5 md:px-10 py-4 bg-[#0a0e1a]/80 backdrop-blur-md border-b border-white/5">
-        <Link href="/landing" className="flex items-center gap-2">
-          <CompassRose className="w-5 h-5 text-[#2dd4bf]" />
-          <span className="font-display text-xl font-bold text-[#f0ece4] tracking-widest uppercase">
-            RegKnot
-          </span>
-        </Link>
-        <div className="flex items-center gap-3">
-          <Link href="/login"
-            className="font-mono text-sm text-[#6b7594] hover:text-[#f0ece4] transition-colors duration-150">
-            Sign In
-          </Link>
-        </div>
-      </nav>
+      {/* 2026-10-16 UI pass — the shared site bar (components/marketing/SiteNav). */}
+      <SiteNav signupHref="/register?ref=education" />
 
       {/* ── Hero ─────────────────────────────────────────────────────────── */}
       <section className="relative flex flex-col items-center justify-center

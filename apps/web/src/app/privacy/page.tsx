@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { SiteNav } from '@/components/marketing/SiteNav'
 
 export const metadata = {
   title: 'Privacy Policy',
@@ -8,16 +9,8 @@ export const metadata = {
 export default function PrivacyPage() {
   return (
     <div className="min-h-dvh bg-[#0a0e1a] text-[#f0ece4]/90">
-      <header className="border-b border-white/8 px-5 md:px-10 py-4">
-        <div className="max-w-3xl mx-auto flex items-center justify-between">
-          <Link href="/landing" className="font-display text-xl font-bold text-[#f0ece4] tracking-wide">
-            RegKnot
-          </Link>
-          <Link href="/landing" className="font-mono text-xs text-[#6b7594] hover:text-[#f0ece4]/80 transition-colors">
-            Back
-          </Link>
-        </div>
-      </header>
+      {/* 2026-10-16 UI pass — the shared site bar (components/marketing/SiteNav). */}
+      <SiteNav spacer />
 
       <main className="max-w-3xl mx-auto px-5 md:px-10 py-10">
         <h1 className="font-display text-3xl font-bold text-[#f0ece4] tracking-wide mb-2">

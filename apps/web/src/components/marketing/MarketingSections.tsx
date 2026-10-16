@@ -24,12 +24,28 @@ import { HallucinationCarousel } from '@/components/HallucinationCarousel'
 
 // ── Shared visual primitives ────────────────────────────────────────────────
 
-/** Citation chip used inline within demo answers and section bodies. */
+/** Citation chip used inline within demo answers and section bodies.
+ *  2026-10-16 UI pass — teal, like the real chips (CitationChip); amber is
+ *  the caution colour in the app, so amber demo chips promised the wrong thing. */
 export function StaticChip({ label }: { label: string }) {
   return (
     <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium
-      bg-amber-950/70 text-amber-400 border border-amber-800/50 leading-none align-baseline mx-0.5">
+      bg-teal-950/70 text-teal-300 border border-teal-800/60 leading-none align-baseline mx-0.5">
       {label}
+    </span>
+  )
+}
+
+/** The "Corpus-verified · N citations" badge from a chat answer's footer. */
+function VerifiedBadge({ count }: { count: number }) {
+  return (
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium
+      bg-emerald-950/60 text-emerald-300 border border-emerald-800/50">
+      <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
+        strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M20 6L9 17l-5-5" />
+      </svg>
+      Corpus-verified · {count} citation{count === 1 ? '' : 's'}
     </span>
   )
 }
@@ -49,19 +65,23 @@ interface Demo {
 }
 
 const DEMOS: Demo[] = [
+  // 2026-10-16 UI pass — from a real answer (the first free question asked on
+  // the live site), each line checked against the cited text of 46 CFR
+  // 141.305, 141.360, 141.370 and 141.375. It replaced a passenger-vessel demo
+  // that cited 46 CFR 133.45, an OSV (Subchapter L) section.
   {
-    vesselContext: 'U.S.-flag passenger vessel · 200 GT · coastwise',
-    question: 'What are the lifeboat inspection requirements for my vessel?',
-    title: 'Lifeboat Inspection Requirements',
-    intro: 'your vessel must conduct inspections on the following schedule:',
-    introChip: '46 CFR 199.190',
+    vesselContext: 'U.S.-flag towboat · 7 crew · Mississippi River',
+    question: 'What lifesaving gear does my towboat need on the Mississippi? We have 7 crew.',
+    title: 'Lifesaving Equipment — Towboat on the Rivers',
+    intro: 'Under Subchapter M, equipment depends on the area you operate in, not the route on your COI.',
+    introChip: '46 CFR 141.370',
     sections: [
-      { label: 'Weekly:', body: 'Visual inspection of survival craft, rescue boats, and launching appliances for readiness.' },
-      { label: 'Monthly:', body: "Each lifesaving appliance must be verified complete and in good working order, with results recorded in the vessel's official logbook", chip: '46 CFR 199.190(e)' },
-      { label: 'Annually:', body: 'Full operational tests including launching appliances at loads from light to full load', chip: '46 CFR 133.45(b)' },
+      { label: 'Survival craft:', body: 'None required on rivers, unless the OCMI or your TSMS calls for them', chip: '46 CFR 141.305' },
+      { label: 'Lifebuoys (26 to 79 ft):', body: 'Two, at least 24 in, on opposite sides where crew are normally present; at least one with a 60 ft buoyant lifeline', chip: '46 CFR 141.360' },
+      { label: 'Distress signals:', body: 'Three day and three night visual distress signals for the rivers area', chip: '46 CFR 141.375' },
     ],
-    note: 'SOLAS Chapter III applies to vessels on international routes in addition to these CFR requirements.',
-    footerChips: ['46 CFR 199.190', '46 CFR 133.45'],
+    note: 'Head into coastwise or Gulf waters and the tables change: buoyant apparatus or liferafts come into play.',
+    footerChips: ['46 CFR 141.305', '46 CFR 141.360', '46 CFR 141.370', '46 CFR 141.375'],
   },
   {
     vesselContext: 'UK-flag ro-pax ferry · Dunkerque–Dover',
@@ -144,11 +164,22 @@ export function DemoCarousel() {
             <path d="M12 8l1.5 3.5L12 16l-1.5-4.5L12 8z" fill="currentColor" stroke="none" />
           </svg>
           <span className="font-display text-base font-bold text-[#f0ece4] tracking-wide">RegKnot</span>
-          <span className="font-mono text-[9px] text-[#6b7594] tracking-[0.2em] uppercase ml-0.5">Maritime Compliance Co-Pilot</span>
-          <span className="ml-auto font-mono text-[10px] text-[#6b7594] hidden sm:inline">{demo.vesselContext}</span>
+          <span className="font-mono text-[9px] text-[#6b7594] tracking-[0.2em] uppercase ml-0.5 hidden sm:inline">Maritime Compliance Co-Pilot</span>
         </div>
 
-        <div className="flex flex-col gap-0.5 py-3 min-h-[420px]">
+        <div className="flex flex-col gap-0.5 py-3 min-h-[460px]">
+          {/* 2026-10-16 UI pass — the vessel, as the chat's vessel pill shows it
+              (it sat in the header, where it overflowed narrow cards). */}
+          <div className="px-4 pt-0.5 pb-1.5">
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.03]
+              px-2.5 py-1 font-mono text-[10px] text-[#8a94ad]">
+              <svg className="w-3 h-3 text-[#2dd4bf]" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <circle cx="12" cy="5" r="2" /><path d="M12 7v14M5 12H3a9 9 0 0 0 18 0h-2M8 10h8" />
+              </svg>
+              {demo.vesselContext}
+            </span>
+          </div>
           <div className="flex justify-end px-4 py-1.5">
             <div className="max-w-[82%] px-4 py-3 rounded-2xl rounded-tr-sm
               bg-[#1a3254] text-[#f0ece4] text-sm leading-relaxed font-mono">
@@ -178,8 +209,11 @@ export function DemoCarousel() {
                   Note: {demo.note}
                 </p>
               )}
-              <div className="mt-3 pt-3 border-t border-white/5 flex flex-wrap gap-1.5">
-                {demo.footerChips.map((c) => <StaticChip key={c} label={c} />)}
+              <div className="mt-3 pt-3 border-t border-white/5">
+                <div className="mb-2"><VerifiedBadge count={demo.footerChips.length} /></div>
+                <div className="flex flex-wrap gap-1.5">
+                  {demo.footerChips.map((c) => <StaticChip key={c} label={c} />)}
+                </div>
               </div>
             </div>
           </div>
@@ -217,7 +251,7 @@ export function SeeItInActionSection({ id = 'in-action' }: { id?: string }) {
             See It In Action
           </h2>
           <p className="font-mono text-[#6b7594] mt-3 text-sm md:text-base">
-            U.S. Captain. Channel ferry. Hazmat fire. Liberian bulker. Real cited answers, every time.
+            River towboat. Channel ferry. Hazmat fire. Liberian bulker. Cited answers, every time.
           </p>
         </div>
         <DemoCarousel />
@@ -243,26 +277,22 @@ export function BuiltByMarinersSection() {
           text-[clamp(32px,6vw,56px)] mb-8">
           The regs are complex.<br />Getting cited shouldn&apos;t be.
         </h2>
+        {/* 2026-10-16 UI pass — three paragraphs cut to three short ones; the
+            "purchased source texts" line went (no claim about how texts were
+            obtained). */}
         <div className="flex flex-col gap-5">
           <p className="font-mono text-[#6b7594] leading-relaxed text-sm md:text-base">
-            Commercial mariners navigate an overlapping web of regs — the IMO conventions
-            (SOLAS, MARPOL, IMDG, COLREGs, STCW, ISM, plus the IGC, IBC, HSC and Load Lines codes),
-            the U.S. CFR Titles 33/46/49 and USCG guidance, and a growing set of flag-state
-            regulators (UK MCA, AMSA Australia, Singapore MPA, Hong Kong, Norway NMA, Liberia,
-            Marshall Islands, Bahamas). Thousands of sections that cross-reference each other,
-            change without warning, and vary by vessel type, tonnage, flag, route, and cargo.
-            One missed detail during an inspection means deficiency citations, vessel detention,
-            or costly litigation.
+            A commercial vessel answers to the CFR, Coast Guard policy, the IMO conventions and its flag
+            state at once, and the answer changes with vessel type, tonnage, route and cargo. One missed
+            detail at an inspection means a deficiency, a detention or worse.
+          </p>
+          <p className="font-mono text-[#f0ece4]/80 leading-relaxed text-sm md:text-base">
+            RegKnot was built by a USCG Master Unlimited and her engineer brother. We know these
+            regulations because we live them. This is the tool we wished existed.
           </p>
           <p className="font-mono text-[#6b7594] leading-relaxed text-sm md:text-base">
-            RegKnot was built by an Unlimited Licensed Captain and her engineer brother.
-            We know these regulations because we live them. This is the tool we wished existed.
-          </p>
-          <p className="font-mono text-[#6b7594] leading-relaxed text-sm md:text-base">
-            General-purpose AI doesn&apos;t have access to the SOLAS Consolidated Edition, the STCW Convention,
-            or the ISM Code — and it can&apos;t tell the difference between what applies to your towing vessel
-            versus a containership. RegKnot is built on the purchased source texts and your vessel profile,
-            so every answer is specific to your ship and cites the exact section you can verify.
+            General-purpose AI answers from memory. RegKnot answers from the regulation text and your
+            vessel profile, and cites the section so you can check it.
           </p>
         </div>
       </div>
@@ -294,14 +324,17 @@ export function WhyNotChatGPTSection() {
             <div className="font-mono text-[10px] text-[#2dd4bf] uppercase tracking-widest mb-3">
               01 — Citation discipline
             </div>
+            {/* 2026-10-16 UI pass — matches the answer prompt since 2026-10-09
+                (rag.prompts.PROVENANCE_RULES): no invented figures, and who to
+                confirm with, rather than "we hedge". */}
             <h3 className="font-display text-xl font-bold text-[#f0ece4] mb-3 leading-snug">
-              Every section we cite is verified against the actual text
+              Every citation is checked against the text
             </h3>
             <p className="font-mono text-sm text-[#6b7594] leading-relaxed">
-              ChatGPT and Gemini will cheerfully invent a CFR section that doesn&apos;t exist.
-              RegKnot runs every citation through a verification pass before you see it.
-              If we can&apos;t ground a claim in the retrieved regulation text, we hedge instead
-              of guessing &mdash; and we tell you exactly what we couldn&apos;t verify.
+              General AI will cite a CFR section that doesn&apos;t exist. RegKnot checks every
+              citation against the regulation text before you see it and drops any that don&apos;t
+              hold up. When an exact figure isn&apos;t in the text, it won&apos;t make one up: it tells
+              you who publishes it and who to confirm with.
             </p>
           </div>
 
@@ -309,15 +342,17 @@ export function WhyNotChatGPTSection() {
             <div className="font-mono text-[10px] text-[#2dd4bf] uppercase tracking-widest mb-3">
               02 — Real source texts
             </div>
+            {/* 2026-10-16 UI pass — "licensed editions" and "9 flag-state
+                regulators" came out: no claim about how texts were obtained, and
+                the corpus is tagged for 14 flag states. */}
             <h3 className="font-display text-xl font-bold text-[#f0ece4] mb-3 leading-snug">
-              IMDG Code 2024, SOLAS Consolidated, STCW with current supplements
+              The full texts, not web summaries
             </h3>
             <p className="font-mono text-sm text-[#6b7594] leading-relaxed">
-              IMO conventions are paywalled. General AI was trained on web summaries
-              and outdated copies. We&apos;ve ingested the licensed editions &mdash; the
-              IMDG Dangerous Goods List, the full SOLAS chapters, STCW with the latest
-              MSC resolutions, the ISM Code, plus 9 flag-state regulators. When you ask
-              about UN 3480 stowage, we have the actual row from Chapter 3.2.
+              SOLAS, MARPOL, the IMDG Code, STCW and the ISM Code; recent IMO resolutions with
+              their adoption and entry-into-force dates; the CFR, NVICs and Coast Guard policy;
+              rules from 14 flag states. Ask about UN 3480 stowage and the answer comes from the
+              Dangerous Goods List entry.
             </p>
           </div>
 
@@ -326,30 +361,31 @@ export function WhyNotChatGPTSection() {
               03 — Vessel-specific scoping
             </div>
             <h3 className="font-display text-xl font-bold text-[#f0ece4] mb-3 leading-snug">
-              The answer changes based on your ship
+              The answer changes with your ship
             </h3>
             <p className="font-mono text-sm text-[#6b7594] leading-relaxed">
-              Subchapter L OSV vs Subchapter K small passenger vessel vs U.K.-flag bulker
-              in U.S. waters &mdash; the regulatory answer is different for each. RegKnot
-              reads your vessel profile (flag, tonnage, route, subchapter, cargo) and scopes
-              retrieval + answer accordingly. Generic LLMs give you the same one-size-fits-all
-              response no matter what you operate.
+              A Subchapter M towboat, a Subchapter K passenger vessel and a UK-flag bulker in
+              U.S. waters get different answers. RegKnot reads your vessel profile (flag,
+              tonnage, route, subchapter, cargo) and scopes the search and the answer to it.
             </p>
           </div>
 
           <div className="bg-[#111827] border border-white/8 rounded-2xl p-6 md:p-7">
+            {/* 2026-10-16 UI pass — "audited daily" / "every few days" came out:
+                no review schedule exists. The three examples are real fixes
+                (MARPOL Annex V 2026-09-26, COSWP flag tag 2026-10-08, pilot-ladder
+                manila 2026-10-08/09). */}
             <div className="font-mono text-[10px] text-[#2dd4bf] uppercase tracking-widest mb-3">
-              04 — Built by mariners, audited daily
+              04 — Built by mariners
             </div>
             <h3 className="font-display text-xl font-bold text-[#f0ece4] mb-3 leading-snug">
-              A Master Unlimited captain runs the audits
+              A Master Unlimited behind it
             </h3>
             <p className="font-mono text-sm text-[#6b7594] leading-relaxed">
-              Karynn holds an Unlimited Master license and reviews actual user answers
-              every few days, flagging anything off. When she finds a gap &mdash; a missed
-              Annex V exemption, a wrong jurisdictional cite &mdash; the prompt rules and
-              ingest pipeline get fixed within the week. This isn&apos;t a wrapper around an
-              API. It&apos;s a regulatory tool with a mariner in the loop.
+              Karynn holds a USCG Master Unlimited license and sails as a containership captain.
+              Misses that she or our users flag (an Annex V exemption, another flag&apos;s rule, a
+              pilot-ladder material) get traced to the source and fixed. A mariner in the loop,
+              not a wrapper around an API.
             </p>
           </div>
         </div>
@@ -460,10 +496,8 @@ export function MarinerVaultSection() {
             Your record, your career,<br />reasoned against the regulation.
           </h2>
           <p className="font-mono text-[#6b7594] mt-4 max-w-2xl mx-auto text-sm md:text-base">
-            Snap a photo of your MMC, TWIC, or medical cert. We extract
-            the data, track the expiry, and answer the regulatory questions
-            only your stored record can trigger — including which
-            credential upgrade you&apos;re closest to qualifying for.
+            Snap your MMC, TWIC or medical certificate. RegKnot reads it, tracks the
+            expiry and tells you what the regulations ask of you next.
           </p>
         </div>
 
@@ -550,8 +584,9 @@ export function MarinerVaultSection() {
               CFR ladder. &ldquo;You&apos;re cap-eligible for Master Inland 200 GT now;
               Master Near-Coastal 200 GT is 180 days away under 46 CFR 11.422.&rdquo;
             </p>
+            {/* 2026-10-16 UI pass — was "…, free": Career Path is a Mate feature. */}
             <p className="font-mono text-[10px] text-[#2dd4bf]/70 uppercase tracking-wider">
-              What credentialing services charge for, free
+              Your next license, mapped to the CFR
             </p>
           </div>
         </div>
@@ -590,7 +625,7 @@ export function MarinerVaultSection() {
 
         <p className="font-mono text-xs text-[#6b7594] text-center mt-10 max-w-2xl mx-auto">
           Other mariner apps store the paperwork.{' '}
-          <span className="text-[#f0ece4]/85">RegKnots stores it AND explains the rule the paperwork points to.</span>
+          <span className="text-[#f0ece4]/85">RegKnot stores it and explains the rule behind it.</span>
         </p>
       </div>
     </section>
