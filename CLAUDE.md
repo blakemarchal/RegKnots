@@ -533,6 +533,10 @@ If a doc says "alembic head is 0045" but `alembic current` says `0092`, the doc 
     - `prep.py` keeps September's phone chrome.
     - Masters are in `data/video/out/final/`; September's are in `out/archive-2026-09-29/`.
   - End cards: "First question free · No sign-up".
+  - **Rendered:** 3 cuts × (music only, Sarah, Bill), each 9:16 + 16:9, covers and share copies. The full run takes about 25 minutes on the laptop. Everything is loudness-normalised to −14 LUFS.
+  - **Transcript check** (gpt-transcribe on the prod key, about $0.01): every line comes back word for word.
+    - The voice says "Karynn Marchal" as "Karen Marshall". Blake checks with Karynn; a respelling in `vo.py` fixes it.
+    - The transcriber heard Sarah's "TVR" in the audit cut as "TBR"; Bill's reads clean.
 See `docs/PROJECT_STATE.md` for a fuller operational snapshot and `docs/roadmap.md` for the prioritized backlog.
 
 
