@@ -440,7 +440,9 @@ If a doc says "alembic head is 0045" but `alembic current` says `0092`, the doc 
     - **Limits:** 1 per device per 30 days, 6 per IP per day, 30 a day and 300 a month in total. Turnstile check.
     - **Retention:** unclaimed conversations are purged after 30 days.
     - **Verified on prod in-process** with Cloudflare's test secret (Opus answer, then the device limit refused a second question).
-    - **Off until `TURNSTILE_SECRET_KEY`, `NEXT_PUBLIC_TURNSTILE_SITE_KEY` and `REGKNOTS_ANON_CHAT_ENABLED=true` are set.**
+    - **ON since 2026-10-16:** Blake set `TURNSTILE_SECRET_KEY`, `NEXT_PUBLIC_TURNSTILE_SITE_KEY` and `REGKNOTS_ANON_CHAT_ENABLED=true` in the prod `.env`, then a deploy (the site key is built into the web app).
+      - Checked: the widget renders on regknots.com, and siteverify accepts the secret (a dummy token gets `invalid-input-response`, not `invalid-input-secret`).
+      - The widget is `appearance: 'interaction-only'`: most visitors never see it. An automated browser gets the "Verify you are human" checkbox, so a live test needs a person.
   - **Step 4, Wheelhouse pilots:**
     - `workspaces.trial_ends_at`: NULL = 30 days. The state machine reads `COALESCE(trial_ends_at, created_at + 30 days)`.
     - **Pilot codes:** the link is `/register?next=/workspaces&src=pilot-<code>`, giving 90 days by default. Admin › Pilots has codes, workspaces and Set trial.
@@ -448,7 +450,6 @@ If a doc says "alembic head is 0045" but `alembic current` says `0092`, the doc 
     - **Audit readiness fix:** it now leaves admin accounts out of an internal-only workspace. It had listed Blake's and Karynn's own expired medicals.
 - **2026-10-16 OpenAI model swaps + security review** (Blake: "Do the luna swap, swap the voice, and greenlight all recommended"). Migrations **0127–0128**; alembic head is **0128**.
   - **PostHog is LIVE** (US cloud; the key went into the prod `.env`, then a deploy).
-    - The prod `.env` holds two different `NEXT_PUBLIC_POSTHOG_KEY` lines; the second is the live one. Blake deletes the extra.
   - **GPT-4o leaves the OpenAI API on 2027-01-14** and **whisper-1 on 2027-02-26** (OpenAI deprecations page).
     - **Fallback:** `rag/fallback.py` answers on **`gpt-6-luna`** (effort `low`; env `OPENAI_FALLBACK_MODEL` / `OPENAI_FALLBACK_EFFORT`) when Claude is down or refuses.
       - It sends `max_completion_tokens` + `reasoning_effort`.
@@ -482,11 +483,16 @@ If a doc says "alembic head is 0045" but `alembic current` says `0092`, the doc 
       - Account deletion blanks the user's words in six log tables.
       - Backups: nightly uploads archive; offsite copies age-encrypted, and nothing uploads without the public key.
   - **Demo audit fix (same day):** Fleet Audit Readiness leaves admin accounts out of internal-only workspaces.
+  - **Done later the same day:** Turnstile keys in and deployed (the free question is on); Google Search Console verified the domain.
+  - **ElevenLabs** (for the marketing videos, after the UI pass): `ELEVENLABS_API_KEY` is in the laptop `.env` only, since the video pipeline runs there.
+    - Creator plan: 131K characters a month, commercial use, voice cloning.
+    - The key and the quota are shared with Blake's other app.
+    - Karynn's voice only with her explicit consent.
   - **Blake's open steps:**
     - Offsite backups: Spaces bucket and keys, `apt-get install -y rclone age`, an age key pair on his laptop (header of `scripts/backup_offsite.sh`).
-    - Turnstile keys (the free question before signup).
-    - Search Console.
+    - Submit `sitemap.xml` in Search Console: 1,165 URLs, 1,154 of them /regs pages.
     - The two Stripe webhook events.
+    - Try the free question from his phone; nobody has asked one yet.
 See `docs/PROJECT_STATE.md` for a fuller operational snapshot and `docs/roadmap.md` for the prioritized backlog.
 
 
@@ -522,4 +528,4 @@ Full audit report (models, retrieval, UX, product packaging): see the 2026-07-18
 
 ---
 
-*Last updated 2026-10-16 (OpenAI fallback → gpt-6-luna, voice → gpt-transcribe, PostHog live, security review shipped: preview-attach fix, rate limits, session revocation, startup guard, upload sniffing, Sentry scrubbing, audit / deletion / backup hardening, migrations 0127–0128; 2026-10-14 growth plan: funnel events + cookieless PostHog, search basics, 1,147 regulation pages at /regs, one free answer before signup (off until keyed), Wheelhouse pilot codes + demo fleet, migrations 0123–0126; 2026-10-13: IMO resolution harvester: backlog of 248 resolutions + 19 parent codes, weekly harvest, retrieval groups / tiers / keyword caps, dates prompt; towboat Sub M fix deployed; 2026-10-09: answer pipeline phase 1 live: whole sections, sources-and-gaps prompt; IMO splitter fix + pilot transfer resolutions; 2026-10-06 mail routing: inbound Google only, ImprovMX unused, app email on Resend with a default reply-to; 2026-10-05: PDF and Word uploads in chat, migration 0121; reply-to on admin emails; off-topic check sees the conversation, attachment wording; 2026-10-03 security: only our hostnames get a TLS certificate or credentialed CORS, junk certificates cleared; earlier: free /practice page, capped free plan, MVUS / school / TPO outreach with a call list, NGA manuals `nga_pubs`, migration 0120; earlier: inland / Coast Guard corpus: ten new sources, NVIC discovery fix, Medical Manual, uscg_bulletin pruned + daily feed, keyword floor, migration 0119; earlier: corpus gap audit; self-serve account deletion + migration 0118; admin redesign + customer UX pass; CFR paragraph chips; video ads first cut). When this drifts from reality, fix it — that's the rule.*
+*Last updated 2026-10-16 (free question before signup ON with Turnstile, Search Console verified, ElevenLabs key for the videos; OpenAI fallback → gpt-6-luna, voice → gpt-transcribe, PostHog live, security review shipped: preview-attach fix, rate limits, session revocation, startup guard, upload sniffing, Sentry scrubbing, audit / deletion / backup hardening, migrations 0127–0128; 2026-10-14 growth plan: funnel events + cookieless PostHog, search basics, 1,147 regulation pages at /regs, one free answer before signup (off until keyed), Wheelhouse pilot codes + demo fleet, migrations 0123–0126; 2026-10-13: IMO resolution harvester: backlog of 248 resolutions + 19 parent codes, weekly harvest, retrieval groups / tiers / keyword caps, dates prompt; towboat Sub M fix deployed; 2026-10-09: answer pipeline phase 1 live: whole sections, sources-and-gaps prompt; IMO splitter fix + pilot transfer resolutions; 2026-10-06 mail routing: inbound Google only, ImprovMX unused, app email on Resend with a default reply-to; 2026-10-05: PDF and Word uploads in chat, migration 0121; reply-to on admin emails; off-topic check sees the conversation, attachment wording; 2026-10-03 security: only our hostnames get a TLS certificate or credentialed CORS, junk certificates cleared; earlier: free /practice page, capped free plan, MVUS / school / TPO outreach with a call list, NGA manuals `nga_pubs`, migration 0120; earlier: inland / Coast Guard corpus: ten new sources, NVIC discovery fix, Medical Manual, uscg_bulletin pruned + daily feed, keyword floor, migration 0119; earlier: corpus gap audit; self-serve account deletion + migration 0118; admin redesign + customer UX pass; CFR paragraph chips; video ads first cut). When this drifts from reality, fix it — that's the rule.*
