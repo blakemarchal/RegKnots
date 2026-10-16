@@ -1,7 +1,8 @@
 """Temp AI voice-over for the RegKnot ads, until Karynn's own recording arrives.
 
-    python vo.py requests            -> data/video/vo/requests.json (lines not yet cached)
-    (run vo_tts_remote.py where a working OpenAI key lives; unpack into data/video/vo/cache/)
+    python vo.py requests [voice …]  -> data/video/vo/requests.json (lines not yet cached)
+    (OpenAI voices: run vo_tts_remote.py where a working OpenAI key lives; unpack into
+     data/video/vo/cache/. ElevenLabs voices: python vo_elevenlabs.py, which writes the cache.)
     python vo.py build <cut> <voice> -> data/video/vo/<cut>_<voice>.wav (the VO track)
                                         data/video/vo/<cut>_<voice>.js  (caption timings for the stage)
 
@@ -15,6 +16,7 @@ import hashlib
 import json
 import math
 import os
+import re
 import sys
 import wave
 from pathlib import Path
@@ -28,6 +30,23 @@ SR = 48000
 
 VOICES = {"marin": "female narrator", "cedar": "male narrator"}
 MODEL = "gpt-4o-mini-tts"
+
+# 2026-10-16 — ElevenLabs stock voices (Blake's Creator plan includes commercial
+# use): premade voices only, never a clone. vo_elevenlabs.py generates them and
+# takes the word times from ElevenLabs' character alignment instead of Whisper.
+EL_VOICES = {"sarah": "EXAVITQu4vr4xnSDxMaL", "bill": "pqHfZKP75CvOlQylNhV4"}
+EL_MODEL = "eleven_v4"
+EL_SETTINGS = {"stability": 0.5, "similarity_boost": 0.75, "style": 0.1, "use_speaker_boost": True}
+# Spoken respellings. Each keeps the word count, because the splitter matches the
+# timed words to the script's chunks.
+EL_SAY = (("regknots.com", "regnots.com"), ("RegKnot", "Regnot"), ("USCG", "U.S.C.G."),
+          ("TVR", "T.V.R."), ("TPO", "T.P.O."))
+
+
+def el_text(text):
+    for a, b in EL_SAY:
+        text = re.sub(rf"(?<![\w.]){re.escape(a)}(?!\w)", b, text)
+    return text
 STYLE = (
     "Voice: an experienced American merchant mariner: calm, confident, warm and plain-spoken. "
     "Delivery: unhurried and natural, like one captain talking to another on the bridge, with short "
@@ -105,6 +124,9 @@ def line_text(line):
 
 
 def cache_key(text, voice, style):
+    if voice in EL_VOICES:
+        settings = json.dumps(EL_SETTINGS, sort_keys=True)
+        return hashlib.sha1(f"{EL_MODEL}|{EL_VOICES[voice]}|{settings}|{el_text(text)}".encode()).hexdigest()[:16]
     return hashlib.sha1(f"{MODEL}|{voice}|{style}|{text}".encode()).hexdigest()[:16]
 
 
@@ -277,19 +299,23 @@ def place(anchors, durs, gaps, min_start):
     return starts
 
 
-def requests():
+def requests(voices=None):
     VO.mkdir(parents=True, exist_ok=True)
     CACHE.mkdir(parents=True, exist_ok=True)
     reqs, seen = [], set()
     for cut, plan in PLANS.items():
         for line in plan["lines"]:
             text = line_text(line)
-            for voice in VOICES:
+            for voice in voices or VOICES:
                 k = cache_key(text, voice, plan["style"])
                 if k in seen or (CACHE / f"{k}.wav").exists():
                     continue
                 seen.add(k)
-                reqs.append({"id": k, "model": MODEL, "voice": voice, "text": text, "instructions": plan["style"]})
+                if voice in EL_VOICES:
+                    reqs.append({"id": k, "provider": "elevenlabs", "voice": voice, "voice_id": EL_VOICES[voice],
+                                 "model": EL_MODEL, "text": el_text(text), "settings": EL_SETTINGS})
+                else:
+                    reqs.append({"id": k, "model": MODEL, "voice": voice, "text": text, "instructions": plan["style"]})
     (VO / "requests.json").write_text(json.dumps(reqs, indent=1), encoding="utf-8")
     print(f"{len(reqs)} requests -> {VO / 'requests.json'} ({sum(len(r['text']) for r in reqs)} chars)")
 
@@ -366,6 +392,6 @@ def build(cut, voice):
 
 if __name__ == "__main__":
     if sys.argv[1] == "requests":
-        requests()
+        requests(sys.argv[2:] or None)
     elif sys.argv[1] == "build":
         build(sys.argv[2], sys.argv[3])

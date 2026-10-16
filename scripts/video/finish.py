@@ -21,7 +21,8 @@ SHARE = OUT / "share"
 FIN.mkdir(exist_ok=True)
 SHARE.mkdir(exist_ok=True)
 NAMES = {"main": "RegKnot_main_45s", "cutA": "RegKnot_first-trip_15s", "cutB": "RegKnot_audit_15s"}
-VOICE_TAG = {"marin": "AI-voice-female", "cedar": "AI-voice-male"}
+VOICE_TAG = {"marin": "AI-voice-female", "cedar": "AI-voice-male",
+             "sarah": "AI-voice-female", "bill": "AI-voice-male"}   # 2026-10-16 ElevenLabs
 COVER_T = {"main": 3.9, "cutA": 2.6, "cutB": 2.4}
 
 

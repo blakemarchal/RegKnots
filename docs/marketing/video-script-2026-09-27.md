@@ -6,6 +6,12 @@ synthesized score. Karynn's lines are on screen as captions; her voice memo drop
 timeline. Pipeline and VO steps: `scripts/video/README.md`. The shared copy for Karynn is the
 Claude Doc "RegKnot video script".
 
+**2026-10-16: rebuilt.**
+- Narration is now ElevenLabs stock voices ("Sarah", "Bill"), still labelled "Narration: AI voice".
+- The answer footage was retaken without the old chip bug.
+- The end cards say "First question free · No sign-up", the new offer on regknots.com.
+- Karynn's lines remain on screen as captions; her own recording still drops in the same way.
+
 One shoot gives three pieces:
 - **Main, 45 s.** For LinkedIn, Facebook and the website.
 - **Two 15 s cuts.** For Reels, Shorts and TikTok.

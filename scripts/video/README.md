@@ -42,6 +42,39 @@ node render.js main video
 python finish.py main
 ```
 
+## Narration with ElevenLabs (2026-10-16)
+
+Stock ElevenLabs voices on Blake's Creator plan (commercial use included): `sarah` (female) and `bill`
+(male), model `eleven_v4`. Premade voices only; never a clone. The key is `ELEVENLABS_API_KEY` in the repo
+`.env` (laptop only). The 32 lines for all three cuts in both voices are about 1,400 characters.
+
+```bash
+python vo.py requests sarah bill        # lines not yet in data/video/vo/cache/
+python vo_elevenlabs.py                 # TTS with timestamps -> cache/*.wav + word times in vo/words.json
+python vo.py build main sarah           # then the same steps as below, with --vo sarah / bill
+```
+
+`vo.py` respells a few words for the voice without changing the word count (the splitter matches timed
+words to the script): RegKnot -> Regnot, regknots.com -> regnots.com, USCG / TVR / TPO spelled with
+dots. Captions keep the real spelling. The finished files are named `AI-voice-female` (sarah) and
+`AI-voice-male` (bill).
+
+## Recaptured footage (2026-10-16)
+
+The September frames showed the CFR chip bug ("46 CFR 140.410](b))", fixed 2026-09-29). The answer
+frames were retaken from the same two M/V Bay Pioneer conversations (no new questions), so the answers are
+word for word the same:
+
+- Browser pane emulating 390x844 (the September phone size), Blake signed in, the account's "Coming up"
+  banner hidden in the page, each frame scrolled to its September position.
+- `recapture.py NEW OLD` scales a capture into the raw geometry (app 464x1003 in a 488x1055 frame) and
+  reports the vertical offset against the frame it replaces; all were within 3 px.
+- The new frames live in `data/video/raw/new/`. `prep.py` takes the answer content from them and keeps
+  September's phone chrome (header, composer), because the streaming frames (consult1, stream1, consult2)
+  can't be retaken without asking again, and phones now show a shorter composer prompt.
+- Overlay boxes that frame a chip were widened in `stage.js`; the second strip is 4 px taller.
+- September's assets are in `data/video/assets_sept/`, its masters in `out/archive-2026-09-29/`.
+
 ## Temp AI narration (until Karynn records)
 
 A stock OpenAI voice (`gpt-4o-mini-tts`: `marin` female, `cedar` male), never Karynn's. Her line 6 is read

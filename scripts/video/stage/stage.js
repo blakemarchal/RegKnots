@@ -577,7 +577,7 @@ function makePhone() {
   const frames = {};
   for (const k of ['consult1', 'bottom', 'consult2', 'q2_top', 'menu']) { frames[k] = img(`${k}.png`, 0, 1003, 'display:none'); app.append(frames[k]); }
   const scroll = h('div', { class: 'scroll' });
-  const strips = { q1: img('q1_strip.png', 8, 1649), q2: img('q2_strip.png', 8, 1117) };
+  const strips = { q1: img('q1_strip.png', 8, 1649), q2: img('q2_strip.png', 8, 1121) };
   const inStrip = h('div', { style: 'position:absolute; left:0; top:8px; width:464px; height:1700px' });   // fx that scroll with the strip
   const dots = h('div', { class: 'dots' }, h('i'), h('i'), h('i'));
   scroll.append(strips.q1, strips.q2, inStrip, dots);
@@ -744,7 +744,7 @@ function sideCounter(parent, label) {
 // ══════════════════════════════════════════════════════════════════════════
 // PHONE SCRIPTS
 // ══════════════════════════════════════════════════════════════════════════
-const MAX_Q1 = 8 + 1649 - 776, MAX_Q2 = 8 + 1117 - 776;
+const MAX_Q1 = 8 + 1649 - 776, MAX_Q2 = 8 + 1121 - 776;
 const Q1_ITEMS = [541, 572, 631, 663, 695, 727, 758, 817, 876, 934];
 
 function phoneQ1Main({ t0, t1 }) {
@@ -762,7 +762,8 @@ function phoneQ1Main({ t0, t1 }) {
   // plain english markers
   const mk = [[36, 394, 366, 20], [36, 421, 392, 20], [36, 447, 384, 20]].map(([x, y, w, hh]) => marker(fx, x, y, w, hh));
   // chip callout
-  const bxChip = hlBox(fx, 146, 365, 129, 25);
+  // 2026-10-16 recapture: the chip now reads "46 CFR 140.410(b)" (was 129 px wide)
+  const bxChip = hlBox(fx, 146, 365, 156, 25);
   const bc = bigChip(fx, 232, 700, '46 CFR 140.410', 'Safety orientation');
   const cnC = conn(fx, 210, 396, 232, 648);
   // bottom: badge + chip tap
@@ -870,11 +871,11 @@ function phoneQ1Cut({ t0, t1 }) {
   const fx = P.fxo;
   const shim = shimmer(P.fxi, 40.5, 295.5);
   const mk = [[36, 286, 366, 20], [36, 313, 410, 20], [36, 340, 402, 20], [36, 367, 106, 20]].map(([x, y, w, hh]) => marker(fx, x, y, w, hh));
-  const bxChip = hlBox(fx, 146, 365, 129, 25);
+  const bxChip = hlBox(fx, 146, 365, 156, 25);
   const bc = bigChip(fx, 232, 560, '46 CFR 140.410', 'Safety orientation');
   const cnC = conn(fx, 210, 396, 232, 510);
   // "Documentation" header, inside the strip so it scrolls with it
-  const bxDoc = hlBox(P.inStrip, 34, 1377, 292, 26);
+  const bxDoc = hlBox(P.inStrip, 34, 1377, 212, 26);   // 2026-10-16: no stray "(d))" after the chip
   const counter = sideCounter(root, 'topics');
   const T = { strip: t0 + 1.05, flick: null, exit: t1 - 0.3 };
   const cam = [
@@ -930,7 +931,7 @@ function phoneQ2Cut({ t0, t1 }) {
   const bxTVR1 = hlBox(fx, 312, 123, 136, 23);
   const bxTVR2 = hlBox(fx, 33, 149, 124, 23);
   const mk = [[250, 179, 178, 20], [36, 206, 150, 20]].map(([x, y, w, hh]) => marker(fx, x, y, w, hh));
-  const bxChip = hlBox(P.inStrip, 218, 47, 84, 23);
+  const bxChip = hlBox(P.inStrip, 218, 47, 98, 23);    // 2026-10-16: "46 CFR 140.915(a)"
   const counter = sideCounter(root, 'records');
   const T = { top: 5.95, flick: 7.45, exit: t1 - 0.3 };
   const cam = [
@@ -1026,7 +1027,7 @@ function montageScene({ t0, t1 }) {
   const items = [
     { src: 'dossier.png', h: 410, crop: 410, label: 'Your vessel profile' },
     { src: 'menu.png', h: 1003, crop: 560, label: 'Fleet · credentials · tools' },
-    { src: 'q2_strip.png', h: 1117, crop: 560, label: 'Records & audits' },
+    { src: 'q2_strip.png', h: 1121, crop: 560, label: 'Records & audits' },
   ];
   const GAP = 660;
   const panels = items.map((it, i) => {
@@ -1129,12 +1130,13 @@ function endCard({ t0, t1, variant = 'main' }) {
   if (variant === 'main') {
     cta = h('div', { class: 'cta', style: 'top:1150px' }, 'Try it free');
     url = h('div', { class: 'url', style: 'top:1270px' }, 'regknots.com');
-    fine1 = h('div', { class: 'fine', style: 'top:1420px' }, '7-day free trial · No credit card');
+    // 2026-10-16 — the free question before signup is the offer now
+    fine1 = h('div', { class: 'fine', style: 'top:1420px' }, 'First question free · No sign-up');
     fine2 = h('div', { class: 'fine b', style: 'top:1475px' }, 'Fleets: first boat free for 30 days');
   } else {
     cta = h('div', { class: 'cta', style: `top:${1150 + Y}px`, html: 'Ask <span style="color:var(--teal)">RegKnot</span>' });
     url = h('div', { class: 'url', style: `top:${1270 + Y}px` }, 'regknots.com');
-    fine1 = h('div', { class: 'fine', style: `top:${1420 + Y}px` }, '7-day free trial · No credit card');
+    fine1 = h('div', { class: 'fine', style: `top:${1420 + Y}px` }, 'First question free · No sign-up');
   }
   ul = h('u', {});
   url.append(ul);

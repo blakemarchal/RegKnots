@@ -43,9 +43,26 @@ F = {
 }
 
 
-def load(key: str) -> np.ndarray:
-    im = Image.open(RAW / f"{F[key]}.jpg").convert("RGB")
+# 2026-10-16 — recaptured after the CFR chip fix (2026-09-29): the September
+# frames showed "46 CFR 140.410](b))". recapture.py puts the new frames in
+# raw/new/ in the same geometry; they bring the answer content, and the phone
+# chrome (header, composer) stays from the September frame, so every shot
+# matches the live-streaming frames that can't be retaken (consult1, stream1,
+# consult2) and phones' shorter composer prompt doesn't flip between shots.
+NEW = {"final_a", "final_b", "final_c", "bottom", "q2_top", "q2_list_a", "q2_list_b"}
+
+
+def load_file(name: str) -> np.ndarray:
+    im = Image.open(RAW / f"{name}.jpg").convert("RGB")
     return np.asarray(im).astype(np.int16)[:H, :W]
+
+
+def load(key: str) -> np.ndarray:
+    a = load_file(F[key])
+    if key in NEW and (RAW / "new" / f"{key}.jpg").exists():
+        a = a.copy()
+        a[HEADER_END:COMPOSER_START] = load_file(f"new/{key}")[HEADER_END:COMPOSER_START]
+    return a
 
 
 def paint_out_scrollbar(a: np.ndarray, y0: int, y1: int) -> np.ndarray:
@@ -119,6 +136,12 @@ seq = [paint_out_scrollbar(load(k), 0, H) for k in ("final_a", "final_b", "final
 # final_a's first clean rows (the answer's opening paragraph) inside mp1ozv.
 dq, sc = best_shift(s1, seq[0], CLEAN_TOP, CLEAN_BOT, band=(CLEAN_TOP, CLEAN_TOP + 120))
 print(f"stream1 -> final_a: d={dq} diff={sc:.2f}")
+# 2026-10-16 — the stage's overlay positions were tuned on the September strip,
+# where the answer starts at row 176. The recaptured final_a matches 4 rows lower
+# (its scroll differs by ~3 px); start it at 176 so the answer sits where the
+# stage expects it (the 4 dropped rows are the blank gap above the answer).
+if "final_a" in NEW and (RAW / "new" / "final_a.jpg").exists():
+    dq = 176
 strip = [s1[CLEAN_TOP:CLEAN_TOP + dq]]          # bubble etc. above final_a's top
 prev = seq[0]
 strip.append(prev[CLEAN_TOP:CLEAN_BOT + 1])

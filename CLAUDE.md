@@ -522,6 +522,17 @@ If a doc says "alembic head is 0045" but `alembic current` says `0092`, the doc 
   - **Demos:** chips are teal like the real ones, with the verified badge. The first demo (a passenger vessel citing 46 CFR 133.45, an OSV section) is replaced by the towboat answer from the first free question, checked against 46 CFR 141.305 / .360 / .370 / .375.
   - `scripts/smoke.sh`: the landing canary is now this version's text ("Ask a question free").
   - Checked locally against a stub API that replays a real answer, with Cloudflare's test keys (always-pass, and forced-challenge for the hint), at 1280 and 375 px. `next build` clean; api 184 and web tests pass.
+  - **Phone composer** (`dce50bb`, found while recapturing the video): since the 16px iOS rule (2026-09-29), the chat placeholder "Ask a regulation question…" wrapped to two lines on a 390px phone and doubled the composer's height. Under 480px it reads "Ask a question…".
+- **2026-10-16 video ads rebuilt** (Blake: "Greenlight the full pass and videos"; pipeline `scripts/video/`, README updated).
+  - **Narration:** ElevenLabs stock voices "Sarah" (female) and "Bill" (male), model `eleven_v4`, via `vo_elevenlabs.py`. Word times come from ElevenLabs' alignment, not Whisper. About 1,400 characters for all lines.
+    - The end card still says "Narration: AI voice".
+    - Line 6 is still third person ("Built by Captain Karynn Marchal…").
+    - No clone of Karynn's voice.
+  - **Footage:** the answer frames were retaken from the same two M/V Bay Pioneer conversations, so the chips no longer read "(b))".
+    - `recapture.py` normalises pane captures.
+    - `prep.py` keeps September's phone chrome.
+    - Masters are in `data/video/out/final/`; September's are in `out/archive-2026-09-29/`.
+  - End cards: "First question free · No sign-up".
 See `docs/PROJECT_STATE.md` for a fuller operational snapshot and `docs/roadmap.md` for the prioritized backlog.
 
 
