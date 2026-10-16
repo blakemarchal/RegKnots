@@ -44,20 +44,26 @@ python finish.py main
 
 ## Narration with ElevenLabs (2026-10-16)
 
-Stock ElevenLabs voices on Blake's Creator plan (commercial use included): `sarah` (female) and `bill`
-(male), model `eleven_v4`. Premade voices only; never a clone. The key is `ELEVENLABS_API_KEY` in the repo
-`.env` (laptop only). The 32 lines for all three cuts in both voices are about 1,400 characters.
+Stock ElevenLabs voices on Blake's Creator plan (commercial use included), model `eleven_v4`: **`chris`**
+(male) and **`river`** (neutral; the female part), Blake's picks after auditioning seven; `sarah` and
+`bill` stay available. Premade voices only; never a clone. The key is `ELEVENLABS_API_KEY` in the repo
+`.env` (laptop only). The 32 lines for all three cuts in two voices are about 1,400 characters.
 
 ```bash
-python vo.py requests sarah bill        # lines not yet in data/video/vo/cache/
+python vo.py requests chris river       # lines not yet in data/video/vo/cache/
 python vo_elevenlabs.py                 # TTS with timestamps -> cache/*.wav + word times in vo/words.json
-python vo.py build main sarah           # then the same steps as below, with --vo sarah / bill
+python vo.py build main chris           # then the same steps as below, with --vo chris / river
 ```
 
 `vo.py` respells a few words for the voice without changing the word count (the splitter matches timed
-words to the script): RegKnot -> Regnot, regknots.com -> regnots.com, USCG / TVR / TPO spelled with
-dots. Captions keep the real spelling. The finished files are named `AI-voice-female` (sarah) and
-`AI-voice-male` (bill).
+words to the script): **Karynn Marchal -> Corinne Marshal** (eleven spellings were tried; this one puts
+the stress on the second syllable, which is how the name is said), RegKnot -> Regnot, regknots.com ->
+regnots.com, USCG / TVR / TPO spelled with dots. Captions keep the real spelling. The finished files are
+named `AI-voice-Chris` and `AI-voice-River` (`AI-voice-female` / `-male` for the older voices).
+
+If a spelling ever fails again: `vo_sts.py RECORDING` converts a recording of a line (Blake saying it)
+into the narrator's voice with ElevenLabs speech-to-speech, keeping the pronunciation, and puts it in the
+cache under that line's key. Tested; not needed for the current build.
 
 ## Recaptured footage (2026-10-16)
 

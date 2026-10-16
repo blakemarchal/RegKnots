@@ -42,7 +42,11 @@ EL_MODEL = "eleven_v4"
 EL_SETTINGS = {"stability": 0.5, "similarity_boost": 0.75, "style": 0.1, "use_speaker_boost": True}
 # Spoken respellings. Each keeps the word count, because the splitter matches the
 # timed words to the script's chunks.
-EL_SAY = (("regknots.com", "regnots.com"), ("RegKnot", "Regnot"), ("USCG", "U.S.C.G."),
+# "Corinne Marshal" is how the voice says Karynn Marchal right (Blake, 2026-10-16,
+# after eleven spellings; the stress is on the second syllable). Captions keep
+# the real spelling.
+EL_SAY = (("Karynn Marchal", "Corinne Marshal"),
+          ("regknots.com", "regnots.com"), ("RegKnot", "Regnot"), ("USCG", "U.S.C.G."),
           ("TVR", "T.V.R."), ("TPO", "T.P.O."))
 
 
