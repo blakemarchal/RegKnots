@@ -420,7 +420,7 @@ If a doc says "alembic head is 0045" but `alembic current` says `0092`, the doc 
       - no autocapture or recording;
       - URLs scrubbed to campaign parameters, private path segments masked;
       - identified by user id; admins opt out.
-      - **Off until `NEXT_PUBLIC_POSTHOG_KEY` is set.**
+      - **Live since 2026-10-16** (key in the prod `.env`).
   - **Step 1, search basics:**
     - `robots.txt`, `sitemap.xml`, a share image, canonical / Open Graph metadata on every public page.
     - noindex on sign-in and partner promo pages.
@@ -446,6 +446,47 @@ If a doc says "alembic head is 0045" but `alembic current` says `0092`, the doc 
     - **Pilot codes:** the link is `/register?next=/workspaces&src=pilot-<code>`, giving 90 days by default. Admin › Pilots has codes, workspaces and Set trial.
     - **Demo fleet:** `scripts/demo/seed_demo_workspace.py [--reset]`: Gulf Coast Marine Towing (Demo), M/V Bay Pioneer, 4 fictional crew, a TSMS excerpt. Blake owns it; Karynn is an admin.
     - **Audit readiness fix:** it now leaves admin accounts out of an internal-only workspace. It had listed Blake's and Karynn's own expired medicals.
+- **2026-10-16 OpenAI model swaps + security review** (Blake: "Do the luna swap, swap the voice, and greenlight all recommended"). Migrations **0127–0128**; alembic head is **0128**.
+  - **PostHog is LIVE** (US cloud; the key went into the prod `.env`, then a deploy).
+    - The prod `.env` holds two different `NEXT_PUBLIC_POSTHOG_KEY` lines; the second is the live one. Blake deletes the extra.
+  - **GPT-4o leaves the OpenAI API on 2027-01-14** and **whisper-1 on 2027-02-26** (OpenAI deprecations page).
+    - **Fallback:** `rag/fallback.py` answers on **`gpt-6-luna`** (effort `low`; env `OPENAI_FALLBACK_MODEL` / `OPENAI_FALLBACK_EFFORT`) when Claude is down or refuses.
+      - It sends `max_completion_tokens` + `reasoning_effort`.
+      - Claude image blocks become `image_url` parts. An image question that fell back used to fail outright.
+      - Stored as `fallback_openai` (migration 0128).
+      - Live check: text 2.7 s with a correct citation; the image was read.
+    - **Voice input:** `/transcribe` is on **`gpt-transcribe`** ($0.0045/min), on the async client.
+      - Live check: MP3 and WebM/Opus transcribed correctly.
+      - No `/transcribe` calls in 60 days of logs.
+    - **Compare harness:** the GPT-4o judge is opt-in (`--gpt-judge=<model>`).
+    - **Why OpenAI stays:**
+      - Embeddings: Anthropic has none; switching means re-embedding 111K chunks and re-tuning retrieval.
+      - Outage fallback: all three outages were Anthropic credits.
+      - Speech-to-text: Claude has none.
+  - **`_MISSING_SOURCES` had rotted again:** "imsbc" told users the IMSBC Code isn't in the database. The harvest ingested it (MSC.268(85) + amendments); removed.
+  - **Mistake, ~$7.50 of promo credit:** `scripts/compare_synthesis_models.py` ran its whole paid comparison on import (unguarded `asyncio.run(main())`). A new script imported it for `capture()`. Now guarded (`e874975`).
+  - **Security review** (from another Claude session's code read; verified here). Doc: `docs/sprint-audits/security-review-2026-10-16.md`.
+    - **P0, preview attach** (`8481878`):
+      - **The hole:** `POST /vessels/{id}/documents/from-preview` globbed an unvalidated `preview_id`. `*` took another user's preview, and `../` reached files the root-run API could move, `/opt/RegKnots/.env` included.
+      - **The fix:** the id is now a UUID; previews are stored per user and found by exact name; stale previews are purged daily.
+      - **No sign of use on prod.**
+    - **P1/P2** (`61b9877`):
+      - Rate limits (`app/ratelimit.py`: Redis, with an in-process fallback). A probe on prod got 401 ×10, then 429.
+      - A password change or reset deletes refresh tokens (deleted, not revoked: refresh's replay check would end the fresh session too).
+      - Register requires 8 characters.
+      - `environment` defaults to production, and the API refuses to start with the dev or a short JWT secret.
+      - Privacy page: Argon2, OpenAI's other uses, scans to Anthropic, Sentry.
+      - Uploads: sniffed types and capped reads (`app/uploads.py`).
+      - Sentry scrubbing on the API and web.
+      - Admin: masked credential numbers; `view_conversation` audited; audit rows survive an admin's deletion (0127).
+      - Account deletion blanks the user's words in six log tables.
+      - Backups: nightly uploads archive; offsite copies age-encrypted, and nothing uploads without the public key.
+  - **Demo audit fix (same day):** Fleet Audit Readiness leaves admin accounts out of internal-only workspaces.
+  - **Blake's open steps:**
+    - Offsite backups: Spaces bucket and keys, `apt-get install -y rclone age`, an age key pair on his laptop (header of `scripts/backup_offsite.sh`).
+    - Turnstile keys (the free question before signup).
+    - Search Console.
+    - The two Stripe webhook events.
 See `docs/PROJECT_STATE.md` for a fuller operational snapshot and `docs/roadmap.md` for the prioritized backlog.
 
 
@@ -481,4 +522,4 @@ Full audit report (models, retrieval, UX, product packaging): see the 2026-07-18
 
 ---
 
-*Last updated 2026-10-14 (growth plan: funnel events + cookieless PostHog, search basics, 1,147 regulation pages at /regs, one free answer before signup (off until keyed), Wheelhouse pilot codes + demo fleet, migrations 0123–0126; 2026-10-13: IMO resolution harvester: backlog of 248 resolutions + 19 parent codes, weekly harvest, retrieval groups / tiers / keyword caps, dates prompt; towboat Sub M fix deployed; 2026-10-09: answer pipeline phase 1 live: whole sections, sources-and-gaps prompt; IMO splitter fix + pilot transfer resolutions; 2026-10-06 mail routing: inbound Google only, ImprovMX unused, app email on Resend with a default reply-to; 2026-10-05: PDF and Word uploads in chat, migration 0121; reply-to on admin emails; off-topic check sees the conversation, attachment wording; 2026-10-03 security: only our hostnames get a TLS certificate or credentialed CORS, junk certificates cleared; earlier: free /practice page, capped free plan, MVUS / school / TPO outreach with a call list, NGA manuals `nga_pubs`, migration 0120; earlier: inland / Coast Guard corpus: ten new sources, NVIC discovery fix, Medical Manual, uscg_bulletin pruned + daily feed, keyword floor, migration 0119; earlier: corpus gap audit; self-serve account deletion + migration 0118; admin redesign + customer UX pass; CFR paragraph chips; video ads first cut). When this drifts from reality, fix it — that's the rule.*
+*Last updated 2026-10-16 (OpenAI fallback → gpt-6-luna, voice → gpt-transcribe, PostHog live, security review shipped: preview-attach fix, rate limits, session revocation, startup guard, upload sniffing, Sentry scrubbing, audit / deletion / backup hardening, migrations 0127–0128; 2026-10-14 growth plan: funnel events + cookieless PostHog, search basics, 1,147 regulation pages at /regs, one free answer before signup (off until keyed), Wheelhouse pilot codes + demo fleet, migrations 0123–0126; 2026-10-13: IMO resolution harvester: backlog of 248 resolutions + 19 parent codes, weekly harvest, retrieval groups / tiers / keyword caps, dates prompt; towboat Sub M fix deployed; 2026-10-09: answer pipeline phase 1 live: whole sections, sources-and-gaps prompt; IMO splitter fix + pilot transfer resolutions; 2026-10-06 mail routing: inbound Google only, ImprovMX unused, app email on Resend with a default reply-to; 2026-10-05: PDF and Word uploads in chat, migration 0121; reply-to on admin emails; off-topic check sees the conversation, attachment wording; 2026-10-03 security: only our hostnames get a TLS certificate or credentialed CORS, junk certificates cleared; earlier: free /practice page, capped free plan, MVUS / school / TPO outreach with a call list, NGA manuals `nga_pubs`, migration 0120; earlier: inland / Coast Guard corpus: ten new sources, NVIC discovery fix, Medical Manual, uscg_bulletin pruned + daily feed, keyword floor, migration 0119; earlier: corpus gap audit; self-serve account deletion + migration 0118; admin redesign + customer UX pass; CFR paragraph chips; video ads first cut). When this drifts from reality, fix it — that's the rule.*

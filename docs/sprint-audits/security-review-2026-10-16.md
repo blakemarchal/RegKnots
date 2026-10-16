@@ -8,13 +8,76 @@
 
 | # | Finding | Verified | Priority | Status |
 |---|---|---|---|---|
-| 1 | Document preview attach: `preview_id` is a free string passed to `glob`, with no owner check | **Yes, and worse than reported** | **P0** | Fix built and tested; awaiting deploy go |
-| 2 | No rate limits on login, register, forgot / reset password, extraction, transcription | Yes | P1 | Planned |
-| 3 | Changing or resetting the password doesn't revoke refresh tokens | Yes | P1 | Planned |
-| 4 | Register accepts any password length (the API has no minimum; the web form has `minLength=8`) | Yes | P1 | Planned |
-| 5 | `environment` defaults to `development`; the default JWT secret isn't refused at startup | Yes | P1 | Planned |
-| 6 | Privacy page is inaccurate or incomplete | Yes | P1 | Wording needs Blake's go |
-| 7 | Hardening items (see below) | Mostly yes | P2 | Planned / decisions |
+| 1 | Document preview attach: `preview_id` is a free string passed to `glob`, with no owner check | **Yes, and worse than reported** | **P0** | **Shipped** `8481878` |
+| 2 | No rate limits on login, register, forgot / reset password, extraction, transcription | Yes | P1 | **Shipped** `61b9877`, `74c58c6` |
+| 3 | Changing or resetting the password doesn't revoke refresh tokens | Yes | P1 | **Shipped** `61b9877` |
+| 4 | Register accepts any password length (the API has no minimum; the web form has `minLength=8`) | Yes | P1 | **Shipped** `61b9877` |
+| 5 | `environment` defaults to `development`; the default JWT secret isn't refused at startup | Yes | P1 | **Shipped** `61b9877` |
+| 6 | Privacy page is inaccurate or incomplete | Yes | P1 | **Shipped** `61b9877` (Blake's go) |
+| 7 | Hardening items (see below) | Mostly yes | P2 | **Shipped** `61b9877`; offsite needs Blake's keys |
+
+**All deployed 2026-10-16.** Migrations 0127 and 0128 applied.
+
+Checked on prod after the deploy:
+- Eleven failed logins for one address got 401 ten times, then 429.
+- The Redis keys hold only hashes. The probe's keys were deleted afterwards.
+- The `admin_audit_log` foreign key is `ON DELETE SET NULL`.
+- The API started past the new startup guard.
+
+## What shipped (2026-10-16)
+
+- **Rate limits** (`app/ratelimit.py`): Redis fixed windows, created with SET NX EX and INCR in one pipeline. When Redis is down, an in-process counter takes over (one API worker): limits stay on, and sign-in still works.
+
+  | Endpoint | Limit |
+  |---|---|
+  | Login | 10 per 15 min per email, 30 per IP |
+  | Register | 10 per hour per IP |
+  | Forgot-password | 3 per hour per email, 10 per IP |
+  | Reset-password | 10 per hour per IP |
+  | Change password | 10 per hour per user |
+  | Document and credential scans | 30 a day per user |
+  | Voice input | 100 a day per user |
+
+- **Sessions:**
+  - A password change deletes the user's refresh tokens and gives the current device a fresh one. A reset deletes them all.
+  - They are deleted, not marked revoked, because `/auth/refresh` treats a revoked token as a replay and would also end the fresh session.
+- **Register:** 8-character minimum, the same as change and reset.
+- **Startup guard:**
+  - `environment` now defaults to `production`; the local `.env` sets `development`.
+  - Outside development, the API refuses to start with the default or a short JWT secret.
+- **Privacy page:**
+  - Argon2, not bcrypt.
+  - OpenAI also transcribes voice input and answers when Anthropic is unavailable.
+  - Credential and document scans go to Anthropic.
+  - Sentry is listed.
+  - Usage counts survive deletion without the user's words; backups are kept 14 days.
+- **Uploads** (`app/uploads.py`):
+  - Chunked reads stop at the cap.
+  - Image, PDF and audio types are read from the bytes, not the browser's claim. This covers vessel documents and previews, credentials and voice.
+- **Sentry:**
+  - The API sends no request bodies, query strings, cookies, auth headers or user emails.
+  - The web drops the same, and runs URLs and breadcrumbs through the analytics URL scrubber (`lib/sentryScrub.ts`).
+- **Admin:**
+  - Credential numbers show only their last 4 characters in the table browser and are no longer searchable.
+  - Opening a user's conversation (`/admin/chats/{id}`) writes `view_conversation` to the audit log.
+  - Audit rows survive an admin's deletion (migration 0127).
+  - `audit_log()` still never raises, but a failure is logged with `logger.exception`, which reaches Sentry.
+- **Account deletion:** the user's questions, answers and model reasoning are blanked in the six logs that keep their rows, inside the deletion transaction (`account_deletion.SCRUB_SQL`).
+- **Backups:**
+  - The nightly run also archives `data/uploads` (65 MB today), with an integrity check and the same 14-day retention.
+  - `backup_offsite.sh` encrypts every file with `age` to a public key before upload, and refuses to upload anything until that key exists.
+  - Tested on the VPS with stand-in `age` and `rclone`: it refuses with no key, then encrypts, syncs and verifies; a rerun encrypts nothing new; a pruned backup leaves offsite too.
+- **Not changed:** chat images stay base64 in `messages.image_attachments` and go with their conversation. No retention rule was decided.
+
+## Blake's remaining step (offsite backups)
+
+The header of `scripts/backup_offsite.sh` lists the steps, about 10 minutes:
+
+1. A DigitalOcean Spaces bucket and keys.
+2. `apt-get install -y rclone age` on the VPS.
+3. The rclone config.
+4. On your laptop, `age-keygen -o regknots-backup.key`. Keep that file in your password manager: it is the only way to read the offsite copies. Copy only the public key to `/etc/regknots/backup-age.pub`.
+5. Enable the timer.
 
 ## 1. Preview attach (P0)
 
