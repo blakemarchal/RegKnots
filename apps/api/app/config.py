@@ -339,6 +339,11 @@ class Settings(BaseSettings):
     speculative_answer_enabled: bool = Field(
         default=True, validation_alias="SPECULATIVE_ANSWER_ENABLED",
     )
+    # 2026-10-17 — Opus answers in fast mode: same model, first word ~2.5 s
+    # sooner and the whole answer ~9 s sooner (measured), twice the price per
+    # token (~$0.26 vs ~$0.13 an answer). Falls back to standard speed when
+    # the API refuses it (rag.engine._answer_stream). false = standard speed.
+    synthesis_fast_mode: bool = Field(default=True, validation_alias="SYNTHESIS_FAST_MODE")
     # researched items (one per missing fact): per user per day, all users per month
     web_research_daily_cap: int = Field(default=30, validation_alias="WEB_RESEARCH_DAILY_CAP")
     web_research_monthly_cap: int = Field(default=2000, validation_alias="WEB_RESEARCH_MONTHLY_CAP")

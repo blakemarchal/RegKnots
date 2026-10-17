@@ -13,6 +13,7 @@ Steps:
 """
 
 import asyncio
+import contextlib
 import logging
 import re
 import time
@@ -28,6 +29,8 @@ from anthropic import (
     APIError,
     APITimeoutError,
     AsyncAnthropic,
+    BadRequestError,
+    OverloadedError,
     RateLimitError,
 )
 
@@ -2784,6 +2787,43 @@ async def _await_company_block(task) -> str | None:
         return None
 
 
+# 2026-10-17 — Opus fast mode (`speed: "fast"`): the same model writing up to
+# 2.5x faster, at twice the per-token price ($8 / $40 per MTok on Opus 5.5).
+# Measured on three captured production answers: first word 4.4 -> 1.9 s
+# median, whole answer 14.3 -> 5.2 s (scripts/latency/fast_mode_probe.py;
+# latency audit). Fast mode has its own rate limit; a request it refuses at
+# the door (429 / 529), or a 400 where it isn't offered, goes again at
+# standard speed. Nothing has streamed at that point, so the switch is
+# invisible. chat.py passes settings.synthesis_fast_mode.
+_FAST_REFUSALS = (RateLimitError, OverloadedError, BadRequestError)
+
+
+def _without_speed(args: dict) -> dict:
+    extra = {k: v for k, v in (args.get("extra_body") or {}).items() if k != "speed"}
+    out = {k: v for k, v in args.items() if k != "extra_body"}
+    if extra:
+        out["extra_body"] = extra
+    return out
+
+
+@contextlib.asynccontextmanager
+async def _answer_stream(client, args: dict):
+    """client.messages.stream(**args), with the fast-mode fallback above."""
+    async with contextlib.AsyncExitStack() as stack:
+        if "speed" in (args.get("extra_body") or {}):
+            try:
+                stream = await stack.enter_async_context(
+                    client.with_options(max_retries=0).messages.stream(**args))
+            except _FAST_REFUSALS as exc:
+                logger.warning("fast mode refused (%s: %s); answering at standard speed",
+                               type(exc).__name__, str(exc)[:200])
+                stream = await stack.enter_async_context(
+                    client.messages.stream(**_without_speed(args)))
+        else:
+            stream = await stack.enter_async_context(client.messages.stream(**args))
+        yield stream
+
+
 class _SpeculativeAnswer:
     """2026-10-17 — the answer call started while the coverage check runs.
 
@@ -2801,7 +2841,7 @@ class _SpeculativeAnswer:
 
     async def _run(self, client, stream_args: dict) -> None:
         try:
-            async with client.messages.stream(**stream_args) as stream:
+            async with _answer_stream(client, stream_args) as stream:
                 async for text_chunk in stream.text_stream:
                     if text_chunk:
                         self.queue.put_nowait(text_chunk)
@@ -2908,6 +2948,9 @@ async def chat_with_progress(
     # 2026-10-17 — start the answer call while the coverage check runs
     # (_SpeculativeAnswer); chat.py passes settings.speculative_answer_enabled.
     speculative_answer_enabled: bool = True,
+    # 2026-10-17 — Opus answers in fast mode (_answer_stream);
+    # chat.py passes settings.synthesis_fast_mode.
+    synthesis_fast_mode: bool = False,
 ) -> AsyncIterator[dict]:
     """Same RAG pipeline as chat() but yields lightweight progress events.
 
@@ -2922,6 +2965,7 @@ async def chat_with_progress(
     # ("answer timing: ..."; docs/sprint-audits/latency-audit-2026-10-17.md).
     _t0 = time.perf_counter()
     _marks: dict[str, float] = {}
+    answer_speed = None  # usage.speed of the answer call ("fast" in fast mode)
 
     def _mark(name: str) -> None:
         _marks.setdefault(name, round(time.perf_counter() - _t0, 2))
@@ -3165,8 +3209,11 @@ async def chat_with_progress(
         # across users (per-user context lives in the user turn), so it is
         # marked for prompt caching: reads bill at 0.1x input (0.05x on
         # Opus 5.5) within the 5-minute TTL.
-        return dict(model=model_used, system=cached_system(effective_system_prompt),
+        args = dict(model=model_used, system=cached_system(effective_system_prompt),
                     messages=msgs, **_stream_kwargs(model_used))
+        if synthesis_fast_mode and _is_opus(model_used):
+            args["extra_body"] = {"speed": "fast"}
+        return args
 
     # 2026-10-17 — the answer call starts here, while the coverage check (and
     # any web research) runs, with the library text as it stands. It is used
@@ -3227,6 +3274,7 @@ async def chat_with_progress(
         input_tokens = 0
         output_tokens = 0
         streaming_failed_for_fallback = False
+        answer_speed = None
         try:
             if use_speculative:
                 async for text_chunk in speculative.chunks():
@@ -3239,7 +3287,7 @@ async def chat_with_progress(
                 _mark("stream_end")
             else:
                 _mark("synth_start")
-                async with anthropic_client.messages.stream(**_stream_args(messages)) as stream:
+                async with _answer_stream(anthropic_client, _stream_args(messages)) as stream:
                     async for text_chunk in stream.text_stream:
                         if not text_chunk:
                             continue
@@ -3251,6 +3299,7 @@ async def chat_with_progress(
             answer = "".join(answer_chunks)
             input_tokens = final_msg.usage.input_tokens
             output_tokens = final_msg.usage.output_tokens
+            answer_speed = getattr(final_msg.usage, "speed", None)
             # 2026-09-22 — surface non-normal terminations. Opus 5.5 / Sonnet 5
             # run safety classifiers (cyber, bio, reasoning_extraction) that
             # return HTTP 200 with stop_reason="refusal" and no usable text;
@@ -3655,6 +3704,6 @@ async def chat_with_progress(
     # D6.97 — tier_metadata always None after tier_router removal.
     # Field kept on the payload shape for frontend compatibility.
     _mark("done")
-    logger.info("answer timing: %s model=%s chunks=%d", " ".join(f"{k}={v}" for k, v in _marks.items()),
-                model_used, len(chunks))
+    logger.info("answer timing: %s model=%s speed=%s chunks=%d",
+                " ".join(f"{k}={v}" for k, v in _marks.items()), model_used, answer_speed, len(chunks))
     yield {"event": "done", "data": done_payload}

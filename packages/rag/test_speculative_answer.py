@@ -68,8 +68,12 @@ class _Client:
         self.messages = _Messages()
         self.events: list[str] = []
 
+    def with_options(self, **kw):                # fast mode turns the SDK's retries off
+        return self
 
-def _run(monkeypatch, *, missing=(), web_block=None, speculative=True, stop_at="Verifying citations…"):
+
+def _run(monkeypatch, *, missing=(), web_block=None, speculative=True, stop_at="Verifying citations…",
+         fast=False):
     client = _Client()
 
     async def route(query, c, context=None):
@@ -108,6 +112,7 @@ def _run(monkeypatch, *, missing=(), web_block=None, speculative=True, stop_at="
             query_rewrite_enabled=False, reranker_enabled=False,
             synthesis_model_floor=OPUS, pipeline_v2_enabled=True,
             speculative_answer_enabled=speculative,
+            synthesis_fast_mode=fast,
         )
         async for ev in agen:
             out.append(ev)
@@ -159,3 +164,12 @@ def test_a_client_that_leaves_during_research_cancels_it(monkeypatch):
                           stop_at="Checking Coast Guard, IMO and other official sources…")
     assert len(client.calls) == 1 and client.calls[0]["_closed_by"] == "CancelledError"
     assert _deltas(events) == ""
+
+
+def test_fast_mode_asks_for_speed_on_both_paths(monkeypatch):
+    for speculative in (True, False):
+        client, events = _run(monkeypatch, speculative=speculative, fast=True)
+        assert [c.get("extra_body") for c in client.calls] == [{"speed": "fast"}]
+        assert _deltas(events) == "Answer text."
+    client, _ = _run(monkeypatch)
+    assert "extra_body" not in client.calls[0]

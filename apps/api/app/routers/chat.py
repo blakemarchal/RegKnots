@@ -1210,6 +1210,7 @@ async def chat_stream_endpoint(
                 web_research_daily_cap=settings.web_research_daily_cap,
                 web_research_monthly_cap=settings.web_research_monthly_cap,
                 speculative_answer_enabled=settings.speculative_answer_enabled,
+                synthesis_fast_mode=settings.synthesis_fast_mode,
                 # D6.97 Phase 2 — image attachments parsed by preflight.
                 images=parsed_images,
                 # D6.97 (C) — Precision Mode flag from
