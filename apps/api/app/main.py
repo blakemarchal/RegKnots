@@ -42,7 +42,7 @@ if settings.sentry_dsn:
         before_send=_scrub_sentry_event,
     )
 from app.db import init_pool, close_pool, close_redis
-from app.routers import admin, admin_dashboard, admin_documents, admin_gaps, admin_pilots, auth, billing, checklists, coming_up, company_documents, contact, credentials, documents, dossier, export, health, chat, logs, me, onboarding, guest_chat, practice, preferences, public_regs, runner, sales, sea_service, sea_time, study, transcribe, user_documents, vessels, regulations, conversations, notifications, support, support_reports, survey, waitlist, web_fallback, whale_zones, workspaces
+from app.routers import admin, admin_dashboard, admin_documents, admin_gaps, admin_pilots, admin_sales, auth, billing, checklists, coming_up, company_documents, contact, credentials, documents, dossier, export, health, chat, logs, me, onboarding, guest_chat, practice, preferences, public_regs, runner, sales, sea_service, sea_time, study, transcribe, user_documents, vessels, regulations, conversations, notifications, support, support_reports, survey, waitlist, web_fallback, whale_zones, workspaces
 
 logger = logging.getLogger(__name__)
 
@@ -141,3 +141,4 @@ app.include_router(user_documents.router)   # 2026-10-05 — PDF / Word attachme
 app.include_router(admin_documents.router)  # 2026-10-05 — admin view of chat attachments
 app.include_router(admin_gaps.router)       # 2026-10-08 — corpus gaps (answer pipeline phase 2)
 app.include_router(admin_pilots.router)     # 2026-10-14 — Wheelhouse pilot codes and trials
+app.include_router(admin_sales.router)      # 2026-10-17 — Admin > Sales: salespeople, credit, payouts, checks

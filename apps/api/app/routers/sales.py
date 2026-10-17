@@ -20,6 +20,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from app import pilots
+from app.sales_credit import CREDIT_CODE_SQL, USER_PAYING_SQL, WORKSPACE_PAYING_SQL
 from app.auth.deps import get_current_user
 from app.auth.schemas import CurrentUser
 from app.db import get_pool
@@ -48,7 +49,8 @@ async def require_sales(
     if row["is_sales"] and row["sales_code"] and not (is_admin and code):
         return SalesCtx(user_id=user.user_id, owner_id=user.user_id, code=row["sales_code"], is_admin=is_admin)
     if is_admin and code:
-        owner = await pool.fetchrow("SELECT id FROM users WHERE sales_code = $1 AND is_sales", pilots.normalize_code(code))
+        # 2026-10-17 — any salesperson's code, with access on or off (Admin > Sales keeps the code).
+        owner = await pool.fetchrow("SELECT id FROM users WHERE sales_code = $1", pilots.normalize_code(code))
         return SalesCtx(user_id=user.user_id, owner_id=str(owner["id"]) if owner else user.user_id,
                         code=pilots.normalize_code(code), is_admin=True)
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
@@ -106,18 +108,17 @@ async def me(ctx: Annotated[SalesCtx, Depends(require_sales)], pool: Annotated[a
 @router.get("/signups", response_model=list[Signup])
 async def signups(ctx: Annotated[SalesCtx, Depends(require_sales)],
                   pool: Annotated[asyncpg.Pool, Depends(get_pool)]) -> list[Signup]:
-    src = f"pilot-{ctx.code}"
+    # 2026-10-17 — the link's code, or an admin's credit (app/sales_credit.py).
     users = await pool.fetch(
-        """SELECT u.id, u.full_name, u.email, u.created_at,
-                  (u.subscription_status = 'active' AND u.subscription_tier IN ('cadet','mate','captain','pro')) AS paying,
+        f"""SELECT u.id, u.full_name, u.email, u.created_at, {USER_PAYING_SQL} AS paying,
                   (SELECT count(*) FROM messages m JOIN conversations c ON c.id = m.conversation_id
                     WHERE c.user_id = u.id AND m.role = 'user') AS questions
-             FROM users u WHERE u.signup_attribution->>'src' = $1 ORDER BY u.created_at DESC""", src)
+             FROM users u WHERE {CREDIT_CODE_SQL} = $1 ORDER BY u.created_at DESC""", ctx.code)
     out = []
     for u in users:
         fleets = await pool.fetch(
             f"""SELECT w.id, w.name, w.status, w.created_at, {pilots.TRIAL_END_SQL} AS trial_ends_at,
-                       (w.stripe_subscription_id IS NOT NULL) AS paying,
+                       {WORKSPACE_PAYING_SQL} AS paying,
                        (SELECT count(*) FROM vessels v WHERE v.workspace_id = w.id) AS boats
                   FROM workspaces w WHERE w.owner_user_id = $1 ORDER BY w.created_at""", u["id"])
         fl = [Fleet(id=str(f["id"]), name=f["name"], status=f["status"], created_at=f["created_at"],
@@ -146,9 +147,8 @@ async def commission(ctx: Annotated[SalesCtx, Depends(require_sales)],
     """What the accounts from this code paid, by month, from our own billing
     records (workspace invoices and personal invoices); refunds are not netted
     here, the monthly report (scripts/sales/commission_report.py) does that."""
-    src = f"pilot-{ctx.code}"
     rows = await pool.fetch(
-        """WITH people AS (SELECT id FROM users WHERE signup_attribution->>'src' = $1)
+        f"""WITH people AS (SELECT u.id FROM users u WHERE {CREDIT_CODE_SQL} = $1)
            SELECT to_char(e.created_at, 'YYYY-MM') AS month,
                   sum(COALESCE((e.details->>'amount_paid_cents')::bigint, 0)) AS cents
              FROM workspace_billing_events e JOIN workspaces w ON w.id = e.workspace_id
@@ -156,7 +156,7 @@ async def commission(ctx: Annotated[SalesCtx, Depends(require_sales)],
             GROUP BY 1
            UNION ALL
            SELECT to_char(COALESCE(b.paid_at, b.created_at), 'YYYY-MM'), sum(COALESCE(b.amount_paid_cents, 0))
-             FROM billing_events b WHERE b.user_id IN (SELECT id FROM people) GROUP BY 1""", src)
+             FROM billing_events b WHERE b.user_id IN (SELECT id FROM people) GROUP BY 1""", ctx.code)
     by_month: dict[str, int] = {}
     for r in rows:
         by_month[r["month"]] = by_month.get(r["month"], 0) + int(r["cents"] or 0)

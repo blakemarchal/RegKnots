@@ -5,7 +5,8 @@ Run on the VPS from apps/api (read-only; prints no secrets):
 
     .venv/bin/python /opt/RegKnots/scripts/sales/commission_report.py jordan [--rate 0.25] [--months N]
 
-Accounts: users whose signup_attribution->>'src' is pilot-<code>, their own
+Accounts: users credited to <code> (app/sales_credit.py: an admin's credit in
+Admin > Sales, else the pilot code in their signup link), their own
 subscription and the workspaces they own (workspaces.stripe_subscription_id).
 Revenue: Stripe invoices with amount_paid > 0 on those subscriptions, by paid
 month; refunds come off the month they're issued. Commission: rate × revenue, for as
@@ -15,9 +16,15 @@ import argparse
 import datetime as dt
 import os
 import subprocess
+import sys
 from collections import defaultdict
+from pathlib import Path
 
 import stripe
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "apps" / "api"))
+from app.pilots import normalize_code  # noqa: E402
+from app.sales_credit import CREDIT_CODE_SQL  # noqa: E402
 
 for line in open("/opt/RegKnots/.env", encoding="utf-8"):
     if "=" in line and not line.startswith("#"):
@@ -38,16 +45,16 @@ def main():
     ap.add_argument("--rate", type=float, default=0.25)
     ap.add_argument("--months", type=int, default=0, help="commission window per customer; 0 = for as long as they pay (Blake, 2026-10-16)")
     a = ap.parse_args()
-    src = f"pilot-{a.code}"
+    code = normalize_code(a.code)
     rows = psql(f"""
         SELECT u.email, u.created_at::date, 'account', u.stripe_subscription_id
-          FROM users u WHERE u.signup_attribution->>'src' = '{src}'
+          FROM users u WHERE {CREDIT_CODE_SQL} = '{code}'
         UNION ALL
         SELECT u.email, w.created_at::date, 'fleet: ' || w.name, w.stripe_subscription_id
           FROM workspaces w JOIN users u ON u.id = w.owner_user_id
-         WHERE u.signup_attribution->>'src' = '{src}'
+         WHERE {CREDIT_CODE_SQL} = '{code}'
         ORDER BY 2""")
-    print(f"{src}: {len(rows)} account(s) / fleet(s)")
+    print(f"{code}: {len(rows)} account(s) / fleet(s)")
     by_month = defaultdict(float)
     for email, created, what, sub_id in rows:
         label = f"{email.split('@')[0][:2]}*** {what}"
