@@ -5,7 +5,7 @@
 
 import { useEffect, useState } from 'react'
 import { apiRequest } from '@/lib/api'
-import { useSales } from './layout'
+import { useSales } from './_lib/context'
 
 interface Fleet { id: string; name: string; status: string; created_at: string; trial_ends_at: string | null; paying: boolean; boats: number }
 interface Signup { id: string; full_name: string | null; email: string; created_at: string; questions: number; fleets: Fleet[]; stage: string }

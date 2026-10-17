@@ -4,27 +4,14 @@
 // users.is_sales (apps/api/app/routers/sales.py); here the token's is_sales flag
 // decides whether the pages render at all. Admins may look at any code with ?code=.
 
-import { createContext, useContext, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { usePathname, useSearchParams } from 'next/navigation'
 import AuthGuard from '@/components/AuthGuard'
 import { AppHeader } from '@/components/AppHeader'
 import { apiRequest } from '@/lib/api'
 import { useAuthStore } from '@/lib/auth'
-
-export interface SalesMe {
-  code: string
-  link: string
-  short_link: string
-  rate: number
-  is_admin: boolean
-  trial_days: number | null
-}
-
-const SalesContext = createContext<{ me: SalesMe | null; codeQuery: string }>({ me: null, codeQuery: '' })
-export function useSales() {
-  return useContext(SalesContext)
-}
+import { SalesContext, type SalesMe } from './_lib/context'
 
 const TABS = [
   { href: '/sales', label: 'Overview' },

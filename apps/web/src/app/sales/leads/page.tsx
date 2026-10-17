@@ -7,7 +7,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { apiDownload, apiRequest } from '@/lib/api'
 import { useEscapeKey } from '@/lib/useEscapeKey'
-import { useSales } from '../layout'
+import { useSales } from '../_lib/context'
 
 interface Lead {
   id: string; lead_ref: string | null; company: string; dba: string | null; city: string | null; state: string | null

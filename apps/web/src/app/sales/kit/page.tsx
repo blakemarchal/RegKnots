@@ -3,7 +3,7 @@
 // 2026-10-16 — the salesperson's kit: the link, the codes, the pitch, the
 // one-pager, and where to send people. The long form lives in docs/sales/.
 
-import { useSales } from '../layout'
+import { useSales } from '../_lib/context'
 
 export default function SalesKit() {
   const { me } = useSales()
