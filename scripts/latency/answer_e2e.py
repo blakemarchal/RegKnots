@@ -6,7 +6,11 @@ every row that references it), and prints when the first word and the finished
 answer arrived plus the engine's own "answer timing" line. Each question costs
 about $0.10-0.15 (Opus answer, Haiku sidecars, web research when it runs).
 
-  cd /opt/RegKnots/apps/api && .venv/bin/python /opt/RegKnots/scripts/latency/answer_e2e.py "question" [towing|container|none]
+  cd /opt/RegKnots/apps/api && .venv/bin/python /opt/RegKnots/scripts/latency/answer_e2e.py [towing|container|none] "question" ["question" ...]
+
+2026-10-17 (later) — the process is warmed first like the API (source caches,
+side-table check, keyword caches, OpenAI connection: one retrieval of an unrelated
+question, Haiku only), so the timings are a running API's, not a cold start's.
 """
 import asyncio
 import logging
@@ -20,6 +24,7 @@ from anthropic import AsyncAnthropic  # noqa: E402
 
 from app.config import settings  # noqa: E402
 from rag.engine import chat_with_progress  # noqa: E402
+from rag.retriever import retrieve_enhanced  # noqa: E402
 
 PROFILES = {
     "towing": {"vessel_name": "E2E check", "vessel_type": "Towing / Tugboat", "flag_state": "United States"},
@@ -39,13 +44,28 @@ class _Grab(logging.Handler):
             self.lines.append(msg)
 
 
-async def main(question: str, profile_key: str) -> None:
-    grab = _Grab()
-    logging.getLogger("rag.engine").addHandler(grab)
-    logging.getLogger("rag.engine").setLevel(logging.INFO)
+async def main(questions: list[str], profile_key: str) -> None:
     pool = await asyncpg.create_pool(settings.database_url.replace("postgresql+asyncpg://", "postgresql://"),
                                      min_size=2, max_size=10)
     client = AsyncAnthropic(api_key=settings.anthropic_api_key)
+    t = time.perf_counter()
+    await retrieve_enhanced(
+        query="how often must the emergency fire pump be tested", pool=pool,
+        openai_api_key=settings.openai_api_key, anthropic_client=client, vessel_profile=PROFILES[profile_key],
+        limit=8, query_rewrite_enabled=True, reranker_enabled=True, jurisdiction_focus="us",
+    )
+    print(f"warm-up retrieval {time.perf_counter() - t:.1f}s")
+    for question in questions:
+        print(f"=== {question}")
+        await one(question, profile_key, pool, client)
+    await client.close()
+    await pool.close()
+
+
+async def one(question: str, profile_key: str, pool, client) -> None:
+    grab = _Grab()
+    logging.getLogger("rag.engine").addHandler(grab)
+    logging.getLogger("rag.engine").setLevel(logging.INFO)
     user_id = await pool.fetchval("SELECT id FROM users WHERE email = 'blakemarchal@gmail.com'")
     conv_id = uuid4()
     await pool.execute("INSERT INTO conversations (id, user_id, title) VALUES ($1, $2, $3)",
@@ -102,12 +122,13 @@ async def main(question: str, profile_key: str) -> None:
         for r in refs:
             await pool.execute(f'DELETE FROM "{r["table_name"]}" WHERE "{r["column_name"]}" = $1', conv_id)
         await pool.execute("DELETE FROM conversations WHERE id = $1", conv_id)
-        await client.close()
-        await pool.close()
+        logging.getLogger("rag.engine").removeHandler(grab)
     for line in grab.lines:
         print("  log:", line[:400])
     print("answer starts:", "".join(answer)[:300].replace("\n", " "))
 
 
 if __name__ == "__main__":
-    asyncio.run(main(sys.argv[1], sys.argv[2] if len(sys.argv) > 2 else "towing"))
+    args = sys.argv[1:]
+    key = args.pop(0) if args and args[0] in PROFILES else "towing"
+    asyncio.run(main(args, key))
