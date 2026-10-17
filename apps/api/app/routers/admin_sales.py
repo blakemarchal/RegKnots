@@ -146,7 +146,7 @@ def build_issues(people: list[dict], accounts: list[SalesAccount], unknown_codes
         if not p["access"] and p["code"] and p["paying_accounts"]:
             out.append(Issue(level="info", code=p["code"],
                              text=f"{who}'s sales access is off, and {p['paying_accounts']} of their accounts "
-                                  f"still pay, so commission is still owed."))
+                                  f"still pay{'s' if p['paying_accounts'] == 1 else ''}, so commission is still owed."))
     for a in accounts:
         for f in a.fleets:
             if f.paying and not f.invoiced:
