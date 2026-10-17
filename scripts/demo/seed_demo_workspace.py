@@ -15,6 +15,12 @@ the OpenAI key, a fraction of a cent):
   uv run python ../../scripts/demo/seed_demo_workspace.py --reset   # delete everything and recreate
 
 --reset deletes the workspace's conversations too, so a demo starts clean.
+
+2026-10-16 (for Jordan Hall's demos): a second boat (M/V Sabine Pass, a river
+push boat), a compliance log, and copies of three real conversations (the two
+Bay Pioneer answers the ads were cut from and the first free question asked on
+the site) as the workspace's shared chat history, so the demo opens on real,
+cited answers instead of an empty chat.
 """
 from __future__ import annotations
 
@@ -35,6 +41,14 @@ from app.config import settings  # noqa: E402
 WORKSPACE_ID = uuid.UUID("d6d63d63-3333-4303-8003-000000000001")
 WORKSPACE_NAME = "Gulf Coast Marine Towing (Demo)"
 VESSEL_NAME = "M/V Bay Pioneer"
+VESSEL2_NAME = "M/V Sabine Pass"
+# Real conversations to copy in (messages word for word, Blake's or the guest
+# account's); skipped if a source is missing on this database.
+SOURCE_CONVERSATIONS = [
+    uuid.UUID("acec9a5d-8494-4c81-a281-61f76ab7e598"),   # new deckhand safety orientation (46 CFR 140.410)
+    uuid.UUID("e92b24b4-7081-409d-9beb-e01717999884"),   # what a Sub M towboat must record (46 CFR 140.915)
+    uuid.UUID("4a64bd28-6757-4d1e-9535-30f3431f5ea7"),   # lifesaving gear on the Mississippi (46 CFR 141)
+]
 OWNER_EMAIL = "blakemarchal@gmail.com"
 ADMIN_EMAILS = ["kdmarchal@gmail.com"]
 CREW_DOMAIN = "demo.regknots.invalid"
@@ -100,6 +114,17 @@ HANDOFF = (
     "at Port Arthur. Towline end-for-ended on the 3rd, logged."
 )
 
+# Compliance log entries (days ago, category, text), on the Bay Pioneer, by the owner.
+LOG_ENTRIES = [
+    (2, "safety_drill", "Fire drill, all hands: fire pump started, two jets charged, engine room dampers and watertight doors operated. 11 minutes. Logged per 46 CFR 140.420."),
+    (5, "crew", "Safety orientation for new deckhand J. Thibodeaux before getting underway: all ten 140.410(b) topics; logged in the TVR with signatures."),
+    (9, "inspection", "Monthly fire extinguisher inspection, 8 portables, all in date; gauge on ER #2 at the low end of green, flagged for annual service."),
+    (14, "maintenance", "Towing gear: both face wires examined, no broken strands; spring line replaced (3-strand nylon, 1-3/4). Recorded per 46 CFR 140.820."),
+    (21, "navigation", "Navigation assessment completed before departure, Port Arthur to Baton Rouge: river stage 18.4 ft rising, 2 locks, air draft OK. Reviewed by oncoming watch."),
+    (33, "environmental", "Oil residue: 40 gal of bilge slops to Port Arthur shore facility; receipt in the TVR."),
+    (45, "psc", "TPO survey visit (annual): no deficiencies; observation on extinguisher bracket in the galley, corrected same day."),
+]
+
 
 async def reset(pool) -> None:
     await pool.execute("DELETE FROM conversations WHERE workspace_id = $1", WORKSPACE_ID)
@@ -141,6 +166,39 @@ async def seed(pool) -> None:
                    RETURNING id""",
                 owner, WORKSPACE_ID, VESSEL_NAME,
             )
+            await conn.execute(
+                """INSERT INTO vessels (user_id, workspace_id, name, vessel_type, gross_tonnage, flag_state,
+                                        route_types, cargo_types, subchapter, inspection_certificate_type,
+                                        manning_requirement, route_limitations)
+                   VALUES ($1, $2, $3, 'Towing / Tugboat', 142, 'United States', ARRAY['inland'],
+                           ARRAY['dry bulk barges','liquid cargo barges'], 'M', 'Certificate of Inspection (Subchapter M)',
+                           'Master of Towing Vessels, Mate (Pilot) of Towing Vessels, 2 deckhands',
+                           'Western Rivers: Lower Mississippi and tributaries, GIWW')""",
+                owner, WORKSPACE_ID, VESSEL2_NAME,
+            )
+            for days_ago, category, entry in LOG_ENTRIES:
+                await conn.execute(
+                    "INSERT INTO compliance_logs (user_id, vessel_id, entry_date, category, entry) VALUES ($1, $2, $3, $4, $5)",
+                    owner, vessel, d(-days_ago), category, entry,
+                )
+            for src in SOURCE_CONVERSATIONS:
+                title = await conn.fetchval("SELECT title FROM conversations WHERE id = $1", src)
+                if title is None:
+                    print(f"source conversation {src} not found; skipped")
+                    continue
+                new_id = await conn.fetchval(
+                    """INSERT INTO conversations (user_id, vessel_id, workspace_id, title, created_at, updated_at)
+                       SELECT $2, $3, $4, title, created_at, updated_at FROM conversations WHERE id = $1
+                       RETURNING id""",
+                    src, owner, vessel, WORKSPACE_ID,
+                )
+                await conn.execute(
+                    """INSERT INTO messages (conversation_id, role, content, model_used, tokens_used,
+                                             cited_regulation_ids, created_at, web_sources)
+                       SELECT $2, role, content, model_used, tokens_used, cited_regulation_ids, created_at, web_sources
+                         FROM messages WHERE conversation_id = $1 ORDER BY created_at""",
+                    src, new_id,
+                )
             for person in CREW:
                 uid = await conn.fetchval(
                     """INSERT INTO users (email, hashed_password, full_name, role, trial_ends_at, email_verified,

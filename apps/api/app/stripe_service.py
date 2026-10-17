@@ -292,6 +292,9 @@ async def create_workspace_checkout_session(
             f"?checkout=success&session_id={{CHECKOUT_SESSION_ID}}"
         ),
         cancel_url=f"{settings.app_url}/workspaces/{workspace_id}",
+        # 2026-10-16 — fleet rates are Stripe promotion codes (FLEET5: 10% off,
+        # FLEET10: 20% off, forever, Wheelhouse products only), entered here.
+        allow_promotion_codes=True,
         metadata={
             "workspace_id": str(workspace_id),
             "owner_user_id": owner_user_id,

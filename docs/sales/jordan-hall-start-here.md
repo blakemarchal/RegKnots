@@ -69,18 +69,23 @@ question into RegKnot on the spot and read it out. That is the demo.
 
 ## Pricing
 
-| | Monthly | Annual |
-|---|---|---|
-| Wheelhouse, per boat | $99.99 | $89.99/mo ($1,079.88/yr) |
-| Fleet trial from your link | 90 days free, no card | |
+Per boat, per month (regknots.com/pricing shows the same table):
 
-For **5 or more boats**, quote a fleet rate; Blake confirms the numbers before you send them.
-Proposed, pending Blake: 5+ boats $89.99/boat/mo, 10+ boats $79.99/boat/mo, annual 10% off those.
+| Boats | Monthly | Annual (per month) | At checkout |
+|---|---|---|---|
+| 1 to 4 | $99.99 | $89.99 | standard |
+| 5 to 9 | $89.99 | $80.99 | code **FLEET5** |
+| 10 or more | $79.99 | $71.99 | code **FLEET10** |
+
+The code goes in when the company adds a card to each boat's Wheelhouse, and the discount stays for
+the life of the subscription. Fleet trial from your link: **90 days free, no card.** Bigger fleets, or
+one invoice for the whole company: Blake quotes it (hello@regknots.com).
 
 ## The demo (10 minutes)
 
 - **Karynn does the demo when she's available**; a USCG Master Unlimited on the call closes the
-  credibility gap in one minute. Book it; Blake will coordinate.
+  credibility gap in one minute. Book it; Blake will coordinate. Any prospect who wants a word with the
+  captain can write to **captain@regknots.com**; it reaches her directly.
 - Otherwise use the demo fleet: **Gulf Coast Marine Towing (Demo)**, the M/V Bay Pioneer, four crew
   and a TSMS excerpt. Blake will add you to it. Ask it the two questions above and tap a citation.
 - The three ads (45 s and two 15 s cuts) are good to send ahead of a call. Blake has the files.
@@ -93,8 +98,8 @@ Proposed, pending Blake: 5+ boats $89.99/boat/mo, 10+ boats $79.99/boat/mo, annu
 
 - Every sign-up from your link shows on our dashboard under `pilot-jordan`, with what they did next
   (asked a question, created a fleet, started paying).
-- You get **25% of what a fleet you brought in pays us in its first 12 months**, paid monthly as the
-  money arrives. The full terms, one page and not lawyerly: `docs/sales/commission-jordan-hall.md`.
+- You get **25% of what a fleet you brought in pays us, for as long as it keeps paying**, paid monthly
+  as the money arrives. The full terms, one page and not lawyerly: `docs/sales/commission-jordan-hall.md`.
 - Blake runs the commission report monthly (`scripts/sales/commission_report.py`); you get the numbers
   with the payment.
 
@@ -102,6 +107,5 @@ Proposed, pending Blake: 5+ boats $89.99/boat/mo, 10+ boats $79.99/boat/mo, annu
 
 - The lead list and the phone script.
 - A seat in the demo fleet.
-- Fleet pricing confirmed, before your first 5-boat quote.
 - Karynn's availability for demos.
 - Anything a prospect asks that isn't in here. Don't guess; we answer fast.

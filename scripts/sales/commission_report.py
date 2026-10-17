@@ -3,13 +3,13 @@ signed up from `src=pilot-<code>` paid us, by month, straight from Stripe.
 
 Run on the VPS from apps/api (read-only; prints no secrets):
 
-    .venv/bin/python /opt/RegKnots/scripts/sales/commission_report.py jordan [--rate 0.25] [--months 12]
+    .venv/bin/python /opt/RegKnots/scripts/sales/commission_report.py jordan [--rate 0.25] [--months N]
 
 Accounts: users whose signup_attribution->>'src' is pilot-<code>, their own
 subscription and the workspaces they own (workspaces.stripe_subscription_id).
 Revenue: Stripe invoices with amount_paid > 0 on those subscriptions, by paid
-month; refunds come off the month they're issued. Commission: rate × revenue
-within each customer's first 12 months of paying.
+month; refunds come off the month they're issued. Commission: rate × revenue, for as
+long as the customer pays (--months limits the window).
 """
 import argparse
 import datetime as dt
@@ -36,7 +36,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("code")
     ap.add_argument("--rate", type=float, default=0.25)
-    ap.add_argument("--months", type=int, default=12, help="commission window per customer")
+    ap.add_argument("--months", type=int, default=0, help="commission window per customer; 0 = for as long as they pay (Blake, 2026-10-16)")
     a = ap.parse_args()
     src = f"pilot-{a.code}"
     rows = psql(f"""
@@ -59,7 +59,7 @@ def main():
         total = 0
         for inv in invoices:
             paid = dt.datetime.fromtimestamp(inv.status_transitions.paid_at, dt.UTC)
-            if first and paid > dt.datetime.fromtimestamp(first, dt.UTC) + dt.timedelta(days=30 * a.months + 15):
+            if a.months and first and paid > dt.datetime.fromtimestamp(first, dt.UTC) + dt.timedelta(days=30 * a.months + 15):
                 continue        # past the commission window
             amount = inv.amount_paid / 100
             for ref in stripe.Refund.list(charge=inv.charge, limit=20).auto_paging_iter() if inv.charge else []:

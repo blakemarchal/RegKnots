@@ -378,7 +378,7 @@ export default function LandingPage() {
                   One vessel. Up to 10 crew. Shared chat, dossier, and rotation handoff.
                 </p>
                 <p className="font-mono text-xs md:text-sm text-[#6b7594] leading-relaxed">
-                  $99.99/month or $89.99/month billed annually ($1,079.88/yr).
+                  $99.99/month or $89.99/month billed annually per boat; fleet rates from 5 boats.
                   30-day free trial — no card required.
                 </p>
               </div>

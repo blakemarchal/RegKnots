@@ -554,6 +554,38 @@ export default function PricingPage() {
             anytime; otherwise the workspace becomes read-only on day 31 and is
             archived 30 days later if no card is added.
           </p>
+
+          {/* 2026-10-16 — fleet rates (Blake's numbers). They are Stripe promotion
+              codes on the Wheelhouse checkout, so a fleet enters the code once per
+              boat and the discount stays for the life of the subscription. */}
+          <div className="mt-10 max-w-3xl mx-auto rounded-2xl border border-white/10 bg-[#0d1225] p-6">
+            <p className="font-mono text-[10px] text-[#2dd4bf] uppercase tracking-[0.25em] mb-3">
+              Fleet rates
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              {[
+                { boats: '1 to 4 boats', monthly: '$99.99', annual: '$89.99', code: null },
+                { boats: '5 to 9 boats', monthly: '$89.99', annual: '$80.99', code: 'FLEET5' },
+                { boats: '10 or more', monthly: '$79.99', annual: '$71.99', code: 'FLEET10' },
+              ].map((r) => (
+                <div key={r.boats} className="rounded-xl border border-white/8 bg-[#0a0e1a]/60 p-4">
+                  <p className="font-display text-lg font-bold text-[#f0ece4]">{r.boats}</p>
+                  <p className="font-mono text-sm text-[#f0ece4]/85 mt-1">{r.monthly} per boat, monthly</p>
+                  <p className="font-mono text-xs text-[#6b7594]">{r.annual} per boat per month, billed annually</p>
+                  {r.code ? (
+                    <p className="font-mono text-xs text-[#2dd4bf] mt-2">Code {r.code} at checkout</p>
+                  ) : (
+                    <p className="font-mono text-xs text-[#6b7594] mt-2">Standard rate</p>
+                  )}
+                </div>
+              ))}
+            </div>
+            <p className="font-mono text-xs text-[#6b7594] mt-4 leading-relaxed">
+              Enter the code when you add a card to each boat&apos;s Wheelhouse; it applies for as long
+              as the subscription runs. Larger fleets or a single invoice for the whole company:{' '}
+              <a href="mailto:hello@regknots.com" className="text-[#2dd4bf] hover:underline">hello@regknots.com</a>.
+            </p>
+          </div>
         </div>
 
         <div className="mt-16 mb-8">

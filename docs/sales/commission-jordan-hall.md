@@ -9,11 +9,11 @@ customers. He speaks for RegKnot honestly and never answers a regulatory questio
 product does that.
 
 **What RegKnot pays.** **25% of the revenue** RegKnot collects from each fleet Jordan brought in, for
-that fleet's **first 12 months** as a paying customer. Paid monthly, as the money actually arrives from
-Stripe, by the 10th of the following month. Refunds and chargebacks come off the next payment.
+**as long as that fleet keeps paying**. Paid monthly, as the money actually arrives from Stripe, by the
+10th of the following month. Refunds and chargebacks come off the next payment.
 
-*Example: a 10-boat fleet at $89.99 a boat pays about $900 a month. Jordan gets about $225 a month for
-12 months, about $2,700 for that fleet.*
+*Example: a 10-boat fleet at the fleet rate pays about $800 a month. Jordan gets about $200 a month,
+every month the fleet stays. Ten such fleets is $2,000 a month.*
 
 **What counts as "his."** A fleet whose account started from his link (`regknots.com/fleet?src=pilot-jordan`),
 or one that Blake agrees in writing came through Jordan's introduction. We settle that when the trial
@@ -23,11 +23,13 @@ starts, not when the money shows up.
 time for demos when she can.
 
 **No exclusivity, no quotas, no notice.** Either of us can stop anytime by saying so; commissions on
-fleets already paying keep running through their 12 months.
+fleets already paying keep running for as long as those fleets pay.
 
 **Confidentiality.** Customer lists and our numbers stay between us.
 
-**Later.** If this works, we'll talk about equity after the first three paying fleets or 90 days,
-whichever comes first. That conversation includes Karynn.
+**Later.** Once fleets Jordan brought in have **10 boats paying**, we sit down and talk about equity.
+That conversation includes Karynn.
+
+**Karynn.** Any prospect who wants to hear it from the captain can: captain@regknots.com reaches her.
 
 Blake Marchal, RegKnot        Jordan Hall
