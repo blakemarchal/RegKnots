@@ -153,6 +153,49 @@ Two consequences:
 Fixes 1 and 2 should bring a typical question's first word from ~24 s to ~18–19 s without web
 research. Getting near 10 s needs 3 and 4 as well (the sequential model steps).
 
+## Shipped the same day (Blake: "greenlighting any speedups that don't negatively effect accuracy")
+
+Droplet upgrade on hold (Blake). Every change below returns the same results; each was checked
+before it shipped. Commits `bba1441`, `ef734a5`, `71cb7a7`; migration **0131**.
+
+| change | how it was checked |
+|---|---|
+| **`regulation_vectors`** (migration 0131): the embeddings stored in-line, kept in step by a trigger + ON DELETE CASCADE. Group queries with a jurisdiction filter read it. | 92 of 92 group results identical on a scratch copy; dense harness 85 of 85 top-8 lists identical to the morning's baseline (0.9529 / 0.9765 / 0.7839). |
+| Keyword lane: frequency checks and the per-keyword pick cached per process (6 h), one lookup in flight per keyword; rows re-read by id with the query's similarity. | Harness 85 of 85 identical sets (one tie reordered); 5 unit tests. |
+| One OpenAI client per event loop (warm HTTPS). | Same API call; first embedding 1.3–1.9 s → 0.2–0.6 s. |
+| Retriever caches loaded at API startup. | No change to results. |
+| **The answer call starts while the coverage check runs** (`rag.engine._SpeculativeAnswer`) and is used only when coverage / web research leave the library text unchanged, i.e. when it is the very request the engine would send afterwards; otherwise cancelled. Kill switch `SPECULATIVE_ANSWER_ENABLED=false`. | 5 unit tests; two real questions on prod (~$0.25), both paths. |
+| One `answer timing:` log line per answer (route, retrieval, context, coverage, web, synth_start, first_token, stream_end, done, speculative). | — |
+
+**Measured and rejected:** the HNSW index with pgvector's iterative scan for the group queries,
+three variants (relaxed / relaxed ef 100 / strict ef 100): recall unchanged but MRR 0.7718 / 0.7714
+/ 0.7818 against 0.7839, and slower single searches (p50 1.9 / 1.1 / 1.0 s against 0.74 s).
+
+**Found on the way:** without a jurisdiction filter the old group query's cached plan *does* use
+the HNSW index (fast, approximate); the exact side table there changed results (MRR 0.7839 →
+0.7714 when every group read it, the same pattern as the HNSW variants), so those groups keep the
+old query. Real questions almost always carry a filter (every U.S.-flag vessel; flag-Unknown
+vessels fall back to the user's jurisdiction focus).
+
+**Results on prod:**
+
+| | before | after |
+|---|---|---|
+| dense harness, strong / weak / MRR | 0.9529 / 0.9765 / 0.7839 | identical, 85 of 85 lists |
+| one search, p50 / p95 (harness) | 738 / 1,566 ms | 629 / 1,133 ms |
+| four searches at once (bench) | 6.5–9.5 s, 10–14 CPU-s | 1.9–2.8 s, 3–4.5 CPU-s |
+| retrieval step incl. rewrite + rerank | 12–15 s | 5.4–5.9 s (warm) |
+| first word, question the library covers | ~24 s (10-11, estimated: not logged then) | **13.5 s** |
+| first word, question that needs web research | 41–44 s (10-16, estimated) | 31.2 s |
+| finished answer, same two | 30.5 s / 65.2 s | 28.2 s / 44.0 s |
+
+**What is left before the first word** (covered question): router ∥ rewrite ~2 s, the three
+rewritten searches ~1.5–2 s, rerank ~2 s, Opus's first token ~5 s (it thinks first). All are model
+calls whose output would change with any trim, so the next steps need an answer-quality A/B:
+items 3 and 4 above, or a smaller rewrite / rerank. Raising Postgres `shared_buffers` so the
+873 MB side table stays in Postgres's own cache could take a little more off the searches (a
+Postgres restart, ~15 s of API downtime; the box is shared).
+
 ## Scripts
 
 Copied from the session to `scripts/latency/` (run on the VPS from `/opt/RegKnots/apps/api` with
@@ -162,3 +205,5 @@ the api venv's python; `PG_CID` is the postgres container id for the CPU counter
 - `bench_retrieval.py`: the four-search fan-out, alone and concurrent, pool 10 and 20.
 - `bench_phases.py`: Postgres CPU per retrieval phase, per keyword check.
 - `bench_plans.py`: the group queries under each plan cache mode.
+- `retrieval_phases.py`: rewrite, the four searches and rerank of one question, timed (Haiku only, ~$0.002).
+- `answer_e2e.py`: one real answer through the production engine, timed, on a throwaway conversation (~$0.10–0.15 per question).

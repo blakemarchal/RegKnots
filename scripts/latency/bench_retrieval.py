@@ -171,7 +171,7 @@ async def main():
         t = time.perf_counter()
         await _orig_embed_queries(settings.openai_api_key, [q])
         emb.append(time.perf_counter() - t)
-    print("embedding call (new client each):", [round(x, 2) for x in emb])
+    print("embedding call (shared client):", [round(x, 2) for x in emb])
     for name, (profile, qs) in SETS.items():
         await cached_embed_queries(settings.openai_api_key, qs)
     pool10 = await asyncpg.create_pool(dsn, min_size=2, max_size=10)
