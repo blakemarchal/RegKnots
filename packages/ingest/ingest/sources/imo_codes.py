@@ -764,10 +764,11 @@ _PREAMBLE_MIN_CHARS = 200
 
 def _assemble(text: str, first_start: int, bodies: list[tuple[str, str, str]], min_chars: int,
               meta: "CodeDocMeta", source_code: str) -> list[Section]:
-    """bodies: (ch_num, title, body) in document order. Short bodies merge into the
+    """bodies: (suffix, title, body) in document order, suffix being what follows the
+    resolution in the section number ("Ch.4", "Pt.1 Ch.5"). Short bodies merge into the
     previous section (or the preamble); the preamble becomes `{resolution}` itself."""
     preamble = text[:first_start].strip()
-    merged: list[list[str]] = []          # [ch_num, title, body]
+    merged: list[list[str]] = []          # [suffix, title, body]
     for ch_num, title, body in bodies:
         if len(body) < min_chars:
             if merged:
@@ -791,10 +792,10 @@ def _assemble(text: str, first_start: int, bodies: list[tuple[str, str, str]], m
         ))
     elif preamble:
         merged[0][2] = preamble + "\n\n" + merged[0][2]
-    for ch_num, title, body in merged:
+    for suffix, title, body in merged:
         sections.append(Section(
             source=source_code, title_number=TITLE_NUMBER,
-            section_number=f"{meta.section_number} Ch.{ch_num}",
+            section_number=f"{meta.section_number} {suffix}",
             section_title=title,
             full_text=body,
             up_to_date_as_of=meta.as_of or SOURCE_DATE,
@@ -809,10 +810,97 @@ def _assemble(text: str, first_start: int, bodies: list[tuple[str, str, str]], m
 # Match a "CHAPTER N — TITLE" heading on its own line. The heading uses
 # all-caps for the title (consistent across the IMO IGC, HSC, IBC PDFs we
 # tested 2026-05-09). Captures (chapter_number, chapter_title).
+#
+# 2026-10-17 — the scanned LSA Code (MSC.48(66)) reads "CHAPTERI-GENER~L",
+# "CHAPTER 11 -PERSONAL..." (for II) and "CHAPTER 1II -VISUAL SIGNALS": Chapter I's
+# heading went unmatched, so its text was filed as "Ch.1 — II -VISUAL SIGNALS" and
+# Chapter II as "Ch.11". The numeral may now follow CHAPTER directly, may read I as
+# 1 or l, and the title may carry a "~"; a document numbered in Roman numerals gets
+# its OCR'd numerals read back (_roman_reader).
 _CHAPTER_RE = re.compile(
-    r"^\s*CHAPTER\s+(\d+|[IVX]+)\s*[—\-:]?\s*([A-Z][A-Z 0-9—\-(),/]{3,80})\s*$",
+    r"^\s*CHAPTER\s*([IVXl1]*[IVXl][IVXl1]*|\d+)\s*[—\-:]?\s*([A-Z][A-Z 0-9—\-(),/~]{3,80})\s*$",
     re.MULTILINE,
 )
+
+
+def _roman_reader(tokens: list[str]):
+    """Token normaliser: in a document whose chapter numerals are mostly Roman,
+    an OCR'd "1" or "l" is an I ("11" -> II, "1II" -> III); in one numbered in
+    Arabic numerals, an OCR'd "I" or "l" is a 1 (the 2008 IS Code's "CHAPTERI")."""
+    roman = sum(1 for t in tokens if not t.isdigit())
+    if roman <= len(tokens) - roman:
+        return lambda t: t.replace("I", "1").replace("l", "1") if re.fullmatch(r"[Il1]+", t) else t
+    return lambda t: (t.replace("1", "I").replace("l", "I")
+                      if re.fullmatch(r"[IVXl1]+", t) else t)
+
+
+# 2026-10-17 — a code in parts whose chapter numbers restart: the 2008 IS Code
+# (MSC.267(85)) has PART A (mandatory criteria, chapters 1-3) and PART B
+# (chapters 1-8). Chapters were deduplicated across the whole text, so Part A's
+# chapters 2 and 3 (the general stability criteria) sat inside "Ch.1" and
+# "Ch.2" was Part B's. The body reads "PART A" and "PARTB".
+_CHAPTER_PART_RE = re.compile(
+    r"^[ \t]*PART\s*([A-Z]|\d{1,2})(?![A-Za-z0-9])[ \t]*(?:[-—:][ \t]*[A-Z][^\n]*)?$",
+    re.MULTILINE,
+)
+
+
+def _chapter_parts(text: str, matches: list[re.Match[str]], numeral) -> list[tuple[str, int, int]]:
+    """(part, start, end) of each body part (the last occurrence of each PART heading),
+    or [] unless there are two or more, in order, each with chapter headings, and some
+    chapter number repeats from one part to another."""
+    last: dict[str, re.Match[str]] = {}
+    for m in _CHAPTER_PART_RE.finditer(text):
+        last[m.group(1)] = m
+    ordered = sorted(last.values(), key=lambda m: m.start())
+    ids = [m.group(1) for m in ordered]
+    if len(ids) < 2 or not (all(i.isdigit() for i in ids) or all(i.isalpha() for i in ids)):
+        return []
+    if ids != sorted(ids, key=lambda i: int(i) if i.isdigit() else i):
+        return []
+    ranges = [(m.group(1), m.start(), ordered[k + 1].start() if k + 1 < len(ordered) else len(text))
+              for k, m in enumerate(ordered)]
+    numbers = [{numeral(c.group(1)) for c in matches if start <= c.start() < end}
+               for _, start, end in ranges]
+    if not all(numbers):
+        return []
+    if not any(numbers[a] & numbers[b] for a in range(len(numbers)) for b in range(a + 1, len(numbers))):
+        return []
+    return ranges
+
+
+def _chapter_bodies(text: str, matches: list[re.Match[str]], numeral, end: int,
+                    meta: "CodeDocMeta", part: str | None = None,
+                    part_start: int | None = None) -> tuple[int, list[tuple[str, str, str]]]:
+    """(offset of the first chapter, bodies) for chapter headings ending at `end`.
+    Within a part, the part heading joins its first chapter."""
+    by_number: dict[str, re.Match[str]] = {}
+    clean_title: dict[str, str] = {}
+    for m in matches:
+        ch_num = numeral(m.group(1))
+        by_number[ch_num] = m   # later matches overwrite earlier (TOC entries)
+        if "~" not in m.group(2):
+            clean_title[ch_num] = m.group(2)   # an OCR-damaged body title falls back to the TOC's
+    ordered = sorted(by_number.items(), key=lambda kv: kv[1].start())
+    bodies: list[tuple[str, str, str]] = []
+    for i, (ch_num, m) in enumerate(ordered):
+        start = part_start if part is not None and i == 0 else m.start()
+        stop = ordered[i + 1][1].start() if i + 1 < len(ordered) else end
+        ch_title = clean_title.get(ch_num, m.group(2)).strip().rstrip("—-:").strip()
+        # Keep BOTH the resolution code AND the chapter in the section_number
+        # so the citation verifier's existing LIKE-match patterns continue
+        # to work for both shapes:
+        #   - LIKE '%MSC.370(93)%'  (yesterday's IMO-family fix in engine.py)
+        #   - LIKE '%Ch.4%'         (chapter-precise queries)
+        # Format: "IMO IGC Code MSC.370(93) Ch.4"
+        if part is None:
+            bodies.append((f"Ch.{ch_num}", f"{meta.parent_label} Chapter {ch_num} — {ch_title}",
+                           text[start:stop].strip()))
+        else:
+            bodies.append((f"Pt.{part} Ch.{ch_num}",
+                           f"{meta.parent_label} Part {part} Chapter {ch_num} — {ch_title}",
+                           text[start:stop].strip()))
+    return ordered[0][1].start(), bodies
 
 
 def _split_into_chapters(
@@ -845,32 +933,20 @@ def _split_into_chapters(
     if len(matches) < 2:
         return []
 
-    # Deduplicate by chapter number, keeping the LAST (= body) occurrence.
-    by_number: dict[str, re.Match[str]] = {}
-    for m in matches:
-        ch_num = m.group(1)
-        by_number[ch_num] = m   # later matches overwrite earlier (TOC entries)
-
-    # Sort by file position so we can slice ranges between them.
-    ordered = sorted(by_number.items(), key=lambda kv: kv[1].start())
-
-    bodies: list[tuple[str, str, str]] = []
-    for i, (ch_num, m) in enumerate(ordered):
-        start = m.start()
-        end = ordered[i + 1][1].start() if i + 1 < len(ordered) else len(text)
-        body = text[start:end].strip()
-        ch_title = m.group(2).strip().rstrip("—-:").strip()
-        # Keep BOTH the resolution code AND the chapter in the section_number
-        # so the citation verifier's existing LIKE-match patterns continue
-        # to work for both shapes:
-        #   - LIKE '%MSC.370(93)%'  (yesterday's IMO-family fix in engine.py)
-        #   - LIKE '%Ch.4%'         (chapter-precise queries)
-        # Format: "IMO IGC Code MSC.370(93) Ch.4"
-        bodies.append((ch_num, f"{meta.parent_label} Chapter {ch_num} — {ch_title}", body))
+    # Deduplicate by chapter number, keeping the LAST (= body) occurrence;
+    # within each part when the chapter numbers restart in parts.
+    numeral = _roman_reader([m.group(1) for m in matches])
+    parts = _chapter_parts(text, matches, numeral)
+    if parts:
+        bodies = [b for part, start, end in parts
+                  for b in _chapter_bodies(text, [m for m in matches if start <= m.start() < end],
+                                           numeral, end, meta, part, start)[1]]
+        return _assemble(text, parts[0][1], bodies, 300, meta, source_code)
+    first, bodies = _chapter_bodies(text, matches, numeral, len(text), meta)
 
     # 2026-10-08 — keep the preamble; a short body (a TOC entry that survived
     # the last-occurrence dedup) joins its neighbour instead of being dropped.
-    return _assemble(text, ordered[0][1].start(), bodies, 300, meta, source_code)
+    return _assemble(text, first, bodies, 300, meta, source_code)
 
 
 # ── Paragraph-aware splitting (Sprint D6.97 #47) ───────────────────────
@@ -923,6 +999,16 @@ def _split_by_paragraph_chapter(
     if len(matches) < 6:
         # Not enough numbered structure to be worth splitting.
         return []
+
+    # 2026-10-17 — a document in parts that each restart their numbering. Only
+    # when every part has sections of its own: MEPC.107(49) has PART headings
+    # but numbers straight through, and keeps the split below.
+    parts = _part_ranges(text)
+    if parts:
+        per_part = [_part_chapters(text, start, end, part, meta) for part, start, end in parts]
+        if all(len(bodies) >= 2 for bodies in per_part):
+            return _assemble(text, parts[0][1], [b for bodies in per_part for b in bodies],
+                             400, meta, source_code)
 
     # IMO docs open with a RESOLUTION clause block — bare `N TitleText`
     # paragraphs like "2 DETERMINES, in accordance with...", "5 REQUESTS
@@ -977,11 +1063,104 @@ def _split_by_paragraph_chapter(
         chapter_title_hint = chapter_first_subpara_title.get(
             ch_num, f"Chapter {ch_num}",
         )
-        bodies.append((ch_num, f"{meta.parent_label} Chapter {ch_num} — {chapter_title_hint}", body))
+        bodies.append((f"Ch.{ch_num}", f"{meta.parent_label} Chapter {ch_num} — {chapter_title_hint}", body))
 
     # 2026-10-08 — keep the preamble (the resolution clauses, incl. entry into
     # force) and fold a short chapter into its neighbour instead of dropping it.
     return _assemble(text, chapter_first_subpara_offset[sorted_chapters[0]], bodies, 400, meta, source_code)
+
+
+# ── Documents in parts (2026-10-17) ─────────────────────────────────────────
+#
+# MSC.81(70), the Revised Recommendation on Testing of Life-Saving Appliances,
+# has PART 1 (prototype tests, sections 1-13) and PART 2 (production and
+# installation tests, sections 1-7), and a contents list of every N.N heading
+# before either. The paragraph splitter took each chapter's first N.x line from
+# that list, so sections 1-12 held a line or two of contents each and "Ch.13"
+# held the whole document (140 chunks). Now the body's PART headings (the last
+# occurrence of each, as for chapters) bound the search, numbering restarts in
+# each part, and a section is labelled "Pt.1 Ch.5".
+
+_PART_RE = re.compile(
+    r"^[ \t]*PART\s+(\d{1,2})\s*[-—:]\s*[A-Z][A-Z0-9 ,/()\-]{3,100}$",
+    re.MULTILINE,
+)
+_CAPS_TITLE = re.compile(r"[A-Z][A-Z0-9 ,/()\-]+")
+
+
+def _part_ranges(text: str) -> list[tuple[str, int, int]]:
+    """(part number, start, end) of each body part; [] unless the document has at
+    least two parts whose last occurrences run in order."""
+    last: dict[str, re.Match[str]] = {}
+    for m in _PART_RE.finditer(text):
+        last[m.group(1)] = m
+    if len(last) < 2:
+        return []
+    ordered = sorted(last.values(), key=lambda m: m.start())
+    numbers = [int(m.group(1)) for m in ordered]
+    if numbers != sorted(numbers):
+        return []
+    return [(m.group(1), m.start(), ordered[i + 1].start() if i + 1 < len(ordered) else len(text))
+            for i, m in enumerate(ordered)]
+
+
+def _increasing(chapters: list[str]) -> list[str]:
+    """The longest run of chapters (in document order) whose numbers increase;
+    drops a stray "0.1" or a cross-reference that only looks like a heading."""
+    best: list[list[str]] = []
+    for i, ch in enumerate(chapters):
+        prev = [best[j] for j in range(i) if int(chapters[j]) < int(ch)]
+        best.append(max(prev, key=len, default=[]) + [ch])
+    return max(best, key=len, default=[])
+
+
+def _part_chapters(text: str, start: int, end: int, part: str,
+                   meta: "CodeDocMeta") -> list[tuple[str, str, str]]:
+    """One body per numbered section of the part: a number with two N.x paragraphs
+    or an all-caps "N TITLE" heading. A section starts at that heading when one sits
+    just before its first N.x paragraph; the part heading and anything before the
+    first section join the first."""
+    seg = text[start:end]
+    first_sub: dict[str, re.Match[str]] = {}
+    sub_count: dict[str, int] = {}
+    caps: dict[str, list[re.Match[str]]] = {}
+    for m in _PARAGRAPH_HEADER_RE.finditer(seg):
+        ch = m.group(1)
+        if m.group(2) is not None:
+            sub_count[ch] = sub_count.get(ch, 0) + 1
+            first_sub.setdefault(ch, m)
+        elif _CAPS_TITLE.fullmatch(m.group(3).strip()):
+            caps.setdefault(ch, []).append(m)
+
+    def anchor(ch: str) -> int:
+        return first_sub[ch].start() if ch in first_sub else caps[ch][0].start()
+
+    confirmed = sorted((ch for ch in set(sub_count) | set(caps)
+                        if int(ch) >= 1 and (sub_count.get(ch, 0) >= 2 or ch in caps)),
+                       key=anchor)
+    order = _increasing(confirmed)
+    if len(order) < 2:
+        return []
+
+    starts: list[int] = []
+    heads: list[re.Match[str]] = []
+    for i, ch in enumerate(order):
+        floor = anchor(order[i - 1]) if i else -1
+        if ch in first_sub:
+            head = next((m for m in reversed(caps.get(ch, []))
+                         if floor < m.start() < first_sub[ch].start()), first_sub[ch])
+        else:
+            head = next(m for m in caps[ch] if m.start() > floor)
+        starts.append(head.start())
+        heads.append(head)
+    starts[0] = 0
+
+    bodies: list[tuple[str, str, str]] = []
+    for i, ch in enumerate(order):
+        body = seg[starts[i]: starts[i + 1] if i + 1 < len(order) else len(seg)].strip()
+        title = heads[i].group(3)[:100].strip().rstrip(".,;:")
+        bodies.append((f"Pt.{part} Ch.{ch}", f"{meta.parent_label} Part {part} Section {ch} — {title}", body))
+    return bodies
 
 
 def get_source_date(raw_dir: Path) -> date:
