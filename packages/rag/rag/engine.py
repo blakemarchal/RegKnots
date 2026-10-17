@@ -2874,6 +2874,14 @@ async def chat_with_progress(
     The done payload contains the same fields as the JSON serialization of
     ChatResponse, with conversation_id stringified for transport.
     """
+    # 2026-10-17 — stage timings, seconds from the start, logged once per answer
+    # ("answer timing: ..."; docs/sprint-audits/latency-audit-2026-10-17.md).
+    _t0 = time.perf_counter()
+    _marks: dict[str, float] = {}
+
+    def _mark(name: str) -> None:
+        _marks.setdefault(name, round(time.perf_counter() - _t0, 2))
+
     # Stage 1: Route — concurrently with query prep and retrieval.
     #
     # 2026-09-22 (U1) — the Haiku router (~0.6 s measured on prod) and
@@ -2976,6 +2984,7 @@ async def chat_with_progress(
         if company_task is not None:
             company_task.cancel()
         raise
+    _mark("route")
     logger.info(f"Routed query to {route.model} (score={route.score})")
 
     # D6.97 Phase 2 — when images attached, force a vision-capable model
@@ -3028,6 +3037,7 @@ async def chat_with_progress(
 
     yield {"event": "status", "data": f"Searching {source_labels}…"}
     chunks = await retrieval_task
+    _mark("retrieval")
     logger.info(f"Retrieved {len(chunks)} chunks")
 
     # Stage 3: Build context
@@ -3072,6 +3082,7 @@ async def chat_with_progress(
         context_str = context_str + "\n\n" + company_block
         logger.info("company documents: added %d chars to the context", len(company_block))
 
+    _mark("context")
     found_sources = _summarize_found_sources(chunks)
     if found_sources:
         yield {
@@ -3097,6 +3108,7 @@ async def chat_with_progress(
             anthropic_client, question=query, library_text=context_str, vessel_line=_vline,
             history=router_context(conversation_history) or "",
         )
+        _mark("coverage")
         logger.info("coverage: %s, missing=%s", coverage.status, [m.item for m in coverage.missing])
         if coverage.missing and await _web_research_allowed(
                 pool, user_id, web_research_daily_cap, web_research_monthly_cap):
@@ -3106,6 +3118,7 @@ async def chat_with_progress(
             _web_block = format_block(web_findings)
             if _web_block:
                 context_str = context_str + "\n\n" + _web_block
+            _mark("web")
             logger.info("web research: %d/%d found",
                         sum(1 for f in web_findings if f.found), len(web_findings))
 
@@ -3144,6 +3157,7 @@ async def chat_with_progress(
         # across users (per-user context lives in the user turn), so it is
         # marked for prompt caching: reads bill at 0.1x input (0.05x on
         # Opus 5.5) within the 5-minute TTL.
+        _mark("synth_start")
         async with anthropic_client.messages.stream(
             model=model_used,
             system=cached_system(effective_system_prompt),
@@ -3154,8 +3168,10 @@ async def chat_with_progress(
                 if not text_chunk:
                     continue
                 answer_chunks.append(text_chunk)
+                _mark("first_token")
                 yield {"event": "delta", "data": text_chunk}
             final_msg = await stream.get_final_message()
+            _mark("stream_end")
         answer = "".join(answer_chunks)
         input_tokens = final_msg.usage.input_tokens
         output_tokens = final_msg.usage.output_tokens
@@ -3557,4 +3573,7 @@ async def chat_with_progress(
         }
     # D6.97 — tier_metadata always None after tier_router removal.
     # Field kept on the payload shape for frontend compatibility.
+    _mark("done")
+    logger.info("answer timing: %s model=%s chunks=%d", " ".join(f"{k}={v}" for k, v in _marks.items()),
+                model_used, len(chunks))
     yield {"event": "done", "data": done_payload}

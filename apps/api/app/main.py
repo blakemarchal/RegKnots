@@ -62,6 +62,21 @@ async def _run_migrations() -> None:
     await asyncio.to_thread(_sync)
 
 
+async def _warm_retriever() -> None:
+    """2026-10-17 — load the retriever's source caches at startup instead of
+    inside the first question after a deploy (the 10-16 free question paid for
+    them mid-search; docs/sprint-audits/latency-audit-2026-10-17.md)."""
+    try:
+        from rag import retriever
+        from app.db import get_pool
+        pool = await get_pool()
+        await retriever._get_available_sources(pool)
+        await retriever._get_source_stats(pool)
+        await retriever._side_table_ready(pool)
+    except Exception as exc:  # the first question then loads them, as before
+        logger.warning("retriever warm-up skipped: %s: %s", type(exc).__name__, str(exc)[:200])
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # 2026-10-16 security review: never serve with development secrets.
@@ -74,6 +89,7 @@ async def lifespan(app: FastAPI):
         await _run_migrations()
         logger.info("Migrations complete.")
     await init_pool()
+    app.state.retriever_warmup = asyncio.create_task(_warm_retriever())
     app.state.anthropic = AsyncAnthropic(api_key=settings.anthropic_api_key)
     app.state.openai_api_key = settings.openai_api_key
     yield

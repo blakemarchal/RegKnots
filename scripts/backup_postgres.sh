@@ -61,7 +61,12 @@ fi
 # Stream pg_dump output through the compressor directly into the
 # destination file. Pipefail catches a pg_dump or compressor non-zero
 # anywhere in the pipeline.
+# 2026-10-17 — regulation_vectors is a copy of regulations.embedding for fast
+# exact scans (migration 0131): its data is left out (~0.8 GB a night) and
+# rebuilt after a restore (docs/runbooks/db-restore.md). Until then the
+# retriever reads regulations, as before.
 docker exec "$PG_CONTAINER" pg_dump -U "$PG_USER" -d "$PG_DB" \
+    --exclude-table-data=regulation_vectors \
     | "${COMPRESSOR[@]}" > "$OUT_FILE"
 
 # Lock down the file: only root can read this — it contains every secret-

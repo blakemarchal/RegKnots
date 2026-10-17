@@ -1480,13 +1480,33 @@ async def _embed_query(openai_api_key: str, query: str) -> str:
     return (await _embed_queries(openai_api_key, [query]))[0]
 
 
+# 2026-10-17 — one OpenAI client per event loop and key, so embedding calls
+# reuse a warm HTTPS connection. A new client per call paid a TLS handshake
+# every time: the 10-16 free question's first embedding took 1.3 s, the
+# latency bench's 1.9 s (docs/sprint-audits/latency-audit-2026-10-17.md).
+# Per loop because the worker runs each task in its own asyncio.run();
+# clients of closed loops are dropped.
+_OAI_CLIENTS: dict[int, tuple[asyncio.AbstractEventLoop, dict[str, AsyncOpenAI]]] = {}
+
+
+def _openai_client(openai_api_key: str) -> AsyncOpenAI:
+    loop = asyncio.get_running_loop()
+    entry = _OAI_CLIENTS.get(id(loop))
+    if entry is None or entry[0] is not loop:
+        for key in [k for k, (lp, _) in _OAI_CLIENTS.items() if lp.is_closed()]:
+            del _OAI_CLIENTS[key]
+        entry = (loop, {})
+        _OAI_CLIENTS[id(loop)] = entry
+    client = entry[1].get(openai_api_key)
+    if client is None:
+        client = AsyncOpenAI(api_key=openai_api_key)
+        entry[1][openai_api_key] = client
+    return client
+
+
 async def _embed_queries(openai_api_key: str, queries: list[str]) -> list[str]:
     """Embed several strings in one API call; vector literals in input order."""
-    oai = AsyncOpenAI(api_key=openai_api_key)
-    try:
-        resp = await oai.embeddings.create(model=_EMBED_MODEL, input=queries)
-    finally:
-        await oai.close()
+    resp = await _openai_client(openai_api_key).embeddings.create(model=_EMBED_MODEL, input=queries)
     data = sorted(resp.data, key=lambda d: d.index)
     return ["[" + ",".join(f"{x:.8f}" for x in d.embedding) + "]" for d in data]
 
@@ -1607,6 +1627,84 @@ async def _keyword_cap_scale(pool: asyncpg.Pool) -> float:
     return max(1.0, sum(n for n, _tags in stats.values()) / _KEYWORD_CAP_BASE_CHUNKS)
 
 
+# 2026-10-17 — the keyword lane's database work doesn't depend on the query
+# vector: the frequency check (a text scan; "towing" took 0.40-0.45 s) and the
+# DISTINCT ON pick of which rows to return. A question's four searches share
+# most of their keywords, so both are cached per process, keyed by keyword
+# (plus jurisdictions and limit for the pick), with one lookup in flight per
+# key; only the similarity is computed per query, by id. Same results as
+# uncached while the corpus is unchanged; an ingest shows up within the TTL
+# or on the next deploy. docs/sprint-audits/latency-audit-2026-10-17.md.
+_KW_CACHE_TTL_S = 6 * 3600.0
+_KW_CACHE_MAX = 4096
+_KW_FREQ_CACHE: dict[tuple, tuple[float, object]] = {}
+_KW_PICK_CACHE: dict[tuple, tuple[float, object]] = {}
+_KW_INFLIGHT: dict[tuple, tuple[asyncio.AbstractEventLoop, asyncio.Task]] = {}
+
+
+async def _kw_cached(cache: dict, key: tuple, compute):
+    """compute() once per key per TTL; concurrent callers share one lookup."""
+    hit = cache.get(key)
+    if hit is not None and time.monotonic() - hit[0] <= _KW_CACHE_TTL_S:
+        return hit[1]
+    loop = asyncio.get_running_loop()
+    flight_key = (id(cache), key)
+    flight = _KW_INFLIGHT.get(flight_key)
+    if flight is None or flight[0] is not loop or flight[1].done():
+        async def run():
+            try:
+                value = await compute()
+            finally:
+                _KW_INFLIGHT.pop(flight_key, None)
+            if len(cache) >= _KW_CACHE_MAX:
+                cache.clear()
+            cache[key] = (time.monotonic(), value)
+            return value
+        flight = (loop, loop.create_task(run()))
+        _KW_INFLIGHT[flight_key] = flight
+    # shield: a search that is cancelled (client gone) leaves the lookup to the others
+    return await asyncio.shield(flight[1])
+
+
+async def _keyword_pick_ids(
+    pool: asyncpg.Pool, kw: str, limit: int, allowed_jurisdictions: list[str] | None,
+) -> list:
+    """Which rows the keyword lane returns for kw, best first: per source the
+    chunk with the most occurrences, then the `limit` with the most."""
+    # Sprint D6.19 — jurisdiction filter applied inside the inner subquery so
+    # DISTINCT ON sees only allowed-jurisdiction chunks.
+    juris_sql = "AND jurisdictions && $3::text[]" if allowed_jurisdictions is not None else ""
+    rows = await pool.fetch(
+        f"""
+        SELECT id FROM (
+            SELECT DISTINCT ON (source) id, source,
+                   (length(full_text) - length(replace(lower(full_text), lower($1), ''))) AS hits
+            FROM regulations
+            WHERE full_text ILIKE '%' || $1 || '%' {juris_sql}
+            ORDER BY source, hits DESC
+        ) sub
+        ORDER BY hits DESC
+        LIMIT $2
+        """,
+        kw, limit, *([allowed_jurisdictions] if allowed_jurisdictions is not None else []),
+    )
+    return [r["id"] for r in rows]
+
+
+async def _rows_by_id(pool: asyncpg.Pool, ids: list, query_vec: str | None) -> list[dict]:
+    """Rows in the given order, with this query's similarity (0.0 without a vector)."""
+    if not ids:
+        return []
+    sim_sql = "0.0" if query_vec is None else "1 - (embedding <=> $2::vector)"
+    got = await pool.fetch(
+        f"SELECT id, source, section_number, section_title, full_text, {sim_sql} AS similarity "
+        "FROM regulations WHERE id = ANY($1::uuid[])",
+        ids, *([query_vec] if query_vec is not None else []),
+    )
+    by_id = {r["id"]: dict(r) for r in got}
+    return [by_id[i] for i in ids if i in by_id]
+
+
 async def _broad_keyword_search(
     keywords: list[str],
     pool: asyncpg.Pool,
@@ -1646,16 +1744,19 @@ async def _broad_keyword_search(
         is_syn = kw in synonym_set
         cap = round((_MAX_SYNONYM_FREQ if is_syn else _MAX_KEYWORD_FREQ) * scale)
         # Fast specificity check: skip overly common terms.
-        freq = await pool.fetchval(
-            """
-            SELECT count(*) FROM (
-                SELECT 1 FROM regulations
-                WHERE full_text ILIKE '%' || $1 || '%'
-                LIMIT $2
-            ) sub
-            """,
-            kw,
-            cap + 1,
+        freq = await _kw_cached(
+            _KW_FREQ_CACHE, (kw.lower(), cap),
+            lambda kw=kw, cap=cap: pool.fetchval(
+                """
+                SELECT count(*) FROM (
+                    SELECT 1 FROM regulations
+                    WHERE full_text ILIKE '%' || $1 || '%'
+                    LIMIT $2
+                ) sub
+                """,
+                kw,
+                cap + 1,
+            ),
         )
         if freq > cap:
             logger.info(
@@ -1666,59 +1767,14 @@ async def _broad_keyword_search(
 
         passed_keywords.append(kw)
 
-        # Sprint D6.19 — jurisdiction filter applied inside the inner
-        # subquery so DISTINCT ON sees only allowed-jurisdiction chunks.
-        sim_sql = "0.0" if query_vec is None else "1 - (embedding <=> $4::vector)"
-        if allowed_jurisdictions is not None:
-            rows = await pool.fetch(
-                f"""
-                SELECT id, source, section_number, section_title, full_text,
-                       {sim_sql} AS similarity
-                FROM (
-                    SELECT DISTINCT ON (source)
-                        id, source, section_number, section_title, full_text, embedding
-                    FROM regulations
-                    WHERE full_text ILIKE '%' || $1 || '%'
-                      AND jurisdictions && $3::text[]
-                    ORDER BY source,
-                             (length(full_text)
-                              - length(replace(lower(full_text), lower($1), ''))
-                             ) DESC
-                ) sub
-                ORDER BY (length(full_text)
-                          - length(replace(lower(full_text), lower($1), ''))
-                         ) DESC
-                LIMIT $2
-                """,
-                kw,
-                limit,
-                allowed_jurisdictions,
-                *([query_vec] if query_vec is not None else []),
-            )
-        else:
-            rows = await pool.fetch(
-                f"""
-                SELECT id, source, section_number, section_title, full_text,
-                       {sim_sql.replace("$4", "$3")} AS similarity
-                FROM (
-                    SELECT DISTINCT ON (source)
-                        id, source, section_number, section_title, full_text, embedding
-                    FROM regulations
-                    WHERE full_text ILIKE '%' || $1 || '%'
-                    ORDER BY source,
-                             (length(full_text)
-                              - length(replace(lower(full_text), lower($1), ''))
-                             ) DESC
-                ) sub
-                ORDER BY (length(full_text)
-                          - length(replace(lower(full_text), lower($1), ''))
-                         ) DESC
-                LIMIT $2
-                """,
-                kw,
-                limit,
-                *([query_vec] if query_vec is not None else []),
-            )
+        pick_key = (kw.lower(),
+                    tuple(sorted(allowed_jurisdictions)) if allowed_jurisdictions is not None else None,
+                    limit)
+        ids = await _kw_cached(
+            _KW_PICK_CACHE, pick_key,
+            lambda kw=kw: _keyword_pick_ids(pool, kw, limit, allowed_jurisdictions),
+        )
+        rows = await _rows_by_id(pool, ids, query_vec)
         for r in rows:
             if r["id"] not in seen_ids:
                 seen_ids.add(r["id"])
@@ -1834,6 +1890,72 @@ async def _fetch_iterative(
     return out
 
 
+# 2026-10-17 — regulation_vectors (migration 0131) holds every embedding stored
+# in-line. The group queries are exact scans (after a pooled connection's
+# first five executions Postgres caches a generic plan that skips the HNSW
+# index), and fetching each vector out of line from regulations was ~90% of a
+# search's database time. Same SQL shape over the side table: same rows in the
+# same order (92 of 92 group results on prod), one search 1.8 s -> 0.48 s, four
+# at once 5.3 s -> 1.6 s. Used only when it holds every embedded row; checked
+# once per process (at API startup), else the regulations query below.
+# docs/sprint-audits/latency-audit-2026-10-17.md.
+_SIDE_TABLE_READY: bool | None = None
+_SIDE_TABLE_LOCK = asyncio.Lock()
+
+
+async def _side_table_ready(pool: asyncpg.Pool) -> bool:
+    global _SIDE_TABLE_READY
+    if _SIDE_TABLE_READY is not None:
+        return _SIDE_TABLE_READY
+    async with _SIDE_TABLE_LOCK:
+        if _SIDE_TABLE_READY is None:
+            try:
+                row = await pool.fetchrow(
+                    "SELECT (SELECT count(*) FROM regulation_vectors) AS side, "
+                    "(SELECT count(*) FROM regulations WHERE embedding IS NOT NULL) AS main"
+                )
+                _SIDE_TABLE_READY = row["side"] == row["main"]
+                if not _SIDE_TABLE_READY:
+                    logger.warning(
+                        "regulation_vectors holds %d of %d embedded rows; group scans read regulations "
+                        "(rebuild: docs/runbooks/db-restore.md)", row["side"], row["main"],
+                    )
+            except Exception as exc:  # no table (migration 0131 not applied): the old query
+                _SIDE_TABLE_READY = False
+                logger.warning("regulation_vectors unavailable (%s); group scans read regulations",
+                               type(exc).__name__)
+    return _SIDE_TABLE_READY
+
+
+async def _fetch_group_side(
+    pool: asyncpg.Pool,
+    vec_literal: str,
+    group_sources: list[str],
+    candidates: int,
+    allowed_jurisdictions: list[str] | None,
+) -> list[dict]:
+    """_fetch_group over regulation_vectors: the exact top-K, then their rows."""
+    juris_sql = "AND jurisdictions && $4::text[]" if allowed_jurisdictions is not None else ""
+    rows = await pool.fetch(
+        f"""
+        SELECT r.id, r.source, r.section_number, r.section_title, r.full_text,
+               1 - v.d AS similarity
+        FROM (
+            SELECT id, embedding <=> $1::vector AS d
+            FROM regulation_vectors
+            WHERE source = ANY($3) {juris_sql}
+            ORDER BY d
+            LIMIT $2
+        ) v
+        JOIN regulations r ON r.id = v.id
+        ORDER BY v.d
+        """,
+        vec_literal, candidates, group_sources,
+        *([allowed_jurisdictions] if allowed_jurisdictions is not None else []),
+    )
+    return [dict(r) for r in rows]
+
+
 async def _fetch_group(
     pool: asyncpg.Pool,
     vec_literal: str,
@@ -1849,7 +1971,10 @@ async def _fetch_group(
     None = no filter (preserve generic-query default behavior).
 
     Iterative HNSW scan per _GROUP_ITERATIVE_SCAN (off; see above).
+    2026-10-17 — regulation_vectors when it is complete (see above).
     """
+    if not _GROUP_ITERATIVE_SCAN and await _side_table_ready(pool):
+        return await _fetch_group_side(pool, vec_literal, group_sources, candidates, allowed_jurisdictions)
     if allowed_jurisdictions is not None:
         return await _fetch_iterative(
             pool,

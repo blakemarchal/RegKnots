@@ -50,7 +50,15 @@ docker exec regknots-postgres psql -U regknots -d regknots -tAc \
    UNION ALL SELECT 'head='||version_num FROM alembic_version
    UNION ALL SELECT 'embedded='||count(*) FROM regulations WHERE embedding IS NOT NULL"
 
-# 5. Restart + verify
+# 4b. Rebuild regulation_vectors (migration 0131; ~15 s). The nightly dump
+#     leaves its data out. Until it is rebuilt, searches read regulations
+#     (correct, ~3x slower) and the API logs "regulation_vectors holds 0 of N".
+docker exec regknots-postgres psql -U regknots -d regknots -c \
+  "INSERT INTO regulation_vectors (id, source, jurisdictions, embedding)
+   SELECT id, source, jurisdictions, embedding FROM regulations
+   WHERE embedding IS NOT NULL ORDER BY source, id ON CONFLICT (id) DO NOTHING; ANALYZE regulation_vectors"
+
+# 5. Restart + verify (restart after 4b: the API checks the table once at startup)
 systemctl start regknots-api regknots-worker regknots-web
 # from the laptop:
 scripts/smoke.sh
