@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>RegKnot for fleets</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@700;900&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  @page { size: Letter; margin: 0; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body { width: 8.5in; height: 11in; background: #0a0e1a; color: #f0ece4; font-family: "IBM Plex Mono", monospace;
+         font-size: 10.5pt; line-height: 1.45; padding: 0.55in 0.6in 0.5in; position: relative; overflow: hidden;
+         -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .grid { position: absolute; inset: 0; pointer-events: none;
+          background-image: repeating-linear-gradient(0deg, transparent, transparent 47px, rgba(45,212,191,0.035) 47px, rgba(45,212,191,0.035) 48px),
+                            repeating-linear-gradient(90deg, transparent, transparent 47px, rgba(45,212,191,0.035) 47px, rgba(45,212,191,0.035) 48px); }
+  .brand { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+  .brand .word { font-family: "Barlow Condensed", sans-serif; font-weight: 900; font-size: 22pt; letter-spacing: 0.12em; }
+  .brand .word b { color: #2dd4bf; font-weight: 900; }
+  .brand .tag { font-size: 7.5pt; letter-spacing: 0.25em; color: #6b7594; text-transform: uppercase; margin-left: 6px; }
+  .eyebrow { color: #2dd4bf; font-size: 8pt; letter-spacing: 0.25em; text-transform: uppercase; margin: 0 0 6px; }
+  h1 { font-family: "Barlow Condensed", sans-serif; font-weight: 900; font-size: 34pt; line-height: 0.95; margin: 0 0 10px; letter-spacing: -0.01em; }
+  h1 span { color: #2dd4bf; }
+  .lead { color: #a8b0c4; margin: 0 0 16px; max-width: 6.6in; }
+  .cols { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin: 0 0 16px; }
+  .card { background: #111827; border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 11px 12px; }
+  .card h3 { font-family: "Barlow Condensed", sans-serif; font-size: 14pt; margin: 0 0 5px; font-weight: 700; }
+  .card p { margin: 0; color: #a8b0c4; font-size: 9.2pt; }
+  .qa { background: #0d1225; border: 1px solid rgba(45,212,191,0.3); border-radius: 10px; padding: 12px 14px; margin-bottom: 14px; }
+  .qa .q { color: #f0ece4; font-weight: 600; margin: 0 0 4px; }
+  .qa .a { margin: 0 0 8px; color: #d8d2c6; font-size: 9.6pt; }
+  .qa .a:last-child { margin-bottom: 0; }
+  .chip { display: inline-block; font-size: 8.2pt; padding: 1px 6px; border-radius: 4px; background: rgba(19,78,74,0.7); color: #5eead4; border: 1px solid rgba(17,94,89,0.6); }
+  .badge { display: inline-block; font-size: 8pt; padding: 2px 7px; border-radius: 5px; background: rgba(6,78,59,0.6); color: #6ee7b7; border: 1px solid rgba(6,95,70,0.6); margin-bottom: 8px; }
+  .bottom { display: grid; grid-template-columns: 1.15fr 1fr; gap: 14px; align-items: start; }
+  table { border-collapse: collapse; width: 100%; font-size: 9.4pt; }
+  th, td { text-align: left; padding: 5px 6px; border-bottom: 1px solid rgba(255,255,255,0.08); }
+  th { color: #2dd4bf; font-size: 8pt; letter-spacing: 0.15em; text-transform: uppercase; }
+  .cta { background: #2dd4bf; color: #0a0e1a; border-radius: 10px; padding: 12px 14px; }
+  .cta .big { font-family: "Barlow Condensed", sans-serif; font-weight: 900; font-size: 19pt; line-height: 1; margin: 0 0 4px; }
+  .cta p { margin: 0; font-size: 9.4pt; font-weight: 600; }
+  .cta .url { font-size: 11pt; font-weight: 600; margin-top: 6px; white-space: nowrap; }
+  .foot { position: absolute; left: 0.6in; right: 0.6in; bottom: 0.38in; display: flex; justify-content: space-between; color: #6b7594; font-size: 7.8pt; }
+</style>
+</head>
+<body>
+<div class="grid"></div>
+<div class="brand">
+  <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#2dd4bf" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4" stroke-linecap="round"/><path d="M12 8l1.5 3.5L12 16l-1.5-4.5L12 8z" fill="#2dd4bf" stroke="none"/></svg>
+  <span class="word">REG<b>KNOT</b></span><span class="tag">Maritime compliance co-pilot</span>
+</div>
+
+<p class="eyebrow">For Subchapter M fleets</p>
+<h1>Your crew's compliance question,<br>answered from the regulation, <span>cited.</span></h1>
+<p class="lead">RegKnot reads the CFR, Coast Guard policy and your own safety manual, and answers for each boat in plain
+English, with the section number your TPO auditor can check. Built with Captain Karynn Marchal, USCG Master Unlimited.</p>
+
+<div class="cols">
+  <div class="card"><h3>Every citation checked</h3><p>Each section number is verified against the regulation text before the answer is shown. No invented rules.</p></div>
+  <div class="card"><h3>It knows the boat</h3><p>Inland towboat, coastal tug or ferry: the vessel profile scopes the search, so the answer fits the boat, not the industry.</p></div>
+  <div class="card"><h3>Your TSMS in the chat</h3><p>Upload the manual once. Questions get answered from it with page references, next to the regulation.</p></div>
+</div>
+
+<div class="qa">
+  <span class="badge">&#10003; Real answers, checked against the text</span>
+  <p class="q">Does a new deckhand need a safety orientation before we get underway?</p>
+  <p class="a">Yes. Before the boat first gets underway with them aboard: ten topics, from emergency duties and lifesaving gear to falls overboard, PPE and the tow, logged with the date, topics and signatures. <span class="chip">46 CFR 140.410</span></p>
+  <p class="q">What records does a Subchapter M towboat have to keep?</p>
+  <p class="a">Ten kinds, in the Towing Vessel Record, the official logbook or your TSMS: personnel, orientations, drills, examinations and tests, navigation equipment and assessments, training, oil residue, towing gear inspections, fire systems. <span class="chip">46 CFR 140.915</span></p>
+</div>
+
+<div class="bottom">
+  <div>
+    <table>
+      <tr><th>Wheelhouse, per boat</th><th>Includes</th></tr>
+      <tr><td>$99.99 / month<br><span style="color:#6b7594">$89.99 / month billed annually</span></td>
+          <td>Up to 10 crew per boat, shared chat and history, the company manual, vessel dossier, credential tracking, and an audit log of who asked what, with citations. Fleet rates from 5 boats.</td></tr>
+    </table>
+    <p style="margin:10px 0 0; color:#a8b0c4; font-size:9pt;">Library today: 46 and 33 CFR complete, 248 NVICs, Coast Guard policy letters and safety alerts, the Medical Manual, SOLAS, MARPOL, STCW, the IMDG Code and 14 flag states. Updated weekly.</p>
+  </div>
+  <div class="cta">
+    <p class="big">First boat free for 90 days.</p>
+    <p>No card. Set up in ten minutes: name the boat, invite the crew, ask the first question.</p>
+    <p class="url">regknots.com/fleet?src=pilot-jordan</p>
+  </div>
+</div>
+
+<div class="foot"><span>Jordan Hall for RegKnot &middot; hello@regknots.com</span><span>Navigation aid only, not legal advice. regknots.com</span></div>
+</body>
+</html>

@@ -545,6 +545,11 @@ If a doc says "alembic head is 0045" but `alembic current` says `0092`, the doc 
   - **Captain now charges what the site says:** Blake created $39.99/month (`price_1URI3VB6F2sQMkiGKxqt7kBx`) and $359.88/year (`price_1URI41B6F2sQMkiGsePpClWw`) on the existing Captain products; the `.env` points `STRIPE_PRICE_CAPTAIN_MONTHLY/_ANNUAL` at them. The old $39.00 and $348.00 ids stay as `STRIPE_PRICE_ID` / `STRIPE_ANNUAL_PRICE_ID`, so the Captain's and Karynn's existing subscriptions still map to Captain (`plans.plan_info_from_price_id` verified for all six ids). Stripe keeps existing subscriptions on their old price; Blake may archive the old prices.
   - **Webhook:** Blake added `customer.subscription.created` and `.deleted`; the endpoint now has all 10 events the handler knows.
   - API and worker restarted; health 200. Paying customers today: the Captain ($39/mo) and one Cadet ($9.99/mo).
+- **2026-10-16 Jordan Hall sells fleets** (Blake's friend, well connected, not maritime; commission, "don't be legalistic").
+  - **Link:** `regknots.com/fleet?src=pilot-jordan` (the `/fleet` redirect keeps `src`; the long form is `/register?next=/workspaces&src=pilot-jordan`). Pilot code `jordan` (90-day fleet trials) is in prod `pilot_codes`; the first Wheelhouse that signup creates gets the 90 days (`pilots.apply_signup_pilot`). The dashboard groups his signups as `src:pilot-jordan`.
+  - **Kit:** `docs/sales/jordan-hall-start-here.md` (who to sell, the pitch, pricing, demo, what we track), `docs/sales/commission-jordan-hall.md` (**25% of a fleet's first 12 months of revenue**, paid monthly as collected, refunds netted, no exclusivity, equity talk after 3 paying fleets or 90 days), `docs/sales/regknot-fleet-one-pager.{html,pdf}` (Chrome headless renders the PDF).
+  - **Report:** `scripts/sales/commission_report.py jordan` on the VPS (read-only: Stripe invoices of the accounts and fleets tagged with his code, by month, × rate).
+  - **Open:** fleet pricing for 5+ / 10+ boats (proposed $89.99 / $79.99 per boat per month; Blake confirms); Jordan's seat in the demo fleet (Blake invites from the workspace page); a live end-to-end signup through his link (Jordan's own is the natural test).
 See `docs/PROJECT_STATE.md` for a fuller operational snapshot and `docs/roadmap.md` for the prioritized backlog.
 
 
