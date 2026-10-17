@@ -116,13 +116,15 @@ def test_group_queries_read_the_side_table_only_when_it_is_complete(monkeypatch)
     assert "FROM regulation_vectors" in sql and "jurisdictions && $4::text[]" in sql
     assert args == ("[0.1]", 6, ["nvic"], ["us"])
 
+    # No jurisdiction filter: the old query, whose cached plan uses the HNSW index (fast, and
+    # the results the harness measured); the exact side table there lowered MRR.
     pool = _SidePool(111, 111)
     asyncio.run(R._fetch_group(pool, "[0.1]", ["nvic"], 6, None))
     sql, args = pool.calls[-1]
-    assert "FROM regulation_vectors" in sql and "jurisdictions" not in sql and args == ("[0.1]", 6, ["nvic"])
+    assert "regulation_vectors" not in sql and "FROM regulations" in sql and args == ("[0.1]", 6, ["nvic"])
 
     for short in (_SidePool(5, 111), _SidePool(0, 0, fail=True)):      # incomplete, or no table
         monkeypatch.setattr(R, "_SIDE_TABLE_READY", None)
-        asyncio.run(R._fetch_group(short, "[0.1]", ["nvic"], 6, None))
+        asyncio.run(R._fetch_group(short, "[0.1]", ["nvic"], 6, ["us"]))
         assert "regulation_vectors" not in short.calls[-1][0] and "FROM regulations" in short.calls[-1][0]
         assert R._SIDE_TABLE_READY is False

@@ -1891,13 +1891,18 @@ async def _fetch_iterative(
 
 
 # 2026-10-17 — regulation_vectors (migration 0131) holds every embedding stored
-# in-line. The group queries are exact scans (after a pooled connection's
-# first five executions Postgres caches a generic plan that skips the HNSW
-# index), and fetching each vector out of line from regulations was ~90% of a
-# search's database time. Same SQL shape over the side table: same rows in the
-# same order (92 of 92 group results on prod), one search 1.8 s -> 0.48 s, four
-# at once 5.3 s -> 1.6 s. Used only when it holds every embedded row; checked
-# once per process (at API startup), else the regulations query below.
+# in-line. With a jurisdiction filter, the group queries are exact scans (after
+# a pooled connection's first five executions Postgres caches a generic plan
+# that filters through the jurisdictions index and skips HNSW), and fetching
+# each vector out of line from regulations was ~90% of a search's database
+# time. Same SQL shape over the side table: same rows in the same order (92 of
+# 92 group results; dense harness 85 of 85 top-8 lists identical), one search
+# 1.8 s -> 0.48 s, four at once 5.3 s -> 1.6 s.
+# WITHOUT a jurisdiction filter the old query's cached plan uses the HNSW index
+# (fast already, and approximate): the side table there would change results
+# (dense harness MRR 0.7839 -> 0.7714 when every group read it), so those
+# groups keep the old query. Used only when the table holds every embedded
+# row; checked once per process (at API startup).
 # docs/sprint-audits/latency-audit-2026-10-17.md.
 _SIDE_TABLE_READY: bool | None = None
 _SIDE_TABLE_LOCK = asyncio.Lock()
@@ -1971,9 +1976,9 @@ async def _fetch_group(
     None = no filter (preserve generic-query default behavior).
 
     Iterative HNSW scan per _GROUP_ITERATIVE_SCAN (off; see above).
-    2026-10-17 — regulation_vectors when it is complete (see above).
+    2026-10-17 — regulation_vectors for filtered groups when it is complete (see above).
     """
-    if not _GROUP_ITERATIVE_SCAN and await _side_table_ready(pool):
+    if allowed_jurisdictions is not None and not _GROUP_ITERATIVE_SCAN and await _side_table_ready(pool):
         return await _fetch_group_side(pool, vec_literal, group_sources, candidates, allowed_jurisdictions)
     if allowed_jurisdictions is not None:
         return await _fetch_iterative(
