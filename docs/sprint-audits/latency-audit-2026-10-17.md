@@ -196,6 +196,87 @@ items 3 and 4 above, or a smaller rewrite / rerank. Raising Postgres `shared_buf
 873 MB side table stays in Postgres's own cache could take a little more off the searches (a
 Postgres restart, ~15 s of API downtime; the box is shared).
 
+## Toward 10 seconds (Blake: "I'm ok with some A/B testing in an effort to speed up further")
+
+**Where the first word's ~10 s goes on a warm API, question the library covers:** rewrite ~1.4 s,
+the three rewritten searches ~1.7 s, rerank ~1.8 s, context ~0.1 s, Opus's first word ~4.7–5.1 s
+(the coverage check runs beside it).
+
+**Model settings, probed on captured real requests (`scripts/latency/ttft_probe.py`,
+`thinking_probe.py`; ~$1.5, each answer replay stopped at its first word):**
+
+| call | as sent | what else the API accepts | result |
+|---|---|---|---|
+| Opus 5.5 answer | effort `low`: first word 4.2–5.1 s, thinking starts at ~0.6–1.1 s | nothing lower: `minimal` / `none` effort, `thinking: disabled` and a thinking budget are all rejected | ~1 s is reading the input, ~3.5–4 s is thinking. Fixed at `low`. |
+| Opus, prompt uncached | 4.65 s | — | The prompt cache doesn't change the first word, so keeping it warm buys nothing. |
+| Opus, half the library text | 3.70 s | — | −0.5 to −1 s, but cutting the text needs an answer-quality A/B (whole sections were the 10-09 accuracy win). |
+| Haiku 5.5 rewrite / rerank / coverage | effort `low`: 1.0–1.4 / 1.3–1.8 / 0.6–1.4 s | `thinking: disabled` (not `between_tools`, not `minimal`) | Thinking off is *slower* (1.7–2.3 / 1.7–2.3 / 1.2–1.9 s). Keep `low`. |
+
+**Postgres:** a side-table scan costs ~8 µs a row even fully cached; the buffer cache saves ~30%
+(268 → 185 ms on the cfr group). Raising `shared_buffers` to hold the 873 MB table would be worth
+~0.3 s a question and needs a Postgres restart; not done.
+
+**Retrieval A/B, dense-prod arm** (rewrite + rerank on, 85 pairs, three runs per arm, ~$2 of
+Haiku; `data/eval/retrieval/*-dense-prod-ef0-ab-*.json`):
+
+| arm | strong recall, mean (range) | weak recall | MRR, mean (range) | retrieval p50 / p90 |
+|---|---|---|---|---|
+| single rerank (as shipped) | 0.9765 (0.9765–0.9765) | 0.9882 | 0.8302 (0.8180–0.8406) | 4.60 / 5.94 s |
+| **pipelined rerank** | 0.9765 (0.9647–0.9882) | 0.9765 | 0.8277 (0.8207–0.8319) | **3.98 / 5.54 s** |
+| pipelined + 2 rewrites instead of 3 | 0.9529 (0.9412–0.9647) | 0.9765 | 0.8245 (0.8080–0.8347) | 3.53 / 4.70 s |
+
+- **Pipelined rerank SHIPPED** (`d6caf26`): the primary search's ~30 candidates are scored while
+  the rewritten searches run; only the candidates they add are scored after. Per pair, strong
+  hits differed on two pairs and cancelled out (F1/V1 3→2 of 3 runs, N-M1/V1 2→3). The weak-recall
+  dip is X4/V1 ("Is NFPA 1981 required"): NFPA isn't in the corpus and the weak pattern is any
+  chunk mentioning "SOLAS".
+- **Two rewrites rejected:** strong recall below the single arm in every run.
+- **An answer call started on the primary search's context** (used only if the final context
+  matched) can't pay off: the final context differed in 40 of 40 gold pairs
+  (`scripts/latency/primary_context_probe.py`).
+
+**Warm API, three real questions after the pipelined rerank** (`answer_e2e.py`, ~$0.45):
+first word 12.9 / 9.9 / 9.6 s; retrieval 4.7–6.0 s; Opus's first word 3.6–7.8 s after its call
+starts. Opus is now the long pole, and its thinking can't be shortened.
+
+**Answer model, first word on captured requests** (`answer_model_probe.py`, ~$0.5): Opus 5.5 low
+5.0–6.0 s; **Sonnet 5.5 low 0.5–0.9 s**; Sonnet 5.5 thinking off 0.6–1.0 s. (A smaller section
+budget barely changes the input: contexts are mostly under 12K tokens already.)
+
+**Answer-model A/B** (`compare_synthesis_models.py --model-ab --session-judge`, 24 questions:
+14 gold, the Captain's 2, 4 hedged, this month's 4; each captured once with the production flags
+and replayed under all three; $4.13 API; grading by 8 blind subagents on the subscription, labels
+shuffled per question; `data/eval/model_compare/20261017-182446-model-ab/`):
+
+| | Opus 5.5 low (shipped) | Sonnet 5.5 low | Sonnet 5.5 medium |
+|---|---|---|---|
+| first word, median / p90 | 6.3 / 8.8 s | **0.8 / 1.1 s** | 0.9 / 3.6 s |
+| finished, median | 20.6 s | 10.0 s | 10.6 s |
+| overall (blind) | **8.50** | 7.67 | 7.71 |
+| accuracy (blind) | **8.42** | 8.04 | 7.88 |
+| errors flagged | **23** | 30 | 33 |
+| judged best | **16 of 24** | 4 | 4 |
+| $ per answer, cold / warm cache | 0.165 / 0.090 | 0.076 / 0.040 | 0.078 / 0.042 |
+| gold citation hit | 93% | 93% | 93% |
+
+**Decision: Opus stays.** The rule set before grading was: switch only if Sonnet's accuracy is
+not lower beyond noise, it has no more errors, and no question shows a serious Sonnet error that
+Opus avoided. Sonnet fails all three (e.g. V1q ballast water, N-E4 hydrogen peroxide ERG,
+WEEK2 pilot-ladder step measurement). Restricting Sonnet to the router's score-1 questions doesn't
+rescue it (7.75 vs 8.50 on those 16). Caveat: the graders are Claude models; blind labels and
+concrete error lists limit self-preference, and the 2026-09-23 run's GPT-4o judge also preferred
+Opus.
+
+**Where that leaves the first word:** ~10 s on a question the library covers (9.6–12.9 s measured
+on a warm process), down from ~24 s this morning; ~5 s of retrieval (rewrite, searches, rerank,
+each shown by the A/Bs to carry accuracy) and ~5 s of Opus thinking at its lowest effort.
+Sub-10 reliably needs one of: a faster Opus-class model or a lower Opus effort if Anthropic adds
+one; more CPU for the searches (4 vCPUs would take ~0.7–0.9 s off; droplet on hold); or accepting
+Sonnet's quality drop.
+
+**Found by the graders, not part of this work:** the hand-added IMDG row "IMDG 3.2 UN 2014
+(manual)" says stowage category A; the 49 CFR 172.101 table shows vessel stowage D for UN2014.
+
 ## Scripts
 
 Copied from the session to `scripts/latency/` (run on the VPS from `/opt/RegKnots/apps/api` with

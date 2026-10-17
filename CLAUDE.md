@@ -578,6 +578,13 @@ If a doc says "alembic head is 0045" but `alembic current` says `0092`, the doc 
     - **Accuracy:** dense harness identical to the morning's run (0.9529 / 0.9765 / 0.7839, 85 of 85 top-8 lists). **Measured and rejected:** HNSW + iterative scan for the groups (three variants: MRR 0.7714–0.7818, slower).
     - **Speed on prod:** four searches 6.5–9.5 s → 1.9–2.8 s; retrieval step 12–15 s → 5.4–5.9 s; first word 13.5 s on a covered question (was ~24 s) and 31.2 s with web research (was ~41–44 s); finished 28.2 s / 44.0 s (were 30.5 / 65.2 s). Checked with two real questions in-process (`scripts/latency/answer_e2e.py`, ~$0.25).
     - **Next, all model calls (need an answer-quality A/B):** rewrite ~2 s, rerank ~2 s, coverage 1–5 s, web research up to 15 s, Opus first token ~5 s.
+  - **Toward 10 s, the same evening** (Blake: "I'm ok with some A/B testing in an effort to speed up further"; doc §Toward 10 seconds; ~$8 API, grading on the subscription):
+    - **Pipelined rerank SHIPPED** (`d6caf26`, `retriever._PIPELINED_RERANK`): the primary search's candidates are scored while the rewritten searches run, then only the candidates they add. dense-prod A/B, 3 runs per arm: strong recall 0.9765 both, MRR 0.8277 vs 0.8302 (within the single arm's own 0.818–0.841), retrieval p50 4.60 → 3.98 s.
+    - **Rejected by measurement:** two rewrites instead of three (strong recall 0.9529 in every run); an answer call started on the primary search's context (the final context differed in 40 of 40 pairs); a smaller section budget (contexts are mostly under 12K tokens already); keeping the prompt cache warm (no effect on Opus's first word).
+    - **API limits:** Opus 5.5 accepts nothing below effort `low` (no thinking off, no budget); Haiku 5.5 with thinking off is slower than at `low`.
+    - **Answer-model A/B** (`compare_synthesis_models.py --model-ab --session-judge`, 24 questions, $4.13, 8 blind subagent graders): Sonnet 5.5 low reaches the first word in 0.8 s (Opus 6.3 s) at half the cost, but scores 7.67 vs **8.50** overall, 8.04 vs **8.42** accuracy, 30 vs **23** errors flagged, best on 4 vs **16** of 24. **Opus stays** (decision rule set before grading). Sonnet medium: 7.71 / 7.88 / 33 errors.
+    - **First word now ~10 s** on a covered question (9.6–12.9 s on a warm process): retrieval ~5 s + Opus thinking ~5 s. More would need a faster Opus-class model or effort, more CPU (droplet on hold), or Sonnet's quality drop.
+    - **Found by the graders:** the hand-added IMDG row "IMDG 3.2 UN 2014 (manual)" says stowage category A; the 49 CFR 172.101 table shows vessel stowage D.
 See `docs/PROJECT_STATE.md` for a fuller operational snapshot and `docs/roadmap.md` for the prioritized backlog.
 
 
