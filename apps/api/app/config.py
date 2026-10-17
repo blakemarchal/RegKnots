@@ -431,6 +431,12 @@ class Settings(BaseSettings):
     anon_ip_daily_cap: int = 6
     anon_device_window_days: int = 30
     turnstile_secret_key: str = Field(default="", validation_alias="TURNSTILE_SECRET_KEY")
+    # 2026-10-16 — bearer token for the laptop runner that works problem reports (routers/runner.py);
+    # empty = the routes answer 404.
+    runner_token: str = Field(default="", validation_alias="REGKNOTS_RUNNER_TOKEN")
+    # 2026-10-16 — bearer token for the laptop runner that works problem reports (routers/runner.py);
+    # empty = the routes answer 404.
+    runner_token: str = Field(default="", validation_alias="REGKNOTS_RUNNER_TOKEN")
 
     # Monitoring
     sentry_dsn: str = Field(default="", validation_alias="SENTRY_DSN")

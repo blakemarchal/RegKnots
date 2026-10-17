@@ -11,6 +11,7 @@ export interface AuthUser {
   full_name: string | null
   role: string
   is_admin: boolean
+  is_sales?: boolean   // 2026-10-16 — admin-lite for a salesperson (/sales)
   email_verified: boolean
 }
 
@@ -33,6 +34,7 @@ function decodeJwtUser(token: string): AuthUser | null {
       full_name: (payload.full_name as string) ?? null,
       role: payload.role as string,
       is_admin: (payload.is_admin as boolean) ?? false,
+      is_sales: (payload.is_sales as boolean) ?? false,
       email_verified: (payload.email_verified as boolean) ?? false,
     }
   } catch {

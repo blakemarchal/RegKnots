@@ -2690,6 +2690,13 @@ class SupportTicket(BaseModel):
     admin_reply: str | None
     replied_at: str | None
     created_at: str
+    # 2026-10-16 — problem reports (kind='problem'): where they were, a screenshot, work notes
+    kind: str = "contact"
+    context: dict | None = None
+    has_screenshot: bool = False
+    admin_notes: str | None = None
+    claimed_by: str | None = None
+    resolved_at: str | None = None
 
 
 @router.get("/support-tickets", response_model=list[SupportTicket])
@@ -2719,9 +2726,100 @@ async def list_support_tickets(
             admin_reply=r["admin_reply"],
             replied_at=r["replied_at"].isoformat() if r["replied_at"] else None,
             created_at=r["created_at"].isoformat() if r["created_at"] else "",
+            kind=r["kind"],
+            context=_json_obj(r["context"]),
+            has_screenshot=bool(r["screenshot_path"]),
+            admin_notes=r["admin_notes"],
+            claimed_by=r["claimed_by"],
+            resolved_at=r["resolved_at"].isoformat() if r["resolved_at"] else None,
         )
         for r in rows
     ]
+
+
+def _json_obj(value) -> dict | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        import json as _json
+        try:
+            value = _json.loads(value)
+        except ValueError:
+            return None
+    return value if isinstance(value, dict) else None
+
+
+class TicketPatchBody(BaseModel):
+    status: Literal["open", "working", "done", "wont_fix", "closed"] | None = None
+    admin_notes: str | None = None
+
+
+@router.patch("/support-tickets/{ticket_id}", response_model=AdminActionResult)
+async def patch_support_ticket(
+    ticket_id: uuid.UUID,
+    body: TicketPatchBody,
+    admin: Annotated[CurrentUser, Depends(require_admin)],
+) -> AdminActionResult:
+    """2026-10-16 — a problem report's work status and notes."""
+    pool = await get_pool()
+    row = await pool.fetchrow(
+        """UPDATE support_tickets
+              SET status = COALESCE($2, status),
+                  admin_notes = COALESCE($3, admin_notes),
+                  resolved_at = CASE WHEN COALESCE($2, status) IN ('done', 'wont_fix', 'closed') THEN now() ELSE NULL END
+            WHERE id = $1 RETURNING id""",
+        ticket_id, body.status, body.admin_notes,
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+    await audit_log(pool, admin, "support_ticket_update", str(ticket_id),
+                    {"status": body.status, "notes": bool(body.admin_notes)})
+    return AdminActionResult(ok=True)
+
+
+@router.get("/support-tickets/{ticket_id}/screenshot")
+async def support_ticket_screenshot(
+    ticket_id: uuid.UUID,
+    _admin: Annotated[CurrentUser, Depends(require_admin)],
+):
+    from pathlib import Path
+    from fastapi.responses import FileResponse
+    pool = await get_pool()
+    path = await pool.fetchval("SELECT screenshot_path FROM support_tickets WHERE id = $1", ticket_id)
+    if not path:
+        raise HTTPException(status_code=404, detail="No screenshot")
+    base = (Path(settings.upload_dir) / "support").resolve()
+    file = Path(path).resolve()
+    if file.parent != base or not file.is_file():
+        raise HTTPException(status_code=404, detail="No screenshot")
+    return FileResponse(str(file))
+
+
+class SalesFlagBody(BaseModel):
+    is_sales: bool
+    sales_code: str | None = None
+
+
+@router.post("/users/{user_id}/sales", response_model=AdminActionResult)
+async def set_sales_flag(
+    user_id: uuid.UUID,
+    body: SalesFlagBody,
+    admin: Annotated[CurrentUser, Depends(require_admin)],
+) -> AdminActionResult:
+    """2026-10-16 — give (or take) a user the salesperson's admin-lite (/sales), keyed to a pilot code."""
+    from app import pilots
+    code = pilots.normalize_code(body.sales_code) if body.sales_code else None
+    if body.is_sales and not code:
+        raise HTTPException(status_code=422, detail="A sales code is required")
+    pool = await get_pool()
+    if code and not await pool.fetchval("SELECT 1 FROM pilot_codes WHERE code = $1", code):
+        raise HTTPException(status_code=422, detail="Create the pilot code first (Admin > Pilots)")
+    res = await pool.execute("UPDATE users SET is_sales = $2, sales_code = $3 WHERE id = $1",
+                             user_id, body.is_sales, code if body.is_sales else None)
+    if res.endswith(" 0"):
+        raise HTTPException(status_code=404, detail="User not found")
+    await audit_log(pool, admin, "set_sales_flag", str(user_id), {"is_sales": body.is_sales, "code": code})
+    return AdminActionResult(ok=True)
 
 
 class AdminReplyBody(BaseModel):

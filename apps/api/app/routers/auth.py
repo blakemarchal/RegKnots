@@ -135,7 +135,7 @@ async def register(data: RegisterRequest, request: Request, response: Response) 
             """
             INSERT INTO users (email, hashed_password, full_name, role, trial_ends_at)
             VALUES ($1, $2, $3, $4, NOW())
-            RETURNING id, email, full_name, role, subscription_tier, is_admin, email_verified
+            RETURNING id, email, full_name, role, subscription_tier, is_admin, is_sales, email_verified
             """,
             data.email, hashed_pw, data.full_name, data.role,
         )
@@ -145,7 +145,7 @@ async def register(data: RegisterRequest, request: Request, response: Response) 
             """
             INSERT INTO users (email, hashed_password, full_name, role, trial_ends_at)
             VALUES ($1, $2, $3, $4, NOW() + ($5 || ' days')::INTERVAL)
-            RETURNING id, email, full_name, role, subscription_tier, is_admin, email_verified
+            RETURNING id, email, full_name, role, subscription_tier, is_admin, is_sales, email_verified
             """,
             data.email, hashed_pw, data.full_name, data.role,
             str(trial_days),
@@ -195,7 +195,7 @@ async def register(data: RegisterRequest, request: Request, response: Response) 
 
     access_token = create_access_token(
         str(user["id"]), user["email"], user["role"], user["subscription_tier"],
-        full_name=user["full_name"], is_admin=user["is_admin"],
+        full_name=user["full_name"], is_admin=user["is_admin"], is_sales=bool(user.get("is_sales", False)),
         email_verified=user["email_verified"],
     )
     raw_refresh, token_hash = create_refresh_token()
@@ -251,7 +251,7 @@ async def login(data: LoginRequest, request: Request, response: Response) -> Tok
     pool = await get_pool()
 
     user = await pool.fetchrow(
-        "SELECT id, email, full_name, hashed_password, role, subscription_tier, is_admin, email_verified FROM users WHERE email = $1",
+        "SELECT id, email, full_name, hashed_password, role, subscription_tier, is_admin, is_sales, email_verified FROM users WHERE email = $1",
         data.email,
     )
     if not user or not verify_password(data.password, user["hashed_password"]):
@@ -261,7 +261,7 @@ async def login(data: LoginRequest, request: Request, response: Response) -> Tok
 
     access_token = create_access_token(
         str(user["id"]), user["email"], user["role"], user["subscription_tier"],
-        full_name=user["full_name"], is_admin=user["is_admin"],
+        full_name=user["full_name"], is_admin=user["is_admin"], is_sales=bool(user.get("is_sales", False)),
         email_verified=user["email_verified"],
     )
     raw_refresh, token_hash = create_refresh_token()
@@ -299,7 +299,7 @@ async def refresh(
     row = await pool.fetchrow(
         """
         SELECT rt.id, rt.user_id, rt.expires_at, rt.revoked, rt.revoked_at,
-               u.email, u.full_name, u.role, u.subscription_tier, u.is_admin, u.email_verified
+               u.email, u.full_name, u.role, u.subscription_tier, u.is_admin, u.is_sales, u.email_verified
         FROM   refresh_tokens rt
         JOIN   users u ON u.id = rt.user_id
         WHERE  rt.token_hash = $1
@@ -343,7 +343,7 @@ async def refresh(
 
     access_token = create_access_token(
         str(row["user_id"]), row["email"], row["role"], row["subscription_tier"],
-        full_name=row["full_name"], is_admin=row["is_admin"],
+        full_name=row["full_name"], is_admin=row["is_admin"], is_sales=bool(row.get("is_sales", False)),
         email_verified=row["email_verified"],
     )
 
@@ -413,14 +413,14 @@ async def update_profile(
         f"""
         UPDATE users SET {', '.join(sets)}
         WHERE id = ${idx}
-        RETURNING id, email, full_name, role, subscription_tier, is_admin, email_verified
+        RETURNING id, email, full_name, role, subscription_tier, is_admin, is_sales, email_verified
         """,
         *params,
     )
 
     access_token = create_access_token(
         str(row["id"]), row["email"], row["role"], row["subscription_tier"],
-        full_name=row["full_name"], is_admin=row["is_admin"],
+        full_name=row["full_name"], is_admin=row["is_admin"], is_sales=bool(row.get("is_sales", False)),
         email_verified=row["email_verified"],
     )
     return ProfileResponse(access_token=access_token)

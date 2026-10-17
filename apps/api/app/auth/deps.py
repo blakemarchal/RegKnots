@@ -28,6 +28,7 @@ async def get_current_user(
             role=payload["role"],
             tier=payload["tier"],
             is_admin=payload.get("is_admin", False) or email in _APP_LEVEL_ADMINS,
+            is_sales=payload.get("is_sales", False),
             email_verified=payload.get("email_verified", False),
             full_name=payload.get("full_name"),
         )

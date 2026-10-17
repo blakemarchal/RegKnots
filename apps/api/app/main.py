@@ -42,7 +42,7 @@ if settings.sentry_dsn:
         before_send=_scrub_sentry_event,
     )
 from app.db import init_pool, close_pool, close_redis
-from app.routers import admin, admin_dashboard, admin_documents, admin_gaps, admin_pilots, auth, billing, checklists, coming_up, company_documents, contact, credentials, documents, dossier, export, health, chat, logs, me, onboarding, guest_chat, practice, preferences, public_regs, sea_service, sea_time, study, transcribe, user_documents, vessels, regulations, conversations, notifications, support, survey, waitlist, web_fallback, whale_zones, workspaces
+from app.routers import admin, admin_dashboard, admin_documents, admin_gaps, admin_pilots, auth, billing, checklists, coming_up, company_documents, contact, credentials, documents, dossier, export, health, chat, logs, me, onboarding, guest_chat, practice, preferences, public_regs, runner, sales, sea_service, sea_time, study, transcribe, user_documents, vessels, regulations, conversations, notifications, support, support_reports, survey, waitlist, web_fallback, whale_zones, workspaces
 
 logger = logging.getLogger(__name__)
 
@@ -108,6 +108,9 @@ app.include_router(notifications.router)
 app.include_router(waitlist.router)
 app.include_router(contact.router)
 app.include_router(support.router)
+app.include_router(support_reports.router)   # 2026-10-16 — Report a problem
+app.include_router(runner.router)            # 2026-10-16 — the laptop runner's job queue (token-gated)
+app.include_router(sales.router)             # 2026-10-16 — admin-lite for a salesperson
 app.include_router(survey.router)
 app.include_router(preferences.router)
 app.include_router(credentials.router)

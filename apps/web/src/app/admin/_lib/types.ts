@@ -202,10 +202,17 @@ export interface SupportTicket {
   user_name: string | null
   subject: string
   message: string
-  status: 'open' | 'replied' | 'closed'
+  status: 'open' | 'replied' | 'closed' | 'working' | 'done' | 'wont_fix'
   admin_reply: string | null
   replied_at: string | null
   created_at: string
+  // 2026-10-16 — problem reports (kind 'problem')
+  kind?: 'contact' | 'problem'
+  context?: Record<string, string> | null
+  has_screenshot?: boolean
+  admin_notes?: string | null
+  claimed_by?: string | null
+  resolved_at?: string | null
 }
 
 export interface AdminNotification {

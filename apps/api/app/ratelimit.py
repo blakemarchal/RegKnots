@@ -111,6 +111,16 @@ async def document_scan(user_id: str) -> None:
                   "You've reached today's limit for document scans. Please try again tomorrow.")
 
 
+async def problem_report(user_id: str) -> None:
+    await enforce([(f"report:user:{user_id}", 10, DAY)],
+                  "You've sent a lot of reports today. Thank you; please try again tomorrow or email support@regknots.com.")
+
+
+async def problem_report(user_id: str) -> None:
+    await enforce([(f"report:user:{user_id}", 10, DAY)],
+                  "You've sent a lot of reports today. Thank you; please try again tomorrow or email support@regknots.com.")
+
+
 async def transcription(user_id: str) -> None:
     await enforce([(f"transcribe:user:{user_id}", 100, DAY)],
                   "You've reached today's limit for voice input. Please try again tomorrow.")

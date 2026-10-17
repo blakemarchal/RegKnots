@@ -99,6 +99,8 @@ const MENU_SECTIONS: MenuSection[] = [
 ]
 
 const ADMIN_ITEM: MenuItem = { icon: '\u2318', label: 'Admin', action: 'admin', path: '/admin' }
+// 2026-10-16 — a salesperson's admin-lite (users.is_sales)
+const SALES_ITEM: MenuItem = { icon: '\u2197', label: 'Sales', action: 'sales', path: '/sales' }
 
 // 2026-07-19 persona-aware nav (Wk2 of the shore-side pivot). The menu
 // was built mariner-first: career tools (Sea-Time Log, Sea Service
@@ -182,6 +184,7 @@ export function HamburgerMenu({ open, onClose, onNewChat, onOpenVessels, onOpenS
   const pathname = usePathname()
   const logout = useAuthStore((s) => s.logout)
   const isAdmin = useAuthStore((s) => s.user?.is_admin ?? false)
+  const isSales = useAuthStore((s) => s.user?.is_sales ?? false)
   // D6.53 — wheelhouse_only users see a filtered menu (no personal-
   // context tools) and have New Chat / Chat History rerouted into
   // the workspace context.
@@ -259,7 +262,7 @@ export function HamburgerMenu({ open, onClose, onNewChat, onOpenVessels, onOpenS
     const flat = MENU_SECTIONS.flatMap((s) => s.items).filter(
       (it) => !isWheelhouseOnly || !WHEELHOUSE_ONLY_HIDDEN_ACTIONS.has(it.action),
     )
-    return isAdmin ? [...flat, ADMIN_ITEM] : flat
+    return [...flat, ...(isSales ? [SALES_ITEM] : []), ...(isAdmin ? [ADMIN_ITEM] : [])]
   })()
 
   // Prefetch all route destinations when the drawer opens so subsequent
@@ -368,8 +371,8 @@ export function HamburgerMenu({ open, onClose, onNewChat, onOpenVessels, onOpenS
   // Append the admin item as its own section so it gets the same visual
   // treatment as the rest of the menu when present.
   const sections: MenuSection[] = isAdmin
-    ? [...filteredSections, { label: 'Admin', items: [ADMIN_ITEM] }]
-    : filteredSections
+    ? [...filteredSections, ...(isSales ? [{ label: 'Sales', items: [SALES_ITEM] }] : []), { label: 'Admin', items: [ADMIN_ITEM] }]
+    : isSales ? [...filteredSections, { label: 'Sales', items: [SALES_ITEM] }] : filteredSections
 
   return (
     // z-[1100] (was z-50) — Leaflet creates internal map panes up to

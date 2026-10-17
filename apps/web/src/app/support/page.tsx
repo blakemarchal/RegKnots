@@ -7,6 +7,7 @@ import type { Components } from 'react-markdown'
 import AuthGuard from '@/components/AuthGuard'
 import { AppHeader } from '@/components/AppHeader'
 import { apiRequest } from '@/lib/api'
+import { ReportProblem } from '@/components/ReportProblem'   // 2026-10-16
 
 const mdComponents: Components = {
   h1: ({ children }) => <h1 className="font-display text-base font-bold text-[#f0ece4] mt-3 mb-1 first:mt-0">{children}</h1>,
@@ -455,6 +456,7 @@ function SupportContent() {
           <SupportChat />
 
           {/* Email escalation */}
+          <ReportProblem />
           <EmailEscalation />
 
           {/* Footer note */}

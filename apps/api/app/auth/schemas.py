@@ -45,5 +45,6 @@ class CurrentUser(BaseModel):
     role: str
     tier: str
     is_admin: bool = False
+    is_sales: bool = False   # 2026-10-16 — admin-lite for a salesperson
     email_verified: bool = False
     full_name: str | None = None
