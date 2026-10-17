@@ -333,6 +333,12 @@ class Settings(BaseSettings):
     answer_pipeline_v2_enabled: bool = Field(
         default=True, validation_alias="ANSWER_PIPELINE_V2_ENABLED",
     )
+    # 2026-10-17 — start the answer call while the coverage check runs and use
+    # it when coverage / web research leave the library text unchanged (the
+    # same request either way; rag.engine._SpeculativeAnswer). false = wait.
+    speculative_answer_enabled: bool = Field(
+        default=True, validation_alias="SPECULATIVE_ANSWER_ENABLED",
+    )
     # researched items (one per missing fact): per user per day, all users per month
     web_research_daily_cap: int = Field(default=30, validation_alias="WEB_RESEARCH_DAILY_CAP")
     web_research_monthly_cap: int = Field(default=2000, validation_alias="WEB_RESEARCH_MONTHLY_CAP")

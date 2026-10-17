@@ -2784,6 +2784,47 @@ async def _await_company_block(task) -> str | None:
         return None
 
 
+class _SpeculativeAnswer:
+    """2026-10-17 — the answer call started while the coverage check runs.
+
+    Streams into a queue in the background; the caller drains it only when the
+    request it was started with is still the request it would send (coverage
+    and web research left the library text unchanged), and cancels it
+    otherwise. docs/sprint-audits/latency-audit-2026-10-17.md.
+    """
+
+    def __init__(self, client, stream_args: dict):
+        self.queue: asyncio.Queue = asyncio.Queue()
+        self.final = None
+        self.error: BaseException | None = None
+        self.task = asyncio.create_task(self._run(client, stream_args))
+
+    async def _run(self, client, stream_args: dict) -> None:
+        try:
+            async with client.messages.stream(**stream_args) as stream:
+                async for text_chunk in stream.text_stream:
+                    if text_chunk:
+                        self.queue.put_nowait(text_chunk)
+                self.final = await stream.get_final_message()
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # handed to the consumer, which treats it like the direct call's
+            self.error = exc
+        finally:
+            self.queue.put_nowait(None)
+
+    async def chunks(self):
+        while True:
+            item = await self.queue.get()
+            if item is None:
+                return
+            yield item
+
+    async def cancel(self) -> None:
+        self.task.cancel()
+        await asyncio.gather(self.task, return_exceptions=True)
+
+
 async def chat_with_progress(
     query: str,
     conversation_history: list[ChatMessage],
@@ -2864,6 +2905,9 @@ async def chat_with_progress(
     pipeline_v2_enabled: bool = False,
     web_research_daily_cap: int = 30,
     web_research_monthly_cap: int = 2000,
+    # 2026-10-17 — start the answer call while the coverage check runs
+    # (_SpeculativeAnswer); chat.py passes settings.speculative_answer_enabled.
+    speculative_answer_enabled: bool = True,
 ) -> AsyncIterator[dict]:
     """Same RAG pipeline as chat() but yields lightweight progress events.
 
@@ -3095,109 +3139,146 @@ async def chat_with_progress(
             "data": f"Found {len(chunks)} relevant regulation sections",
         }
 
-    # 2026-10-08 — answer pipeline phase 2: does the library text cover the
-    # question? If not, research the missing items on official websites now,
-    # before writing, and fold the findings INTO context_str (the judge, the
-    # citation checks and regeneration must see the same world; see above).
-    coverage = None
-    web_findings: list = []
-    if pipeline_v2_enabled:
-        from rag.coverage import check_coverage, vessel_line
-        _vline = vessel_line(vessel_profile)
-        coverage = await check_coverage(
-            anthropic_client, question=query, library_text=context_str, vessel_line=_vline,
-            history=router_context(conversation_history) or "",
-        )
-        _mark("coverage")
-        logger.info("coverage: %s, missing=%s", coverage.status, [m.item for m in coverage.missing])
-        if coverage.missing and await _web_research_allowed(
-                pool, user_id, web_research_daily_cap, web_research_monthly_cap):
-            from rag.web_research import format_block, research
-            yield {"event": "status", "data": "Checking Coast Guard, IMO and other official sources…"}
-            web_findings = await research(anthropic_client, coverage.missing, question=query, vessel=_vline)
-            _web_block = format_block(web_findings)
-            if _web_block:
-                context_str = context_str + "\n\n" + _web_block
-            _mark("web")
-            logger.info("web research: %d/%d found",
-                        sum(1 for f in web_findings if f.found), len(web_findings))
-
-    # Stage 4: Construct messages and call Claude
-    messages = _build_chat_messages(
-        query, conversation_history, vessel_profile, context_str, credential_context,
-        conversation_title=conversation_title,
-        fingerprint_summary=fingerprint_summary,
-        user_role=user_role,
-        user_jurisdiction_focus=user_jurisdiction_focus,
-        user_verbosity=user_verbosity,
-        # D6.97 Phase 2 — pass through image attachments. When non-empty
-        # the final user message becomes a multimodal block list.
-        images=images,
-        today=imo_dates_prompt_enabled,
-    )
-
-    yield {"event": "status", "data": "Consulting compliance engine…"}
     # Sprint D6.4 — followup turns escalate to Opus.
-    # Sprint D6.68 — answer text streams token-by-token instead of
-    # holding for the full response. Each text chunk goes out as a
-    # `delta` SSE event; the frontend accumulates into the assistant
-    # message in real time so the user starts reading at second 1
-    # rather than second 5-8.
     model_used = REGENERATION_MODEL if followup_match else route.model
     floored = _apply_model_floor(model_used, synthesis_model_floor)
     if floored != model_used:
         logger.info("synthesis model floor: %s -> %s", model_used, floored)
         model_used = floored
-    answer_chunks: list[str] = []
-    input_tokens = 0
-    output_tokens = 0
-    streaming_failed_for_fallback = False
-    try:
+
+    def _messages_for(ctx: str) -> list:
+        return _build_chat_messages(
+            query, conversation_history, vessel_profile, ctx, credential_context,
+            conversation_title=conversation_title,
+            fingerprint_summary=fingerprint_summary,
+            user_role=user_role,
+            user_jurisdiction_focus=user_jurisdiction_focus,
+            user_verbosity=user_verbosity,
+            # D6.97 Phase 2 — pass through image attachments. When non-empty
+            # the final user message becomes a multimodal block list.
+            images=images,
+            today=imo_dates_prompt_enabled,
+        )
+
+    def _stream_args(msgs: list) -> dict:
         # 2026-09-22 (U3) — the ~10K-token system prompt is byte-identical
         # across users (per-user context lives in the user turn), so it is
         # marked for prompt caching: reads bill at 0.1x input (0.05x on
         # Opus 5.5) within the 5-minute TTL.
-        _mark("synth_start")
-        async with anthropic_client.messages.stream(
-            model=model_used,
-            system=cached_system(effective_system_prompt),
-            messages=messages,
-            **_stream_kwargs(model_used),
-        ) as stream:
-            async for text_chunk in stream.text_stream:
-                if not text_chunk:
-                    continue
-                answer_chunks.append(text_chunk)
-                _mark("first_token")
-                yield {"event": "delta", "data": text_chunk}
-            final_msg = await stream.get_final_message()
-            _mark("stream_end")
-        answer = "".join(answer_chunks)
-        input_tokens = final_msg.usage.input_tokens
-        output_tokens = final_msg.usage.output_tokens
-        # 2026-09-22 — surface non-normal terminations. Opus 5.5 / Sonnet 5
-        # run safety classifiers (cyber, bio, reasoning_extraction) that
-        # return HTTP 200 with stop_reason="refusal" and no usable text;
-        # "max_tokens" means the reply was cut off. Neither raises, so log
-        # both, and route a refusal through the existing OpenAI fallback
-        # exactly as a Claude outage would be.
-        stop_reason = getattr(final_msg, "stop_reason", None)
-        if stop_reason not in (None, "end_turn"):
-            logger.warning(
-                "Claude stream ended with stop_reason=%s (model=%s, out=%d, details=%s)",
-                stop_reason, model_used, output_tokens,
-                getattr(final_msg, "stop_details", None),
+        return dict(model=model_used, system=cached_system(effective_system_prompt),
+                    messages=msgs, **_stream_kwargs(model_used))
+
+    # 2026-10-17 — the answer call starts here, while the coverage check (and
+    # any web research) runs, with the library text as it stands. It is used
+    # when that text comes back unchanged, which makes it the very request the
+    # answer step would send afterwards; when web findings were added it is
+    # cancelled and the answer is written with them, as before. Saves the
+    # coverage check's 3-5 s (and a fruitless research's 15 s) before the first
+    # word; a discarded call costs at most one Opus answer.
+    speculative: _SpeculativeAnswer | None = None
+    speculative_context = context_str
+    try:
+        # 2026-10-08 — answer pipeline phase 2: does the library text cover the
+        # question? If not, research the missing items on official websites now,
+        # before writing, and fold the findings INTO context_str (the judge, the
+        # citation checks and regeneration must see the same world; see above).
+        coverage = None
+        web_findings: list = []
+        if pipeline_v2_enabled:
+            if speculative_answer_enabled:
+                _mark("synth_start")
+                speculative = _SpeculativeAnswer(anthropic_client, _stream_args(_messages_for(context_str)))
+            from rag.coverage import check_coverage, vessel_line
+            _vline = vessel_line(vessel_profile)
+            coverage = await check_coverage(
+                anthropic_client, question=query, library_text=context_str, vessel_line=_vline,
+                history=router_context(conversation_history) or "",
             )
-        if stop_reason == "refusal":
+            _mark("coverage")
+            logger.info("coverage: %s, missing=%s", coverage.status, [m.item for m in coverage.missing])
+            if coverage.missing and await _web_research_allowed(
+                    pool, user_id, web_research_daily_cap, web_research_monthly_cap):
+                from rag.web_research import format_block, research
+                yield {"event": "status", "data": "Checking Coast Guard, IMO and other official sources…"}
+                web_findings = await research(anthropic_client, coverage.missing, question=query, vessel=_vline)
+                _web_block = format_block(web_findings)
+                if _web_block:
+                    context_str = context_str + "\n\n" + _web_block
+                _mark("web")
+                logger.info("web research: %d/%d found",
+                            sum(1 for f in web_findings if f.found), len(web_findings))
+
+        # Stage 4: Construct messages and call Claude
+        use_speculative = speculative is not None and context_str == speculative_context
+        if speculative is not None and not use_speculative:
+            await speculative.cancel()
+            speculative = None
+            _marks.pop("synth_start", None)
+            logger.info("speculative answer discarded: web findings changed the library text")
+        messages = _messages_for(context_str)
+
+        yield {"event": "status", "data": "Consulting compliance engine…"}
+        # Sprint D6.68 — answer text streams token-by-token instead of
+        # holding for the full response. Each text chunk goes out as a
+        # `delta` SSE event; the frontend accumulates into the assistant
+        # message in real time so the user starts reading at second 1
+        # rather than second 5-8.
+        answer_chunks: list[str] = []
+        input_tokens = 0
+        output_tokens = 0
+        streaming_failed_for_fallback = False
+        try:
+            if use_speculative:
+                async for text_chunk in speculative.chunks():
+                    answer_chunks.append(text_chunk)
+                    _mark("first_token")
+                    yield {"event": "delta", "data": text_chunk}
+                if speculative.error is not None:
+                    raise speculative.error
+                final_msg = speculative.final
+                _mark("stream_end")
+            else:
+                _mark("synth_start")
+                async with anthropic_client.messages.stream(**_stream_args(messages)) as stream:
+                    async for text_chunk in stream.text_stream:
+                        if not text_chunk:
+                            continue
+                        answer_chunks.append(text_chunk)
+                        _mark("first_token")
+                        yield {"event": "delta", "data": text_chunk}
+                    final_msg = await stream.get_final_message()
+                    _mark("stream_end")
+            answer = "".join(answer_chunks)
+            input_tokens = final_msg.usage.input_tokens
+            output_tokens = final_msg.usage.output_tokens
+            # 2026-09-22 — surface non-normal terminations. Opus 5.5 / Sonnet 5
+            # run safety classifiers (cyber, bio, reasoning_extraction) that
+            # return HTTP 200 with stop_reason="refusal" and no usable text;
+            # "max_tokens" means the reply was cut off. Neither raises, so log
+            # both, and route a refusal through the existing OpenAI fallback
+            # exactly as a Claude outage would be.
+            stop_reason = getattr(final_msg, "stop_reason", None)
+            if stop_reason not in (None, "end_turn"):
+                logger.warning(
+                    "Claude stream ended with stop_reason=%s (model=%s, out=%d, details=%s)",
+                    stop_reason, model_used, output_tokens,
+                    getattr(final_msg, "stop_details", None),
+                )
+            if stop_reason == "refusal":
+                streaming_failed_for_fallback = True
+        except _CLAUDE_FAILURE_EXCEPTIONS as exc:
+            logger.warning(
+                "Claude streaming failed (%s: %s), falling back to OpenAI (%s)",
+                type(exc).__name__,
+                str(exc)[:200],
+                FALLBACK_MODEL_ID,
+            )
             streaming_failed_for_fallback = True
-    except _CLAUDE_FAILURE_EXCEPTIONS as exc:
-        logger.warning(
-            "Claude streaming failed (%s: %s), falling back to OpenAI (%s)",
-            type(exc).__name__,
-            str(exc)[:200],
-            FALLBACK_MODEL_ID,
-        )
-        streaming_failed_for_fallback = True
+    finally:
+        # A client that leaves mid-way must not leave the answer call running.
+        if speculative is not None and not speculative.task.done():
+            speculative.task.cancel()
+    _marks["speculative"] = 1.0 if use_speculative else 0.0
 
     if streaming_failed_for_fallback:
         # If we got partial chunks before the failure, tell the client
