@@ -168,8 +168,8 @@ def build_issues(people: list[dict], accounts: list[SalesAccount], unknown_codes
                                             f"Agree who has it before both call."))
     for g in member_gaps:
         out.append(Issue(level="warn", code=g["code"], user_id=g["owner_id"], fix="credit_owner",
-                         text=f"{g['member_email']} came from the '{g['code']}' link and is in {g['workspace']}, "
-                              f"but its owner {g['owner_email']} signed up without it, so the fleet's payments "
+                         text=f"{g['member_email']} counts toward '{g['code']}' and is in {g['workspace']}, "
+                              f"but the fleet's owner {g['owner_email']} doesn't, so the fleet's payments "
                               f"don't count for '{g['code']}'."))
     return out
 
