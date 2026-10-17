@@ -15,7 +15,8 @@ word appears**. Three things make it slow, in this order:
 
 1. **Model steps that run one after another before the answer starts:** rerank (2.5 s), the
    coverage check (3–5 s), web research when it runs (up to 15 s, about 4 questions in 10),
-   then Opus's first token (5–8 s, it always thinks first). Hardware cannot speed these up.
+   then Opus's first token (about 6 s, up to 9 s; it always thinks first). Hardware cannot speed
+   these up.
 2. **The search stage (5–10 s), which is CPU-bound and does about four times more work than it
    needs to.** Each question runs four searches (the question plus three rewrites). After a
    connection's first few queries, Postgres stops using the vector index for the 23 source-group
@@ -34,7 +35,8 @@ are pegged. Twice the cores would roughly halve the search stage (5–10 s to 3�
 nothing else. Fixing the wasted search work is free and gains more.
 
 **The models:** Haiku 5.5 made each sidecar call about 0.5 s faster (2026-10-07 measurement).
-Opus 5.5 takes 5–8 s to its first token. The models are not the regression; the extra stages are.
+Opus 5.5 takes about 6 s to its first token (p90 8.7 s). The models are not the regression; the
+extra stages are.
 
 ## Evidence
 
@@ -132,9 +134,10 @@ Two consequences:
 
 - **The search is exact, which is why recall is good,** and nearly every query behind the
   dense-harness baselines ran this way. Any change must re-run the harness.
-- **The first five group queries on each new pooled connection use the HNSW index instead**
-  (custom plans), and 7 of 23 groups then return fewer than k rows. Right after a restart,
-  searches differ slightly from steady state.
+- **The first five group queries on each new pooled connection are planned one by one**
+  (custom plans). When such a plan uses the HNSW index, the group can come back short: forcing
+  custom plans on all 23 groups left 7 of them short of k. Right after a restart, searches
+  differ slightly from steady state.
 
 ## What to do, ranked
 
