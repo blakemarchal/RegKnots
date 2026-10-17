@@ -51,6 +51,12 @@ block, IMO_DATES_PROMPT_ENABLED; docs/specs/imo-harvester-2026-10-13.md), on the
 the IMO resolution backlog harvest. Questions: IMO, about adopted amendments and their dates
 (the Captain's vessel), plus 4 gold and the Captain's two for regressions. ~$5.
 
+2026-10-17 — `--model-ab` compares answer models on the production answer path (Blake: "I'm ok
+with some A/B testing in an effort to speed up further"): Opus 5.5 low (shipped) against Sonnet
+5.5 at effort low (first word ~0.6 s vs ~5.7 s on captured requests) and medium. Each question
+is captured once with the production flags (whole sections, the sources-and-gaps prompt,
+coverage + web research, the dates block); all three replay the same request. GOLD, the
+Captain's two, 4 HEDGED, WEEK. ~$6-7.
 2026-10-09 — `--session-judge` (Blake: use the Claude subscription for evaluation work): the
 answers still come from the production API (they are what is measured) and the GPT judge, if on, still judges,
 but the Opus judge call is replaced by a blind packet per question in OUT/judge_packets/
@@ -93,6 +99,7 @@ PROMPT_AB = "--prompt-ab" in sys.argv
 PHASE1_AB = "--phase1-ab" in sys.argv
 PIPELINE_AB = "--pipeline-ab" in sys.argv
 DATES_AB = "--dates-ab" in sys.argv
+MODEL_AB = "--model-ab" in sys.argv
 SESSION_JUDGE = "--session-judge" in sys.argv
 # 2026-10-16 — GPT-4o leaves the OpenAI API on 2027-01-14; the second, cross-family judge is now
 # opt-in: --gpt-judge=<model> (e.g. gpt-6.1-sol). Off by default (the session judge grades).
@@ -101,7 +108,7 @@ GPT_PRICES = {"gpt-6.1-sol": (2.00, 10.00), "gpt-6-sol": (2.00, 10.00), "gpt-6-l
 OUT = REPO / "data" / "eval" / "model_compare" / (
     time.strftime("%Y%m%d-%H%M%S", time.gmtime())
     + ("-prompt-ab" if PROMPT_AB else "-phase1-ab" if PHASE1_AB else "-pipeline-ab" if PIPELINE_AB
-       else "-dates-ab" if DATES_AB else ""))
+       else "-dates-ab" if DATES_AB else "-model-ab" if MODEL_AB else ""))
 if __name__ == "__main__":
     OUT.mkdir(parents=True, exist_ok=True)
 
@@ -138,6 +145,19 @@ if DATES_AB:
            "provenance_prompt_enabled": True, "pipeline_v2_enabled": True}
     VARIANTS = {"today": VARIANTS["opus_low"], "dates": VARIANTS["opus_low"]}
     CAPTURE_FLAGS = {"today": _v2, "dates": {**_v2, "imo_dates_prompt_enabled": True}}
+if MODEL_AB:
+    VARIANTS = {
+        "opus_low": VARIANTS["opus_low"],
+        "sonnet_low": VARIANTS["sonnet_low"],
+        "sonnet_medium": {"model": SONNET, "max_tokens": 8192, "output_config": {"effort": "medium"}},
+    }
+    CAPTURE_FLAGS = {"prod": {
+        "model_led_grounding_enabled": settings.model_led_grounding_enabled,
+        "whole_sections_enabled": settings.whole_sections_enabled,
+        "provenance_prompt_enabled": settings.provenance_prompt_enabled,
+        "pipeline_v2_enabled": settings.answer_pipeline_v2_enabled,
+        "imo_dates_prompt_enabled": settings.imo_dates_prompt_enabled,
+    }}
 ROUTER = {HAIKU: "haiku", SONNET: "sonnet_today", OPUS: "opus_low"}
 # Answers that describe the search instead of answering (the 2026-10 hedges).
 PLUMBING = re.compile(r"retriev|excerpt|surfac|in this query|knowledge base|didn'?t come up|not in what I", re.I)
@@ -263,6 +283,9 @@ async def capture(query, profile, pool, client, okey, conv_id, user_id, flags: d
             # strict baseline and applies the edits itself (opus_led).
             query_rewrite_enabled=settings.query_rewrite_enabled,
             reranker_enabled=settings.reranker_enabled,
+            # 2026-10-17 — the engine's speculative answer call would hit the patched
+            # stream() inside a background task; capture the plain path.
+            speculative_answer_enabled=False,
             **(flags or {"model_led_grounding_enabled": (not PROMPT_AB) and settings.model_led_grounding_enabled}),
         ):
             pass
@@ -483,7 +506,8 @@ def ranks(scores: dict[str, float]) -> dict[str, float]:
 def summarize(recs: list[dict]) -> dict:
     done = [r for r in recs if "runs" in r]
     rows = {}
-    for name in list(VARIANTS) + ([] if (PROMPT_AB or PHASE1_AB or PIPELINE_AB or DATES_AB) else ["router_mix"]):
+    for name in list(VARIANTS) + ([] if (PROMPT_AB or PHASE1_AB or PIPELINE_AB or DATES_AB or MODEL_AB)
+                                  else ["router_mix"]):
         per = []
         for r in done:
             v = ROUTER.get(r.get("route_model"), "sonnet_today") if name == "router_mix" else name
@@ -562,11 +586,11 @@ async def main() -> None:
         "route_types": list(row["route_types"] or []), "cargo_types": list(row["cargo_types"] or []),
     }.items() if v not in (None, [], {})}
     items += [(f"REAL{i + 1}", qq, cap_profile, None, "captain") for i, qq in enumerate(REAL)]
-    if PROMPT_AB or PHASE1_AB or PIPELINE_AB:
-        hedged = HEDGED[:4] if (PHASE1_AB or PIPELINE_AB) else HEDGED
+    if PROMPT_AB or PHASE1_AB or PIPELINE_AB or MODEL_AB:
+        hedged = HEDGED[:4] if (PHASE1_AB or PIPELINE_AB or MODEL_AB) else HEDGED
         items += [(f"HEDGE{i + 1}", qq, gold_profile(vc) if vc != "V0" else None, None, vc)
                   for i, (qq, vc) in enumerate(hedged)]
-    if PHASE1_AB or PIPELINE_AB:
+    if PHASE1_AB or PIPELINE_AB or MODEL_AB:
         items += [(f"WEEK{i + 1}", qq, cap_profile, None, "captain") for i, qq in enumerate(WEEK)]
     if PIPELINE_AB:
         items += [(f"GAP{i + 1}", qq, cap_profile, None, "captain") for i, qq in enumerate(GAPS)]
