@@ -78,25 +78,18 @@ The index matches the [N] number in the candidate list you receive. Score every 
 """
 
 
-async def rerank_chunks(
+async def score_chunks(
     query: str,
     chunks: list[dict],
     anthropic_client,
-    top_k: int = 8,
     per_chunk_chars: int = _PER_CHUNK_TEXT_CHARS,
-) -> list[dict]:
-    """Rerank `chunks` by Haiku-judged relevance to `query`.
-
-    Returns the same chunks reordered, with a `_rerank_score` field
-    added to each (0-5). Top-`top_k` returned by score; the rest
-    follow in their original cosine order.
-
-    Failure-safe: on any Haiku error or malformed JSON, returns the
-    original chunks unchanged.
-    """
+) -> dict[int, int] | None:
+    """Haiku's 0-5 relevance score per candidate index; None when the call or
+    its JSON fails (callers then keep the cosine order). 2026-10-17: split out
+    of rerank_chunks so retrieve_enhanced can score the primary search's
+    candidates while the reformulation searches run."""
     if not chunks or not query:
-        return chunks
-
+        return None
     candidates_block = _format_candidates(chunks, per_chunk_chars)
     user_payload = (
         f"USER QUESTION:\n{query[:1000]}\n\n"
@@ -119,7 +112,7 @@ async def rerank_chunks(
             "reranker call failed (returning original order): %s: %s",
             type(exc).__name__, str(exc)[:200],
         )
-        return chunks
+        return None
 
     parsed = result.data
     if parsed is None:
@@ -127,7 +120,7 @@ async def rerank_chunks(
             "reranker: no structured output (returning original): %s",
             result.text[:200],
         )
-        return chunks
+        return None
 
     scores_raw = parsed.get("scores") or []
     score_by_index: dict[int, int] = {}
@@ -145,9 +138,12 @@ async def rerank_chunks(
             continue
         score_by_index[idx] = score
 
-    if not score_by_index:
-        return chunks
+    return score_by_index or None
 
+
+def apply_scores(chunks: list[dict], score_by_index: dict[int, int], top_k: int = 8) -> list[dict]:
+    """Annotate each chunk with its score (0 when unscored) and stable-sort by
+    score, so ties keep the given (cosine) order."""
     # Annotate every chunk with its score (default 0 for missing entries).
     annotated = []
     for i, ch in enumerate(chunks):
@@ -169,6 +165,30 @@ async def rerank_chunks(
         [int(c.get("_rerank_score", 0)) for c in annotated[:top_count]],
     )
     return annotated
+
+
+async def rerank_chunks(
+    query: str,
+    chunks: list[dict],
+    anthropic_client,
+    top_k: int = 8,
+    per_chunk_chars: int = _PER_CHUNK_TEXT_CHARS,
+) -> list[dict]:
+    """Rerank `chunks` by Haiku-judged relevance to `query`.
+
+    Returns the same chunks reordered, with a `_rerank_score` field
+    added to each (0-5). Top-`top_k` returned by score; the rest
+    follow in their original cosine order.
+
+    Failure-safe: on any Haiku error or malformed JSON, returns the
+    original chunks unchanged.
+    """
+    if not chunks or not query:
+        return chunks
+    scores = await score_chunks(query, chunks, anthropic_client, per_chunk_chars)
+    if not scores:
+        return chunks
+    return apply_scores(chunks, scores, top_k)
 
 
 def _format_candidates(chunks: list[dict], per_chunk_chars: int) -> str:

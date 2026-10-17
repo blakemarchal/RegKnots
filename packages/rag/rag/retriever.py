@@ -1810,6 +1810,10 @@ async def _broad_keyword_search(
 # exact-scan work on one connection and was slower under real concurrency.
 _GROUP_ITERATIVE_SCAN = False
 
+# 2026-10-17 — score the primary search's candidates while the reformulation
+# searches run (retrieve_enhanced); see docs/sprint-audits/latency-audit-2026-10-17.md.
+_PIPELINED_RERANK = True
+
 # SET LOCAL, per query: asyncpg's pool runs RESET ALL whenever a connection
 # is released, so a session-level SET (pool `init`) is lost after the
 # connection's first query. max_scan_tuples bounds the scan for groups with
@@ -3746,6 +3750,19 @@ async def retrieve_enhanced(
     # finishes (the Captain's 2026-09-23 follow-up: rewrite back 1.2 s before
     # the primary, whose reformulations then ran another 4.2 s).
     primary_task = asyncio.create_task(_retrieve_one(query, fetch_limit))
+    # 2026-10-17 — pipelined rerank (_PIPELINED_RERANK): the primary search is
+    # done ~2 s before the reformulation searches, so its candidates are scored
+    # while those run, and only the candidates the reformulations add are
+    # scored after. Same per-candidate 0-5 scale and the same stable sort.
+    primary_scores_task: asyncio.Task | None = None
+    if _PIPELINED_RERANK and reranker_enabled and anthropic_client is not None:
+        from rag.reranker import score_chunks
+
+        async def _score_primary():
+            rows = await primary_task
+            return rows, (await score_chunks(query, rows, anthropic_client) if rows else None)
+
+        primary_scores_task = asyncio.create_task(_score_primary())
     extra_tasks: list[asyncio.Task] = []
     extras: list[list[dict]] = []
     try:
@@ -3783,7 +3800,7 @@ async def retrieve_enhanced(
     except BaseException:
         # Client disconnect or a failed primary: don't leave retrievals
         # running unowned.
-        for t in (primary_task, *extra_tasks):
+        for t in (primary_task, *extra_tasks, *([primary_scores_task] if primary_scores_task else [])):
             t.cancel()
         if rewrite_task is not None:
             rewrite_task.cancel()
@@ -3799,6 +3816,26 @@ async def retrieve_enhanced(
 
     # 5. Reranker (optional). Operates on the wider pool, returns the
     #    top-`limit` after rerank scores have been applied.
+    if reranker_enabled and anthropic_client is not None and merged and primary_scores_task is not None:
+        from rag.reranker import apply_scores, score_chunks
+        try:
+            primary_rows, primary_scores = await primary_scores_task
+        except Exception as exc:  # the single call below, as before
+            logger.info("pipelined rerank: primary scoring failed: %s", type(exc).__name__)
+            primary_rows, primary_scores = [], None
+        if primary_scores:
+            score_by_id = {primary_rows[i]["id"]: sc for i, sc in primary_scores.items() if 0 <= i < len(primary_rows)}
+            scored_ids = {row["id"] for row in primary_rows}
+            new = [c for c in merged if c["id"] not in scored_ids]
+            new_scores = await score_chunks(query, new, anthropic_client) if new else {}
+            if new_scores is not None:
+                for i, sc in new_scores.items():
+                    if 0 <= i < len(new):
+                        score_by_id[new[i]["id"]] = sc
+                merged = apply_scores(merged, {i: score_by_id.get(c["id"], 0) for i, c in enumerate(merged)},
+                                      top_k=limit)
+                return merged[:limit]
+        # Anything failed: score the whole pool in one call, as before.
     if reranker_enabled and anthropic_client is not None and merged:
         from rag.reranker import rerank_chunks
         merged = await rerank_chunks(
